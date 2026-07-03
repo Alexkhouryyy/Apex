@@ -17,8 +17,18 @@ def _save_usage(data: dict) -> None:
     _USAGE_FILE.write_text(json.dumps(data, indent=2))
 
 
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _safe_name(name: str) -> str:
+    """Reject path-traversal in skill names (blocks manage(name='../../x'))."""
+    if not isinstance(name, str) or not _SAFE_NAME_RE.match(name):
+        raise ValueError(f"Invalid skill name {name!r} (letters, digits, - and _ only).")
+    return name
+
+
 def _skill_path(name: str) -> Path:
-    return _SKILLS_DIR / name / "SKILL.md"
+    return _SKILLS_DIR / _safe_name(name) / "SKILL.md"
 
 
 def _parse_frontmatter(text: str) -> dict:
@@ -56,6 +66,12 @@ def manage(
     _bypass_approval: bool = False,
 ) -> str:
     """Dispatch a skill_manage action. Returns a string result."""
+    # Path-traversal guard: every action that names a skill must use a safe name.
+    if name is not None and action in ("create", "edit", "patch", "delete", "view"):
+        try:
+            _safe_name(name)
+        except ValueError as e:
+            return f"[skill_manage] {e}"
     # Write-approval gate: stage skill creation when enabled.
     if action == "create" and not _bypass_approval:
         try:

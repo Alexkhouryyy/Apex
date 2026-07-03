@@ -7,6 +7,7 @@ events from the awareness log.
 Runs in a background thread on DASHBOARD_PORT (default 7860).
 """
 import asyncio
+import hmac
 import json
 import os
 import threading
@@ -174,7 +175,7 @@ async def _auth(request: Request, call_next):
         # The shared DASHBOARD_TOKEN is the master credential; per-device tokens
         # are revocable peers. Mark which one authenticated so management endpoints
         # can require master.
-        if provided == token:
+        if hmac.compare_digest(provided, token):
             request.state.is_master = True
             return await call_next(request)
         try:
@@ -1626,7 +1627,7 @@ async def ws_live(ws: WebSocket):
     token = config.DASHBOARD_TOKEN
     if token:
         qtoken = ws.query_params.get("token")
-        ok = (qtoken == token)
+        ok = bool(qtoken) and hmac.compare_digest(qtoken, token)
         if not ok:
             try:
                 from agent import access_tokens

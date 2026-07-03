@@ -260,8 +260,16 @@ def init_db():
 
 @contextmanager
 def _conn():
-    conn = sqlite3.connect(DB_PATH)
+    # busy_timeout: wait up to 5s for a lock instead of instantly raising
+    # "database is locked" (background curator/cortex/scheduler threads contend
+    # with the main loop). WAL: concurrent readers don't block the writer.
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
     try:
+        conn.execute("PRAGMA busy_timeout=5000")
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except Exception:
+            pass
         yield conn
         conn.commit()
     finally:
@@ -454,7 +462,9 @@ def save_memory_entry(
     path = _MEMORY_FILE if target == "memory" else _USER_FILE
     limit = _MEMORY_LIMIT if target == "memory" else _USER_LIMIT
 
-    if action == "add" and _INJECTION_PATTERNS.search(content or ""):
+    # Both add and replace write attacker-influenceable content that is later read
+    # into the system prompt — screen the injected text on both paths.
+    if action in ("add", "replace") and _INJECTION_PATTERNS.search(content or ""):
         return "Rejected: content matches security pattern."
 
     _APEX_MEMORY_DIR.mkdir(parents=True, exist_ok=True)

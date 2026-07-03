@@ -113,4 +113,7 @@ def dispatch_inbound(form: dict) -> str:
     if len(reply) > 1600:
         reply = reply[:1590] + "…"
 
-    return f"<Response><Message>{reply}</Message></Response>"
+    # Escape TwiML: an unescaped '<'/'&' (common in agent/web text) corrupts the
+    # message or injects Twilio verbs. Element-content escaping via stdlib.
+    from xml.sax.saxutils import escape as _xml_escape
+    return f"<Response><Message>{_xml_escape(reply)}</Message></Response>"

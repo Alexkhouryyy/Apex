@@ -214,9 +214,20 @@ def rollback() -> str:
         return "No backups found."
     latest = archives[-1]
     try:
+        dest = _SKILLS_MD_DIR.parent.resolve()
         with tarfile.open(latest, "r:gz") as tf:
-            # Extract to parent of skills dir, which overwrites ~/.apex/skills/
-            tf.extractall(_SKILLS_MD_DIR.parent)
+            # Guard against tar-slip: refuse any member that resolves outside dest.
+            safe = []
+            for m in tf.getmembers():
+                target = (dest / m.name).resolve()
+                if target == dest or dest in target.parents:
+                    safe.append(m)
+                else:
+                    print(f"[Curator] Skipping unsafe tar member: {m.name!r}")
+            try:
+                tf.extractall(dest, members=safe, filter="data")  # py>=3.12
+            except TypeError:
+                tf.extractall(dest, members=safe)                 # py<3.12 fallback
         return f"Restored from {latest.name}."
     except Exception as e:
         return f"Rollback failed: {e}"

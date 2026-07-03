@@ -130,13 +130,19 @@ def approve(write_id) -> str:
             results.append(approve(w["id"]))
         return f"Approved {len(results)} write(s)." if results else "Nothing pending."
 
+    # Atomically CLAIM the row before applying, so two concurrent approvals
+    # (e.g. approve(id) racing approve("all")) can't both fire the side effect.
     with longterm._conn() as c:
+        cur = c.execute(
+            "UPDATE staged_writes SET status = 'approving' WHERE id = ? AND status = 'pending'",
+            (int(write_id),),
+        )
+        if cur.rowcount != 1:
+            return f"Staged write #{write_id} not found or already processed."
         row = c.execute(
-            "SELECT kind, payload_json FROM staged_writes WHERE id = ? AND status = 'pending'",
+            "SELECT kind, payload_json FROM staged_writes WHERE id = ?",
             (int(write_id),),
         ).fetchone()
-    if not row:
-        return f"Staged write #{write_id} not found or already processed."
     kind, payload_json = row
     result = _apply(kind, json.loads(payload_json))
     with longterm._conn() as c:

@@ -21,8 +21,16 @@ SKILLS_DIR = Path(__file__).parent.parent / "skills"
 _registry: dict[str, dict] = {}
 
 
+def _safe_name(name: str) -> str:
+    """Reject anything that isn't a bare skill identifier — blocks path traversal
+    like run_skill("../../../tmp/evil") from loading and executing arbitrary .py."""
+    if not isinstance(name, str) or not name.isidentifier():
+        raise ValueError(f"Invalid skill name {name!r} (must be a bare identifier).")
+    return name
+
+
 def _skill_path(name: str) -> Path:
-    return SKILLS_DIR / f"{name}.py"
+    return SKILLS_DIR / f"{_safe_name(name)}.py"
 
 
 def discover() -> list[str]:
@@ -71,6 +79,10 @@ def list_skills() -> list[dict]:
 
 
 def run_skill(name: str, inputs: dict) -> str:
+    try:
+        _safe_name(name)
+    except ValueError as e:
+        return f"[Skills] {e}"
     if name not in _registry:
         if _skill_path(name).exists():
             try:
