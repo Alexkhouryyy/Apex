@@ -450,14 +450,19 @@ def save_memory_entry(
     if not _bypass_approval:
         try:
             import config as _cfg
-            if getattr(_cfg, "MEMORY_WRITE_APPROVAL", False):
-                from agent import approvals as _appr
+            approval_on = getattr(_cfg, "MEMORY_WRITE_APPROVAL", False)
+        except Exception:
+            approval_on = False
+        if approval_on:
+            # Fail CLOSED: if staging errors, do NOT fall through to the direct write.
+            from agent import approvals as _appr
+            try:
                 return _appr.stage("memory", {
                     "target": target, "action": action,
                     "content": content, "old_text": old_text,
                 })
-        except Exception:
-            pass
+            except Exception as e:
+                return f"Write blocked: approval is required but staging failed ({e})."
 
     path = _MEMORY_FILE if target == "memory" else _USER_FILE
     limit = _MEMORY_LIMIT if target == "memory" else _USER_LIMIT

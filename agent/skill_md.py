@@ -76,13 +76,18 @@ def manage(
     if action == "create" and not _bypass_approval:
         try:
             import config as _cfg
-            if getattr(_cfg, "SKILL_WRITE_APPROVAL", False):
-                from agent import approvals as _appr
+            approval_on = getattr(_cfg, "SKILL_WRITE_APPROVAL", False)
+        except Exception:
+            approval_on = False
+        if approval_on:
+            # Fail CLOSED: if staging errors, do NOT fall through to the direct write.
+            from agent import approvals as _appr
+            try:
                 return _appr.stage("skill", {
                     "name": name, "description": description, "content": content,
                 })
-        except Exception:
-            pass
+            except Exception as e:
+                return f"Skill blocked: approval is required but staging failed ({e})."
     if action == "list":
         skills = list_skills()
         if not skills:

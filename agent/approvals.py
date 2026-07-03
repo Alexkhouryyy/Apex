@@ -144,7 +144,14 @@ def approve(write_id) -> str:
             (int(write_id),),
         ).fetchone()
     kind, payload_json = row
-    result = _apply(kind, json.loads(payload_json))
+    try:
+        result = _apply(kind, json.loads(payload_json))
+    except Exception as e:
+        # Don't leave the row stuck in 'approving' — release it back to pending so
+        # it stays visible/re-approvable instead of vanishing from the queue.
+        with longterm._conn() as c:
+            c.execute("UPDATE staged_writes SET status = 'pending' WHERE id = ?", (int(write_id),))
+        return f"Apply failed for #{write_id}, returned to pending: {e}"
     with longterm._conn() as c:
         c.execute("UPDATE staged_writes SET status = 'approved' WHERE id = ?", (int(write_id),))
     return f"Approved #{write_id}: {result}"

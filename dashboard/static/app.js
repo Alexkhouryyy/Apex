@@ -87,7 +87,7 @@ async function api(path, opts = {}) {
 }
 
 function escapeHTML(s) {
-  return String(s ?? '').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+  return String(s ?? '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 function fmtTs(t) {
@@ -993,13 +993,15 @@ async function loadInbox() {
     list.innerHTML = `<div class="evo-empty">Inbox clear. ✓</div>`;
   } else {
     list.innerHTML = msgs.map(m => `
-      <div class="inbox-msg ${m.unread ? 'inbox-unread' : ''}" onclick="openMessage('${m.uid}')">
+      <div class="inbox-msg ${m.unread ? 'inbox-unread' : ''}" data-uid="${escapeHTML(m.uid)}">
         <div class="inbox-msg-top">
           <span class="inbox-from">${m.unread ? '<span class="inbox-dot"></span>' : ''}${escapeHTML(m.from || '')}</span>
           <span class="inbox-date">${escapeHTML((m.date || '').slice(0, 22))}</span>
         </div>
         <div class="inbox-subject">${escapeHTML(m.subject || '(no subject)')}</div>
       </div>`).join('');
+    list.querySelectorAll('.inbox-msg').forEach(el =>
+      el.addEventListener('click', () => openMessage(el.dataset.uid)));
   }
   document.getElementById('inbox-count').textContent = `${msgs.length} message(s)`;
   if (status) status.textContent = '';
@@ -1044,8 +1046,13 @@ async function openMessage(uid) {
       </div>
       <pre class="inbox-reader-body">${escapeHTML(m.body || '(empty)')}</pre>
       <div class="inbox-reader-actions">
-        <button class="btn-primary" onclick="askApexToReply('${m.from_email}', ${JSON.stringify(m.subject || '').replace(/"/g, '&quot;')}, '${(m.message_id || '').replace(/'/g, '')}')">Ask Apex to draft a reply</button>
+        <button class="btn-primary inbox-reply-btn">Ask Apex to draft a reply</button>
       </div>`;
+    // Bind via closure — never interpolate attacker-controlled email headers
+    // (from_email/message_id) into markup, which was a stored-XSS → token-theft vector.
+    const _replyBtn = reader.querySelector('.inbox-reply-btn');
+    if (_replyBtn) _replyBtn.addEventListener('click',
+      () => askApexToReply(m.from_email || '', m.subject || '', m.message_id || ''));
   } catch (e) {
     reader.innerHTML = `<div class="evo-empty">Failed: ${escapeHTML(e.message)}</div>`;
   }
@@ -1231,7 +1238,7 @@ async function loadBudget() {
 }
 
 document.getElementById('budget-enabled').addEventListener('change', async (e) => {
-  await api('/api/budget', { method: 'POST', body: JSON.stringify({ enabled: e.target.checked }) });
+  await api('/api/budget', { method: 'POST', body: { enabled: e.target.checked } });
   document.getElementById('budget-enabled-label').textContent = e.target.checked ? 'Enabled' : 'Disabled';
 });
 
@@ -1240,7 +1247,7 @@ document.getElementById('budget-form').addEventListener('submit', async (e) => {
   const daily   = parseFloat(document.getElementById('budget-daily-input').value);
   const session = parseFloat(document.getElementById('budget-session-input').value);
   if (isNaN(daily) || isNaN(session) || daily < 0 || session < 0) return;
-  await api('/api/budget', { method: 'POST', body: JSON.stringify({ daily_usd: daily, session_usd: session }) });
+  await api('/api/budget', { method: 'POST', body: { daily_usd: daily, session_usd: session } });
   await loadBudget();
 });
 
@@ -1277,7 +1284,7 @@ async function loadGuardian() {
 }
 
 document.getElementById('guardian-enabled')?.addEventListener('change', async (e) => {
-  await api('/api/guardian/toggle', { method: 'POST', body: JSON.stringify({ enabled: e.target.checked }) });
+  await api('/api/guardian/toggle', { method: 'POST', body: { enabled: e.target.checked } });
   document.getElementById('guardian-enabled-label').textContent = e.target.checked ? 'Active' : 'Paused';
 });
 
@@ -1320,7 +1327,7 @@ async function loadTimeCapsule() {
 }
 
 document.getElementById('timecapsule-enabled')?.addEventListener('change', async (e) => {
-  await api('/api/timecapsule/toggle', { method: 'POST', body: JSON.stringify({ enabled: e.target.checked }) });
+  await api('/api/timecapsule/toggle', { method: 'POST', body: { enabled: e.target.checked } });
   document.getElementById('timecapsule-enabled-label').textContent = e.target.checked ? 'Active' : 'Paused';
 });
 

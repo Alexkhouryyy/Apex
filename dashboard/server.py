@@ -884,17 +884,26 @@ def devices_forget(device_id: str):
 
 
 def _pair_url(request: Request) -> str:
-    """Build the URL a phone should open to pair: <base>/#token=<token>."""
+    """Build the URL a phone should open to pair: <base>/#token=<device_token>.
+
+    Mints a fresh REVOCABLE device token — never embeds the master DASHBOARD_TOKEN,
+    so a paired phone can be revoked individually and a leaked QR/URL never exposes
+    the master secret. Callers must already be master (enforced at the endpoints).
+    """
     base = (getattr(config, "PUBLIC_BASE_URL", "") or "").rstrip("/")
     if not base:
-        # Fall back to the host the dashboard was reached on.
         base = str(request.base_url).rstrip("/")
-    token = config.DASHBOARD_TOKEN or ""
-    return f"{base}/?source=pair#token={token}" if token else f"{base}/?source=pair"
+    if not config.DASHBOARD_TOKEN:
+        return f"{base}/?source=pair"  # auth disabled; nothing to embed
+    from agent import access_tokens
+    token = access_tokens.issue(label="paired device")
+    return f"{base}/?source=pair#token={token}"
 
 
 @app.get("/api/pair/info")
 def pair_info(request: Request):
+    if config.DASHBOARD_TOKEN and not _require_master(request):
+        return JSONResponse({"error": "Only the master token can create a pairing link."}, status_code=403)
     return {"url": _pair_url(request),
             "base": (getattr(config, "PUBLIC_BASE_URL", "") or str(request.base_url).rstrip("/"))}
 
@@ -1218,6 +1227,8 @@ async def awareness_ingest(request: Request):
 @app.get("/api/pair/qr")
 def pair_qr(request: Request):
     """PNG QR code encoding the pairing URL (base + token) for the phone to scan."""
+    if config.DASHBOARD_TOKEN and not _require_master(request):
+        return JSONResponse({"error": "Only the master token can create a pairing QR."}, status_code=403)
     try:
         import qrcode
         import io

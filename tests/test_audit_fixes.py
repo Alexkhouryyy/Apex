@@ -67,3 +67,39 @@ def test_approve_is_atomic(test_db, monkeypatch):
     assert "Approved" in first
     assert "already processed" in second
     assert applied == ["memory"]  # side effect fired exactly once
+
+
+# --- D-M1: a failing _apply must NOT leave the row stuck in 'approving' -----
+
+def test_approve_failure_returns_to_pending(test_db, monkeypatch):
+    approvals.init_db()
+    import json as _j
+    def boom(kind, payload):
+        raise RuntimeError("apply exploded")
+    monkeypatch.setattr(approvals, "_apply", boom)
+    with longterm._conn() as c:
+        cur = c.execute(
+            "INSERT INTO staged_writes (ts, kind, summary, payload_json, status) "
+            "VALUES (?, ?, ?, ?, 'pending')",
+            (0.0, "memory", "s", _j.dumps({"x": 1})),
+        )
+        wid = cur.lastrowid
+    out = approvals.approve(wid)
+    assert "returned to pending" in out
+    # It must be visible/re-approvable again, not stuck in 'approving'.
+    assert any(w["id"] == wid for w in approvals.list_pending("pending"))
+
+
+# --- DFO: approval gate fails CLOSED when staging raises -------------------
+
+def test_memory_write_gate_fails_closed(test_db, tmp_path, monkeypatch):
+    import config as _cfg
+    monkeypatch.setattr(_cfg, "MEMORY_WRITE_APPROVAL", True, raising=False)
+    monkeypatch.setattr(longterm, "_APEX_MEMORY_DIR", tmp_path)
+    monkeypatch.setattr(longterm, "_MEMORY_FILE", tmp_path / "MEMORY.md")
+    from agent import approvals as _appr
+    monkeypatch.setattr(_appr, "stage", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db locked")))
+    out = longterm.save_memory_entry(target="memory", action="add", content="secret note")
+    assert "approval is required but staging failed" in out
+    # The write must NOT have been applied.
+    assert not (tmp_path / "MEMORY.md").exists() or "secret note" not in (tmp_path / "MEMORY.md").read_text()

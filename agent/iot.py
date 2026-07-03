@@ -31,7 +31,10 @@ _CACHE_TTL = 5.0  # seconds
 
 @contextmanager
 def _db():
-    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    # timeout + busy_timeout: this writer shares the DB file with the main loop
+    # and background threads; wait for the lock instead of raising immediately.
+    conn = sqlite3.connect(_DB_PATH, check_same_thread=False, timeout=5.0)
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA journal_mode=WAL")
     try:
         yield conn
