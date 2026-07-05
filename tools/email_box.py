@@ -92,7 +92,7 @@ def fetch_inbox(limit: int = 20, unread_only: bool = False) -> list[dict]:
         return [{"error": "Email not configured. Set EMAIL_ADDRESS / EMAIL_PASSWORD in .env."}]
     c = _cfg()
     try:
-        M = imaplib.IMAP4_SSL(c["imap_host"], c["imap_port"], ssl_context=ssl.create_default_context())
+        M = imaplib.IMAP4_SSL(c["imap_host"], c["imap_port"], ssl_context=ssl.create_default_context(), timeout=30)
         M.login(c["address"], c["password"])
         M.select("INBOX")
         criterion = "(UNSEEN)" if unread_only else "ALL"
@@ -131,7 +131,7 @@ def read_message(uid: str) -> dict:
         return {"error": "Email not configured."}
     c = _cfg()
     try:
-        M = imaplib.IMAP4_SSL(c["imap_host"], c["imap_port"], ssl_context=ssl.create_default_context())
+        M = imaplib.IMAP4_SSL(c["imap_host"], c["imap_port"], ssl_context=ssl.create_default_context(), timeout=30)
         M.login(c["address"], c["password"])
         M.select("INBOX")
         typ, msg_data = M.fetch(uid.encode(), "(RFC822)")

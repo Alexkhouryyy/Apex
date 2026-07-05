@@ -92,6 +92,32 @@ def test_approve_failure_returns_to_pending(test_db, monkeypatch):
 
 # --- DFO: approval gate fails CLOSED when staging raises -------------------
 
+def test_remember_truncates_long_content(test_db):
+    longterm.init_db()
+    longterm.remember("x" * 20000, kind="note")
+    with longterm._conn() as c:
+        content = c.execute("SELECT content FROM memories ORDER BY id DESC LIMIT 1").fetchone()[0]
+    assert len(content) <= longterm._REMEMBER_MAX_CHARS + 20
+    assert content.endswith("[truncated]")
+
+
+def test_fts_delete_trigger_keeps_index_synced(test_db):
+    longterm.init_db()
+    import time as _t
+    with longterm._conn() as c:
+        cur = c.execute(
+            "INSERT INTO turn_log (ts, session_id, turn_index, role, content_json, tool_calls_json) "
+            "VALUES (?,?,?,?,?,?)",
+            (_t.time(), 1, 0, "user", '{"text":"zebrawordxyz"}', "[]"),
+        )
+        rid = cur.lastrowid
+    assert longterm.search_turns("zebrawordxyz"), "insert trigger should index it"
+    with longterm._conn() as c:
+        c.execute("DELETE FROM turn_log WHERE id=?", (rid,))
+    # The delete trigger must remove it from the FTS index (no stale/orphan match).
+    assert not longterm.search_turns("zebrawordxyz"), "delete trigger should desync-proof the FTS index"
+
+
 def test_memory_write_gate_fails_closed(test_db, tmp_path, monkeypatch):
     import config as _cfg
     monkeypatch.setattr(_cfg, "MEMORY_WRITE_APPROVAL", True, raising=False)

@@ -212,6 +212,20 @@ def init_db():
               INSERT INTO turn_log_fts(rowid, content_json) VALUES (new.id, new.content_json);
             END
         """)
+        # DELETE/UPDATE triggers keep the external-content FTS index in sync if turn_log
+        # is ever pruned/edited — without them the index desyncs and search_turns can
+        # return wrong/NULL content or "database disk image is malformed".
+        c.execute("""
+            CREATE TRIGGER IF NOT EXISTS turn_log_ad AFTER DELETE ON turn_log BEGIN
+              INSERT INTO turn_log_fts(turn_log_fts, rowid, content_json) VALUES('delete', old.id, old.content_json);
+            END
+        """)
+        c.execute("""
+            CREATE TRIGGER IF NOT EXISTS turn_log_au AFTER UPDATE ON turn_log BEGIN
+              INSERT INTO turn_log_fts(turn_log_fts, rowid, content_json) VALUES('delete', old.id, old.content_json);
+              INSERT INTO turn_log_fts(rowid, content_json) VALUES (new.id, new.content_json);
+            END
+        """)
         if not had_trigger:
             c.execute("INSERT INTO turn_log_fts(turn_log_fts) VALUES('rebuild')")
 
@@ -276,11 +290,17 @@ def _conn():
         conn.close()
 
 
+_REMEMBER_MAX_CHARS = 8000  # a single memory row shouldn't bloat every future recall/embed
+
+
 def remember(content: str, kind: str = "fact", importance: int = 5, tags: str = "") -> str:
     kind = kind.lower().strip()
     if kind not in {"fact", "preference", "project", "decision", "note"}:
         kind = "note"
     importance = max(1, min(10, int(importance)))
+    content = content or ""
+    if len(content) > _REMEMBER_MAX_CHARS:
+        content = content[:_REMEMBER_MAX_CHARS] + "…[truncated]"
     embedding = _embed(content)
     with _conn() as c:
         c.execute(
@@ -291,17 +311,28 @@ def remember(content: str, kind: str = "fact", importance: int = 5, tags: str = 
     return f"Remembered [#{new_id} {kind} importance={importance}]: {content}"
 
 
+_RECALL_CANDIDATE_CAP = 2000  # bound the semantic-scoring pool so recall stays O(cap), not O(table)
+
+
 def recall(query: str = "", limit: int = 10, kind: str = "", semantic: bool = True) -> list[dict]:
-    """Retrieve memories. Uses semantic search when a query is given and embeddings available."""
+    """Retrieve memories. Uses semantic search when a query is given and embeddings available.
+
+    The candidate pool is capped at the most important/recent _RECALL_CANDIDATE_CAP rows
+    so cost stays bounded as the table grows (previously it loaded EVERY row + embedding
+    on every call — O(n) per turn).
+    """
     with _conn() as c:
         if kind:
             rows = c.execute(
-                "SELECT id, ts, kind, content, importance, tags, embedding FROM memories WHERE kind = ? ORDER BY importance DESC, ts DESC",
-                (kind.lower(),)
+                "SELECT id, ts, kind, content, importance, tags, embedding FROM memories WHERE kind = ? "
+                "ORDER BY importance DESC, ts DESC LIMIT ?",
+                (kind.lower(), _RECALL_CANDIDATE_CAP)
             ).fetchall()
         else:
             rows = c.execute(
-                "SELECT id, ts, kind, content, importance, tags, embedding FROM memories ORDER BY importance DESC, ts DESC"
+                "SELECT id, ts, kind, content, importance, tags, embedding FROM memories "
+                "ORDER BY importance DESC, ts DESC LIMIT ?",
+                (_RECALL_CANDIDATE_CAP,)
             ).fetchall()
 
     if not rows:
