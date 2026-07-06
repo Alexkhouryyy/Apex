@@ -1,14 +1,14 @@
 /* Apex service worker — offline app shell + Web Push receiver.
  * Served from the origin root (/sw.js) so its scope covers the whole app.
  */
-const CACHE = 'apex-shell-v17';
+const CACHE = 'apex-shell-v18';
 const SHELL = [
   '/',
-  '/static/styles.css?v=omni17',
-  '/static/mobile.css?v=omni17',
-  '/static/app.js?v=omni17',
-  '/static/voice-mobile.js?v=omni17',
-  '/static/cst3d.js?v=omni17',
+  '/static/styles.css?v=omni18',
+  '/static/mobile.css?v=omni18',
+  '/static/app.js?v=omni18',
+  '/static/voice-mobile.js?v=omni18',
+  '/static/cst3d.js?v=omni18',
   '/static/marked.min.js',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',

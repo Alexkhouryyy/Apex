@@ -2159,3 +2159,46 @@ pre.md-pre code { background: none; border: none; padding: 0; }
 .doc-preview h1, .doc-preview h2, .doc-preview h3 { margin: 0.6em 0 0.3em; }
 .doc-preview p { margin: 0.5em 0; }
 .doc-preview code { background: var(--bg-3); padding: 1px 5px; border-radius: 4px; }
+
+/* ============== Approvals (autonomous actions + forged tools) ============== */
+.nav-badge {
+  display: inline-block; margin-left: 6px; min-width: 16px; height: 16px; padding: 0 5px;
+  border-radius: 8px; background: var(--warn, #ffb547); color: #1a1200;
+  font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; vertical-align: middle;
+}
+.apv-group { margin-bottom: 26px; }
+.apv-title { font-size: 15px; margin: 0 0 10px; }
+.apv-count {
+  display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 9px;
+  background: var(--bg-3); color: var(--text-dim); font-size: 12px; font-weight: 600;
+}
+.apv-list { display: flex; flex-direction: column; gap: 12px; }
+.apv-empty { color: var(--text-dim); font-size: 13px; padding: 8px 0; }
+.apv-card {
+  background: var(--bg-2); border: 1px solid var(--border); border-left: 3px solid var(--warn, #ffb547);
+  border-radius: 10px; padding: 12px 14px;
+}
+.apv-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.apv-tool { font-weight: 700; color: var(--accent); font-family: ui-monospace, Menlo, monospace; }
+.apv-net {
+  font-size: 10.5px; color: var(--warn, #ffb547); border: 1px solid var(--warn, #ffb547);
+  border-radius: 999px; padding: 1px 7px;
+}
+.apv-time { margin-left: auto; font-size: 11.5px; color: var(--text-dim); }
+.apv-rationale { font-size: 13.5px; color: var(--text); line-height: 1.5; margin-bottom: 8px; }
+.apv-inputs {
+  background: var(--bg-3); border-radius: 6px; padding: 8px 10px; margin: 0 0 10px;
+  font-size: 11.5px; color: var(--text-dim); overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+}
+.apv-actions { display: flex; gap: 8px; }
+.apv-approve {
+  background: var(--success, #3ddc97); color: #00150c; border: none; border-radius: 8px;
+  padding: 6px 14px; font-weight: 600; cursor: pointer;
+}
+.apv-approve:hover { filter: brightness(1.08); }
+.apv-approve:disabled { opacity: .6; cursor: default; }
+.apv-reject {
+  background: transparent; color: var(--err, #ff6a6a); border: 1px solid var(--err, #ff6a6a);
+  border-radius: 8px; padding: 6px 14px; font-weight: 600; cursor: pointer;
+}
+.apv-reject:hover { background: rgba(255,106,106,0.12); }

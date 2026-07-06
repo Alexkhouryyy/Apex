@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="Apex">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="/static/icons/favicon-64.png">
-<link rel="stylesheet" href="/static/styles.css?v=omni17">
-<link rel="stylesheet" href="/static/mobile.css?v=omni17">
+<link rel="stylesheet" href="/static/styles.css?v=omni18">
+<link rel="stylesheet" href="/static/mobile.css?v=omni18">
 <script src="/static/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
@@ -60,6 +60,7 @@
     <button data-tab="replay" class="nav-btn"><span class="icon">▷</span>Replay</button>
 
     <div class="nav-group-label">Automation</div>
+    <button data-tab="approvals" class="nav-btn"><span class="icon">✔</span>Approvals<span id="nav-approvals-badge" class="nav-badge" style="display:none"></span></button>
     <button data-tab="briefing" class="nav-btn"><span class="icon">☀</span>Briefing</button>
     <button data-tab="schedule" class="nav-btn"><span class="icon">◷</span>Schedule</button>
     <button data-tab="subagents" class="nav-btn"><span class="icon">⌥</span>Sub-agents</button>
@@ -890,6 +891,22 @@
     </div>
   </section>
 
+  <!-- APPROVALS — sign off on autonomous actions + forged tools -->
+  <section id="tab-approvals" class="tab">
+    <header class="page-head">
+      <h1>Approvals</h1>
+      <div class="page-sub">Autonomous actions the cortex staged, and tools Apex forged for itself, waiting for your sign-off. <strong>Nothing here runs until you approve it.</strong></div>
+    </header>
+    <div class="apv-group">
+      <h2 class="apv-title">Pending actions <span id="apv-actions-count" class="apv-count">0</span></h2>
+      <div id="apv-actions" class="apv-list"></div>
+    </div>
+    <div class="apv-group">
+      <h2 class="apv-title">Forged tools <span id="apv-forged-count" class="apv-count">0</span></h2>
+      <div id="apv-forged" class="apv-list"></div>
+    </div>
+  </section>
+
   <!-- CONSTELLATION -->
   <section id="tab-constellation" class="tab">
     <header class="page-head">
@@ -975,9 +992,9 @@
   <button class="ib-no" id="install-no">Not now</button>
 </div>
 
-<script src="/static/app.js?v=omni17"></script>
-<script src="/static/voice-mobile.js?v=omni17"></script>
+<script src="/static/app.js?v=omni18"></script>
+<script src="/static/voice-mobile.js?v=omni18"></script>
 <script type="module" src="/static/avatar3d.js?v=vision3"></script>
-<script type="module" src="/static/cst3d.js?v=omni17"></script>
+<script type="module" src="/static/cst3d.js?v=omni18"></script>
 </body>
 </html>

@@ -158,7 +158,11 @@ function connectWS() {
     if (msg.type === 'snapshot' && msg.data?.events_recent) {
       msg.data.events_recent.forEach(e => addFeedItem(e));
     }
-    if (msg.type === 'notify') showNotifyToast(msg);
+    if (msg.type === 'notify') {
+      showNotifyToast(msg);
+      // A staged action or forged tool just appeared — refresh the approvals badge.
+      if (['skill_forge', 'cortex', 'write_approval'].includes(msg.kind)) refreshApprovalsBadge();
+    }
     if (msg.type === 'chat_token') { _chatAppendToken(msg.delta, msg.chat_id); _setApexState('speaking'); }
     if (msg.type === 'chat_done')  { _chatFinalize(msg.chat_id, msg.response, msg.session_id, msg.turn_index); _setApexState('idle'); }
     if (msg.type === 'chat_error') { _chatError(msg.error, msg.chat_id); _setApexState('idle'); }
@@ -227,6 +231,7 @@ async function loadTab(tab) {
     council: loadCouncil,
     compare: loadCompare,
     documents: loadDocuments,
+    approvals: loadApprovals,
     constellation: loadConstellation,
   };
   if (fns[tab]) try { await fns[tab](); } catch (e) { console.error('loadTab', tab, e); }
@@ -2443,6 +2448,89 @@ async function _docReloadOpen() {
   } catch (_) {}
 }
 
+// ============== APPROVALS — autonomous actions + forged tools ==============
+async function loadApprovals() {
+  const actionsEl = document.getElementById('apv-actions');
+  const forgedEl = document.getElementById('apv-forged');
+  if (!actionsEl || !forgedEl) return;
+
+  // Pending cortex actions
+  let nActions = 0;
+  try {
+    const d = await api('/api/pending-actions');
+    const actions = d.actions || [];
+    nActions = actions.length;
+    actionsEl.innerHTML = actions.length ? actions.map(a => {
+      const inputs = escapeHTML(JSON.stringify(a.inputs || {}, null, 0)).slice(0, 400);
+      return `<div class="apv-card" data-id="${a.id}">
+        <div class="apv-head"><span class="apv-tool">${escapeHTML(a.tool || '?')}</span>
+          <span class="apv-time">${fmtDate(a.ts)}</span></div>
+        <div class="apv-rationale">${escapeHTML(a.rationale || '')}</div>
+        <pre class="apv-inputs">${inputs}</pre>
+        <div class="apv-actions">
+          <button class="apv-approve" data-kind="action" data-id="${a.id}">Approve &amp; run</button>
+          <button class="apv-reject" data-kind="action" data-id="${a.id}">Reject</button>
+        </div></div>`;
+    }).join('') : '<div class="apv-empty">No autonomous actions waiting. ✓</div>';
+  } catch (e) { actionsEl.innerHTML = '<div class="apv-empty">Could not load pending actions.</div>'; }
+
+  // Forged tools awaiting install
+  let nForged = 0;
+  try {
+    const d = await api('/api/forged-tools');
+    const pending = (d.tools || []).filter(t => t.status === 'pending');
+    nForged = pending.length;
+    forgedEl.innerHTML = pending.length ? pending.map(t => {
+      const net = t.needs_network ? '<span class="apv-net">needs network</span>' : '';
+      return `<div class="apv-card" data-id="${t.id}">
+        <div class="apv-head"><span class="apv-tool">${escapeHTML(t.name || '?')}</span>${net}
+          <span class="apv-time">${fmtDate(t.created_at)}</span></div>
+        <div class="apv-rationale">${escapeHTML(t.description || '')}</div>
+        <div class="apv-actions">
+          <button class="apv-approve" data-kind="forged" data-id="${t.id}">Approve &amp; install</button>
+          <button class="apv-reject" data-kind="forged" data-id="${t.id}">Reject</button>
+        </div></div>`;
+    }).join('') : '<div class="apv-empty">No forged tools waiting. ✓</div>';
+  } catch (e) { forgedEl.innerHTML = '<div class="apv-empty">Could not load forged tools.</div>'; }
+
+  document.getElementById('apv-actions-count').textContent = nActions;
+  document.getElementById('apv-forged-count').textContent = nForged;
+  _updateApprovalsBadge(nActions + nForged);
+
+  document.querySelectorAll('#tab-approvals .apv-approve, #tab-approvals .apv-reject').forEach(b => {
+    b.addEventListener('click', () => _decideApproval(b.dataset.kind, b.dataset.id,
+      b.classList.contains('apv-approve') ? 'approve' : 'reject', b));
+  });
+}
+
+async function _decideApproval(kind, id, decision, btn) {
+  const base = kind === 'forged' ? '/api/forged-tools' : '/api/pending-actions';
+  btn.disabled = true; btn.textContent = decision === 'approve' ? 'Working…' : 'Rejecting…';
+  try {
+    await api(`${base}/${id}/${decision}`, { method: 'POST', body: {} });
+    loadApprovals();  // refresh both lists + badge
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = decision === 'approve' ? 'Approve' : 'Reject';
+  }
+}
+
+function _updateApprovalsBadge(n) {
+  const badge = document.getElementById('nav-approvals-badge');
+  if (!badge) return;
+  if (n > 0) { badge.textContent = n; badge.style.display = ''; }
+  else { badge.style.display = 'none'; }
+}
+
+// Keep the nav badge fresh even when the tab isn't open (cheap poll on other loads).
+async function refreshApprovalsBadge() {
+  try {
+    const [a, f] = await Promise.all([api('/api/pending-actions'), api('/api/forged-tools')]);
+    const n = (a.actions || []).length + (f.tools || []).filter(t => t.status === 'pending').length;
+    _updateApprovalsBadge(n);
+  } catch (_) {}
+}
+
 // ============== THE CONSTELLATION ==============
 let cstRunning = false;
 let _cstPlanets = [];
@@ -2748,6 +2836,7 @@ async function boot() {
   setInterval(refreshStatus, 5000);
   connectWS();
   loadTab('overview');
+  refreshApprovalsBadge();
 }
 boot();
 
