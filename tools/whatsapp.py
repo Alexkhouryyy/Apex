@@ -58,7 +58,7 @@ def _allowed_numbers() -> set[str]:
 
 def _is_allowed(number: str) -> bool:
     allowed = _allowed_numbers()
-    return not allowed or number.replace("whatsapp:", "").strip() in allowed
+    return bool(allowed) and number.replace("whatsapp:", "").strip() in allowed  # DENY-BY-DEFAULT
 
 
 def send_message(to: str, text: str) -> str:

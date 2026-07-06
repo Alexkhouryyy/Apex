@@ -131,7 +131,13 @@ def _execute_tool(tool: str, inputs: dict) -> str:
         elif tool == "run_python":
             from tools import sandbox
             code = inputs.get("code", "")
-            res = sandbox.get_backend().run_python(code, timeout=10)
+            # DECISION (a): self-initiated code runs in Docker, never on the host.
+            try:
+                backend = sandbox.autonomous_backend()
+            except sandbox.SandboxUnavailable:
+                return ("[cortex] run_python needs the Docker sandbox for autonomous "
+                        "execution, which is unavailable — skipped (not run on host).")
+            res = backend.run_python(code, timeout=10)
             return (res["stdout"] + res["stderr"])[:500]
         else:
             # Confirm-tier tools (write_file, bash, send_email, sms_send, browser_*)

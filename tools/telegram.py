@@ -53,7 +53,7 @@ def _allowed_ids() -> set[int]:
 
 def _is_allowed(chat_id: int) -> bool:
     allowed = _allowed_ids()
-    return not allowed or chat_id in allowed
+    return bool(allowed) and chat_id in allowed  # DENY-BY-DEFAULT when unconfigured
 
 
 def send_message(chat_id: int | str, text: str) -> str:

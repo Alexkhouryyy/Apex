@@ -243,6 +243,27 @@ class _RefusingBackend(Backend):
         return _error_result("Execution refused: sandbox required but Docker is unavailable.")
 
 
+class SandboxUnavailable(Exception):
+    """Raised when self-initiated execution is requested but Docker isn't reachable.
+
+    Callers MUST NOT fall back to host execution — they stage for approval or refuse.
+    """
+
+
+def autonomous_backend(refresh: bool = False) -> Backend:
+    """Backend for SELF-INITIATED execution (cortex run_python, forged-skill
+    validation, autonomous skill runs). DECISION (a): origin-based sandboxing —
+    anything Apex starts on its own runs in Docker, unconditionally, regardless of
+    EXECUTION_BACKEND. If Docker is unreachable this RAISES SandboxUnavailable so the
+    caller degrades to staged-for-approval; it never silently runs on the host.
+    """
+    if docker_available(refresh=refresh):
+        return DockerBackend()
+    raise SandboxUnavailable(
+        "Docker is required for autonomous execution but is unavailable."
+    )
+
+
 def active_backend_name() -> str:
     """Human-readable name of the backend that would be used right now."""
     return get_backend().name

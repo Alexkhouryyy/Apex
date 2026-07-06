@@ -54,7 +54,7 @@ def _allowed_channel_ids() -> set[str]:
 
 def _is_allowed(channel_id: str) -> bool:
     allowed = _allowed_channel_ids()
-    return not allowed or channel_id in allowed
+    return bool(allowed) and channel_id in allowed  # DENY-BY-DEFAULT when unconfigured
 
 
 def verify_signature(signature: str, timestamp: str, body: bytes) -> bool:

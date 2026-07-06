@@ -4,6 +4,46 @@ import pytest
 from agent import skills, skill_md, approvals, longterm
 
 
+# --- Decision (c): channel allowlists deny-by-default when unconfigured --------
+
+def test_channel_allowlists_deny_when_empty(monkeypatch):
+    from tools import telegram, signal as sig, phone, whatsapp, slack
+    monkeypatch.setattr(telegram, "_allowed_ids", lambda: set())
+    monkeypatch.setattr(sig, "_allowed_numbers", lambda: set())
+    monkeypatch.setattr(whatsapp, "_allowed_numbers", lambda: set())
+    monkeypatch.setattr(slack, "_allowed_channel_ids", lambda: set())
+    monkeypatch.setattr(phone.config, "PHONE_ALLOWED_NUMBERS", [], raising=False)
+    assert telegram._is_allowed(999) is False
+    assert sig._is_allowed("+100") is False
+    assert whatsapp._is_allowed("whatsapp:+100") is False
+    assert slack._is_allowed("C123") is False
+    assert phone._is_allowed("+100") is False
+
+
+# --- Decision (a): safety gate covers run_python/run_skill --------------------
+
+def test_safety_gates_run_python_and_run_skill():
+    from agent import safety
+    safety.set_confirm_fn(lambda _r: False)  # deny
+    try:
+        assert safety.check("run_python", {"code": "print(1)"})[0] is False
+        assert safety.check("run_skill", {"name": "x"})[0] is False
+    finally:
+        safety.set_confirm_fn(lambda _r: False)
+
+
+# --- Decision (a): autonomous run_python refuses host when Docker unavailable --
+
+def test_cortex_run_python_refuses_without_sandbox(monkeypatch):
+    from agent import cortex
+    from tools import sandbox
+    def _raise(refresh=False):
+        raise sandbox.SandboxUnavailable("no docker")
+    monkeypatch.setattr(sandbox, "autonomous_backend", _raise)
+    out = cortex._execute_tool("run_python", {"code": "import os; os.system('echo pwned')"})
+    assert "not run on host" in out.lower() or "unavailable" in out.lower()
+
+
 # --- C4/H3: path-traversal guards on skill names ---------------------------
 
 def test_run_skill_rejects_path_traversal():

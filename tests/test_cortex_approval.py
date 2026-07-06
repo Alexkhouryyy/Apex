@@ -29,9 +29,12 @@ def test_read_only_tools_do_not_delegate(monkeypatch):
     monkeypatch.setitem(sys.modules, "agent.core", stub)
 
     from tools import sandbox
-    monkeypatch.setattr(sandbox, "_backend", None)
+    # Origin-based sandbox: autonomous run_python goes through the Docker path.
+    # Simulate Docker-available with a Local backend so the code executes; the point
+    # of this test is that run_python does NOT fall through to the real dispatcher.
+    monkeypatch.setattr(sandbox, "autonomous_backend", lambda refresh=False: sandbox.LocalBackend())
     out = cortex._execute_tool("run_python", {"code": "print(2+2)"})
-    assert "4" in out  # ran locally, did not hit the stub dispatcher
+    assert "4" in out  # ran in the (simulated) sandbox, did not hit the stub dispatcher
 
 
 def pytest_fail_marker():

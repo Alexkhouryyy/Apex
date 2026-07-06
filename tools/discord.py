@@ -51,7 +51,7 @@ def _allowed_user_ids() -> set[str]:
 
 def _is_allowed(user_id: str) -> bool:
     allowed = _allowed_user_ids()
-    return not allowed or str(user_id) in allowed
+    return bool(allowed) and str(user_id) in allowed  # DENY-BY-DEFAULT when unconfigured
 
 
 def send_message(channel_id: str, text: str) -> str:

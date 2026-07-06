@@ -158,7 +158,13 @@ def _validate_in_sandbox(code: str, test_inputs: dict) -> tuple[bool, str]:
     """)
     try:
         from tools import sandbox
-        res = sandbox.get_backend().run_python(script, timeout=10)
+        # DECISION (a): forged code is model-written and untrusted — validate it in
+        # Docker, never on the host. No Docker → validation cannot proceed safely.
+        try:
+            backend = sandbox.autonomous_backend()
+        except sandbox.SandboxUnavailable:
+            return False, "Docker sandbox required to validate a forged tool (unavailable)."
+        res = backend.run_python(script, timeout=10)
         out = (res.get("stdout") or "").strip()
         if not out:
             if res.get("returncode") == -1 and "timed out" in (res.get("stderr") or ""):
@@ -202,7 +208,6 @@ def attempt_forge(client, gap_description: str) -> Optional[dict]:
     description = proposal.get("description", "").strip()
     code = proposal.get("code", "").strip()
     test_case = proposal.get("test_case", {})
-    is_read_only = bool(proposal.get("is_read_only", False))
 
     if not name or not code or not name.isidentifier():
         return None
@@ -226,24 +231,22 @@ def attempt_forge(client, gap_description: str) -> Optional[dict]:
         print(f"[SkillForge] DB insert failed: {e}")
         return None
 
-    if is_read_only:
-        result = approve_forged(tool_id)
-        print(f"[SkillForge] Auto-approved '{name}': {result}")
-        proposal["auto_approved"] = True
-    else:
-        if _NOTIFY_FN:
-            try:
-                _NOTIFY_FN(
-                    title="New tool ready to install",
-                    body=f"'{name}': {description}",
-                    kind="skill_forge",
-                    priority="normal",
-                    url=f"/?tab=skills",
-                )
-            except Exception:
-                pass
-        print(f"[SkillForge] Staged '{name}' for user approval (id={tool_id})")
-        proposal["auto_approved"] = False
+    # DECISION (b): every forged tool stages for approval. The model-declared
+    # `is_read_only` flag is NOT trusted — it was never verified against the code,
+    # so an injected "read-only:true" could ship host-executing tools unattended.
+    if _NOTIFY_FN:
+        try:
+            _NOTIFY_FN(
+                title="New tool ready to install",
+                body=f"'{name}': {description}",
+                kind="skill_forge",
+                priority="normal",
+                url=f"/?tab=skills",
+            )
+        except Exception:
+            pass
+    print(f"[SkillForge] Staged '{name}' for user approval (id={tool_id})")
+    proposal["auto_approved"] = False
 
     proposal["id"] = tool_id
     proposal["sandbox_output"] = output

@@ -55,6 +55,8 @@ def test_dispatch_inbound_runs_agent_and_replies(monkeypatch):
     )
     sent = []
     monkeypatch.setattr(telegram, "send_message", lambda cid, txt: sent.append((cid, txt)))
+    # Deny-by-default: the sender must be on the allowlist to reach the agent.
+    monkeypatch.setattr(telegram, "_allowed_ids", lambda: {555})
 
     reply = telegram.dispatch_inbound(_update("ping", chat_id=555))
 

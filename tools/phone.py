@@ -44,7 +44,7 @@ def _from_number() -> str:
 def _is_allowed(num: str) -> bool:
     allowed = getattr(config, "PHONE_ALLOWED_NUMBERS", []) or []
     if not allowed:
-        return True  # no whitelist configured → allow
+        return False  # DENY-BY-DEFAULT: no allowlist configured → nobody gets through
     norm = re.sub(r"\D", "", num or "")
     return any(re.sub(r"\D", "", a) == norm for a in allowed)
 

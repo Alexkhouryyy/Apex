@@ -3,6 +3,10 @@ import re
 
 # (tool_name, input_key, pattern) → human-readable risk description
 _RULES: list[tuple[str, str, re.Pattern, str]] = [
+    # Code-execution tools: confirm on the user/core path. (Autonomous cortex/forge
+    # paths route through the Docker sandbox instead — see tools/sandbox.autonomous_backend.)
+    ("run_python", "code", re.compile(r".+", re.S), "running arbitrary Python on the host"),
+    ("run_skill", "name", re.compile(r".+"), "running a skill (executes code) on the host"),
     ("bash", "command", re.compile(r"\brm\b.+(-rf?|--recursive)", re.I), "recursive delete"),
     ("bash", "command", re.compile(r"\bdd\b"), "disk overwrite (dd)"),
     ("bash", "command", re.compile(r">\s*/dev/(sd|nvme|disk)", re.I), "writing to raw device"),
