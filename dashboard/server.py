@@ -645,6 +645,21 @@ def discord_status():
     }
 
 
+_slack_seen_events: "collections.OrderedDict[str, bool]" = __import__("collections").OrderedDict()
+
+
+def _slack_dedup(event_id: str) -> bool:
+    """True if this Slack event_id was already handled (Slack retries on slow ack)."""
+    if not event_id:
+        return False
+    if event_id in _slack_seen_events:
+        return True
+    _slack_seen_events[event_id] = True
+    while len(_slack_seen_events) > 512:
+        _slack_seen_events.popitem(last=False)
+    return False
+
+
 @app.post("/slack/events")
 async def slack_events(request: Request):
     body = await request.body()
@@ -653,9 +668,15 @@ async def slack_events(request: Request):
     if not slack_mod.verify_signature(sig, ts, body):
         return Response(content="invalid signature", status_code=401)
     payload = json.loads(body)
-    result = slack_mod.dispatch_event(payload)
-    if result:
-        return JSONResponse(result)
+    # URL verification handshake — answer inline, never run the agent.
+    if payload.get("type") == "url_verification":
+        return JSONResponse({"challenge": payload.get("challenge", "")})
+    # Dedup Slack retries (they resend if we don't ack within ~3s).
+    if _slack_dedup(payload.get("event_id", "")):
+        return {"ok": True}
+    # Run the agent EXACTLY ONCE, off the event loop, and ack immediately.
+    # (Previously this ran dispatch_event synchronously — blocking the loop — and
+    # then AGAIN in the executor, causing duplicate replies + double model charges.)
     loop = asyncio.get_event_loop()
     loop.run_in_executor(None, lambda: slack_mod.dispatch_event(payload))
     return {"ok": True}
