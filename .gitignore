@@ -17,4 +17,7 @@ secrets/
 *.db
 
 # Claude Code local config (settings, worktrees)
-.claude/
+# Ignore .claude contents (worktrees, local settings) but keep the directory
+# itself un-excluded so reusable skills below can be re-included and versioned.
+.claude/*
+!.claude/skills/
