@@ -166,6 +166,14 @@ def run_resident(model_override: Optional[str] = None) -> None:
 
     # Self-mod tools
     self_mod.load_dynamic_handlers()
+    # Procedural (markdown) skills that ship with Apex — self-install on first boot.
+    try:
+        from agent import skill_md as _skill_md_mod
+        _n_bundled = _skill_md_mod.install_bundled()
+        if _n_bundled:
+            logging.info(f"Installed {_n_bundled} bundled procedural skill(s).")
+    except Exception as e:
+        logging.warning(f"Bundled skill install skipped: {e}")
     knowledge.init_db()
     goals.init_db()
     fb_mod.init_db()

@@ -43,6 +43,43 @@ def _parse_frontmatter(text: str) -> dict:
     return out
 
 
+_BUNDLED_DIR = Path(__file__).resolve().parent.parent / "apex_skills"
+
+
+def install_bundled() -> int:
+    """Install skills that ship with Apex into ~/.apex/skills, skipping any that
+    already exist. Returns how many were installed.
+
+    Bundled skills live in the repo so they are versioned and survive a rebuild;
+    ~/.apex/skills is runtime state and is not backed up. Usage is seeded on
+    install for the same reason `create` does it — otherwise the curator sees
+    age_days=999 and archives them before first use.
+    """
+    installed = 0
+    if not _BUNDLED_DIR.exists():
+        return 0
+    try:
+        usage = _load_usage()
+        for src in sorted(_BUNDLED_DIR.glob("*/SKILL.md")):
+            name = src.parent.name
+            try:
+                dest = _skill_path(name)          # validates the name
+            except ValueError:
+                continue
+            if dest.exists():
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(src.read_text())
+            usage.setdefault(name, {"use_count": 0})
+            usage[name]["last_used_at"] = time.time()
+            installed += 1
+        if installed:
+            _save_usage(usage)
+    except Exception as e:
+        print(f"[Skills] bundled install skipped: {e}")
+    return installed
+
+
 def list_skills() -> list[dict]:
     """Return [{name, description}] for all non-archived skills."""
     if not _SKILLS_DIR.exists():
@@ -107,6 +144,18 @@ def manage(
             f"created: {today}\nuse_count: 0\nlast_used_at: null\n---\n\n"
         )
         path.write_text(header + content.strip() + "\n")
+        # Seed the usage sidecar. Without this there is no `last_used_at`, so
+        # curator computes age_days = 999.0 (curator.py:176-177) and ARCHIVES the
+        # skill on its very next run — every freshly authored skill would silently
+        # vanish before it was ever used. Creation counts as touching it.
+        try:
+            usage = _load_usage()
+            usage.setdefault(name, {})
+            usage[name].setdefault("use_count", 0)
+            usage[name]["last_used_at"] = time.time()
+            _save_usage(usage)
+        except Exception:
+            pass
         return f"Skill {name!r} created at {path}."
 
     if action == "view":

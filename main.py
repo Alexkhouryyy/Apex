@@ -156,6 +156,12 @@ def main():
 
     # Load skills registry
     from agent import skills as skills_mod
+    # Procedural (markdown) skills that ship with Apex — self-install on first boot.
+    from agent import skill_md as _skill_md_mod
+    _n_bundled = _skill_md_mod.install_bundled()
+    if _n_bundled:
+        print(f"[Skills] Installed {_n_bundled} bundled procedural skill(s).")
+
     n_skills = skills_mod.load_all()
     if n_skills:
         print(f"[Skills] Loaded {n_skills} skill(s).")
