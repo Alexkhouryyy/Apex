@@ -42,6 +42,14 @@ def init_db():
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status, horizon)")
 
+    # The completion-contract gate lives in update_goal, so its tables must exist
+    # wherever goals do — otherwise an older DB would block every goal close.
+    try:
+        from agent import verification
+        verification.init_db()
+    except Exception:
+        pass
+
 
 def set_goal(title: str, description: str = "", horizon: str = "week", deadline_iso: Optional[str] = None) -> str:
     horizon = horizon.lower().strip()
@@ -98,7 +106,8 @@ def list_goals(active_only: bool = True, horizon: Optional[str] = None) -> list[
     return goals
 
 
-def update_goal(goal_id: int, status: Optional[str] = None, progress_note: Optional[str] = None, score: Optional[int] = None) -> str:
+def update_goal(goal_id: int, status: Optional[str] = None, progress_note: Optional[str] = None,
+                score: Optional[int] = None, evidence: str = "", _force: bool = False) -> str:
     now = time.time()
     actions = []
 
@@ -106,9 +115,30 @@ def update_goal(goal_id: int, status: Optional[str] = None, progress_note: Optio
         status = status.lower().strip()
         if status not in VALID_STATUSES:
             return f"Invalid status {status!r}. Use one of: {sorted(VALID_STATUSES)}"
+
+        # Work verification gate: a goal carrying a completion contract cannot be
+        # closed on the agent's say-so — the contract must actually pass. Goals
+        # with no contract stay closable (backward compatible) but are recorded
+        # as unverified so the two cases never blur.
+        verdict_note = ""
+        if status == "done" and not _force:
+            try:
+                from agent import verification
+                res = verification.verify(goal_id, evidence=evidence)
+                if res["contracted"] and not res["passed"]:
+                    return (f"Goal #{goal_id} NOT closed — completion contract failed:\n"
+                            + verification.format_result(res)
+                            + "\nFix the work (or pass _force=True to override, which is recorded).")
+                verdict_note = "verified" if res["contracted"] else "unverified (no contract)"
+            except Exception as e:
+                # Fail CLOSED: if the gate itself is broken we do not silently pass.
+                return f"Goal #{goal_id} NOT closed — verification could not run: {e}"
+        elif status == "done" and _force:
+            verdict_note = "FORCE-CLOSED without verification"
+
         with longterm._conn() as c:
             c.execute("UPDATE goals SET status = ?, updated_at = ? WHERE id = ?", (status, now, goal_id))
-        actions.append(f"status -> {status}")
+        actions.append(f"status -> {status}" + (f" [{verdict_note}]" if verdict_note else ""))
 
     if progress_note:
         with longterm._conn() as c:

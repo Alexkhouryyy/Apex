@@ -635,7 +635,12 @@ TOOLS = [
     },
     {
         "name": "update_goal",
-        "description": "Update a goal's status or add a progress note. Use after meaningful work on a goal.",
+        "description": (
+            "Update a goal's status or add a progress note. Use after meaningful work on a goal. "
+            "NOTE: setting status='done' on a goal that has a completion contract will FAIL unless "
+            "the contract actually passes — pass `evidence` describing what you did so an llm-kind "
+            "contract can judge it."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -643,6 +648,39 @@ TOOLS = [
                 "status": {"type": "string", "enum": ["active", "paused", "done", "abandoned"]},
                 "progress_note": {"type": "string"},
                 "score": {"type": "integer", "description": "1-10 satisfaction with this progress"},
+                "evidence": {"type": "string", "description": "What you actually did/produced, for verification"},
+            },
+            "required": ["goal_id"],
+        },
+    },
+    {
+        "name": "add_goal_contract",
+        "description": (
+            "Attach a checkable completion criterion to a goal, so finishing it must be PROVEN "
+            "rather than asserted. Use when the user sets a goal whose completion is objectively "
+            "checkable. Kinds: 'command' (shell command, exit 0 = done, runs sandboxed), "
+            "'file_exists' (spec=path), 'contains' (spec=path, detail=required text), "
+            "'llm' (spec=criterion judged against evidence), 'manual' (only a human can close it)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "integer"},
+                "kind": {"type": "string", "enum": ["command", "file_exists", "contains", "llm", "manual"]},
+                "spec": {"type": "string", "description": "Command, path, or criterion text"},
+                "detail": {"type": "string", "description": "Required substring for 'contains'"},
+            },
+            "required": ["goal_id", "kind", "spec"],
+        },
+    },
+    {
+        "name": "verify_goal",
+        "description": "Run a goal's completion contracts now and report the evidence, without closing it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "integer"},
+                "evidence": {"type": "string", "description": "Evidence for an llm-kind contract to judge"},
             },
             "required": ["goal_id"],
         },
@@ -1404,6 +1442,17 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                 status=inputs.get("status"),
                 progress_note=inputs.get("progress_note"),
                 score=inputs.get("score"),
+                evidence=inputs.get("evidence", ""),
+            )
+        elif name == "add_goal_contract":
+            from agent import verification as _verif
+            return _verif.add_contract(
+                inputs["goal_id"], inputs["kind"], inputs["spec"], inputs.get("detail", "")
+            )
+        elif name == "verify_goal":
+            from agent import verification as _verif
+            return _verif.format_result(
+                _verif.verify(inputs["goal_id"], evidence=inputs.get("evidence", ""))
             )
         elif name == "evaluate_recent_work":
             client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
