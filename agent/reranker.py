@@ -63,7 +63,8 @@ def init_db() -> None:
                 reordered     INTEGER NOT NULL DEFAULT 0,
                 learned       INTEGER NOT NULL DEFAULT 0,
                 scores_json   TEXT DEFAULT '',
-                chosen_model  TEXT DEFAULT ''
+                chosen_model  TEXT DEFAULT '',
+                UNIQUE(session_id, turn_index)
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_rerank_ts ON rerank_events(ts DESC)")
@@ -77,13 +78,26 @@ def _rated_responses(limit: int = _MAX_SAMPLES) -> tuple[list[str], list[str]]:
     Joins the rating in turn_feedback to the actual text in turn_log — the text
     is not stored alongside the rating, which is why this join is the whole trick.
     """
+    # ONE row per rated turn. `telemetry.log_turn("assistant", ...)` runs INSIDE
+    # the tool-use loop (agent/core.py:2126 within the loop at :2042), so a turn
+    # with 3 tool rounds writes 4 assistant rows sharing one turn_index. Joining
+    # naively replicated a single rating across all of them — including
+    # intermediate rows whose text is empty or a partial preamble — and the LIMIT
+    # then applied to joined rows rather than distinct ratings, letting a few
+    # tool-heavy turns crowd out real samples. MAX(t.id) keeps the FINAL answer,
+    # which is the text the user actually rated.
     try:
         with longterm._conn() as c:
             rows = c.execute(
                 "SELECT f.rating, t.content_json FROM turn_feedback f "
-                "JOIN turn_log t ON t.session_id = f.session_id "
-                "AND t.turn_index = f.turn_index "
-                "WHERE t.role = 'assistant' ORDER BY f.ts DESC LIMIT ?",
+                "JOIN ("
+                "  SELECT session_id, turn_index, MAX(id) AS id"
+                "  FROM turn_log WHERE role = 'assistant'"
+                "  GROUP BY session_id, turn_index"
+                ") last ON last.session_id = f.session_id "
+                "AND last.turn_index = f.turn_index "
+                "JOIN turn_log t ON t.id = last.id "
+                "ORDER BY f.ts DESC LIMIT ?",
                 (limit,),
             ).fetchall()
     except Exception:
@@ -200,15 +214,37 @@ def rerank(candidates: list[dict]) -> dict:
             "learned": True, "reordered": best != 0}
 
 
+_warned_no_session = False
+
+
 def record(result: dict, session_id: Optional[int] = None,
            turn_index: Optional[int] = None) -> None:
-    """Log a rerank decision so its effect can be measured later. Best-effort."""
+    """Log a rerank decision so its effect can be measured later. Best-effort.
+
+    A row with a NULL session_id can never join to turn_feedback, so stats() would
+    silently report rated=0 forever. Refuse to write one, and say so once.
+    """
+    global _warned_no_session
+    if session_id is None or turn_index is None:
+        if not _warned_no_session:
+            _warned_no_session = True
+            print("[Rerank] no session/turn context — decision not recorded "
+                  "(telemetry.set_session was never called), so it could never "
+                  "be measured.")
+        return
     try:
         with longterm._conn() as c:
+            # Upsert: mirrors turn_feedback's UNIQUE(session_id, turn_index) so a
+            # duplicate event for one turn cannot double-count that rating.
             c.execute(
                 "INSERT INTO rerank_events (ts, session_id, turn_index, n_candidates, "
                 "chosen_index, reordered, learned, scores_json, chosen_model) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(session_id, turn_index) DO UPDATE SET "
+                "ts=excluded.ts, n_candidates=excluded.n_candidates, "
+                "chosen_index=excluded.chosen_index, reordered=excluded.reordered, "
+                "learned=excluded.learned, scores_json=excluded.scores_json, "
+                "chosen_model=excluded.chosen_model",
                 (time.time(), session_id, turn_index, len(result.get("scores", [])),
                  result.get("chosen_index", -1), 1 if result.get("reordered") else 0,
                  1 if result.get("learned") else 0,

@@ -282,6 +282,12 @@ def run_resident(model_override: Optional[str] = None) -> None:
 
     # Single-flight lock — only one turn at a time
     turn_lock = threading.Lock()
+    # Turn index of the last SPOKEN answer, captured at the moment it completes.
+    # Required because telemetry._turn_index is a single process-wide global that
+    # the scheduler, cortex, channels and dashboard all advance concurrently — so
+    # reading current_turn() when the user says "that was perfect" could rate a
+    # background turn instead of the one they just heard.
+    _last_voice_turn = {"index": 0}
 
     def _do_turn(text_from_wake: str = "", *, from_hotkey: bool = False) -> None:
         """Run one user turn. text_from_wake may already contain the request."""
@@ -309,10 +315,35 @@ def run_resident(model_override: Optional[str] = None) -> None:
                 state.set(ResidentState.IDLE)
                 return
 
+            # Spoken feedback ("that was perfect", "no, that's wrong") rates the
+            # PREVIOUS answer instead of starting a new turn. This is the only
+            # way ratings are ever captured in resident mode, and the reward
+            # model behind best-of-n reranking is trained on them.
+            from agent import feedback as _fb
+            phrase_rating = _fb.capture_phrase(
+                user_text, session_id=session_id,
+                last_turn=_last_voice_turn["index"],   # captured, not a live read
+                source="voice",
+            )
+            if phrase_rating is not None:
+                audit.record(user_text, "feedback",
+                             note=f"rated turn #{_last_voice_turn['index']} "
+                                  f"{'up' if phrase_rating == 1 else 'down'}")
+                _speak_with_state(state, "Got it — noted.")
+                state.set(ResidentState.IDLE)
+                return
+
             # Run the turn (screenshot included by default)
             state.set(ResidentState.THINKING)
             try:
                 reply = agent.run(user_text, include_screenshot=True, use_thinking=False)
+                # Pin the turn this answer landed on, so spoken feedback on the
+                # NEXT turn rates this one and not whatever background turn the
+                # scheduler/cortex has advanced the global counter to since.
+                try:
+                    _last_voice_turn["index"] = telemetry.current_turn()
+                except Exception:
+                    pass
             except Exception as e:
                 logging.exception("Agent.run failed")
                 reply = f"Something went wrong: {e}"

@@ -206,3 +206,28 @@ def detect_feedback_phrase(text: str) -> Optional[int]:
     if any(p in low for p in _THUMBS_UP_PHRASES):
         return 1
     return None
+
+
+def capture_phrase(text: str, *, session_id: Optional[int], last_turn: int,
+                   source: str = "voice") -> Optional[int]:
+    """Record `text` as feedback on `last_turn` if it is a feedback phrase.
+
+    Returns the rating if it was captured (caller should then NOT run a normal
+    agent turn), or None if this is ordinary input that should proceed.
+
+    `last_turn` must be the turn index CAPTURED when that answer completed — not
+    a live read of `telemetry.current_turn()`. The turn counter is a process-wide
+    global that the scheduler, cortex, channels and dashboard all advance, so a
+    live read can rate a background turn the user never saw.
+
+    Never raises: feedback capture must not break a conversation.
+    """
+    try:
+        rating = detect_feedback_phrase(text)
+        if rating is None or session_id is None or last_turn < 1:
+            return None
+        record(rating, session_id=session_id, turn_index=last_turn,
+               comment=text, source=source)
+        return rating
+    except Exception:
+        return None
