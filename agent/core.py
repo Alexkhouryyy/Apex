@@ -1241,10 +1241,18 @@ def _execute_tool(name: str, inputs: dict) -> str:
     import time as _t
     _started = _t.perf_counter()
     result = _execute_tool_inner(name, inputs)
+    # Record the ORIGINAL result: recovery hints are appended below, and the
+    # trajectory signal must reflect what the tool actually did, not our advice.
     try:
         from agent import trajectory as _traj
         _traj.record(name, result, duration_ms=int((_t.perf_counter() - _started) * 1000),
                      inputs=inputs)
+    except Exception:
+        pass
+    # Self-recovery: turn a dead-end failure into an actionable next step.
+    try:
+        from agent import recovery as _rec
+        result = _rec.enrich(name, inputs, result)
     except Exception:
         pass
     return result
