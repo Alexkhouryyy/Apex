@@ -256,4 +256,15 @@ def active_goals_for_prompt() -> str:
     except Exception:
         pass
 
+    # Self-knowledge: only present when a tool is genuinely misbehaving, so a
+    # healthy day costs no tokens. Lets the agent AVOID a broken tool rather than
+    # only discovering the problem after the call fails.
+    try:
+        from agent import trajectory as _traj
+        reliability = _traj.reliability_digest()
+        if reliability:
+            lines.append(f"\n[Tool reliability warning:]\n  {reliability}")
+    except Exception:
+        pass
+
     return "\n".join(lines)

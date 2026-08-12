@@ -90,6 +90,27 @@ def _known_tools() -> list[str]:
         return []
 
 
+SPILL_KEEP = 50  # newest N spill files retained; older ones are pruned on write
+
+
+def _prune_spills() -> None:
+    """Keep the spill dir bounded. Nothing else ever cleans it, so a long-running
+    always-on agent would otherwise accumulate these forever."""
+    try:
+        files = [os.path.join(_SPILL_DIR, f) for f in os.listdir(_SPILL_DIR)
+                 if f.endswith(".txt")]
+        if len(files) <= SPILL_KEEP:
+            return
+        files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        for stale in files[SPILL_KEEP:]:
+            try:
+                os.remove(stale)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def spill(text: str, tool: str = "tool") -> Optional[str]:
     """Write oversized output to a file; return its path (or None)."""
     try:
@@ -98,9 +119,27 @@ def spill(text: str, tool: str = "tool") -> Optional[str]:
         path = os.path.join(_SPILL_DIR, f"{int(time.time()*1000)}-{safe}.txt")
         with open(path, "w", encoding="utf-8", errors="replace") as f:
             f.write(text)
+        _prune_spills()
         return path
     except Exception:
         return None
+
+
+# A tool must have failed at least this often before we mention it at failure time.
+REPEAT_FAILURE_MIN = 3
+
+
+def _repeat_failure_note(tool: str) -> str:
+    """'this keeps happening' context, only once it genuinely keeps happening."""
+    try:
+        from agent import trajectory
+        fails, total = trajectory.failure_counts(tool)
+        if fails >= REPEAT_FAILURE_MIN:
+            return (f"\n[recovery] Note: {tool} has failed {fails} of its last "
+                    f"{total} calls — consider a different approach.")
+    except Exception:
+        pass
+    return ""
 
 
 def _first_path_input(inputs: dict) -> str:
@@ -128,14 +167,15 @@ def enrich(tool: str, inputs: dict, result: str) -> str:
         # 2. File not found -> near-miss filenames.
         if any(m in low for m in _NOT_FOUND_MARKERS):
             p = _first_path_input(inputs)
+            repeat = _repeat_failure_note(tool)
             near = suggest_paths(p)
             if near:
-                return result + "\n[recovery] Did you mean:\n  " + "\n  ".join(near)
+                return result + "\n[recovery] Did you mean:\n  " + "\n  ".join(near) + repeat
             d = _nearest_existing_dir(p) if p else None
             if d:
                 return result + (f"\n[recovery] No similar name in {d}. "
-                                 f"List it to see what's actually there.")
-            return result
+                                 f"List it to see what's actually there.") + repeat
+            return result + repeat
 
         # 3. Empty search -> show what IS there and a looser pattern.
         if any(m in low for m in _NO_MATCH_MARKERS):
@@ -164,6 +204,16 @@ def enrich(tool: str, inputs: dict, result: str) -> str:
                         + f"\n\n…[truncated {len(result) - SPILL_HEAD} chars]\n"
                         + f"[recovery] Full output saved to {path} — read that file "
                           f"(or grep it) instead of re-running this tool.")
+            return result
+
+        # 5. Any other failure shape still gets the repeat-failure context, so a
+        # tool that keeps breaking says so even when we have no specific hint.
+        try:
+            from agent import trajectory as _traj
+            if _traj.classify(result)[0] != _traj.OK:
+                return result + _repeat_failure_note(tool)
+        except Exception:
+            pass
         return result
     except Exception:
         return result

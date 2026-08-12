@@ -148,6 +148,63 @@ def stats(days: int = 7) -> dict:
     }
 
 
+# A tool must fail at least this many times, and succeed less than this often,
+# before it is worth spending prompt tokens warning the agent about it.
+_DIGEST_MIN_FAILURES = 3
+_DIGEST_MAX_SUCCESS_RATE = 60
+
+
+def failure_counts(tool: str, days: int = 7) -> tuple[int, int]:
+    """(failures, total) for one tool in the window. Cheap; used by recovery."""
+    cutoff = time.time() - days * 86400
+    try:
+        with longterm._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*), SUM(CASE WHEN outcome != ? THEN 1 ELSE 0 END) "
+                "FROM tool_events WHERE tool = ? AND ts >= ?",
+                (OK, tool, cutoff),
+            ).fetchone()
+    except Exception:
+        return 0, 0
+    total = row[0] or 0
+    return (row[1] or 0), total
+
+
+def reliability_digest(days: int = 7) -> str:
+    """One line naming tools that are genuinely unreliable right now — or ''.
+
+    Deliberately conditional. Injected into the system prompt the same way the
+    prefs digest is (see goals.active_goals_for_prompt), so on a healthy day it
+    costs nothing, and when something IS broken the agent can avoid the tool
+    rather than only learning after it fails.
+    """
+    cutoff = time.time() - days * 86400
+    try:
+        with longterm._conn() as c:
+            rows = c.execute(
+                "SELECT tool, COUNT(*) AS total, "
+                "SUM(CASE WHEN outcome != ? THEN 1 ELSE 0 END) AS fails "
+                "FROM tool_events WHERE ts >= ? GROUP BY tool",
+                (OK, cutoff),
+            ).fetchall()
+    except Exception:
+        return ""
+    bad = []
+    for tool, total, fails in rows:
+        fails = fails or 0
+        if fails < _DIGEST_MIN_FAILURES or not total:
+            continue
+        rate = round(100 * (total - fails) / total)
+        if rate < _DIGEST_MAX_SUCCESS_RATE:
+            bad.append((fails, tool, rate))
+    if not bad:
+        return ""
+    bad.sort(reverse=True)
+    parts = ", ".join(f"{t} ({f} failures, {r}% success)" for f, t, r in bad[:3])
+    return (f"These tools have been unreliable recently: {parts}. "
+            f"Prefer an alternative approach, or verify inputs carefully before using them.")
+
+
 def recent(limit: int = 50) -> list[dict]:
     try:
         with longterm._conn() as c:

@@ -600,7 +600,31 @@ async function loadGoals() {
       </div>
     </div>`).join('') || '<div class="empty-state">No goals yet.</div>';
 }
-async function updateGoal(id, status) { await api(`/api/goals/${id}`, { method: 'PATCH', body: { status } }); loadGoals(); }
+async function updateGoal(id, status) {
+  const body = { status };
+  // A goal may carry a completion contract that must actually pass. If it has an
+  // llm-kind contract, the auditor needs evidence — without it the close is
+  // refused with "(none gathered)" and, before this, the refusal was invisible.
+  if (status === 'done') {
+    const evidence = prompt(
+      'What did you actually do? (evidence for this goal\'s completion check — leave blank if it has no contract)'
+    );
+    if (evidence === null) return;          // cancelled
+    if (evidence.trim()) body.evidence = evidence.trim();
+  }
+  let res;
+  try {
+    res = await api(`/api/goals/${id}`, { method: 'PATCH', body });
+  } catch (e) {
+    alert(`Could not update goal: ${e.message}`);
+    return;
+  }
+  // The server returns HTTP 200 with a refusal STRING when a contract fails, so
+  // this must be inspected — otherwise "Mark done" silently does nothing.
+  const msg = (res && res.result) || '';
+  if (/NOT closed/i.test(msg)) alert(msg);
+  loadGoals();
+}
 async function addProgress(id) {
   const note = prompt('Progress note:'); if (!note) return;
   await api(`/api/goals/${id}`, { method: 'PATCH', body: { progress_note: note } });

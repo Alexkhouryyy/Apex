@@ -357,7 +357,28 @@ def update_goal_endpoint(goal_id: int, payload: dict):
         status=payload.get("status"),
         progress_note=payload.get("progress_note"),
         score=payload.get("score"),
+        # Without this an llm-kind completion contract sees "(none gathered)" and
+        # correctly refuses, making contracted goals unclosable from the UI.
+        evidence=payload.get("evidence", ""),
     )}
+
+
+@app.get("/api/goals/{goal_id}/verification")
+def goal_verification(goal_id: int):
+    """A goal's completion contracts and its evidence ledger.
+
+    Surfaces verification.history(), which was written on every check and never
+    read back — so a refused close gave no way to see WHY. A gate whose refusals
+    are invisible is worse than no gate.
+    """
+    try:
+        from agent import verification
+        return {
+            "contracts": verification.list_contracts(goal_id),
+            "history": verification.history(goal_id),
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # --- Sub-agents ---
