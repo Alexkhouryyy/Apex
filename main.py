@@ -76,6 +76,7 @@ def main():
     from agent import access_tokens as _at_init; _at_init.init_db()
     from agent import trajectory as _traj_init; _traj_init.init_db()
     from agent import verification as _verif_init; _verif_init.init_db()
+    from agent import reranker as _rr_init; _rr_init.init_db()
     from agent import documents as _docs_init; _docs_init.init_db()
     session_id = longterm.start_session()
     telemetry.set_session(session_id)

@@ -180,6 +180,7 @@ def run_resident(model_override: Optional[str] = None) -> None:
     from agent import access_tokens as _at_mod; _at_mod.init_db()
     from agent import trajectory as _traj_mod; _traj_mod.init_db()
     from agent import verification as _verif_mod; _verif_mod.init_db()
+    from agent import reranker as _rr_mod; _rr_mod.init_db()
     from agent import documents as _docs_mod; _docs_mod.init_db()
 
     # Scheduler — pass a thin speak that goes through the state machine

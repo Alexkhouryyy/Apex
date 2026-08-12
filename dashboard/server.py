@@ -1458,6 +1458,23 @@ async def compare_leaderboard():
     return compare.leaderboard()
 
 
+@app.get("/api/learning")
+def learning_stats(days: int = 30):
+    """The learning loop's scoreboard: is reranking actually earning its cost?"""
+    out = {}
+    try:
+        from agent import reranker
+        out["rerank"] = reranker.stats(days=days)
+    except Exception as e:
+        out["rerank"] = {"error": str(e)}
+    try:
+        from agent import trajectory
+        out["tools"] = trajectory.stats(days=days)
+    except Exception as e:
+        out["tools"] = {"error": str(e)}
+    return out
+
+
 # --- Documents: writing-first editor with AI edits ---
 @app.get("/api/documents")
 def documents_list():
