@@ -232,6 +232,7 @@ async function loadTab(tab) {
     compare: loadCompare,
     documents: loadDocuments,
     approvals: loadApprovals,
+    learning: loadLearning,
     constellation: loadConstellation,
   };
   if (fns[tab]) try { await fns[tab](); } catch (e) { console.error('loadTab', tab, e); }
@@ -2529,6 +2530,96 @@ async function refreshApprovalsBadge() {
     const n = (a.actions || []).length + (f.tools || []).filter(t => t.status === 'pending').length;
     _updateApprovalsBadge(n);
   } catch (_) {}
+}
+
+// ============== LEARNING — the honest scoreboard ==============
+const _MIN_LEARN_SAMPLES = 3;
+
+async function loadLearning() {
+  const statusEl = document.getElementById('learn-status');
+  if (!statusEl) return;
+  let data;
+  try {
+    data = await api('/api/learning?days=30');
+  } catch (e) {
+    statusEl.innerHTML = `<div class="learn-cold">Could not load learning stats: ${escapeHTML(e.message)}</div>`;
+    return;
+  }
+
+  const rr = data.rerank || {};
+  const tools = data.tools || {};
+
+  // --- status: be explicit about cold start rather than showing misleading zeros
+  const samples = rr.samples || 0;
+  if (rr.error) {
+    statusEl.innerHTML = `<div class="learn-cold">Reranker unavailable: ${escapeHTML(rr.error)}</div>`;
+  } else if (!rr.learned) {
+    const need = Math.max(0, _MIN_LEARN_SAMPLES - samples);
+    statusEl.innerHTML =
+      `<div class="learn-cold"><span class="learn-dot cold"></span>
+        <strong>Cold — not learning yet.</strong>
+        ${samples} rated answer${samples === 1 ? '' : 's'} recorded;
+        ${need} more needed before Apex will reorder anything.
+        Until then it keeps the original order rather than inventing a preference.
+        <span class="learn-hint">Rate answers with 👍/👎 in Chat to teach it.</span>
+      </div>`;
+  } else {
+    statusEl.innerHTML =
+      `<div class="learn-warm"><span class="learn-dot warm"></span>
+        <strong>Learning from ${samples} rated answer${samples === 1 ? '' : 's'}.</strong>
+        ${rr.events || 0} rerank decision${rr.events === 1 ? '' : 's'} in the last 30 days,
+        ${rr.reordered || 0} of which changed the answer.
+      </div>`;
+  }
+
+  // --- verdict: did reordering actually help?
+  const a = rr.approval_when_reordered, b = rr.approval_when_not_reordered;
+  const vEl = document.getElementById('learn-verdict');
+  if (a === null || a === undefined || b === null || b === undefined) {
+    vEl.innerHTML = `<div class="learn-cold">Not enough rated turns to compare yet — need feedback on
+      both reordered and untouched answers before this means anything.</div>`;
+  } else if (a > b) {
+    vEl.innerHTML = `<div class="learn-good">✓ Reordering is winning — ${a}% approval vs ${b}% when left alone.</div>`;
+  } else if (a === b) {
+    vEl.innerHTML = `<div class="learn-flat">— No measurable difference (${a}% both ways). Not yet earning its cost.</div>`;
+  } else {
+    vEl.innerHTML = `<div class="learn-bad">✗ Reordering is LOSING — ${a}% approval vs ${b}% when left alone.
+      The reward model may be learning the wrong thing; consider turning best-of-n off.</div>`;
+  }
+
+  const row = (label, value, extra = '') =>
+    `<div class="learn-row"><span class="learn-label">${escapeHTML(label)}</span>
+     <span class="learn-value">${value}</span>${extra}</div>`;
+  const pct = v => (v === null || v === undefined) ? '—' : v + '%';
+
+  document.getElementById('learn-rerank').innerHTML =
+    row('Rated answers learned from', samples) +
+    row('Rerank decisions (30d)', rr.events || 0) +
+    row('Answers actually reordered', rr.reordered || 0) +
+    row('Approval — reordered', pct(a)) +
+    row('Approval — left alone', pct(b));
+
+  // --- tool reliability
+  if (tools.error) {
+    document.getElementById('learn-tools').innerHTML =
+      `<div class="learn-cold">Tool stats unavailable: ${escapeHTML(tools.error)}</div>`;
+  } else {
+    const byOutcome = tools.by_outcome || {};
+    document.getElementById('learn-tools').innerHTML =
+      row('Tool calls (30d)', tools.total || 0) +
+      row('Success rate', pct(tools.success_rate)) +
+      row('Errors', byOutcome.error || 0) +
+      row('Blocked by safety', byOutcome.blocked || 0) +
+      row('Invented tools', byOutcome.unknown_tool || 0) +
+      row('Failures never recovered', tools.unrecovered || 0);
+
+    const worst = tools.worst_tools || [];
+    document.getElementById('learn-worst').innerHTML = worst.length
+      ? '<div class="learn-worst-title">Most failure-prone tools</div>' +
+        worst.map(w => `<div class="learn-row"><span class="learn-label">${escapeHTML(w.tool)}</span>
+          <span class="learn-value">${w.failures} failure${w.failures === 1 ? '' : 's'}</span></div>`).join('')
+      : '<div class="learn-cold">No tool failures recorded. ✓</div>';
+  }
 }
 
 // ============== THE CONSTELLATION ==============

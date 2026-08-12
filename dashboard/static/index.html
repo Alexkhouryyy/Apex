@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="Apex">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="/static/icons/favicon-64.png">
-<link rel="stylesheet" href="/static/styles.css?v=omni18">
-<link rel="stylesheet" href="/static/mobile.css?v=omni18">
+<link rel="stylesheet" href="/static/styles.css?v=omni19">
+<link rel="stylesheet" href="/static/mobile.css?v=omni19">
 <script src="/static/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
@@ -54,6 +54,7 @@
     <button data-tab="graph" class="nav-btn"><span class="icon">◈</span>Knowledge graph</button>
     <button data-tab="reflections" class="nav-btn"><span class="icon">⌘</span>Reflections</button>
     <button data-tab="evolution" class="nav-btn"><span class="icon">✦</span>Evolution</button>
+    <button data-tab="learning" class="nav-btn"><span class="icon">◔</span>Learning</button>
 
     <div class="nav-group-label">Observability</div>
     <button data-tab="telemetry" class="nav-btn"><span class="icon">▤</span>Telemetry</button>
@@ -891,6 +892,32 @@
     </div>
   </section>
 
+  <!-- LEARNING — is the loop actually earning its cost? -->
+  <section id="tab-learning" class="tab">
+    <header class="page-head">
+      <h1>Learning</h1>
+      <div class="page-sub">Apex learns from what you approve of. This page is the honest scoreboard — including when the answer is "not yet".</div>
+    </header>
+
+    <div id="learn-status" class="learn-status"></div>
+
+    <div class="learn-grid">
+      <div class="panel">
+        <div class="panel-head"><h3>Is reranking earning its cost?</h3></div>
+        <div class="guardian-desc">Approval rate on answers the reranker <strong>reordered</strong>, versus answers it left alone. If reordering isn't clearly ahead, it isn't paying for itself.</div>
+        <div id="learn-verdict" class="learn-verdict"></div>
+        <div id="learn-rerank" class="learn-rows"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Tool reliability</h3></div>
+        <div class="guardian-desc">Captured on every tool call: did it error, did Apex recover, did it invent a tool that doesn't exist.</div>
+        <div id="learn-tools" class="learn-rows"></div>
+        <div id="learn-worst" class="learn-worst"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- APPROVALS — sign off on autonomous actions + forged tools -->
   <section id="tab-approvals" class="tab">
     <header class="page-head">
@@ -992,9 +1019,9 @@
   <button class="ib-no" id="install-no">Not now</button>
 </div>
 
-<script src="/static/app.js?v=omni18"></script>
-<script src="/static/voice-mobile.js?v=omni18"></script>
+<script src="/static/app.js?v=omni19"></script>
+<script src="/static/voice-mobile.js?v=omni19"></script>
 <script type="module" src="/static/avatar3d.js?v=vision3"></script>
-<script type="module" src="/static/cst3d.js?v=omni18"></script>
+<script type="module" src="/static/cst3d.js?v=omni19"></script>
 </body>
 </html>
