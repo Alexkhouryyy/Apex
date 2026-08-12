@@ -74,6 +74,7 @@ def main():
     from agent import approvals as _appr_init; _appr_init.init_db()
     from agent import compare as _compare_init; _compare_init.init_db()
     from agent import access_tokens as _at_init; _at_init.init_db()
+    from agent import trajectory as _traj_init; _traj_init.init_db()
     from agent import documents as _docs_init; _docs_init.init_db()
     session_id = longterm.start_session()
     telemetry.set_session(session_id)

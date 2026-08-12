@@ -1195,6 +1195,24 @@ def _broadcast_live_event(source: str, content: str) -> None:
 
 
 def _execute_tool(name: str, inputs: dict) -> str:
+    """Dispatch a tool call, capturing its outcome for trajectory learning.
+
+    Thin wrapper over _execute_tool_inner so every tool is instrumented in one
+    place. Capture is best-effort and can never break a tool call.
+    """
+    import time as _t
+    _started = _t.perf_counter()
+    result = _execute_tool_inner(name, inputs)
+    try:
+        from agent import trajectory as _traj
+        _traj.record(name, result, duration_ms=int((_t.perf_counter() - _started) * 1000),
+                     inputs=inputs)
+    except Exception:
+        pass
+    return result
+
+
+def _execute_tool_inner(name: str, inputs: dict) -> str:
     """Dispatch a tool call and return its result as a string."""
     # Safety check before execution
     proceed, reason = safety.check(name, inputs)

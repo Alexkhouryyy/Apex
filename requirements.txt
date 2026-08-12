@@ -1,7 +1,11 @@
 anthropic>=0.40.0
 apscheduler
 sentence-transformers
-mcp
+# PINNED: MCP spec 2026-07-28 removed the initialize() handshake that
+# agent/mcp_client.py calls (mcp_client.py:81,112). Unpinned, a routine
+# `pip install -U` could silently break all MCP tools. Re-pin deliberately
+# after verifying the stdio transport against the new spec.
+mcp<2.0
 jupyter_client
 ipykernel
 watchdog
