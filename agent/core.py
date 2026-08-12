@@ -2103,6 +2103,15 @@ class AgentCore:
                             print(f"[Resilience] Fallback failed: {fe}")
                     return resilience.friendly_message(e)
 
+                # Best-of-n: pick the answer closest to what the user has approved
+                # of before. Done BEFORE add_assistant so the winner is what enters
+                # conversation history — otherwise memory would diverge from what
+                # the user actually saw.
+                if self._rerank_eligible(stop_reason, streamer is not None):
+                    response_content, this_text = self._rerank_answer(
+                        kwargs, response_content, this_text
+                    )
+
                 memory.add_assistant(response_content)
                 final_text = this_text
                 if this_text and stop_reason == "end_turn":
@@ -2146,6 +2155,79 @@ class AgentCore:
             if stop_reason == "end_turn":
                 return final_text
             return final_text or "I hit my iteration limit. Something may have gone wrong — let me know how to proceed."
+
+    def _rerank_eligible(self, stop_reason: str, streaming: bool) -> bool:
+        """Only rerank a FINAL, non-streamed answer, and only once there is
+        enough rated history for the reward to mean anything.
+
+        The cold check happens BEFORE any extra generation, so enabling this
+        before you have rated anything costs nothing rather than paying n x for
+        a reranker that would just return the first candidate.
+        """
+        if not getattr(config, "RERANK_ENABLED", False):
+            return False
+        if streaming:
+            return False          # you cannot rerank text already streamed out
+        if stop_reason != "end_turn":
+            return False          # tool-use turns are not answers
+        try:
+            from agent import reranker
+            return reranker.is_learned()
+        except Exception:
+            return False
+
+    def _rerank_answer(self, kwargs: dict, first_content: list, first_text: str) -> tuple[list, str]:
+        """Generate n-1 extra candidates and return the best (content, text).
+
+        The first candidate is free — it was needed anyway — so the extra cost is
+        (n-1) generations. Returns the original unchanged on any problem.
+        """
+        try:
+            from agent import reranker
+            n = int(getattr(config, "RERANK_N", 2))
+            cands = [{"text": first_text, "model": kwargs.get("model", ""),
+                      "_content": first_content}]
+
+            extra_kwargs = dict(kwargs)
+            # Nudge sampling for diversity, but never alongside thinking (which
+            # requires temperature 1).
+            if "thinking" not in extra_kwargs:
+                extra_kwargs["temperature"] = 1.0
+
+            for _ in range(max(0, n - 1)):
+                try:
+                    r = telemetry.create(self.client, call_site="agent.core/rerank", **extra_kwargs)
+                    txt = " ".join(
+                        getattr(b, "text", "") for b in r.content if getattr(b, "type", "") == "text"
+                    ).strip()
+                    # Discard candidates that came back as tool calls or empty.
+                    if txt and getattr(r, "stop_reason", "") == "end_turn":
+                        cands.append({"text": txt, "model": kwargs.get("model", ""),
+                                      "_content": r.content})
+                except Exception as e:
+                    print(f"[Rerank] extra candidate failed: {e}")
+                    break
+
+            if len(cands) < 2:
+                return first_content, first_text
+
+            result = reranker.rerank([{k: v for k, v in c.items() if k != "_content"}
+                                      for c in cands])
+            try:
+                reranker.record(result, session_id=telemetry._session_id,
+                                turn_index=telemetry._turn_index)
+            except Exception:
+                pass
+            idx = result.get("chosen_index", 0)
+            if not (0 <= idx < len(cands)):
+                return first_content, first_text
+            if result.get("reordered"):
+                print(f"[Rerank] picked candidate {idx + 1}/{len(cands)} "
+                      f"(scores={result.get('scores')})")
+            return cands[idx]["_content"], cands[idx]["text"]
+        except Exception as e:
+            print(f"[Rerank] disabled for this turn: {e}")
+            return first_content, first_text
 
     def _stream_turn(self, kwargs: dict, streamer, cancel_event: "threading.Event | None" = None) -> tuple[list, str, str]:
         """Run one streamed turn, feeding text deltas to the streamer.

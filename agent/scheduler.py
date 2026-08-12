@@ -185,8 +185,20 @@ def _fire_was_missed(trigger, baseline_ts: Optional[float], now_dt: datetime) ->
             datetime.fromtimestamp(baseline_ts, tz=timezone.utc)
             if baseline_ts else None
         )
+        if baseline is None:
+            return False  # no last_run and no created_at — nothing to catch up from
+
+        # IntervalTrigger defaults start_date to CONSTRUCTION time, so on restart
+        # get_next_fire_time() measures from "now" rather than from the last run
+        # and an overdue interval task never looks missed. Compute it from the
+        # baseline directly instead. (Cron/date triggers are absolute, so their
+        # get_next_fire_time is already correct relative to the baseline.)
+        interval = getattr(trigger, "interval", None)
+        if interval is not None:
+            return (baseline + interval) <= now_dt
+
         # Next fire strictly after the baseline; if it's already <= now, we missed it.
-        nxt = trigger.get_next_fire_time(None, baseline or now_dt)
+        nxt = trigger.get_next_fire_time(None, baseline)
         return nxt is not None and nxt <= now_dt
     except Exception:
         return False

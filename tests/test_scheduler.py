@@ -49,6 +49,25 @@ def test_interval_missed_when_overdue():
     assert _fire_was_missed(interval, baseline, NOW) is True
 
 
+def test_interval_not_missed_when_recent():
+    """Ran 10 minutes ago on an hourly interval — nothing missed."""
+    interval = IntervalTrigger(hours=1)
+    baseline = (NOW - timedelta(minutes=10)).timestamp()
+    assert _fire_was_missed(interval, baseline, NOW) is False
+
+
+def test_interval_uses_baseline_not_trigger_construction_time():
+    """Regression: IntervalTrigger defaults start_date to when it was CONSTRUCTED.
+
+    Relying on get_next_fire_time() therefore measured from 'now' rather than
+    from the last run, so an overdue hourly task never looked missed and was
+    never caught up. This asserts the baseline drives the decision.
+    """
+    interval = IntervalTrigger(hours=1)          # start_date = real now, far from NOW
+    long_ago = (NOW - timedelta(days=30)).timestamp()
+    assert _fire_was_missed(interval, long_ago, NOW) is True
+
+
 def test_none_baseline_does_not_crash():
     cron = CronTrigger(hour=8, minute=0, timezone="UTC")
     # No baseline → uses now as the reference; must not raise.
