@@ -107,6 +107,41 @@ def stop_polling() -> None:
         _poll_stop.set()
 
 
+def set_webhook(url: str, secret: str) -> tuple[bool, str]:
+    """Register the webhook URL together with its secret_token.
+
+    Telegram echoes `secret_token` back in X-Telegram-Bot-Api-Secret-Token on
+    every delivery, which is the only thing distinguishing a real update from
+    anyone who knows the URL. Registering both together means the secret cannot
+    drift out of sync with what Telegram is actually sending.
+
+    Previously this was a curl command in this module's docstring, which is why
+    no secret was ever set.
+    """
+    import json as _json
+    import urllib.parse
+
+    if not _token():
+        return False, "no bot token configured"
+    if not url or not secret:
+        return False, "url and secret are both required"
+    try:
+        body = urllib.parse.urlencode({
+            "url": url,
+            "secret_token": secret,
+            "drop_pending_updates": "false",
+        }).encode()
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{_token()}/setWebhook", data=body)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            payload = _json.loads(resp.read().decode() or "{}")
+        if payload.get("ok"):
+            return True, "registered"
+        return False, str(payload.get("description") or payload)
+    except Exception as e:
+        return False, str(e)
+
+
 def _poll_loop(stop: threading.Event) -> None:
     # getUpdates only works when no webhook is registered.
     try:

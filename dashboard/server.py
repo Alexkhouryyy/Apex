@@ -143,6 +143,7 @@ _WEBHOOK_PATHS = frozenset({
 
 # Brute-force throttle: too many bad tokens from one IP → cool that IP off.
 from dashboard.ratelimit import AuthThrottle
+from dashboard import webhook_auth
 
 _throttle = AuthThrottle(window=60.0, max_fails=10)
 
@@ -163,7 +164,12 @@ async def _auth(request: Request, call_next):
     if (path == "/" or path.startswith("/static/") or path == "/health"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
-    # Inbound webhooks carry per-service auth; don't block them here.
+    # Inbound webhooks can't present a bearer token, so they authenticate
+    # themselves instead — see dashboard/webhook_auth.py and each handler.
+    # This exemption is only safe because EVERY path below verifies a signature
+    # before touching its payload. Adding a path here without doing that opens
+    # an unauthenticated route into an agent with shell access; the startup
+    # audit prints the state of each one so that cannot happen quietly again.
     if path in _WEBHOOK_PATHS:
         return await call_next(request)
     ip = request.client.host if request.client else "?"
@@ -613,9 +619,20 @@ def phone_sms_endpoint(payload: dict):
     return {"result": phone_mod.sms_send(payload["to"], payload["body"])}
 
 
+def _reject(reason: str) -> Response:
+    """Log the reason, tell the caller nothing. Explaining *why* a signature
+    failed is free reconnaissance for whoever is probing."""
+    print(f"[Webhooks] rejected — {reason}")
+    return Response(content="forbidden", status_code=403)
+
+
 @app.post("/twilio/sms")
 async def twilio_inbound_sms(request: Request):
     form = await request.form()
+    try:
+        webhook_auth.verify_twilio(request, dict(form))
+    except webhook_auth.WebhookRejected as e:
+        return _reject(str(e))
     from_number = form.get("From", "")
     body = form.get("Body", "")
     twiml = phone_mod.dispatch_inbound_sms(from_number, body)
@@ -625,6 +642,10 @@ async def twilio_inbound_sms(request: Request):
 @app.post("/twilio/voice")
 async def twilio_inbound_voice(request: Request):
     form = await request.form()
+    try:
+        webhook_auth.verify_twilio(request, dict(form))
+    except webhook_auth.WebhookRejected as e:
+        return _reject(str(e))
     from_number = form.get("From", "")
     speech_result = form.get("SpeechResult", "")
     twiml = phone_mod.dispatch_inbound_voice(from_number, speech_result or None)
@@ -633,6 +654,12 @@ async def twilio_inbound_voice(request: Request):
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
+    # Verify before parsing: the allowlist downstream checks a chat_id that
+    # arrives in this body, so it cannot tell a real sender from a forged one.
+    try:
+        webhook_auth.verify_telegram(request)
+    except webhook_auth.WebhookRejected as e:
+        return _reject(str(e))
     update = await request.json()
     loop = asyncio.get_event_loop()
     loop.run_in_executor(None, lambda: telegram_mod.dispatch_inbound(update))
@@ -714,6 +741,10 @@ def slack_status():
 @app.post("/twilio/whatsapp")
 async def twilio_whatsapp(request: Request):
     form = await request.form()
+    try:
+        webhook_auth.verify_twilio(request, dict(form))
+    except webhook_auth.WebhookRejected as e:
+        return _reject(str(e))
     twiml = whatsapp_mod.dispatch_inbound(dict(form))
     return Response(content=twiml, media_type="application/xml")
 
@@ -729,7 +760,12 @@ def whatsapp_status():
 
 @app.post("/signal/webhook")
 async def signal_webhook(request: Request):
-    payload = await request.json()
+    raw = await request.body()
+    try:
+        webhook_auth.verify_signal(request, raw)
+    except webhook_auth.WebhookRejected as e:
+        return _reject(str(e))
+    payload = json.loads(raw or b"{}")
     loop = asyncio.get_event_loop()
     loop.run_in_executor(None, lambda: signal_mod.dispatch_inbound(payload))
     return {"ok": True}
@@ -748,9 +784,10 @@ def signal_status():
 @app.post("/iot/webhook")
 async def iot_webhook(request: Request):
     body = await request.body()
-    sig = request.headers.get("X-Apex-Signature", "")
-    if not iot_state.verify_signature(sig or None, body):
-        return JSONResponse({"error": "invalid signature"}, status_code=403)
+    try:
+        webhook_auth.verify_iot(request, body)
+    except webhook_auth.WebhookRejected as e:
+        return _reject(str(e))
     if not iot_state.is_enabled():
         return JSONResponse({"error": "IoT is disabled"}, status_code=503)
     try:
@@ -1859,6 +1896,13 @@ def start_in_background(port: int = 7860, host: str | None = None) -> threading.
                   "DASHBOARD_TOKEN — anyone could run commands. Falling back to "
                   "127.0.0.1. Set DASHBOARD_TOKEN to expose Apex.")
             _host = "127.0.0.1"
+        # Say out loud which inbound webhooks are actually authenticated. Five of
+        # them were open for months behind a comment claiming otherwise; the only
+        # durable fix is that the state is visible on every boot.
+        try:
+            webhook_auth.print_audit()
+        except Exception as e:
+            print(f"[Webhooks] audit failed: {e}")
         cfg = uvicorn.Config(app, host=_host, port=port, log_level="warning")
         server = uvicorn.Server(cfg)
         server.run()

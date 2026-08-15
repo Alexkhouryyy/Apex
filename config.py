@@ -188,6 +188,10 @@ TELEGRAM_ALLOWED_CHAT_IDS = [x.strip() for x in os.getenv("TELEGRAM_ALLOWED_CHAT
 # webhook. Set true when you have no public HTTPS URL (laptop / home machine).
 # Leave false if you register a webhook with a public URL.
 TELEGRAM_POLLING = os.getenv("TELEGRAM_POLLING", "false").lower() == "true"
+# Echoed back by Telegram in X-Telegram-Bot-Api-Secret-Token on every delivery.
+# Must match the `secret_token` given to setWebhook — tools/telegram.set_webhook
+# registers both together. Without it, remote callers are refused outright.
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 
 # Image generation (Replicate)
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
@@ -241,6 +245,10 @@ WHATSAPP_ALLOWED_NUMBERS = [n.strip() for n in os.getenv("WHATSAPP_ALLOWED_NUMBE
 SIGNAL_CLI_URL = os.getenv("SIGNAL_CLI_URL", "")
 SIGNAL_PHONE_NUMBER = os.getenv("SIGNAL_PHONE_NUMBER", "")
 SIGNAL_ALLOWED_NUMBERS = [n.strip() for n in os.getenv("SIGNAL_ALLOWED_NUMBERS", "").split(",") if n.strip()]
+# signal-cli bridges have no signing standard, so this is a shared secret set on
+# whatever posts to /signal/webhook. Sent as X-Apex-Signature =
+# HMAC-SHA256(raw_body). Bridges on localhost work without it; remote ones don't.
+SIGNAL_WEBHOOK_SECRET = os.getenv("SIGNAL_WEBHOOK_SECRET", "")
 
 # Ollama local models — point at a local or remote ollama instance.
 # Use model names like ollama/llama3.2, ollama/mistral, ollama/qwen2.5, etc.
