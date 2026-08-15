@@ -226,7 +226,8 @@ class TestCreateSkillSnapshot:
 
     def test_reflection_trigger_recorded(self, rb_db):
         skills.create_skill("reflskill", "desc", _GOOD_V1)
-        skills.create_skill("reflskill", "desc", _GOOD_V2, _trigger="reflection")
+        skills.create_skill("reflskill", "desc", _GOOD_V2, _trigger="reflection",
+                            _bypass_approval=True)  # simulates post-approval install
         with longterm._conn() as c:
             row = c.execute(
                 "SELECT trigger FROM skill_rewrites WHERE name = 'reflskill'"

@@ -394,6 +394,7 @@ def refine_skills(client, hours: int = 24) -> dict:
 
     candidates = skills_mod.failure_stats(hours=hours, min_failures=3)
     refined = 0
+    staged = 0
     for cand in candidates:
         name = cand["name"]
         source = skills_mod.read_source(name)
@@ -430,6 +431,24 @@ def refine_skills(client, hours: int = 24) -> dict:
             continue
         result = skills_mod.create_skill(name, skills_mod.get_description(name), new_code, _trigger="reflection")
         print(f"[Reflection] refined skill {name!r}: {result}")
+        if "STAGED" in result:
+            # Model-written executable code now waits for approval rather than
+            # installing itself. Counted separately: nothing has been refined
+            # until a human says yes, and reporting otherwise would overstate
+            # what actually changed.
+            staged += 1
+            try:
+                from agent import notify as _notify
+                _notify.notify(
+                    "Apex proposes a skill rewrite",
+                    f"Rewrote \u201c{name}\u201d after {cand['failures']} recent "
+                    f"failures \u2014 approve it to install.",
+                    kind="write_approval", url="/?tab=approvals",
+                    dedup_key=f"evo-stage-{name}",
+                )
+            except Exception as _e:
+                print(f"[Reflection] stage notify failed: {_e}")
+            continue
         if "created and loaded" in result:
             refined += 1
             # Surface the self-improvement to the user across all devices.
@@ -444,7 +463,8 @@ def refine_skills(client, hours: int = 24) -> dict:
                 )
             except Exception as _e:
                 print(f"[Reflection] refine notify failed: {_e}")
-    return {"candidates": len(candidates), "refined": refined}
+    return {"candidates": len(candidates), "refined": refined,
+            "staged": staged}
 
 
 def _apply_action(action: dict) -> None:

@@ -245,7 +245,7 @@ class TestRefineSkills:
         saved = dict(skills._registry); skills._registry.clear()
         client = _make_client(monkeypatch)
         result = reflection.refine_skills(client, hours=1)
-        assert result == {"candidates": 0, "refined": 0}
+        assert result == {"candidates": 0, "refined": 0, "staged": 0}
         skills._registry.update(saved)
 
     def test_failing_skill_triggers_rewrite(self, monkeypatch, tmp_path):
@@ -268,7 +268,7 @@ class TestRefineSkills:
         client = _make_client(monkeypatch, text_payload=new_code)
         result = reflection.refine_skills(client, hours=1)
         assert result["candidates"] == 1
-        assert result["refined"] == 1
+        assert result["staged"] == 1   # gated: installs only on approval
 
         skills._registry.clear()
         skills._registry.update(saved)

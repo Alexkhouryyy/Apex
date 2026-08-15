@@ -156,7 +156,17 @@ class TestRefineSkills:
         monkeypatch.setattr(telemetry, "create", lambda *a, **k: FakeResp())
 
         result = reflection.refine_skills(client=None, hours=24)
-        assert result["refined"] == 1
+        assert result["staged"] == 1   # gated: installs only on approval
+
+        # The old code keeps running until a human approves the rewrite — a
+        # model editing the code an always-on agent executes should not take
+        # effect unattended.
+        from agent import approvals
+        assert skills.run_skill("repairme", {}) != "fixed"
+
+        pending = [p for p in approvals.list_pending() if p["kind"] == "skill_code"]
+        assert len(pending) == 1
+        approvals.approve(pending[0]["id"])
         assert skills.run_skill("repairme", {}) == "fixed"
 
     def test_no_failures_means_nothing_refined(self, skill_dir, test_db, monkeypatch):

@@ -11,6 +11,7 @@ Optionally:
 Skills are safer than self_mod: each skill is its own auditable file,
 discoverable by humans, reloadable without touching the overlay blob.
 """
+import ast
 import importlib.util
 import time
 from pathlib import Path
@@ -166,19 +167,39 @@ def create_skill(
     code: str,
     version: str = "1.0",
     _trigger: str = "manual",
+    _bypass_approval: bool = False,
 ) -> str:
     if not name.isidentifier():
         return f"Invalid skill name: {name!r} — must be a valid Python identifier."
     SKILLS_DIR.mkdir(exist_ok=True)
     path = _skill_path(name)
 
-    ns: dict = {}
+    # Validate by PARSING, never by running. This used to exec() the code
+    # in-process to check that `run` existed — which meant any module-level
+    # statement in model-generated code executed with full agent privileges
+    # before anyone had approved it, and even if it was then discarded.
     try:
-        exec(compile(code, f"<skill:{name}>", "exec"), ns)
+        tree = ast.parse(code, filename=f"<skill:{name}>")
     except SyntaxError as e:
         return f"Syntax error in skill code: {e}"
-    if "run" not in ns or not callable(ns["run"]):
+    if not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "run"
+               for n in tree.body):
         return "Skill code must define: def run(inputs: dict) -> str"
+
+    # Autonomously-generated code is staged, not installed. reflection's
+    # refine_skills() rewrites failing skills on the consolidation heartbeat —
+    # unattended, every few hours — and the result is imported and executed on
+    # every later call. A model rewriting the code an always-on agent runs is
+    # exactly the change that should need a human to say yes.
+    if _trigger != "manual" and not _bypass_approval:
+        try:
+            from agent import approvals
+            return approvals.stage("skill_code", {
+                "name": name, "description": description,
+                "code": code, "version": version, "trigger": _trigger,
+            })
+        except Exception as e:
+            return f"Skill {name!r} rewrite not installed (could not stage: {e})"
 
     source = (
         f'"""Skill: {name} — {description}"""\n'
