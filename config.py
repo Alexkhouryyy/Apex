@@ -135,6 +135,13 @@ SANDBOX_WORKDIR = os.getenv("SANDBOX_WORKDIR", "~/Documents/Apex/sandbox")
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").strip().lower() in ("1", "true", "yes")
 RERANK_N = max(2, min(4, int(os.getenv("RERANK_N", "2"))))
 
+# Memory consolidation cadence (agent/reflection.consolidate_if_due).
+# Consolidation distils recent activity into reflections and refreshes the
+# preference digest that rides in every system prompt. It used to run only when
+# the model chose to call reflect_now, i.e. almost never, so the whole
+# consolidation layer was dormant. Costs one AGENT_MODEL call per run.
+REFLECTION_INTERVAL_HOURS = float(os.getenv("REFLECTION_INTERVAL_HOURS", "6"))
+
 # Research: grounding audit (agent/answers.py, audit_support)
 # A cited sentence is flagged "weakly supported" when its cosine similarity to
 # the passages of the source it cites falls below this floor.

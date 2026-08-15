@@ -342,6 +342,22 @@ class AwarenessMonitor:
                     except Exception as e:
                         print(f"[Cortex] Tick error: {e}")
 
+            # Memory consolidation — distils recent activity into reflections and
+            # refreshes the preference digest injected into every system prompt.
+            # Runs off-thread: a consolidation pass is a full model call, and
+            # blocking here would stall the 15s Guardian checks behind it.
+            # Placed before the review `continue` so its cadence is its own.
+            if self.world_model_client is not None:
+                try:
+                    from agent import reflection as _refl
+                    if _refl.is_due():
+                        threading.Thread(
+                            target=_refl.consolidate_if_due,
+                            args=(self.world_model_client,),
+                            daemon=True, name="MemoryConsolidation").start()
+                except Exception as e:
+                    print(f"[Reflection] could not start consolidation: {e}")
+
             # General Haiku review — fires every review_interval
             if now - _last_review < self.review_interval:
                 continue

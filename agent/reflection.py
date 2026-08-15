@@ -14,6 +14,7 @@ stale ones forgotten, implicit goal progress recorded, entities inserted into
 the knowledge graph. Lower-confidence go to the dashboard for approval.
 """
 import json
+import threading
 import time
 from typing import Callable, Optional
 
@@ -157,6 +158,96 @@ Be conservative — only flag patterns supported by the evidence. If nothing mea
 
 DIGEST:
 """
+
+
+_LAST_RUN_KEY = "last_consolidation"
+_running = threading.Lock()
+
+# Fallback clock. If the timestamp cannot be persisted, `is_due` would be True on
+# every tick and consolidation — a full model call — would fire every 15 seconds
+# forever. Degrading to a per-process cadence is a small loss; an unbounded spend
+# loop triggered by a missing table is not.
+_last_run_memory = 0.0
+
+
+def last_run_ts() -> float:
+    """When consolidation last started, persisted across restarts.
+
+    In-memory alone would be wrong for the same reason the scheduler's
+    missed-fire bug was wrong: a machine that restarts more often than the
+    interval would never reach it, and the feature would look enabled while
+    never running. So persistence is the primary source and memory is the floor.
+    """
+    stored = 0.0
+    try:
+        with longterm._conn() as c:
+            row = c.execute(
+                "SELECT updated_at FROM world_state WHERE key = ?", (_LAST_RUN_KEY,)
+            ).fetchone()
+        stored = row[0] if row else 0.0
+    except Exception:
+        stored = 0.0
+    return max(stored, _last_run_memory)
+
+
+def _mark_run() -> None:
+    global _last_run_memory
+    now = time.time()
+    _last_run_memory = now              # set first: this is the guard that holds
+    try:                                # even when the write below fails
+        with longterm._conn() as c:
+            c.execute(
+                "CREATE TABLE IF NOT EXISTS world_state ("
+                "key TEXT PRIMARY KEY, value TEXT, updated_at REAL)"
+            )
+            c.execute(
+                "INSERT OR REPLACE INTO world_state (key, value, updated_at) "
+                "VALUES (?, ?, ?)",
+                (_LAST_RUN_KEY, "1", now),
+            )
+    except Exception as e:
+        print(f"[Reflection] run time not persisted ({e}); "
+              f"falling back to this process's clock")
+
+
+def interval_seconds() -> float:
+    return max(1.0, float(getattr(config, "REFLECTION_INTERVAL_HOURS", 6))) * 3600.0
+
+
+def is_due(now: float | None = None) -> bool:
+    now = time.time() if now is None else now
+    last = last_run_ts()
+    if last <= 0:
+        return True                      # never run — the state Apex shipped in
+    return (now - last) >= interval_seconds()
+
+
+def consolidate_if_due(client, hours: int = 24) -> dict | None:
+    """Consolidate on a cadence. Returns None when not due or already running.
+
+    Until this existed, `consolidate` had exactly one caller: the `reflect_now`
+    tool. Nothing scheduled it, so Apex's memory consolidation ran only when the
+    model happened to choose to — which is to say, almost never. The machinery
+    was built, tested and effectively dormant.
+
+    The timestamp is written *before* the work, so a consolidation that crashes
+    waits out the interval instead of retrying in a hot loop.
+    """
+    if client is None or not is_due():
+        return None
+    if not _running.acquire(blocking=False):
+        return None                      # a slow pass is still going; skip this tick
+    try:
+        _mark_run()
+        result = consolidate(client, hours=hours)
+        created = result.get("created", 0) if isinstance(result, dict) else 0
+        print(f"[Reflection] consolidation ran — {created} reflection(s) created")
+        return result
+    except Exception as e:
+        print(f"[Reflection] consolidation failed: {e}")
+        return {"error": str(e), "created": 0, "applied": 0}
+    finally:
+        _running.release()
 
 
 def consolidate(client, hours: int = 24, autosave: bool = True) -> dict:
