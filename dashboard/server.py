@@ -1431,6 +1431,75 @@ async def council_endpoint(request: Request):
     return {"ok": True, **payload}
 
 
+# --- Research: cited answers ---
+@app.post("/api/research")
+async def research_endpoint(request: Request):
+    body = await request.json()
+    query = (body.get("query") or "").strip()
+    depth = body.get("depth") or "standard"
+    # Prior [{query, answer}] turns — what makes a follow-up resolvable.
+    history = body.get("history") or []
+    if not query:
+        return JSONResponse({"error": "empty query"}, status_code=400)
+
+    from agent import answers
+
+    def _event(phase: str, payload: dict):
+        # Source cards render before the first answer token — showing which
+        # pages are being read is most of the perceived speed.
+        ws_manager.broadcast_threadsafe(
+            {"type": f"research_{phase}", "phase": phase, **payload}
+        )
+
+    def _token(delta: str):
+        ws_manager.broadcast_threadsafe({"type": "research_token", "delta": delta})
+
+    on_token = _token if getattr(config, "RESEARCH_STREAM_ENABLED", True) else None
+
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: answers.answer(query, depth=depth, on_event=_event,
+                                   history=history, on_token=on_token),
+        )
+    except Exception as e:
+        ws_manager.broadcast_threadsafe({"type": "research_error", "error": str(e)})
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    if result.get("error"):
+        ws_manager.broadcast_threadsafe(
+            {"type": "research_error", "error": result["error"]}
+        )
+    ws_manager.broadcast_threadsafe({"type": "research_result", **result})
+    return {"ok": not result.get("error"), **result}
+
+
+@app.post("/api/research/save")
+async def research_save(request: Request):
+    """Save a research thread to Documents, citations and all."""
+    body = await request.json()
+    turns = body.get("turns")
+    if not turns:                                   # single-answer callers
+        turns = [body] if body.get("answer") else []
+    turns = [t for t in turns if t.get("answer")]
+    if not turns:
+        return JSONResponse({"error": "nothing to save"}, status_code=400)
+
+    from agent import answers, documents
+
+    parts = []
+    for t in turns:
+        parts.append(f"## {t.get('query') or 'Question'}\n")
+        parts.append(answers.format_markdown(
+            {"error": "", "answer": t.get("answer", ""), "sources": t.get("sources") or []}
+        ))
+        parts.append("")
+    title = (turns[0].get("query") or "Research").strip()
+    doc = documents.create(title=f"Research: {title}", content="\n".join(parts))
+    return {"ok": True, "id": doc["id"]}
+
+
 # --- Compare: blind side-by-side model testing (complements the council) ---
 @app.get("/api/compare/roster")
 async def compare_roster():
@@ -1711,15 +1780,22 @@ async def ws_live(ws: WebSocket):
     if ws_manager.loop is None:
         ws_manager.loop = asyncio.get_event_loop()
     # Register the connecting device so the hub can route + the dashboard can list it.
-    from agent import devices as _devices
-    device_id = ws.query_params.get("device", "")
-    if device_id:
-        _devices.touch(
-            device_id,
-            label=ws.query_params.get("label", ""),
-            kind=ws.query_params.get("kind", "web"),
-            user_agent=ws.headers.get("user-agent", ""),
-        )
+    # Bookkeeping must never cost us the socket: this used to run unguarded, so a
+    # single DB error here closed the connection before the first frame — killing
+    # the live feed, research streaming and council streaming for that client,
+    # with nothing on screen to say why.
+    try:
+        from agent import devices as _devices
+        device_id = ws.query_params.get("device", "")
+        if device_id:
+            _devices.touch(
+                device_id,
+                label=ws.query_params.get("label", ""),
+                kind=ws.query_params.get("kind", "web"),
+                user_agent=ws.headers.get("user-agent", ""),
+            )
+    except Exception as e:
+        print(f"[Dashboard] device registration failed (continuing): {e}")
     try:
         # Send initial snapshot
         await ws.send_json({"type": "snapshot", "ts": time.time(), "data": {

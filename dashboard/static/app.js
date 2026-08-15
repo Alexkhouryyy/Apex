@@ -176,6 +176,16 @@ function connectWS() {
     if (msg.type === 'constellation_answer')   _cstAnswer(msg);
     if (msg.type === 'constellation_done')     _cstDone(msg);
     if (msg.type === 'constellation_error')    _cstError(msg.error);
+    if (msg.type === 'research_rewrite')     _researchRewrite(msg);
+    if (msg.type === 'research_search')      _researchStep(`Searching: ${msg.query}`);
+    if (msg.type === 'research_sources')     _researchSources(msg.sources);
+    if (msg.type === 'research_reading')     _researchStep(`Reading ${msg.count} sources…`);
+    if (msg.type === 'research_source_done') _researchSourceDone(msg);
+    if (msg.type === 'research_ranking')     _researchStep('Selecting the relevant passages…');
+    if (msg.type === 'research_writing')     _researchStep(`Writing from ${msg.sources} sources…`);
+    if (msg.type === 'research_token')       _researchToken(msg.delta);
+    if (msg.type === 'research_result')      _researchResult(msg);
+    if (msg.type === 'research_error')       _researchError(msg.error);
     // Refresh self-improvement panel when a rollback check completes
     if (msg.type === 'rollback_done' && document.getElementById('tab-reflections')?.classList.contains('active')) {
       loadReflections();
@@ -234,6 +244,7 @@ async function loadTab(tab) {
     approvals: loadApprovals,
     learning: loadLearning,
     constellation: loadConstellation,
+    research: loadResearch,
   };
   if (fns[tab]) try { await fns[tab](); } catch (e) { console.error('loadTab', tab, e); }
 }
@@ -3785,3 +3796,305 @@ function _ellipse(ctx, x, y, rx, ry, fill) {
   ctx.fill();
 }
 
+
+// ---------------------------------------------------------------------------
+// RESEARCH — cited answers, as a thread
+//
+// A follow-up is what turns a lookup tool into a research session, so the tab
+// is a thread of turns rather than a single result. Each turn keeps its own
+// sources and its own numbering: [1] in turn two is not [1] in turn one.
+//
+// The answer text is synthesized from arbitrary web pages, so it is untrusted
+// input. It is escaped before any formatting runs, and citation links are built
+// from the server's source list rather than from anything the model emitted —
+// a page that asks the model to write a link cannot become one.
+// ---------------------------------------------------------------------------
+let _researchRunning = false;
+let _researchThread = [];      // [{query, answer, sources, ...}] — sent as history
+let _researchPending = null;   // DOM node for the turn currently being answered
+
+function _researchThreadEl() { return document.getElementById('research-thread'); }
+
+function _researchNewThread() {
+  _researchThread = [];
+  _researchThreadEl().innerHTML = '';
+  document.getElementById('research-progress').innerHTML = '';
+  document.getElementById('research-new').style.display = 'none';
+  document.getElementById('research-save').style.display = 'none';
+  _researchSyncPrompt();
+}
+
+function _researchSyncPrompt() {
+  const box = document.getElementById('research-query');
+  if (!box) return;
+  box.placeholder = _researchThread.length
+    ? 'Ask a follow-up — "why?", "what about the second one?"…'
+    : "Ask anything — you'll get an answer you can check…";
+}
+
+function _researchStep(text) {
+  const box = document.getElementById('research-progress');
+  if (!box) return;
+  const d = document.createElement('div');
+  d.className = 'council-step';
+  d.textContent = text;
+  box.appendChild(d);
+}
+
+function _safeUrl(u) {
+  try {
+    const parsed = new URL(u);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.href : '';
+  } catch (e) { return ''; }
+}
+
+// Source cards render before the first answer token: seeing which pages are
+// being read is most of the perceived speed.
+function _researchSources(sources) {
+  if (!_researchPending) return;
+  const box = _researchPending.querySelector('.research-sources');
+  box.innerHTML = '';
+  (sources || []).forEach(s => {
+    const card = document.createElement('a');
+    card.className = 'research-source pending';
+    card.dataset.n = s.n;
+    const href = _safeUrl(s.url);
+    if (href) { card.href = href; card.target = '_blank'; card.rel = 'noopener noreferrer'; }
+    card.innerHTML =
+      `<span class="research-src-n">${s.n}</span>` +
+      `<span class="research-src-body">` +
+      `<span class="research-src-title">${escapeHTML(s.title || s.domain || s.url)}</span>` +
+      `<span class="research-src-domain">${escapeHTML(s.domain || '')}</span></span>`;
+    box.appendChild(card);
+  });
+}
+
+function _researchSourceDone(s) {
+  if (!_researchPending) return;
+  const card = _researchPending.querySelector(`.research-source[data-n="${s.n}"]`);
+  if (!card) return;
+  card.classList.remove('pending');
+  card.classList.add(s.status === 'ok' ? 'ok' : 'failed');
+  if (s.status !== 'ok') card.title = 'Could not fetch: ' + (s.error || 'unknown error');
+}
+
+// Minimal Markdown: headings, bold, bullets, paragraphs. Deliberately not
+// marked.parse() — that emits raw HTML, which would turn a hostile page into
+// script in this dashboard.
+function _researchFormat(text, sources) {
+  const byNum = {};
+  (sources || []).forEach(s => { byNum[s.n] = s; });
+
+  const cite = escaped => escaped.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, (m, group) => {
+    const links = group.split(',').map(part => {
+      const n = parseInt(part.trim(), 10);
+      const src = byNum[n];
+      const href = src ? _safeUrl(src.url) : '';
+      if (!href) return `<sup class="cite-dead">[${n}]</sup>`;
+      const label = escapeHTML(src.title || src.domain || src.url);
+      return `<a class="cite" href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer" title="${label}">[${n}]</a>`;
+    });
+    return `<sup class="cite-group">${links.join('')}</sup>`;
+  });
+
+  const inline = s => cite(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  const out = [];
+  let list = null;
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trim();
+    if (!line) { if (list) { out.push(list + '</ul>'); list = null; } continue; }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    const b = line.match(/^[-*+]\s+(.*)$/);
+    if (h) {
+      if (list) { out.push(list + '</ul>'); list = null; }
+      const lvl = Math.min(6, h[1].length + 2);
+      out.push(`<h${lvl}>${inline(escapeHTML(h[2]))}</h${lvl}>`);
+    } else if (b) {
+      if (!list) list = '<ul>';
+      list += `<li>${inline(escapeHTML(b[1]))}</li>`;
+    } else {
+      if (list) { out.push(list + '</ul>'); list = null; }
+      out.push(`<p>${inline(escapeHTML(line))}</p>`);
+    }
+  }
+  if (list) out.push(list + '</ul>');
+  return out.join('\n');
+}
+
+// Show what a follow-up was actually searched for. "does it support that?"
+// retrieves nothing on its own, so the resolved query is worth seeing — it is
+// the difference between a thread and a series of unrelated searches.
+function _researchRewrite(msg) {
+  if (!_researchPending) return;
+  const el = _researchPending.querySelector('.research-rewrite');
+  if (el) {
+    el.textContent = `searched: ${msg.search_query}`;
+    el.style.display = '';
+  }
+}
+
+// Tokens land as plain text via textContent: the model's words are untrusted
+// until the final render escapes and formats them. Markers arriving here have
+// already cleared the server-side CitationGate, so nothing unbacked is shown.
+function _researchToken(delta) {
+  if (!_researchPending || !delta) return;
+  const box = _researchPending.querySelector('.research-answer');
+  let live = box.querySelector('.research-streaming');
+  if (!live) {
+    box.innerHTML = '';
+    live = document.createElement('p');
+    live.className = 'research-streaming';
+    box.appendChild(live);
+  }
+  live.textContent += delta;
+}
+
+function _researchDone() {
+  _researchRunning = false;
+  _researchPending = null;
+  const btn = document.getElementById('research-run');
+  if (btn) { btn.disabled = false; btn.textContent = 'Research'; }
+  // Progress steps describe work in flight. Once the answer is on screen they
+  // are stale, and leaving them stranded under the thread reads as if the run
+  // is still going.
+  const prog = document.getElementById('research-progress');
+  if (prog) prog.innerHTML = '';
+}
+
+function _researchResult(data) {
+  if (!_researchRunning) return;
+  const node = _researchPending;
+  _researchDone();
+  if (data.error) { _researchError(data.error, node); return; }
+  if (!node) return;
+
+  (data.sources || []).forEach(s => {
+    const card = node.querySelector(`.research-source[data-n="${s.n}"]`);
+    if (card) {
+      card.classList.remove('pending');
+      card.classList.add(s.status === 'ok' ? 'ok' : 'failed');
+    }
+  });
+  node.querySelector('.research-answer').innerHTML =
+    _researchFormat(data.answer, data.sources);
+
+  // Be honest about the soft spots rather than presenting a uniform wall of
+  // confidence: a citation is a pointer to check, not a proof.
+  const bits = [];
+  const failed = (data.sources || []).filter(s => s.status !== 'ok').length;
+  if (failed) bits.push(`${failed} source${failed > 1 ? 's' : ''} could not be fetched.`);
+  if ((data.dropped_citations || []).length) {
+    bits.push(`${data.dropped_citations.length} citation(s) pointed at sources that don't exist and were removed.`);
+  }
+  const un = (data.uncited_claims || []).length;
+  if (un) bits.push(`${un} statement${un > 1 ? 's' : ''} carry no citation — treat as unverified.`);
+
+  // Grounding audit. Deliberately asymmetric: suspicious claims are named,
+  // and claims that pass get no badge — clearing the bar only means "topically
+  // consistent with the page cited", which is not a verification of anything.
+  const weak = data.weak_claims || [];
+  let html = bits.length ? `<div class="research-warn">${bits.map(escapeHTML).join(' ')}</div>` : '';
+  if (weak.length) {
+    const items = weak.map(w =>
+      `<li><span class="weak-cites">${escapeHTML(w.cites.map(n => `[${n}]`).join(', '))}</span> ` +
+      `${escapeHTML(w.sentence)}</li>`).join('');
+    html += `<div class="research-warn research-weak">` +
+      `<strong>Check these against their source.</strong> ` +
+      `${weak.length} claim${weak.length > 1 ? 's look' : ' looks'} topically distant from the ` +
+      `source cited — a prompt to check, not a verdict.<ul>${items}</ul></div>`;
+  }
+  node.querySelector('.research-warnings').innerHTML = html;
+
+  _researchThread.push(data);
+  _researchSyncPrompt();
+  document.getElementById('research-save').style.display = '';
+  document.getElementById('research-new').style.display = '';
+}
+
+function _researchError(err, node) {
+  const target = node || _researchPending;
+  _researchDone();
+  if (target) {
+    target.querySelector('.research-answer').innerHTML =
+      `<div class="research-warn">${escapeHTML(err)}</div>`;
+  }
+}
+
+function _researchAddTurn(query) {
+  const node = document.createElement('div');
+  node.className = 'research-turn';
+  node.innerHTML =
+    `<div class="research-q">${escapeHTML(query)}</div>` +
+    `<div class="research-rewrite" style="display:none"></div>` +
+    `<div class="research-sources"></div>` +
+    `<div class="research-answer"><div class="research-thinking">Researching…</div></div>` +
+    `<div class="research-warnings"></div>`;
+  _researchThreadEl().appendChild(node);
+  node.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  return node;
+}
+
+async function runResearch() {
+  if (_researchRunning) return;
+  const box = document.getElementById('research-query');
+  const q = box.value.trim();
+  if (!q) return;
+  _researchRunning = true;
+  document.getElementById('research-progress').innerHTML = '';
+  _researchPending = _researchAddTurn(q);
+  box.value = '';
+  const btn = document.getElementById('research-run');
+  btn.disabled = true; btn.textContent = 'Researching…';
+  try {
+    const result = await api('/api/research', {
+      method: 'POST',
+      body: {
+        query: q,
+        depth: document.getElementById('research-depth').value,
+        // Source titles ride along so an ordinal ("the second one") has a
+        // numbered list to resolve against. The server shows them to the
+        // query rewriter only — never to the writer, whose [n] numbering
+        // belongs to this turn alone.
+        history: _researchThread.map(t => ({
+          query: t.query,
+          answer: t.answer,
+          sources: (t.sources || []).map(s => ({ n: s.n, title: s.title,
+                                                 domain: s.domain, status: s.status })),
+        })),
+      },
+    });
+    if (_researchRunning) _researchResult(result);   // fallback if WS missed it
+  } catch (e) {
+    _researchError('Request failed: ' + e.message);
+  }
+}
+
+async function saveResearch() {
+  if (!_researchThread.length) return;
+  const btn = document.getElementById('research-save');
+  btn.disabled = true;
+  try {
+    await api('/api/research/save', { method: 'POST', body: { turns: _researchThread } });
+    btn.textContent = 'Saved ✓';
+    setTimeout(() => { btn.textContent = 'Save to Documents'; btn.disabled = false; }, 2000);
+  } catch (e) {
+    btn.textContent = 'Save failed';
+    btn.disabled = false;
+  }
+}
+
+async function loadResearch() {
+  const form = document.getElementById('research-form');
+  if (!form || form._wired) return;
+  form._wired = true;
+  form.addEventListener('submit', e => { e.preventDefault(); runResearch(); });
+  document.getElementById('research-save')?.addEventListener('click', () => saveResearch());
+  document.getElementById('research-new')?.addEventListener('click', () => _researchNewThread());
+  // Enter sends, shift+Enter newlines — a follow-up should be one keystroke.
+  document.getElementById('research-query')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runResearch(); }
+  });
+}

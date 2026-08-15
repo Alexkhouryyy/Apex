@@ -2230,3 +2230,71 @@ pre.md-pre code { background: none; border: none; padding: 0; }
 .learn-value { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .learn-worst { margin-top: 14px; }
 .learn-worst-title { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; font-weight: 600; }
+
+/* ============== RESEARCH — cited answers ============== */
+.research-sources {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0;
+}
+.research-source {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel);
+  text-decoration: none; color: inherit;
+  max-width: 260px; transition: border-color .2s, opacity .2s;
+}
+.research-source.pending { opacity: .5; }
+.research-source.ok:hover { border-color: var(--accent); }
+.research-source.failed { opacity: .45; border-style: dashed; }
+.research-source.failed .research-src-title { text-decoration: line-through; }
+.research-src-n {
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 11px; font-weight: 600;
+  background: var(--accent); color: #fff;
+}
+.research-src-body { display: flex; flex-direction: column; min-width: 0; }
+.research-src-title {
+  font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.research-src-domain { font-size: 11px; opacity: .6; }
+
+.research-answer { line-height: 1.7; margin-top: 8px; }
+.research-answer p { margin: 0 0 12px; }
+.research-answer ul { margin: 0 0 12px 20px; }
+.research-answer h3, .research-answer h4 { margin: 20px 0 8px; }
+.research-answer .cite {
+  text-decoration: none; font-weight: 600; color: var(--accent);
+  padding: 0 1px;
+}
+.research-answer .cite:hover { text-decoration: underline; }
+.research-answer .cite-dead { opacity: .4; }
+
+.research-warnings { margin-top: 16px; }
+.research-warn {
+  padding: 10px 14px; border-radius: 8px; font-size: 13px;
+  border: 1px solid var(--border); background: var(--panel); opacity: .85;
+}
+
+/* Research threads: each turn keeps its own sources and numbering. */
+.research-thread { display: flex; flex-direction: column; gap: 4px; }
+.research-turn {
+  padding: 18px 0 22px;
+  border-bottom: 1px solid var(--border);
+}
+.research-turn:last-child { border-bottom: none; }
+.research-q { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+.research-rewrite { font-size: 12px; opacity: .55; margin-bottom: 6px; font-style: italic; }
+.research-thinking { opacity: .6; font-size: 14px; }
+
+/* Grounding audit. Only suspicion is ever rendered — a claim that clears the
+   floor gets no badge, because clearing it proves nothing. */
+.research-weak { margin-top: 8px; }
+.research-weak ul { margin: 8px 0 0 18px; }
+.research-weak li { margin-bottom: 6px; opacity: .9; }
+.research-weak .weak-cites { font-weight: 600; opacity: .7; }
+
+/* Streaming answer: plain text until the validated render replaces it. */
+.research-streaming { white-space: pre-wrap; }
+.research-streaming::after {
+  content: '▍'; opacity: .5; animation: research-caret 1s steps(2) infinite;
+}
+@keyframes research-caret { 50% { opacity: 0; } }
