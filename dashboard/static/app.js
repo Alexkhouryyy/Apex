@@ -3974,8 +3974,22 @@ function _researchResult(data) {
   }
   const un = (data.uncited_claims || []).length;
   if (un) bits.push(`${un} statement${un > 1 ? 's' : ''} carry no citation — treat as unverified.`);
-  node.querySelector('.research-warnings').innerHTML = bits.length
-    ? `<div class="research-warn">${bits.map(escapeHTML).join(' ')}</div>` : '';
+
+  // Grounding audit. Deliberately asymmetric: suspicious claims are named,
+  // and claims that pass get no badge — clearing the bar only means "topically
+  // consistent with the page cited", which is not a verification of anything.
+  const weak = data.weak_claims || [];
+  let html = bits.length ? `<div class="research-warn">${bits.map(escapeHTML).join(' ')}</div>` : '';
+  if (weak.length) {
+    const items = weak.map(w =>
+      `<li><span class="weak-cites">${escapeHTML(w.cites.map(n => `[${n}]`).join(', '))}</span> ` +
+      `${escapeHTML(w.sentence)}</li>`).join('');
+    html += `<div class="research-warn research-weak">` +
+      `<strong>Check these against their source.</strong> ` +
+      `${weak.length} claim${weak.length > 1 ? 's look' : ' looks'} topically distant from the ` +
+      `source cited — a prompt to check, not a verdict.<ul>${items}</ul></div>`;
+  }
+  node.querySelector('.research-warnings').innerHTML = html;
 
   _researchThread.push(data);
   _researchSyncPrompt();

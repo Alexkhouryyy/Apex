@@ -260,11 +260,12 @@ def test_one_long_page_cannot_monopolise_the_context(monkeypatch):
     sources[1].chunks = _kb._chunk("Short but relevant page. " * 40)
 
     monkeypatch.setattr(answers, "_score_pairs",
-                        lambda q, pairs: [1.0] * len(pairs))  # tie: cap decides
+                        lambda q, pairs: ([1.0] * len(pairs),
+                                          [None] * len(pairs)))  # tie: cap decides
     selected = answers._rank_chunks("subject", sources)
     per_source = {}
-    for src, _ in selected:
-        per_source[src.n] = per_source.get(src.n, 0) + 1
+    for p in selected:
+        per_source[p.n] = per_source.get(p.n, 0) + 1
     assert per_source[1] <= answers._MAX_CHUNKS_PER_SOURCE
 
 
@@ -314,8 +315,8 @@ def test_research_tab_exists_in_the_shell():
     assert 'data-tab="research"' in html and 'id="tab-research"' in html
     # Cache version must move with any frontend change or clients keep the old
     # bundle and the tab silently does not exist for them.
-    assert "v=omni23" in html
-    assert "apex-shell-v23" in (root / "sw.js").read_text()
+    assert "v=omni24" in html
+    assert "apex-shell-v24" in (root / "sw.js").read_text()
 
 
 def test_answer_html_is_escaped_before_formatting():
@@ -368,13 +369,14 @@ def test_live_research_reports_engine_failure(monkeypatch):
 
 # --- the scoring path (exercised without a real embedding model) -------------
 
-def _fake_embed_factory(vectors):
+def _fake_embed_factory(vectors, default=None):
     """Return an _embed stub producing real float32 blobs, so the numpy path in
-    _score_pairs runs for real even where sentence-transformers is absent."""
+    _score_pairs and audit_support runs for real even where
+    sentence-transformers is absent."""
     import numpy as np
 
     def _embed(text):
-        vec = vectors.get(text)
+        vec = vectors.get(text, default)
         if vec is None:
             return None
         return np.array(vec, dtype=np.float32).tobytes()
@@ -392,8 +394,12 @@ def test_score_pairs_ranks_by_cosine_similarity(monkeypatch):
     monkeypatch.setattr(_lt, "_embed", _fake_embed_factory(vectors))
     pairs = [(answers.Source(n=1, url="u"), "on topic"),
              (answers.Source(n=2, url="u"), "off topic")]
-    scores = answers._score_pairs("query", pairs)
-    assert scores is not None
+    scored = answers._score_pairs("query", pairs)
+    assert scored is not None
+    scores, blobs = scored
+    # The vectors come back so the grounding audit can reuse them instead of
+    # paying to embed the same chunks twice.
+    assert len(blobs) == 2 and all(b is not None for b in blobs)
     assert scores[0] == pytest.approx(1.0, abs=1e-5)
     assert scores[1] == pytest.approx(0.0, abs=1e-5)
 
@@ -418,7 +424,8 @@ def test_ranking_prefers_the_relevant_passage(monkeypatch):
     src = answers.Source(n=1, url="https://a.com", status=answers.OK)
     src.chunks = ["Unrelated boilerplate text.", "Canberra is the capital."]
     selected = answers._rank_chunks("capital", [src])
-    assert selected[0][1] == "Canberra is the capital."
+    assert selected[0].text == "Canberra is the capital."
+    assert selected[0].vec is not None      # carried through for the audit
 
 
 # --- follow-ups: the thing that makes it a research session ------------------
@@ -583,3 +590,185 @@ def test_websocket_survives_device_registration_failure(monkeypatch):
             # The snapshot is the first frame; if registration killed the socket
             # this raises instead.
             assert ws.receive_json()["type"] == "snapshot"
+
+
+# --- grounding audit: does the cited source actually support the claim? -------
+#
+# Validation proves [2] is a real fetched source. It cannot prove source 2 says
+# this. These pin the gap — and pin the limits, so nobody later mistakes the
+# check for fact-checking.
+
+def _passage(n, text, vec):
+    import numpy as np
+    src = answers.Source(n=n, url=f"https://s{n}.com", status=answers.OK)
+    return answers.Passage(source=src, text=text,
+                           vec=np.array(vec, dtype=np.float32).tobytes())
+
+
+def test_claim_citing_an_unrelated_source_is_flagged(monkeypatch):
+    """The failure this whole phase exists for: a real source, cited for a claim
+    it never made. Every other check in the system passes it."""
+    from agent import longterm as _lt
+    monkeypatch.setattr(_lt, "_embed", _fake_embed_factory({
+        "The tax rate rose to forty percent last year.": [0.0, 1.0],
+        "Canberra is the capital of Australia.": [1.0, 0.0],
+    }))
+    passages = [_passage(1, "Canberra is the capital of Australia.", [1.0, 0.0])]
+    weak = answers.audit_support(
+        "The tax rate rose to forty percent last year [1].", passages, floor=0.25)
+    assert len(weak) == 1
+    assert weak[0]["cites"] == [1] and weak[0]["support"] < 0.25
+
+
+def test_a_well_supported_claim_is_not_flagged(monkeypatch):
+    from agent import longterm as _lt
+    monkeypatch.setattr(_lt, "_embed", _fake_embed_factory({
+        "Canberra is the capital city of Australia.": [1.0, 0.0],
+        "Canberra is the capital of Australia.": [1.0, 0.0],
+    }))
+    passages = [_passage(1, "Canberra is the capital of Australia.", [1.0, 0.0])]
+    assert answers.audit_support(
+        "Canberra is the capital city of Australia [1].", passages, floor=0.25) == []
+
+
+def test_a_claim_is_scored_only_against_the_source_it_cites(monkeypatch):
+    """Citing [1] must be judged against source 1 alone. Scoring against every
+    passage would let an unrelated source rescue a bad citation."""
+    from agent import longterm as _lt
+    monkeypatch.setattr(_lt, "_embed", _fake_embed_factory({
+        "Sydney is the largest city.": [0.0, 1.0],
+    }))
+    passages = [_passage(1, "Griffin won the design competition.", [1.0, 0.0]),
+                _passage(2, "Sydney is the largest city.", [0.0, 1.0])]
+    # Cites [1] but matches source 2 — must still be flagged.
+    weak = answers.audit_support("Sydney is the largest city [1].", passages, floor=0.25)
+    assert len(weak) == 1 and weak[0]["cites"] == [1]
+    # Cited correctly, it passes.
+    assert answers.audit_support("Sydney is the largest city [2].", passages,
+                                 floor=0.25) == []
+
+
+def test_a_multi_source_claim_passes_if_any_cited_source_supports_it(monkeypatch):
+    """[1, 2] means 'these support it' — one genuine supporter is enough."""
+    from agent import longterm as _lt
+    monkeypatch.setattr(_lt, "_embed", _fake_embed_factory({
+        "Sydney is the largest city.": [0.0, 1.0],
+    }))
+    passages = [_passage(1, "Griffin won the design competition.", [1.0, 0.0]),
+                _passage(2, "Sydney is the largest city.", [0.0, 1.0])]
+    assert answers.audit_support("Sydney is the largest city [1, 2].", passages,
+                                 floor=0.25) == []
+
+
+def test_markers_are_stripped_before_embedding(monkeypatch):
+    """'[1]' is noise in vector space; the claim is what gets scored."""
+    seen = []
+    from agent import longterm as _lt
+
+    def _embed(text):
+        import numpy as np
+        seen.append(text)
+        return np.array([1.0, 0.0], dtype=np.float32).tobytes()
+
+    monkeypatch.setattr(_lt, "_embed", _embed)
+    answers.audit_support("Canberra is the capital of Australia [1].",
+                          [_passage(1, "x", [1.0, 0.0])], floor=0.25)
+    assert seen and "[1]" not in seen[0]
+
+
+def test_uncited_sentences_are_not_double_reported(monkeypatch):
+    """They are already surfaced as uncited_claims; flagging them again is noise."""
+    from agent import longterm as _lt
+    monkeypatch.setattr(_lt, "_embed", _fake_embed_factory({}))
+    passages = [_passage(1, "Anything at all here.", [1.0, 0.0])]
+    assert answers.audit_support(
+        "This sentence is long enough to count but carries no citation.",
+        passages, floor=0.25) == []
+
+
+def test_audit_fails_open_without_an_embedding_model(monkeypatch):
+    """No model must mean 'no opinion', never an error — and never a false
+    all-clear, which is why the caller renders nothing rather than a tick."""
+    from agent import longterm as _lt
+    monkeypatch.setattr(_lt, "_embed", lambda t: None)
+    passages = [_passage(1, "text", [1.0, 0.0])]
+    assert answers.audit_support("A claim of some length here [1].",
+                                 passages, floor=0.25) == []
+
+
+def test_audit_survives_a_broken_embedder(monkeypatch):
+    from agent import longterm as _lt
+    monkeypatch.setattr(_lt, "_embed",
+                        lambda t: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert answers.audit_support("A claim of some length here [1].",
+                                 [_passage(1, "t", [1.0, 0.0])], floor=0.25) == []
+
+
+def test_audit_declines_when_passages_carry_no_vectors():
+    """The no-embedding ranking path produces vector-less passages. The audit
+    must decline rather than invent a judgement."""
+    src = answers.Source(n=1, url="https://a.com", status=answers.OK)
+    passages = [answers.Passage(source=src, text="some text", vec=None)]
+    assert answers.audit_support("A claim of some length here [1].",
+                                 passages, floor=0.25) == []
+
+
+def test_audit_never_mutates_the_answer(monkeypatch):
+    """It is an annotation layer. It may not edit prose or remove a citation."""
+    from agent import longterm as _lt
+    monkeypatch.setattr(_lt, "_embed", _fake_embed_factory({
+        "Totally unrelated claim goes here.": [0.0, 1.0],
+    }))
+    text = "Totally unrelated claim goes here [1]."
+    before = text
+    passages = [_passage(1, "Something else entirely.", [1.0, 0.0])]
+    weak = answers.audit_support(text, passages, floor=0.25)
+    assert weak and text == before
+
+
+def test_weak_claims_reach_the_result(monkeypatch):
+    """End to end through answer(), on the real pipeline."""
+    from agent import longterm as _lt
+    _stub(
+        monkeypatch,
+        results=[{"title": "A", "url": "https://a.com", "snippet": ""}],
+        pages={"https://a.com": "Canberra is the capital of Australia. " * 30},
+        reply="The tax rate rose to forty percent last year [1].",
+    )
+    monkeypatch.setattr(_lt, "_embed", _fake_embed_factory({
+        "The tax rate rose to forty percent last year.": [0.0, 1.0],
+        "q": [1.0, 0.0],
+    }, default=[1.0, 0.0]))
+    out = answers.answer("q", depth="quick")
+    assert len(out["weak_claims"]) == 1
+    assert out["answer"] == "The tax rate rose to forty percent last year [1]."
+
+
+def test_format_markdown_lists_weak_claims_without_certifying_the_rest():
+    md = answers.format_markdown({
+        "error": "", "answer": "Good claim [1]. Odd claim [2].",
+        "sources": [
+            {"n": 1, "url": "https://a.com", "title": "A", "domain": "a.com",
+             "status": answers.OK, "cited": True, "error": ""},
+            {"n": 2, "url": "https://b.com", "title": "B", "domain": "b.com",
+             "status": answers.OK, "cited": True, "error": ""},
+        ],
+        "weak_claims": [{"sentence": "Odd claim [2].", "cites": [2], "support": 0.05}],
+    })
+    assert "Check these against their source" in md
+    assert "Odd claim" in md
+    # Asymmetry: nothing anywhere may imply the unflagged claim was verified.
+    assert "verified" not in md.lower()
+
+
+def test_frontend_renders_weak_claims_and_never_a_pass_badge():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    fn = js[js.index("function _researchResult"):]
+    fn = fn[:fn.index("\nfunction ")]
+    assert "weak_claims" in fn
+    assert "escapeHTML(w.sentence)" in fn          # untrusted text stays escaped
+    # Nothing may certify the claims that pass: clearing the floor only means
+    # "topically consistent with the page cited".
+    for badge in ("✓", "✔", "checks passed", "all claims verified", "supported ✓"):
+        assert badge not in fn

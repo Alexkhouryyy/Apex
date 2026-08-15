@@ -42,6 +42,13 @@ _SYNTH_MAX_TOKENS = 4000
 # factual claim worth flagging as uncited.
 _MIN_CLAIM_CHARS = 40
 
+# The audit uses a lower floor: carrying a citation is itself strong evidence a
+# sentence is a claim, so "Sydney is the largest city [2]." (31 chars) deserves
+# checking even though it is too short to be worth flagging as *uncited*.
+# Not zero, because a very short sentence scores low against a long passage on
+# length alone, which would manufacture false alarms.
+_MIN_AUDIT_CHARS = 25
+
 # Follow-up context. Only recent turns matter for resolving a reference, and
 # every turn carried costs tokens on every subsequent question.
 _MAX_HISTORY_TURNS = 4
@@ -80,6 +87,22 @@ class Source:
         return {"n": self.n, "url": self.url, "title": self.title,
                 "domain": self.domain, "status": self.status,
                 "error": self.error, "cited": self.cited}
+
+
+@dataclass
+class Passage:
+    """One selected chunk, carrying the embedding computed while ranking it.
+
+    Retaining `vec` is what makes the grounding audit nearly free: the vectors
+    already exist by the time a passage is chosen, and were previously discarded.
+    """
+    source: Source
+    text: str
+    vec: bytes | None = None
+
+    @property
+    def n(self) -> int:
+        return self.source.n
 
 
 def _noop(phase: str, payload: dict) -> None:
@@ -225,7 +248,7 @@ def _fetch_all(sources: list[Source], on_event=_noop) -> None:
 
 # --- passage selection -------------------------------------------------------
 
-def _rank_chunks(query: str, sources: list[Source]) -> list[tuple[Source, str]]:
+def _rank_chunks(query: str, sources: list[Source]) -> list[Passage]:
     """Pick the passages most relevant to the query, keeping each tied to its
     source.
 
@@ -234,7 +257,8 @@ def _rank_chunks(query: str, sources: list[Source]) -> list[tuple[Source, str]]:
     junk from eating the context window.
 
     Degrades to leading chunks when embeddings are unavailable — a worse answer,
-    never a crash.
+    never a crash. Passages then carry no vector, and the grounding audit
+    correctly declines to run rather than guessing.
     """
     live = [s for s in sources if s.status == OK and s.chunks]
     if not live:
@@ -244,33 +268,40 @@ def _rank_chunks(query: str, sources: list[Source]) -> list[tuple[Source, str]]:
         (s, c) for s in live for c in s.chunks[: _MAX_CHUNKS_PER_SOURCE * 3]
     ]
 
-    scores = _score_pairs(query, pairs)
-    if scores is None:
+    scored = _score_pairs(query, pairs)
+    if scored is None:
         # No embedding model: round-robin the head of each source so every
         # source still gets representation.
-        out: list[tuple[Source, str]] = []
+        out: list[Passage] = []
         for i in range(_MAX_CHUNKS_PER_SOURCE):
             for s in live:
                 if i < len(s.chunks):
-                    out.append((s, s.chunks[i]))
+                    out.append(Passage(source=s, text=s.chunks[i]))
         return out[:_MAX_CHUNKS]
 
+    scores, blobs = scored
     order = sorted(range(len(pairs)), key=lambda i: scores[i], reverse=True)
     per_source: dict[int, int] = {}
-    selected: list[tuple[Source, str]] = []
+    selected: list[Passage] = []
     for i in order:
         src, chunk = pairs[i]
         if per_source.get(src.n, 0) >= _MAX_CHUNKS_PER_SOURCE:
             continue
         per_source[src.n] = per_source.get(src.n, 0) + 1
-        selected.append((src, chunk))
+        selected.append(Passage(source=src, text=chunk, vec=blobs[i]))
         if len(selected) >= _MAX_CHUNKS:
             break
     return selected
 
 
-def _score_pairs(query: str, pairs: list[tuple[Source, str]]) -> list[float] | None:
-    """Cosine similarity of each chunk against the query. None if unavailable."""
+def _score_pairs(query: str,
+                 pairs: list[tuple[Source, str]]) -> tuple[list[float], list[bytes | None]] | None:
+    """Cosine of each chunk against the query, plus the chunk vectors.
+
+    The vectors are returned rather than discarded so the grounding audit can
+    reuse them; recomputing them later would double the embedding cost for no
+    benefit. None if no embedding model is available.
+    """
     try:
         import numpy as np
         from agent import longterm as _lt
@@ -282,7 +313,7 @@ def _score_pairs(query: str, pairs: list[tuple[Source, str]]) -> list[float] | N
         blobs = [_lt._embed(c) for _, c in pairs]
         if not any(b is not None for b in blobs):
             return None
-        return _lt._cosine_scores(qvec, blobs)
+        return _lt._cosine_scores(qvec, blobs), blobs
     except Exception:
         return None
 
@@ -308,7 +339,7 @@ _SYNTH_SYSTEM = (
 )
 
 
-def _build_context(selected: list[tuple[Source, str]]) -> str:
+def _build_context(selected: list[Passage]) -> str:
     """Group the chosen passages under their source number.
 
     The number the model sees is the number the validator checks and the number
@@ -316,9 +347,9 @@ def _build_context(selected: list[tuple[Source, str]]) -> str:
     """
     by_source: dict[int, list[str]] = {}
     meta: dict[int, Source] = {}
-    for src, chunk in selected:
-        by_source.setdefault(src.n, []).append(chunk)
-        meta[src.n] = src
+    for p in selected:
+        by_source.setdefault(p.n, []).append(p.text)
+        meta[p.n] = p.source
 
     blocks = []
     for n in sorted(by_source):
@@ -385,13 +416,13 @@ def validate_citations(text: str, valid: set[int]) -> tuple[str, set[int], list[
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
-def find_uncited_claims(text: str) -> list[str]:
-    """Sentences long enough to be factual claims that carry no citation.
+def _iter_claims(text: str, min_chars: int = _MIN_CLAIM_CHARS):
+    """Yield sentences substantial enough to be factual claims.
 
-    Advisory, not a gate: a transition or a summarising line legitimately has no
-    source. Surfacing them lets the reader see where the ground is soft.
+    Shared by the uncited-claim scan and the grounding audit so the two cannot
+    drift apart on sentence splitting — but the length floor differs, because
+    the two are asking different questions. See `_MIN_AUDIT_CHARS`.
     """
-    out: list[str] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or line.startswith(">"):
@@ -399,10 +430,84 @@ def find_uncited_claims(text: str) -> list[str]:
         body = re.sub(r"^[-*+]\s+|^\d+[.)]\s+", "", line)
         for sent in _SENT_SPLIT.split(body):
             sent = sent.strip()
-            if len(sent) < _MIN_CLAIM_CHARS or sent.endswith(":"):
+            if len(sent) < min_chars or sent.endswith(":"):
                 continue
-            if not _CITE_RE.search(sent):
-                out.append(sent)
+            yield sent
+
+
+def find_uncited_claims(text: str) -> list[str]:
+    """Sentences long enough to be factual claims that carry no citation.
+
+    Advisory, not a gate: a transition or a summarising line legitimately has no
+    source. Surfacing them lets the reader see where the ground is soft.
+    """
+    return [s for s in _iter_claims(text) if not _CITE_RE.search(s)]
+
+
+def _cited_numbers(sentence: str) -> list[int]:
+    out: list[int] = []
+    for m in _CITE_RE.finditer(sentence):
+        for part in re.split(r"\s*,\s*", m.group(1)):
+            if part.strip().isdigit():
+                n = int(part)
+                if n not in out:
+                    out.append(n)
+    return out
+
+
+def audit_support(text: str, passages: list[Passage],
+                  floor: float | None = None) -> list[dict]:
+    """Flag cited sentences whose cited source looks unrelated to the claim.
+
+    Closes the gap between *cited* and *checked*: validate_citations proves `[2]`
+    is a real fetched source, not that source 2 says this. A model citing a real
+    source for a claim it never made passes every other check we have.
+
+    IMPORTANT — this compares TOPIC, not TRUTH. "Canberra became capital in 1908"
+    and "...in 1927" are near-identical vectors, so a wrong date sails through.
+    It catches gross misattribution, and must never be presented as fact-checking.
+
+    Asymmetric by design: it flags suspicion and never certifies correctness.
+    Clearing the floor earns no marker at all, because clearing it only means
+    "topically consistent with the page cited".
+
+    Returns [{sentence, cites, support}] for suspicious sentences. Advisory only:
+    the caller must not alter the answer based on it. Fails open — no embedding
+    model, or any error, yields [] rather than an exception or a false all-clear.
+    """
+    floor = getattr(config, "RESEARCH_SUPPORT_FLOOR", 0.25) if floor is None else floor
+    by_source: dict[int, list[bytes]] = {}
+    for p in passages:
+        if p.vec is not None:
+            by_source.setdefault(p.n, []).append(p.vec)
+    if not by_source:
+        return []
+
+    try:
+        import numpy as np
+        from agent import longterm as _lt
+    except Exception:
+        return []
+
+    out: list[dict] = []
+    for sent in _iter_claims(text, min_chars=_MIN_AUDIT_CHARS):
+        cites = _cited_numbers(sent)
+        if not cites:
+            continue                     # uncited claims are reported separately
+        blobs = [v for n in cites for v in by_source.get(n, [])]
+        if not blobs:
+            continue
+        try:
+            # Embed the claim, not its punctuation: "[1]" is noise in vector space.
+            sblob = _lt._embed(strip_citations(sent))
+            if sblob is None:
+                return []                # no model -> no opinion, on any sentence
+            svec = np.frombuffer(sblob, dtype=np.float32)
+            best = max(_lt._cosine_scores(svec, blobs))
+        except Exception:
+            return []
+        if best < floor:
+            out.append({"sentence": sent, "cites": cites, "support": round(best, 3)})
     return out
 
 
@@ -462,7 +567,7 @@ def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None,
     if not selected:
         return _fail(query, "sources had no readable content", sources=sources)
 
-    on_event("writing", {"sources": len({s.n for s, _ in selected})})
+    on_event("writing", {"sources": len({p.n for p in selected})})
     try:
         raw = _synthesize(query, _build_context(selected), history=turns)
     except Exception as e:
@@ -473,6 +578,9 @@ def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None,
     for s in sources:
         s.cited = s.n in cited
 
+    # Advisory pass. It reads `clean`; it must never rewrite it.
+    weak = audit_support(clean, selected)
+
     result = {
         "query": query,
         "search_query": search_query,
@@ -480,9 +588,11 @@ def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None,
         "sources": [s.to_dict() for s in sources],
         "uncited_claims": find_uncited_claims(clean),
         "dropped_citations": dropped,
+        "weak_claims": weak,
         "error": "",
     }
-    on_event("done", {"cited": sorted(cited), "dropped": dropped})
+    on_event("done", {"cited": sorted(cited), "dropped": dropped,
+                      "weak": len(weak)})
     return result
 
 
@@ -495,6 +605,7 @@ def _fail(query: str, message: str, sources: list[Source] | None = None) -> dict
         "sources": [s.to_dict() for s in (sources or [])],
         "uncited_claims": [],
         "dropped_citations": [],
+        "weak_claims": [],
         "error": message,
     }
 
@@ -513,4 +624,15 @@ def format_markdown(result: dict) -> str:
     if failed:
         lines.append("")
         lines.append(f"_{len(failed)} source(s) could not be fetched._")
+    weak = result.get("weak_claims") or []
+    if weak:
+        # Named for what it measures. Not "unverified" — that would imply the
+        # unflagged ones were verified, which nothing here establishes.
+        lines.append("")
+        lines.append("## Check these against their source")
+        lines.append("_These claims look topically distant from the source they "
+                     "cite. That is a prompt to check, not a verdict._")
+        for w in weak:
+            cites = ", ".join(f"[{n}]" for n in w["cites"])
+            lines.append(f"- {cites} {w['sentence']}")
     return "\n".join(lines)
