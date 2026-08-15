@@ -267,4 +267,15 @@ def active_goals_for_prompt() -> str:
     except Exception:
         pass
 
+    # Procedural memory: what has actually worked, distilled from Apex's own
+    # tool log. The reliability warning above says a tool is currently sick;
+    # this says what to do about a pattern that has held over time.
+    try:
+        from agent import lessons as _lessons
+        learned = _lessons.for_prompt()
+        if learned:
+            lines.append("\n" + learned)
+    except Exception:
+        pass
+
     return "\n".join(lines)

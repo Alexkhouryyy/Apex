@@ -242,6 +242,20 @@ def consolidate_if_due(client, hours: int = 24) -> dict | None:
         result = consolidate(client, hours=hours)
         created = result.get("created", 0) if isinstance(result, dict) else 0
         print(f"[Reflection] consolidation ran — {created} reflection(s) created")
+        # Procedural memory rides the same cadence: episodic consolidation asks
+        # what happened, this asks what worked. Isolated so a failure here
+        # cannot cost the reflection pass that already succeeded.
+        try:
+            from agent import lessons as _lessons
+            stats = _lessons.run(client)
+            if stats.get("learned") or stats.get("retired"):
+                print(f"[Lessons] +{stats['learned']} learned, "
+                      f"-{stats['retired']} retired, "
+                      f"{stats.get('revived', 0)} revived")
+            if isinstance(result, dict):
+                result["lessons"] = stats
+        except Exception as e:
+            print(f"[Lessons] pass failed: {e}")
         return result
     except Exception as e:
         print(f"[Reflection] consolidation failed: {e}")

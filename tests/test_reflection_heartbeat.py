@@ -79,7 +79,21 @@ def test_it_runs_when_due(monkeypatch):
     monkeypatch.setattr(reflection, "consolidate",
                         lambda c, hours=24: calls.append(hours) or {"created": 2})
     out = reflection.consolidate_if_due(object())
-    assert out == {"created": 2} and calls == [24]
+    assert out["created"] == 2 and calls == [24]
+    # Procedural memory rides the same cadence.
+    assert "lessons" in out
+
+
+def test_a_lessons_failure_does_not_lose_the_reflection(monkeypatch):
+    """Two different kinds of learning share one pass; the second must not be
+    able to discard the first's work."""
+    monkeypatch.setattr(reflection, "consolidate",
+                        lambda c, hours=24: {"created": 3})
+    from agent import lessons
+    monkeypatch.setattr(lessons, "run",
+                        lambda client: (_ for _ in ()).throw(RuntimeError("boom")))
+    out = reflection.consolidate_if_due(object())
+    assert out["created"] == 3
 
 
 def test_it_skips_when_not_due(monkeypatch):
