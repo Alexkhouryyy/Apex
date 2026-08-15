@@ -29,6 +29,27 @@ _SIM_HI = 0.85
 _CANDIDATE_CAP = 300  # bound the O(n^2) pair scan to the most important memories
 
 
+_ready = False
+
+
+def _ensure_db() -> None:
+    """Create tables on first use.
+
+    threads.init_db() was never called from any entry point, so
+    `threads_surfaced` never existed and every surfacing attempt failed against
+    a missing table. Same shape as the restraint bug: nothing crashed loudly, it
+    simply never worked.
+    """
+    global _ready
+    if _ready:
+        return
+    try:
+        init_db()
+        _ready = True
+    except Exception:
+        pass
+
+
 def init_db() -> None:
     with longterm._conn() as c:
         c.execute("""
@@ -112,12 +133,14 @@ def discover(limit: int = 20, cross_domain_only: bool = True) -> list[dict]:
 
 
 def _already_surfaced() -> set[tuple[int, int]]:
+    _ensure_db()
     with longterm._conn() as c:
         rows = c.execute("SELECT a_id, b_id FROM threads_surfaced").fetchall()
     return {_pair_key(r[0], r[1]) for r in rows}
 
 
 def surface_next() -> Optional[dict]:
+    _ensure_db()
     """Pick the strongest cross-domain link not yet shown, record it, return it."""
     seen = _already_surfaced()
     for cand in discover(limit=50):

@@ -12,6 +12,8 @@ import time
 import uuid
 from typing import Callable, Optional
 
+import config
+
 ROLE_PROMPTS = {
     "researcher": (
         "You are a focused research specialist. Your job is to gather and synthesize "
@@ -73,6 +75,17 @@ def spawn(role: str, task: str, use_thinking: bool = False) -> str:
 
     sub_id = f"sub_{uuid.uuid4().hex[:8]}"
     with _lock:
+        # config.MAX_SUBAGENTS documented a cap that nothing enforced — a
+        # phantom limit is worse than no limit, because anyone reading config.py
+        # reasonably concludes an always-on agent cannot spawn without bound.
+        # Counted and inserted under one lock: checking outside it races, and
+        # two concurrent spawns would both see room that only one of them has.
+        cap = max(1, int(getattr(config, "MAX_SUBAGENTS", 5)))
+        running = sum(1 for s in _subagents.values() if s.get("status") == "running")
+        if running >= cap:
+            return (f"Refused: {running} sub-agents already running and the limit "
+                    f"is {cap} (config.MAX_SUBAGENTS). Wait for one to finish, or "
+                    f"raise the limit.")
         _subagents[sub_id] = {
             "status": "running",
             "role": role,

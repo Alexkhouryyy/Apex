@@ -176,6 +176,14 @@ function connectWS() {
     if (msg.type === 'constellation_answer')   _cstAnswer(msg);
     if (msg.type === 'constellation_done')     _cstDone(msg);
     if (msg.type === 'constellation_error')    _cstError(msg.error);
+    // The IoT kill switch is a safety control; a UI that silently disagrees
+    // with it is worse than no UI. This event was broadcast with no listener.
+    if (msg.type === 'iot_toggle') {
+      const el = document.getElementById('iot-enabled');
+      if (el) el.checked = !!msg.enabled;
+      showNotifyToast({title: 'IoT ' + (msg.enabled ? 'enabled' : 'disabled'),
+                       body: 'changed by ' + (msg.source || 'system'), kind: 'iot'});
+    }
     if (msg.type === 'research_rewrite')     _researchRewrite(msg);
     if (msg.type === 'research_search')      _researchStep(`Searching: ${msg.query}`);
     if (msg.type === 'research_sources')     _researchSources(msg.sources);
