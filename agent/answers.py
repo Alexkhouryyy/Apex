@@ -42,6 +42,11 @@ _SYNTH_MAX_TOKENS = 4000
 # factual claim worth flagging as uncited.
 _MIN_CLAIM_CHARS = 40
 
+# Follow-up context. Only recent turns matter for resolving a reference, and
+# every turn carried costs tokens on every subsequent question.
+_MAX_HISTORY_TURNS = 4
+_HISTORY_ANSWER_CHARS = 700
+
 OK = "ok"
 FAILED = "failed"
 
@@ -89,6 +94,74 @@ def _shielded(fn):
         except Exception:
             pass
     return _emit
+
+
+# --- follow-ups --------------------------------------------------------------
+
+def strip_citations(text: str) -> str:
+    """Remove `[n]` markers. Used on prior turns before they re-enter a prompt:
+    those numbers referred to a different turn's sources, and leaving them in
+    invites the model to reuse a number that now means something else."""
+    return re.sub(r"[ \t]+([.,;:!?])", r"\1", _CITE_RE.sub("", text)).strip()
+
+
+def _recent(history: list[dict] | None) -> list[dict]:
+    turns = [h for h in (history or [])
+             if (h.get("query") or "").strip() and (h.get("answer") or "").strip()]
+    return turns[-_MAX_HISTORY_TURNS:]
+
+
+def _history_block(history: list[dict]) -> str:
+    parts = []
+    for h in history:
+        prior = strip_citations(h["answer"])[:_HISTORY_ANSWER_CHARS]
+        parts.append(f"Q: {h['query'].strip()}\nA: {prior}")
+    return "\n\n".join(parts)
+
+
+_REWRITE_SYSTEM = (
+    "Rewrite a follow-up question into a standalone web-search query.\n\n"
+    "Resolve pronouns and references ('it', 'that', 'they', 'the second one') "
+    "using the conversation. Keep it short and keyword-shaped, the way someone "
+    "would type it into a search engine. Preserve any named entity the user is "
+    "actually asking about.\n\n"
+    "Output ONLY the rewritten query — no quotes, no explanation, no preamble."
+)
+
+
+def rewrite_query(query: str, history: list[dict] | None) -> str:
+    """Turn a conversational follow-up into something searchable.
+
+    "does it support that?" retrieves nothing on its own — the entity lives in
+    the previous turn. This is what makes a thread work rather than a series of
+    unrelated one-shot searches.
+
+    Returns the original query unchanged on any failure: a bad rewrite is far
+    worse than no rewrite, so this never blocks an answer.
+    """
+    turns = _recent(history)
+    if not turns:
+        return query
+    try:
+        from agent import provider
+
+        raw = provider.complete(
+            config.PROACTIVE_MODEL, _REWRITE_SYSTEM,
+            f"CONVERSATION:\n{_history_block(turns)}\n\nFOLLOW-UP: {query}\n\n"
+            f"Standalone search query:",
+            max_tokens=120,
+        )
+        # Take the first line *before* unquoting: a model that adds a trailing
+        # note would otherwise leave the closing quote glued to the query.
+        lines = [ln.strip() for ln in raw.strip().splitlines() if ln.strip()]
+        out = lines[0].strip('"').strip("'").strip() if lines else ""
+    except Exception:
+        return query
+    # A model that returns an essay, an empty string, or something wildly longer
+    # than the question has misunderstood the job; keep the original.
+    if not out or len(out) > max(160, len(query) * 4):
+        return query
+    return out
 
 
 # --- retrieval ---------------------------------------------------------------
@@ -256,16 +329,24 @@ def _build_context(selected: list[tuple[Source, str]]) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-def _synthesize(query: str, context: str, model: str | None = None) -> str:
+def _synthesize(query: str, context: str, model: str | None = None,
+                history: list[dict] | None = None) -> str:
     from agent import provider
 
     model = model or config.AGENT_MODEL
-    user = (
-        f"QUESTION:\n{query}\n\n"
-        f"SOURCES:\n{context}\n\n"
-        f"Answer the question using only these sources, citing as instructed."
-    )
-    return provider.complete(model, _SYNTH_SYSTEM, user, max_tokens=_SYNTH_MAX_TOKENS)
+    parts = []
+    if history:
+        # Earlier turns are context for understanding the question, never a
+        # source to cite: their markers are stripped and the prompt says so.
+        parts.append(
+            "EARLIER IN THIS CONVERSATION (for context only — never cite it, "
+            f"and never carry its source numbers over):\n{_history_block(history)}"
+        )
+    parts.append(f"QUESTION:\n{query}")
+    parts.append(f"SOURCES:\n{context}")
+    parts.append("Answer the question using only these sources, citing as instructed.")
+    return provider.complete(model, _SYNTH_SYSTEM, "\n\n".join(parts),
+                             max_tokens=_SYNTH_MAX_TOKENS)
 
 
 # --- citation validation -----------------------------------------------------
@@ -327,11 +408,18 @@ def find_uncited_claims(text: str) -> list[str]:
 
 # --- the engine --------------------------------------------------------------
 
-def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None) -> dict:
+def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None,
+           history: list[dict] | None = None) -> dict:
     """Research `query` and return a cited answer.
 
-    Returns {query, answer, sources, uncited_claims, dropped_citations, error}.
-    `error` is set (and `answer` empty) only when nothing could be produced.
+    `history` is prior [{query, answer}] turns in this thread. Supplying it is
+    what makes a follow-up work: the question is rewritten into something
+    searchable before retrieval, and the earlier turns are given to the writer
+    as context — never as a source.
+
+    Returns {query, search_query, answer, sources, uncited_claims,
+    dropped_citations, error}. `error` is set (and `answer` empty) only when
+    nothing could be produced.
     """
     # A disconnected dashboard must never fail a research run: progress
     # reporting is a courtesy, the answer is the product.
@@ -341,14 +429,19 @@ def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None) -> dict:
         return _fail(query, "a query is required")
 
     n = _DEPTH_SOURCES.get(depth, _DEPTH_SOURCES[_DEFAULT_DEPTH])
+    turns = _recent(history)
 
-    on_event("search", {"query": query, "depth": depth})
+    search_query = rewrite_query(query, turns) if turns else query
+    if search_query != query:
+        on_event("rewrite", {"original": query, "search_query": search_query})
+
+    on_event("search", {"query": search_query, "depth": depth})
     try:
-        sources = _search(query, n)
+        sources = _search(search_query, n)
     except Exception as e:
         return _fail(query, f"search failed: {e}")
     if not sources:
-        return _fail(query, f"no results found for {query!r}")
+        return _fail(query, f"no results found for {search_query!r}")
 
     # Emit the roster before fetching: the user sees what is being read while
     # it is being read, which is most of the perceived speed.
@@ -364,13 +457,14 @@ def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None) -> dict:
                      sources=sources)
 
     on_event("ranking", {"sources": len(live)})
-    selected = _rank_chunks(query, sources)
+    # Rank against the resolved query — "does it support that?" scores nothing.
+    selected = _rank_chunks(search_query, sources)
     if not selected:
         return _fail(query, "sources had no readable content", sources=sources)
 
     on_event("writing", {"sources": len({s.n for s, _ in selected})})
     try:
-        raw = _synthesize(query, _build_context(selected))
+        raw = _synthesize(query, _build_context(selected), history=turns)
     except Exception as e:
         return _fail(query, f"synthesis failed: {e}", sources=sources)
 
@@ -381,6 +475,7 @@ def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None) -> dict:
 
     result = {
         "query": query,
+        "search_query": search_query,
         "answer": clean,
         "sources": [s.to_dict() for s in sources],
         "uncited_claims": find_uncited_claims(clean),
@@ -395,6 +490,7 @@ def _fail(query: str, message: str, sources: list[Source] | None = None) -> dict
     """An honest empty answer. Never a fabricated one."""
     return {
         "query": query,
+        "search_query": query,
         "answer": "",
         "sources": [s.to_dict() for s in (sources or [])],
         "uncited_claims": [],

@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="Apex">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="/static/icons/favicon-64.png">
-<link rel="stylesheet" href="/static/styles.css?v=omni21">
-<link rel="stylesheet" href="/static/mobile.css?v=omni21">
+<link rel="stylesheet" href="/static/styles.css?v=omni22">
+<link rel="stylesheet" href="/static/mobile.css?v=omni22">
 <script src="/static/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
@@ -833,8 +833,10 @@
   <section id="tab-research" class="tab">
     <header class="page-head">
       <h1>Research</h1>
-      <div class="page-sub">Searches the live web, reads the pages, and answers with every claim cited — click a <strong>[n]</strong> to open the source it came from.</div>
+      <div class="page-sub">Searches the live web, reads the pages, and answers with every claim cited — click a <strong>[n]</strong> to open the source it came from. Follow-ups keep the thread's context, so "why?" and "what about the second one?" work.</div>
     </header>
+    <div id="research-thread" class="research-thread"></div>
+    <div id="research-progress" class="council-progress"></div>
     <form id="research-form" class="add-form vertical">
       <textarea id="research-query" placeholder="Ask anything — you'll get an answer you can check…" rows="3" required></textarea>
       <div class="council-controls">
@@ -847,12 +849,9 @@
         </label>
         <button type="submit" id="research-run" class="primary-btn">Research</button>
         <button type="button" id="research-save" class="ghost-btn" style="display:none">Save to Documents</button>
+        <button type="button" id="research-new" class="ghost-btn" style="display:none">New thread</button>
       </div>
     </form>
-    <div id="research-progress" class="council-progress"></div>
-    <div id="research-sources" class="research-sources"></div>
-    <div id="research-answer" class="research-answer"></div>
-    <div id="research-warnings" class="research-warnings"></div>
   </section>
 
   <!-- COMPARE — blind side-by-side model testing -->
@@ -1046,9 +1045,9 @@
   <button class="ib-no" id="install-no">Not now</button>
 </div>
 
-<script src="/static/app.js?v=omni21"></script>
-<script src="/static/voice-mobile.js?v=omni21"></script>
+<script src="/static/app.js?v=omni22"></script>
+<script src="/static/voice-mobile.js?v=omni22"></script>
 <script type="module" src="/static/avatar3d.js?v=vision3"></script>
-<script type="module" src="/static/cst3d.js?v=omni21"></script>
+<script type="module" src="/static/cst3d.js?v=omni22"></script>
 </body>
 </html>

@@ -109,7 +109,8 @@ def _stub(monkeypatch, *, results, pages, reply):
         return pages[url]
 
     monkeypatch.setattr(_res, "fetch", _fetch)
-    monkeypatch.setattr(answers, "_synthesize", lambda q, c, model=None: reply)
+    monkeypatch.setattr(answers, "_synthesize",
+                        lambda q, c, model=None, history=None: reply)
 
 
 def test_end_to_end_produces_cited_answer(monkeypatch):
@@ -311,8 +312,8 @@ def test_research_tab_exists_in_the_shell():
     assert 'data-tab="research"' in html and 'id="tab-research"' in html
     # Cache version must move with any frontend change or clients keep the old
     # bundle and the tab silently does not exist for them.
-    assert "v=omni21" in html
-    assert "apex-shell-v21" in (root / "sw.js").read_text()
+    assert "v=omni22" in html
+    assert "apex-shell-v22" in (root / "sw.js").read_text()
 
 
 def test_answer_html_is_escaped_before_formatting():
@@ -416,3 +417,140 @@ def test_ranking_prefers_the_relevant_passage(monkeypatch):
     src.chunks = ["Unrelated boilerplate text.", "Canberra is the capital."]
     selected = answers._rank_chunks("capital", [src])
     assert selected[0][1] == "Canberra is the capital."
+
+
+# --- follow-ups: the thing that makes it a research session ------------------
+
+HISTORY = [{"query": "what is the capital of Australia",
+            "answer": "Canberra is the capital [1]. It was chosen in 1908 [2]."}]
+
+
+def test_strip_citations_removes_markers_and_tidies_spacing():
+    """Prior turns re-enter the prompt; their numbers referred to a different
+    turn's sources, so leaving them in invites the model to reuse a number that
+    now means something else."""
+    assert answers.strip_citations("Canberra is the capital [1]. Chosen in 1908 [2, 3].") \
+        == "Canberra is the capital. Chosen in 1908."
+
+
+def test_history_block_carries_prior_turns_without_markers():
+    block = answers._history_block(HISTORY)
+    assert "capital of Australia" in block and "Canberra is the capital." in block
+    assert "[1]" not in block
+
+
+def test_history_is_capped_to_recent_turns():
+    many = [{"query": f"q{i}", "answer": f"a{i}"} for i in range(10)]
+    kept = answers._recent(many)
+    assert len(kept) == answers._MAX_HISTORY_TURNS
+    assert kept[-1]["query"] == "q9"          # the most recent, not the oldest
+
+
+def test_incomplete_turns_are_not_treated_as_history():
+    assert answers._recent([{"query": "q", "answer": ""}, {"query": "", "answer": "a"}]) == []
+
+
+def test_rewrite_resolves_a_reference(monkeypatch):
+    """'why was it chosen?' retrieves nothing on its own — the entity lives in
+    the previous turn. This is the whole mechanism behind a working thread."""
+    from agent import provider
+    monkeypatch.setattr(provider, "complete",
+                        lambda *a, **k: "why was Canberra chosen as Australia's capital")
+    out = answers.rewrite_query("why was it chosen?", HISTORY)
+    assert out == "why was Canberra chosen as Australia's capital"
+
+
+def test_first_question_is_never_rewritten(monkeypatch):
+    """No history, nothing to resolve — and no reason to pay for a model call."""
+    from agent import provider
+    called = []
+    monkeypatch.setattr(provider, "complete",
+                        lambda *a, **k: called.append(1) or "rewritten")
+    assert answers.rewrite_query("what is the capital of Australia", []) \
+        == "what is the capital of Australia"
+    assert called == []
+
+
+def test_rewrite_failure_falls_back_to_the_original(monkeypatch):
+    """A bad rewrite is worse than no rewrite, so it must never block an answer."""
+    from agent import provider
+    monkeypatch.setattr(provider, "complete",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    assert answers.rewrite_query("why?", HISTORY) == "why?"
+
+
+def test_rewrite_rejects_a_runaway_reply(monkeypatch):
+    """A model that answers the question instead of rewriting it has
+    misunderstood the job; the original query is safer than an essay."""
+    from agent import provider
+    monkeypatch.setattr(provider, "complete", lambda *a, **k: "Sure! " + "x" * 500)
+    assert answers.rewrite_query("why?", HISTORY) == "why?"
+
+
+def test_rewrite_rejects_an_empty_reply(monkeypatch):
+    from agent import provider
+    monkeypatch.setattr(provider, "complete", lambda *a, **k: "   ")
+    assert answers.rewrite_query("why?", HISTORY) == "why?"
+
+
+def test_rewrite_strips_quotes_and_extra_lines(monkeypatch):
+    from agent import provider
+    monkeypatch.setattr(provider, "complete",
+                        lambda *a, **k: '"Canberra capital history"\nsome trailing note')
+    assert answers.rewrite_query("why?", HISTORY) == "Canberra capital history"
+
+
+def test_followup_searches_the_rewritten_query(monkeypatch):
+    """End to end: retrieval must use the resolved question, not the pronoun."""
+    seen = {}
+
+    from tools import research as _res
+    from agent import provider
+
+    def _search(q, num_results=None):
+        seen["query"] = q
+        return [{"title": "A", "url": "https://a.com", "snippet": ""}]
+
+    monkeypatch.setattr(_res, "search", _search)
+    monkeypatch.setattr(_res, "fetch", lambda u, max_chars=None: "Canberra content. " * 50)
+    monkeypatch.setattr(provider, "complete", lambda *a, **k: "Canberra 1908 compromise")
+    monkeypatch.setattr(answers, "_synthesize",
+                        lambda q, c, model=None, history=None: "Because of a compromise [1].")
+
+    out = answers.answer("why was it chosen?", depth="quick", history=HISTORY)
+    assert seen["query"] == "Canberra 1908 compromise"
+    assert out["search_query"] == "Canberra 1908 compromise"
+    assert out["query"] == "why was it chosen?"      # the user's words are kept
+    assert out["error"] == ""
+
+
+def test_synthesis_gets_history_as_context_not_as_a_source(monkeypatch):
+    """Prior turns must reach the writer, labelled as context and stripped of
+    markers — otherwise turn two cites turn one's source numbers."""
+    captured = {}
+    from agent import provider
+    monkeypatch.setattr(provider, "complete",
+                        lambda model, system, user, max_tokens=0: captured.update(
+                            {"user": user, "system": system}) or "ok")
+    answers._synthesize("why?", "[1] src (https://a.com)\nbody", history=HISTORY)
+    assert "EARLIER IN THIS CONVERSATION" in captured["user"]
+    assert "never cite it" in captured["user"]
+    assert "Canberra is the capital." in captured["user"]
+    assert "Canberra is the capital [1]" not in captured["user"]
+
+
+def test_first_turn_prompt_has_no_history_section(monkeypatch):
+    captured = {}
+    from agent import provider
+    monkeypatch.setattr(provider, "complete",
+                        lambda model, system, user, max_tokens=0: captured.update(
+                            {"user": user}) or "ok")
+    answers._synthesize("q", "[1] src\nbody", history=None)
+    assert "EARLIER IN THIS CONVERSATION" not in captured["user"]
+
+
+def test_frontend_handles_the_rewrite_event():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    assert "research_rewrite" in js
+    assert "_researchThread" in js and "history:" in js

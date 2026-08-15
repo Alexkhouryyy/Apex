@@ -1437,6 +1437,8 @@ async def research_endpoint(request: Request):
     body = await request.json()
     query = (body.get("query") or "").strip()
     depth = body.get("depth") or "standard"
+    # Prior [{query, answer}] turns — what makes a follow-up resolvable.
+    history = body.get("history") or []
     if not query:
         return JSONResponse({"error": "empty query"}, status_code=400)
 
@@ -1452,7 +1454,9 @@ async def research_endpoint(request: Request):
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(
-            None, lambda: answers.answer(query, depth=depth, on_event=_event)
+            None,
+            lambda: answers.answer(query, depth=depth, on_event=_event,
+                                   history=history),
         )
     except Exception as e:
         ws_manager.broadcast_threadsafe({"type": "research_error", "error": str(e)})
@@ -1468,18 +1472,26 @@ async def research_endpoint(request: Request):
 
 @app.post("/api/research/save")
 async def research_save(request: Request):
-    """Save a finished answer to Documents, citations and all."""
+    """Save a research thread to Documents, citations and all."""
     body = await request.json()
-    query = (body.get("query") or "").strip() or "Research"
-    if not body.get("answer"):
+    turns = body.get("turns")
+    if not turns:                                   # single-answer callers
+        turns = [body] if body.get("answer") else []
+    turns = [t for t in turns if t.get("answer")]
+    if not turns:
         return JSONResponse({"error": "nothing to save"}, status_code=400)
 
     from agent import answers, documents
-    md = answers.format_markdown({
-        "error": "", "answer": body.get("answer", ""),
-        "sources": body.get("sources") or [],
-    })
-    doc = documents.create(title=f"Research: {query}", content=md)
+
+    parts = []
+    for t in turns:
+        parts.append(f"## {t.get('query') or 'Question'}\n")
+        parts.append(answers.format_markdown(
+            {"error": "", "answer": t.get("answer", ""), "sources": t.get("sources") or []}
+        ))
+        parts.append("")
+    title = (turns[0].get("query") or "Research").strip()
+    doc = documents.create(title=f"Research: {title}", content="\n".join(parts))
     return {"ok": True, "id": doc["id"]}
 
 

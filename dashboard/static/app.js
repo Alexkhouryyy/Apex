@@ -176,6 +176,7 @@ function connectWS() {
     if (msg.type === 'constellation_answer')   _cstAnswer(msg);
     if (msg.type === 'constellation_done')     _cstDone(msg);
     if (msg.type === 'constellation_error')    _cstError(msg.error);
+    if (msg.type === 'research_rewrite')     _researchRewrite(msg);
     if (msg.type === 'research_search')      _researchStep(`Searching: ${msg.query}`);
     if (msg.type === 'research_sources')     _researchSources(msg.sources);
     if (msg.type === 'research_reading')     _researchStep(`Reading ${msg.count} sources…`);
@@ -3796,7 +3797,11 @@ function _ellipse(ctx, x, y, rx, ry, fill) {
 
 
 // ---------------------------------------------------------------------------
-// RESEARCH — cited answers
+// RESEARCH — cited answers, as a thread
+//
+// A follow-up is what turns a lookup tool into a research session, so the tab
+// is a thread of turns rather than a single result. Each turn keeps its own
+// sources and its own numbering: [1] in turn two is not [1] in turn one.
 //
 // The answer text is synthesized from arbitrary web pages, so it is untrusted
 // input. It is escaped before any formatting runs, and citation links are built
@@ -3804,14 +3809,26 @@ function _ellipse(ctx, x, y, rx, ry, fill) {
 // a page that asks the model to write a link cannot become one.
 // ---------------------------------------------------------------------------
 let _researchRunning = false;
-let _researchLast = null;
+let _researchThread = [];      // [{query, answer, sources, ...}] — sent as history
+let _researchPending = null;   // DOM node for the turn currently being answered
 
-function _researchReset() {
-  document.getElementById('research-sources').innerHTML = '';
-  document.getElementById('research-answer').innerHTML = '';
-  document.getElementById('research-warnings').innerHTML = '';
+function _researchThreadEl() { return document.getElementById('research-thread'); }
+
+function _researchNewThread() {
+  _researchThread = [];
+  _researchThreadEl().innerHTML = '';
+  document.getElementById('research-progress').innerHTML = '';
+  document.getElementById('research-new').style.display = 'none';
   document.getElementById('research-save').style.display = 'none';
-  _researchLast = null;
+  _researchSyncPrompt();
+}
+
+function _researchSyncPrompt() {
+  const box = document.getElementById('research-query');
+  if (!box) return;
+  box.placeholder = _researchThread.length
+    ? 'Ask a follow-up — "why?", "what about the second one?"…'
+    : "Ask anything — you'll get an answer you can check…";
 }
 
 function _researchStep(text) {
@@ -3833,13 +3850,13 @@ function _safeUrl(u) {
 // Source cards render before the first answer token: seeing which pages are
 // being read is most of the perceived speed.
 function _researchSources(sources) {
-  const box = document.getElementById('research-sources');
-  if (!box) return;
+  if (!_researchPending) return;
+  const box = _researchPending.querySelector('.research-sources');
   box.innerHTML = '';
   (sources || []).forEach(s => {
     const card = document.createElement('a');
     card.className = 'research-source pending';
-    card.id = 'research-src-' + s.n;
+    card.dataset.n = s.n;
     const href = _safeUrl(s.url);
     if (href) { card.href = href; card.target = '_blank'; card.rel = 'noopener noreferrer'; }
     card.innerHTML =
@@ -3852,13 +3869,12 @@ function _researchSources(sources) {
 }
 
 function _researchSourceDone(s) {
-  const card = document.getElementById('research-src-' + s.n);
+  if (!_researchPending) return;
+  const card = _researchPending.querySelector(`.research-source[data-n="${s.n}"]`);
   if (!card) return;
   card.classList.remove('pending');
   card.classList.add(s.status === 'ok' ? 'ok' : 'failed');
-  if (s.status !== 'ok') {
-    card.title = 'Could not fetch: ' + (s.error || 'unknown error');
-  }
+  if (s.status !== 'ok') card.title = 'Could not fetch: ' + (s.error || 'unknown error');
 }
 
 // Minimal Markdown: headings, bold, bullets, paragraphs. Deliberately not
@@ -3907,22 +3923,44 @@ function _researchFormat(text, sources) {
   return out.join('\n');
 }
 
-function _researchResult(data) {
+// Show what a follow-up was actually searched for. "does it support that?"
+// retrieves nothing on its own, so the resolved query is worth seeing — it is
+// the difference between a thread and a series of unrelated searches.
+function _researchRewrite(msg) {
+  if (!_researchPending) return;
+  const el = _researchPending.querySelector('.research-rewrite');
+  if (el) {
+    el.textContent = `searched: ${msg.search_query}`;
+    el.style.display = '';
+  }
+}
+
+function _researchDone() {
   _researchRunning = false;
+  _researchPending = null;
   const btn = document.getElementById('research-run');
-  btn.disabled = false; btn.textContent = 'Research';
+  if (btn) { btn.disabled = false; btn.textContent = 'Research'; }
+}
 
-  if (data.error) { _researchError(data.error); return; }
+function _researchResult(data) {
+  if (!_researchRunning) return;
+  const node = _researchPending;
+  _researchDone();
+  if (data.error) { _researchError(data.error, node); return; }
+  if (!node) return;
 
-  _researchLast = data;
-  (data.sources || []).forEach(_researchSourceDone);
-  document.getElementById('research-answer').innerHTML =
+  (data.sources || []).forEach(s => {
+    const card = node.querySelector(`.research-source[data-n="${s.n}"]`);
+    if (card) {
+      card.classList.remove('pending');
+      card.classList.add(s.status === 'ok' ? 'ok' : 'failed');
+    }
+  });
+  node.querySelector('.research-answer').innerHTML =
     _researchFormat(data.answer, data.sources);
-  document.getElementById('research-save').style.display = '';
 
   // Be honest about the soft spots rather than presenting a uniform wall of
   // confidence: a citation is a pointer to check, not a proof.
-  const warn = document.getElementById('research-warnings');
   const bits = [];
   const failed = (data.sources || []).filter(s => s.status !== 'ok').length;
   if (failed) bits.push(`${failed} source${failed > 1 ? 's' : ''} could not be fetched.`);
@@ -3931,31 +3969,58 @@ function _researchResult(data) {
   }
   const un = (data.uncited_claims || []).length;
   if (un) bits.push(`${un} statement${un > 1 ? 's' : ''} carry no citation — treat as unverified.`);
-  warn.innerHTML = bits.length
+  node.querySelector('.research-warnings').innerHTML = bits.length
     ? `<div class="research-warn">${bits.map(escapeHTML).join(' ')}</div>` : '';
+
+  _researchThread.push(data);
+  _researchSyncPrompt();
+  document.getElementById('research-save').style.display = '';
+  document.getElementById('research-new').style.display = '';
 }
 
-function _researchError(err) {
-  _researchRunning = false;
-  const btn = document.getElementById('research-run');
-  if (btn) { btn.disabled = false; btn.textContent = 'Research'; }
-  document.getElementById('research-answer').innerHTML =
-    `<div class="research-warn">${escapeHTML(err)}</div>`;
+function _researchError(err, node) {
+  const target = node || _researchPending;
+  _researchDone();
+  if (target) {
+    target.querySelector('.research-answer').innerHTML =
+      `<div class="research-warn">${escapeHTML(err)}</div>`;
+  }
+}
+
+function _researchAddTurn(query) {
+  const node = document.createElement('div');
+  node.className = 'research-turn';
+  node.innerHTML =
+    `<div class="research-q">${escapeHTML(query)}</div>` +
+    `<div class="research-rewrite" style="display:none"></div>` +
+    `<div class="research-sources"></div>` +
+    `<div class="research-answer"><div class="research-thinking">Researching…</div></div>` +
+    `<div class="research-warnings"></div>`;
+  _researchThreadEl().appendChild(node);
+  node.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  return node;
 }
 
 async function runResearch() {
   if (_researchRunning) return;
-  const q = document.getElementById('research-query').value.trim();
+  const box = document.getElementById('research-query');
+  const q = box.value.trim();
   if (!q) return;
   _researchRunning = true;
-  _researchReset();
   document.getElementById('research-progress').innerHTML = '';
+  _researchPending = _researchAddTurn(q);
+  box.value = '';
   const btn = document.getElementById('research-run');
   btn.disabled = true; btn.textContent = 'Researching…';
   try {
     const result = await api('/api/research', {
       method: 'POST',
-      body: { query: q, depth: document.getElementById('research-depth').value },
+      body: {
+        query: q,
+        depth: document.getElementById('research-depth').value,
+        // Only what the rewriter and writer need; sources stay per-turn.
+        history: _researchThread.map(t => ({ query: t.query, answer: t.answer })),
+      },
     });
     if (_researchRunning) _researchResult(result);   // fallback if WS missed it
   } catch (e) {
@@ -3964,11 +4029,11 @@ async function runResearch() {
 }
 
 async function saveResearch() {
-  if (!_researchLast) return;
+  if (!_researchThread.length) return;
   const btn = document.getElementById('research-save');
   btn.disabled = true;
   try {
-    await api('/api/research/save', { method: 'POST', body: _researchLast });
+    await api('/api/research/save', { method: 'POST', body: { turns: _researchThread } });
     btn.textContent = 'Saved ✓';
     setTimeout(() => { btn.textContent = 'Save to Documents'; btn.disabled = false; }, 2000);
   } catch (e) {
@@ -3982,6 +4047,10 @@ async function loadResearch() {
   if (!form || form._wired) return;
   form._wired = true;
   form.addEventListener('submit', e => { e.preventDefault(); runResearch(); });
-  document.getElementById('research-save')
-    ?.addEventListener('click', () => saveResearch());
+  document.getElementById('research-save')?.addEventListener('click', () => saveResearch());
+  document.getElementById('research-new')?.addEventListener('click', () => _researchNewThread());
+  // Enter sends, shift+Enter newlines — a follow-up should be one keystroke.
+  document.getElementById('research-query')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runResearch(); }
+  });
 }

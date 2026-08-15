@@ -2273,3 +2273,14 @@ pre.md-pre code { background: none; border: none; padding: 0; }
   padding: 10px 14px; border-radius: 8px; font-size: 13px;
   border: 1px solid var(--border); background: var(--panel); opacity: .85;
 }
+
+/* Research threads: each turn keeps its own sources and numbering. */
+.research-thread { display: flex; flex-direction: column; gap: 4px; }
+.research-turn {
+  padding: 18px 0 22px;
+  border-bottom: 1px solid var(--border);
+}
+.research-turn:last-child { border-bottom: none; }
+.research-q { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+.research-rewrite { font-size: 12px; opacity: .55; margin-bottom: 6px; font-style: italic; }
+.research-thinking { opacity: .6; font-size: 14px; }
