@@ -9,6 +9,8 @@ confident prose.
 """
 import pytest
 
+import config
+
 from agent import answers
 
 
@@ -312,8 +314,8 @@ def test_research_tab_exists_in_the_shell():
     assert 'data-tab="research"' in html and 'id="tab-research"' in html
     # Cache version must move with any frontend change or clients keep the old
     # bundle and the tab silently does not exist for them.
-    assert "v=omni22" in html
-    assert "apex-shell-v22" in (root / "sw.js").read_text()
+    assert "v=omni23" in html
+    assert "apex-shell-v23" in (root / "sw.js").read_text()
 
 
 def test_answer_html_is_escaped_before_formatting():
@@ -554,3 +556,30 @@ def test_frontend_handles_the_rewrite_event():
     js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
     assert "research_rewrite" in js
     assert "_researchThread" in js and "history:" in js
+
+
+# --- the live WebSocket must survive bookkeeping failures --------------------
+
+def test_websocket_survives_device_registration_failure(monkeypatch):
+    """Found by driving the real dashboard in a browser, not by any unit test.
+
+    devices.touch() ran unguarded in the WS handler, so one DB error closed the
+    socket before the first frame — silently killing the live feed, research
+    streaming and council streaming, with nothing on screen to explain it.
+    """
+    from fastapi.testclient import TestClient
+    from dashboard import server
+    from agent import devices
+
+    monkeypatch.setattr(config, "DASHBOARD_TOKEN", "", raising=False)
+    monkeypatch.setattr(server.config, "DASHBOARD_TOKEN", "", raising=False)
+    monkeypatch.setattr(devices, "touch",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            RuntimeError("no such table: devices")))
+    monkeypatch.setattr(server, "_awareness_log", None, raising=False)
+
+    with TestClient(server.app) as client:
+        with client.websocket_connect("/ws/live?device=abc&kind=web") as ws:
+            # The snapshot is the first frame; if registration killed the socket
+            # this raises instead.
+            assert ws.receive_json()["type"] == "snapshot"

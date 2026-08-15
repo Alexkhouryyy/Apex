@@ -3940,6 +3940,11 @@ function _researchDone() {
   _researchPending = null;
   const btn = document.getElementById('research-run');
   if (btn) { btn.disabled = false; btn.textContent = 'Research'; }
+  // Progress steps describe work in flight. Once the answer is on screen they
+  // are stale, and leaving them stranded under the thread reads as if the run
+  // is still going.
+  const prog = document.getElementById('research-progress');
+  if (prog) prog.innerHTML = '';
 }
 
 function _researchResult(data) {

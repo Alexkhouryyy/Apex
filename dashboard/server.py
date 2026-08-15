@@ -1775,15 +1775,22 @@ async def ws_live(ws: WebSocket):
     if ws_manager.loop is None:
         ws_manager.loop = asyncio.get_event_loop()
     # Register the connecting device so the hub can route + the dashboard can list it.
-    from agent import devices as _devices
-    device_id = ws.query_params.get("device", "")
-    if device_id:
-        _devices.touch(
-            device_id,
-            label=ws.query_params.get("label", ""),
-            kind=ws.query_params.get("kind", "web"),
-            user_agent=ws.headers.get("user-agent", ""),
-        )
+    # Bookkeeping must never cost us the socket: this used to run unguarded, so a
+    # single DB error here closed the connection before the first frame — killing
+    # the live feed, research streaming and council streaming for that client,
+    # with nothing on screen to say why.
+    try:
+        from agent import devices as _devices
+        device_id = ws.query_params.get("device", "")
+        if device_id:
+            _devices.touch(
+                device_id,
+                label=ws.query_params.get("label", ""),
+                kind=ws.query_params.get("kind", "web"),
+                user_agent=ws.headers.get("user-agent", ""),
+            )
+    except Exception as e:
+        print(f"[Dashboard] device registration failed (continuing): {e}")
     try:
         # Send initial snapshot
         await ws.send_json({"type": "snapshot", "ts": time.time(), "data": {
