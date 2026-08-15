@@ -256,6 +256,16 @@ def consolidate_if_due(client, hours: int = 24) -> dict | None:
                 result["lessons"] = stats
         except Exception as e:
             print(f"[Lessons] pass failed: {e}")
+        # Initiative rides the same cadence: what the evidence now implies is
+        # worth doing. Stages proposals only — never creates a goal. Isolated
+        # for the same reason as above.
+        try:
+            from agent import initiative as _init
+            taken = _init.run()
+            if isinstance(result, dict):
+                result["initiative"] = taken
+        except Exception as e:
+            print(f"[Initiative] pass failed: {e}")
         return result
     except Exception as e:
         print(f"[Reflection] consolidation failed: {e}")

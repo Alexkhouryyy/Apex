@@ -45,6 +45,11 @@ def _summarize(kind: str, payload: dict) -> str:
         return f"skill '{payload.get('name')}': {str(payload.get('description'))[:80]}"
     if kind == "email":
         return f"email to {payload.get('to')}: {str(payload.get('subject'))[:80]}"
+    if kind == "goal_proposal":
+        # The evidence rides in the summary because that is what reaches the
+        # push notification. A proposal you cannot audit from the notification
+        # is one you will rubber-stamp or ignore.
+        return f"{payload.get('title')} — {payload.get('evidence', 'no evidence')}"
     return kind
 
 
@@ -119,6 +124,15 @@ def _apply(kind: str, payload: dict) -> str:
             payload["to"], payload.get("subject", ""), payload.get("body", ""),
             in_reply_to=payload.get("in_reply_to"),
         )
+    if kind == "goal_proposal":
+        # THE gate for agent-originated goals. agent/initiative.py only ever
+        # stages; this line is the sole path from a proposal to a real goal, and
+        # it runs when the user approves. Structural, not a prompt instruction.
+        from agent import goals
+        return goals.set_goal(
+            payload["title"], payload.get("description", ""),
+            horizon=payload.get("horizon", "week"),
+        )
     return f"Unknown staged kind: {kind!r}"
 
 
@@ -157,12 +171,37 @@ def approve(write_id) -> str:
     return f"Approved #{write_id}: {result}"
 
 
+def _remember_declines(rows) -> None:
+    """Tell initiative that these subjects were rejected.
+
+    Without this, declining a proposed goal means "raise it again in six hours",
+    which trains the user to stop reading proposals — and a review gate nobody
+    reads is worse than none, because it still looks like oversight.
+    """
+    try:
+        from agent import initiative
+        for (payload_json,) in rows:
+            key = json.loads(payload_json or "{}").get("evidence_key")
+            if key:
+                initiative.decline(key)
+    except Exception as e:
+        print(f"[Approvals] could not record decline: {e}")
+
+
 def reject(write_id) -> str:
     """Reject one staged write, or 'all' to reject every pending write."""
     if str(write_id).lower() == "all":
         with longterm._conn() as c:
+            rows = c.execute(
+                "SELECT payload_json FROM staged_writes "
+                "WHERE status = 'pending' AND kind = 'goal_proposal'").fetchall()
             c.execute("UPDATE staged_writes SET status = 'rejected' WHERE status = 'pending'")
+        _remember_declines(rows)
         return "Rejected all pending writes."
     with longterm._conn() as c:
+        rows = c.execute(
+            "SELECT payload_json FROM staged_writes WHERE id = ? AND kind = 'goal_proposal'",
+            (int(write_id),)).fetchall()
         c.execute("UPDATE staged_writes SET status = 'rejected' WHERE id = ?", (int(write_id),))
+    _remember_declines(rows)
     return f"Staged write #{write_id} rejected."
