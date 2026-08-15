@@ -12,6 +12,16 @@ from agent import telemetry
 _search_client = None
 
 
+class SearchError(Exception):
+    """Every search backend failed. Raised rather than returned: a caller that
+    cannot tell 'no results' from 'search is broken' will synthesise an answer
+    out of the error message."""
+
+
+class FetchError(Exception):
+    """A page could not be fetched. See fetch() vs browse()."""
+
+
 def _get_client():
     global _search_client
     if _search_client is None:
@@ -39,7 +49,10 @@ def search(query: str, num_results: int = None) -> list[dict]:
             for r in (results or [])
         ]
     except Exception as e:
-        return [{"title": "Search unavailable", "url": "", "snippet": str(e)}]
+        # Never return a synthetic result row here. It reads as a successful
+        # search to every caller, and its error text ends up quoted back as
+        # if it were a source.
+        raise SearchError(f"all search backends failed: {e}") from e
 
 
 def _search_via_anthropic(query: str, num_results: int) -> list[dict]:
@@ -70,12 +83,18 @@ def _search_via_anthropic(query: str, num_results: int) -> list[dict]:
     if start != -1 and end > start:
         return json.loads(text[start:end])
 
-    # If no JSON, build results from the text itself
-    return [{"title": f"Result for: {query}", "url": "", "snippet": text[:500]}]
+    # No JSON in the reply — that is a parse failure, not a result. Fall through
+    # to the next backend rather than inventing a URL-less row.
+    raise ValueError("web_search returned no parseable JSON array")
 
 
-def browse(url: str, max_chars: int = None) -> str:
-    """Fetch a URL and return cleaned text content."""
+def fetch(url: str, max_chars: int = None) -> str:
+    """Fetch a URL and return cleaned text content. Raises FetchError.
+
+    Prefer this over browse() anywhere the content feeds a model: browse()
+    reports failure as an ordinary string, which is indistinguishable from a
+    page whose text happens to say 'Error fetching ...'.
+    """
     max_chars = max_chars or config.MAX_PAGE_CONTENT_CHARS
     headers = {
         "User-Agent": (
@@ -94,9 +113,24 @@ def browse(url: str, max_chars: int = None) -> str:
         text = soup.get_text(separator="\n", strip=True)
         lines = [l for l in text.splitlines() if l.strip()]
         content = "\n".join(lines)
-        return content[:max_chars] + ("..." if len(content) > max_chars else "")
     except Exception as e:
-        return f"Error fetching {url}: {e}"
+        raise FetchError(f"{url}: {e}") from e
+
+    if not content.strip():
+        raise FetchError(f"{url}: page had no readable text")
+    return content[:max_chars] + ("..." if len(content) > max_chars else "")
+
+
+def browse(url: str, max_chars: int = None) -> str:
+    """Fetch a URL and return cleaned text, or an error string.
+
+    Kept string-returning for the `web_browse` agent tool, where the model is
+    the reader and an error message is a useful result.
+    """
+    try:
+        return fetch(url, max_chars=max_chars)
+    except FetchError as e:
+        return f"Error fetching {e}"
 
 
 def deep_research(topic: str) -> str:
@@ -105,11 +139,14 @@ def deep_research(topic: str) -> str:
     compiled = [f"Research on: {topic}\n"]
 
     for i, r in enumerate(results, 1):
-        compiled.append(f"\n--- Source {i}: {r['title']} ---")
-        compiled.append(f"URL: {r['url']}")
-        compiled.append(f"Snippet: {r['snippet']}")
+        compiled.append(f"\n--- Source {i}: {r.get('title', '')} ---")
+        compiled.append(f"URL: {r.get('url', '')}")
+        compiled.append(f"Snippet: {r.get('snippet', '')}")
         if r.get("url"):
-            content = browse(r["url"], max_chars=2000)
-            compiled.append(f"Content:\n{content}")
+            try:
+                compiled.append(f"Content:\n{fetch(r['url'], max_chars=2000)}")
+            except FetchError as e:
+                # Say the page is missing; never pass the error off as content.
+                compiled.append(f"Content: [unavailable — {e}]")
 
     return "\n".join(compiled)
