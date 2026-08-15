@@ -772,3 +772,118 @@ def test_frontend_renders_weak_claims_and_never_a_pass_badge():
     # "topically consistent with the page cited".
     for badge in ("✓", "✔", "checks passed", "all claims verified", "supported ✓"):
         assert badge not in fn
+
+
+# --- ordinal follow-ups -------------------------------------------------------
+#
+# "why was it chosen?" already worked. "what about the second one?" did not:
+# the rewriter saw prior turns as flat prose, and *second* indexes into
+# structure that had been thrown away.
+
+HISTORY_WITH_SOURCES = [{
+    "query": "biggest cities in Australia",
+    "answer": "Sydney is the largest, then Melbourne, then Brisbane.",
+    "sources": [
+        {"n": 1, "title": "Sydney — largest city", "domain": "a.com", "status": answers.OK},
+        {"n": 2, "title": "Melbourne — second city", "domain": "b.com", "status": answers.OK},
+        {"n": 3, "title": "Dead link", "domain": "c.com", "status": answers.FAILED},
+    ],
+}]
+
+
+def test_rewriter_is_shown_the_numbered_sources():
+    """An ordinal needs a list to index into."""
+    block = answers._history_block(HISTORY_WITH_SOURCES, with_sources=True)
+    assert "1. Sydney — largest city" in block
+    assert "2. Melbourne — second city" in block
+
+
+def test_unfetched_sources_are_not_offered_to_the_rewriter():
+    """A source that failed to fetch was never read; pointing an ordinal at it
+    would resolve the question to a page we do not have."""
+    block = answers._history_block(HISTORY_WITH_SOURCES, with_sources=True)
+    assert "Dead link" not in block
+
+
+def test_the_writer_never_sees_prior_source_numbers():
+    """THE invariant of the whole threading design. Prior [n] means something
+    different this turn, so showing the writer an old numbered list is an
+    invitation to cite a source that no longer exists under that number."""
+    block = answers._history_block(HISTORY_WITH_SOURCES)          # writer path
+    assert "Sources shown" not in block
+    assert "Melbourne — second city" not in block
+    assert "Sydney is the largest, then Melbourne" in block       # prose survives
+
+
+def test_synthesis_prompt_carries_no_prior_source_list(monkeypatch):
+    """Same invariant, asserted where it actually matters — the real prompt."""
+    captured = {}
+    from agent import provider
+    monkeypatch.setattr(provider, "complete",
+                        lambda model, system, user, max_tokens=0:
+                        captured.update({"user": user}) or "ok")
+    answers._synthesize("q", "[1] src\nbody", history=HISTORY_WITH_SOURCES)
+    assert "Sources shown for that answer" not in captured["user"]
+    assert "Melbourne — second city" not in captured["user"]
+
+
+def test_history_without_sources_still_works():
+    """Voice and chat callers pass {query, answer} only."""
+    block = answers._history_block(HISTORY, with_sources=True)
+    assert "capital of Australia" in block and "Sources shown" not in block
+
+
+def test_source_list_is_capped():
+    many = [{"query": "q", "answer": "a",
+             "sources": [{"n": i, "title": f"Title {i}", "status": answers.OK}
+                         for i in range(1, 30)]}]
+    block = answers._history_block(many, with_sources=True)
+    assert f"{answers._MAX_HISTORY_SOURCES}. Title {answers._MAX_HISTORY_SOURCES}" in block
+    assert f"{answers._MAX_HISTORY_SOURCES + 1}. Title" not in block
+
+
+def test_malformed_source_entries_do_not_break_the_rewrite():
+    junk = [{"query": "q", "answer": "a",
+             "sources": ["not a dict", {}, {"n": 2, "title": "  "}, None]}]
+    assert answers._history_block(junk, with_sources=True)  # no raise
+
+
+def test_ordinal_resolves_end_to_end(monkeypatch):
+    """The behaviour this phase exists for."""
+    seen = {}
+    from agent import provider
+    from tools import research as _res
+
+    def _complete(model, system, user, max_tokens=0):
+        seen["system"] = system
+        seen["user"] = user
+        return "Melbourne population size"
+
+    monkeypatch.setattr(provider, "complete", _complete)
+
+    def _search(q, num_results=None):
+        seen["searched"] = q
+        return [{"title": "M", "url": "https://m.com", "snippet": ""}]
+
+    monkeypatch.setattr(_res, "search", _search)
+    monkeypatch.setattr(_res, "fetch", lambda u, max_chars=None: "Melbourne content. " * 40)
+    monkeypatch.setattr(answers, "_synthesize",
+                        lambda q, c, model=None, history=None: "Melbourne is large [1].")
+
+    out = answers.answer("what about the second one?", depth="quick",
+                         history=HISTORY_WITH_SOURCES)
+    assert seen["searched"] == "Melbourne population size"
+    assert out["search_query"] == "Melbourne population size"
+    assert out["query"] == "what about the second one?"
+    # The rewriter must have been given both the prose list and the source list.
+    assert "Melbourne — second city" in seen["user"]
+    assert "Sydney is the largest, then Melbourne" in seen["user"]
+    assert "second one" in seen["system"] or "Ordinal" in seen["system"]
+
+
+def test_frontend_sends_source_titles_in_history():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    fn = js[js.index("async function runResearch"):]
+    fn = fn[:fn.index("\nasync function ")]
+    assert "sources:" in fn and "title: s.title" in fn

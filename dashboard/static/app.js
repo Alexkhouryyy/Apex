@@ -4037,8 +4037,16 @@ async function runResearch() {
       body: {
         query: q,
         depth: document.getElementById('research-depth').value,
-        // Only what the rewriter and writer need; sources stay per-turn.
-        history: _researchThread.map(t => ({ query: t.query, answer: t.answer })),
+        // Source titles ride along so an ordinal ("the second one") has a
+        // numbered list to resolve against. The server shows them to the
+        // query rewriter only — never to the writer, whose [n] numbering
+        // belongs to this turn alone.
+        history: _researchThread.map(t => ({
+          query: t.query,
+          answer: t.answer,
+          sources: (t.sources || []).map(s => ({ n: s.n, title: s.title,
+                                                 domain: s.domain, status: s.status })),
+        })),
       },
     });
     if (_researchRunning) _researchResult(result);   // fallback if WS missed it

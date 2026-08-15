@@ -53,6 +53,10 @@ _MIN_AUDIT_CHARS = 25
 # every turn carried costs tokens on every subsequent question.
 _MAX_HISTORY_TURNS = 4
 _HISTORY_ANSWER_CHARS = 700
+# Prior-turn source titles, shown to the rewriter so ordinals have something to
+# index into. Capped because this rides along on every follow-up.
+_MAX_HISTORY_SOURCES = 10
+_HISTORY_TITLE_CHARS = 80
 
 OK = "ok"
 FAILED = "failed"
@@ -134,20 +138,55 @@ def _recent(history: list[dict] | None) -> list[dict]:
     return turns[-_MAX_HISTORY_TURNS:]
 
 
-def _history_block(history: list[dict]) -> str:
+def _history_block(history: list[dict], with_sources: bool = False) -> str:
+    """Render prior turns for a prompt.
+
+    `with_sources` is for the REWRITER ONLY. An ordinal like "the second one"
+    needs a numbered list to index into, but the writer must never see prior
+    source numbers: they mean something different this turn, and showing them
+    is an open invitation to cite [2] from a list that no longer exists.
+    """
     parts = []
     for h in history:
         prior = strip_citations(h["answer"])[:_HISTORY_ANSWER_CHARS]
-        parts.append(f"Q: {h['query'].strip()}\nA: {prior}")
+        block = f"Q: {h['query'].strip()}\nA: {prior}"
+        if with_sources:
+            listed = _source_lines(h.get("sources"))
+            if listed:
+                block += "\nSources shown for that answer:\n" + listed
+        parts.append(block)
     return "\n\n".join(parts)
+
+
+def _source_lines(sources) -> str:
+    """Compact numbered list of a prior turn's sources — titles, not URLs.
+
+    Titles are what an ordinal actually refers to; URLs would spend tokens
+    without helping resolve "the second one".
+    """
+    out = []
+    for s in (sources or [])[:_MAX_HISTORY_SOURCES]:
+        if not isinstance(s, dict) or s.get("status") not in (None, OK):
+            continue
+        label = (s.get("title") or s.get("domain") or "").strip()
+        if not label:
+            continue
+        out.append(f"  {s.get('n', len(out) + 1)}. {label[:_HISTORY_TITLE_CHARS]}")
+    return "\n".join(out)
 
 
 _REWRITE_SYSTEM = (
     "Rewrite a follow-up question into a standalone web-search query.\n\n"
-    "Resolve pronouns and references ('it', 'that', 'they', 'the second one') "
-    "using the conversation. Keep it short and keyword-shaped, the way someone "
-    "would type it into a search engine. Preserve any named entity the user is "
-    "actually asking about.\n\n"
+    "Resolve pronouns and references — 'it', 'that', 'they' — using the "
+    "conversation.\n\n"
+    "Ordinals and comparatives ('the second one', 'the latter', 'the bigger "
+    "one') refer to something enumerable. Look for it first in the previous "
+    "ANSWER — a list of things named in the prose is usually what the user "
+    "means — and otherwise in the numbered sources shown for that answer. "
+    "Replace the reference with the actual name.\n\n"
+    "Keep it short and keyword-shaped, the way someone would type it into a "
+    "search engine. Preserve any named entity the user is actually asking "
+    "about.\n\n"
     "Output ONLY the rewritten query — no quotes, no explanation, no preamble."
 )
 
@@ -170,8 +209,8 @@ def rewrite_query(query: str, history: list[dict] | None) -> str:
 
         raw = provider.complete(
             config.PROACTIVE_MODEL, _REWRITE_SYSTEM,
-            f"CONVERSATION:\n{_history_block(turns)}\n\nFOLLOW-UP: {query}\n\n"
-            f"Standalone search query:",
+            f"CONVERSATION:\n{_history_block(turns, with_sources=True)}\n\n"
+            f"FOLLOW-UP: {query}\n\nStandalone search query:",
             max_tokens=120,
         )
         # Take the first line *before* unquoting: a model that adds a trailing
@@ -517,10 +556,11 @@ def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None,
            history: list[dict] | None = None) -> dict:
     """Research `query` and return a cited answer.
 
-    `history` is prior [{query, answer}] turns in this thread. Supplying it is
-    what makes a follow-up work: the question is rewritten into something
-    searchable before retrieval, and the earlier turns are given to the writer
-    as context — never as a source.
+    `history` is prior [{query, answer, sources?}] turns in this thread.
+    Supplying it is what makes a follow-up work: the question is rewritten into
+    something searchable before retrieval, and the earlier turns are given to
+    the writer as context — never as a source. `sources` is optional and reaches
+    the rewriter only, so ordinals like "the second one" can be resolved.
 
     Returns {query, search_query, answer, sources, uncited_claims,
     dropped_citations, error}. `error` is set (and `answer` empty) only when
