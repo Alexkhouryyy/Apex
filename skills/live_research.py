@@ -1,8 +1,14 @@
-"""Skill: live_research — streaming multi-phase research orchestrator.
+"""Skill: live_research — cited research for voice and chat.
 
-Phases: search → visit top sources → synthesise → save Markdown report.
-Progress events are broadcast to the Apex dashboard live feed via WebSocket
-so the user sees a live panel update while research runs.
+A thin surface over agent.answers: search → parallel fetch → passage rerank →
+synthesis with numbered sources → citation validation. Progress is broadcast to
+the dashboard so the Research tab lights up regardless of which surface started
+the run.
+
+This used to run its own pipeline, which truncated each source to 3000 chars and
+then capped the concatenation at 14000 — so at depth='deep' sources 5-10 never
+reached the model while the UI reported reading all ten. Passage selection
+replaces blind truncation, so that class of silent loss is gone.
 
 Trusted, hand-written skill.
 """
@@ -14,10 +20,11 @@ from pathlib import Path
 
 DESCRIPTION = (
     "Research a topic thoroughly: searches the web, reads top sources, and writes "
-    "a structured Markdown report saved to ~/Documents/Apex/Research/. "
+    "a cited Markdown report saved to ~/Documents/Apex/Research/. Every factual "
+    "claim carries a [n] marker resolving to a source that was actually fetched. "
     "Pass {query, depth} where depth is 'quick' (3 sources), 'standard' (6), or 'deep' (10)."
 )
-VERSION = "1.0"
+VERSION = "2.0"
 INPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -35,15 +42,14 @@ INPUT_SCHEMA = {
     "required": ["query"],
 }
 
-_DEPTH_SOURCES = {"quick": 3, "standard": 6, "deep": 10}
-
-
-def _broadcast(phase: str, detail: str) -> None:
+def _broadcast(phase: str, payload: dict) -> None:
+    """Emit the same event shape the Research tab consumes, so a run started by
+    voice or chat renders live in the dashboard too."""
     try:
         from dashboard import server as _srv
-        _srv.ws_manager.broadcast_threadsafe({
-            "type": "research_phase", "phase": phase, "detail": detail, "ts": time.time(),
-        })
+        _srv.ws_manager.broadcast_threadsafe(
+            {"type": f"research_{phase}", "phase": phase, "ts": time.time(), **payload}
+        )
     except Exception:
         pass
 
@@ -63,57 +69,14 @@ def run(inputs: dict) -> str:
     if not query:
         return "live_research: 'query' is required."
     depth = inputs.get("depth", "standard")
-    n = _DEPTH_SOURCES.get(depth, 6)
 
-    _broadcast("search", f"Searching: {query}")
-    try:
-        from tools import research as _res
-        results = _res.search(query, num_results=n)
-    except Exception as e:
-        return f"live_research: search failed: {e}"
+    from agent import answers
 
-    if not results:
-        return f"live_research: no results found for '{query}'."
+    result = answers.answer(query, depth=depth, on_event=_broadcast)
+    if result.get("error"):
+        return f"live_research: {result['error']}"
 
-    _broadcast("reading", f"Reading {len(results)} sources…")
-    source_texts: list[str] = []
-    for r in results[:n]:
-        url = r.get("url") or r.get("href") or ""
-        if not url:
-            continue
-        try:
-            content = _res.browse(url)
-            source_texts.append(f"**Source**: {url}\n\n{content[:3000]}\n\n---\n")
-            _broadcast("reading", f"Read: {url[:70]}")
-        except Exception:
-            continue
-
-    if not source_texts:
-        return f"live_research: could not fetch any sources for '{query}'."
-
-    combined = "\n".join(source_texts)
-    _broadcast("writing", "Synthesising report…")
-
-    try:
-        import config
-        import anthropic
-        from agent import telemetry
-        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        resp = telemetry.create(
-            client,
-            call_site="skills.live_research/synthesise",
-            model=config.AGENT_MODEL,
-            max_tokens=4000,
-            messages=[{"role": "user", "content": (
-                f"You are a research analyst. Based on the following web sources, write a thorough "
-                f"Markdown report answering: **{query}**\n\n"
-                f"Structure: ## Summary, ## Key Findings (bulleted), ## Sources, ## Conclusion\n\n"
-                f"Sources:\n{combined[:14000]}"
-            )}],
-        )
-        report = resp.content[0].text.strip()
-    except Exception as e:
-        return f"live_research: synthesis failed: {e}"
+    report = answers.format_markdown(result)
 
     ts = time.strftime("%Y%m%d-%H%M%S")
     out_path = _research_dir() / f"{ts}-{_slug(query)}.md"
@@ -122,5 +85,5 @@ def run(inputs: dict) -> str:
     except Exception as e:
         return f"live_research: report save failed: {e}\n\n{report[:600]}"
 
-    _broadcast("done", f"Report saved: {out_path.name}")
-    return f"Research complete. Report saved to {out_path}.\n\n{report[:1000]}…"
+    _broadcast("saved", {"path": str(out_path)})
+    return f"Research complete. Report saved to {out_path}.\n\n{report}"

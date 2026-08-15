@@ -43,7 +43,10 @@ edge cases, and alternatives before touching anything.
 - **bash**: Run shell commands (grep, find, pip install, git, write code, run scripts, anything)
 - **web_search**: Search the web for current information
 - **web_browse**: Fetch and read a specific URL
-- **deep_research**: Comprehensive research on a topic (search + read multiple sources)
+- **research**: Answer a question from the live web with every claim cited — prefer \
+this whenever the answer should be verifiable
+- **deep_research**: Raw uncited source dump on a topic (use **research** instead unless \
+you want unsynthesised material)
 - **browser_***: Drive a real Chromium browser — goto, click, fill, press, get_text, screenshot, \
 evaluate JS. Use this when you need to actually INTERACT with a website (log in, fill forms, \
 click buttons, submit). Use web_browse for read-only access.
@@ -228,8 +231,34 @@ TOOLS = [
         },
     },
     {
+        "name": "research",
+        "description": (
+            "Answer a question from the live web with every factual claim cited. "
+            "Searches, reads the pages in parallel, picks the relevant passages and "
+            "writes an answer where each [n] marker resolves to a source that was "
+            "actually fetched. Prefer this over deep_research and web_search whenever "
+            "the answer should be verifiable."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The question to answer."},
+                "depth": {
+                    "type": "string",
+                    "enum": ["quick", "standard", "deep"],
+                    "description": "quick=3 sources, standard=6, deep=10.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "deep_research",
-        "description": "Perform thorough research on a topic: searches and reads multiple sources.",
+        "description": (
+            "Raw source dump on a topic: searches and reads a few pages, returning "
+            "their text uncited. Use `research` instead unless you specifically want "
+            "unsynthesised source material."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {"topic": {"type": "string"}},
@@ -1302,6 +1331,13 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
 
         elif name == "web_browse":
             return research.browse(inputs["url"])
+
+        elif name == "research":
+            from agent import answers as _answers
+            _res = _answers.answer(inputs["query"], depth=inputs.get("depth", "standard"))
+            if _res.get("error"):
+                return f"[Research] {_res['error']}"
+            return _answers.format_markdown(_res)
 
         elif name == "deep_research":
             return research.deep_research(inputs["topic"])

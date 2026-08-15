@@ -324,3 +324,95 @@ def test_answer_html_is_escaped_before_formatting():
     fn = fn[:fn.index("\nfunction ")]
     assert "escapeHTML" in fn
     assert "marked.parse" not in fn
+
+
+# --- surfaces ----------------------------------------------------------------
+
+def test_research_is_a_first_class_tool():
+    """deep_research sat in the tool list while the better path needed a two-hop
+    list_skills -> run_skill, so the model reliably picked the weaker one."""
+    from agent import core
+    names = {t["name"] for t in core.TOOLS}
+    assert "research" in names
+    tool = [t for t in core.TOOLS if t["name"] == "research"][0]
+    assert "query" in tool["input_schema"]["properties"]
+
+
+def test_live_research_delegates_to_the_engine(monkeypatch, tmp_path):
+    """The skill must not carry a second, drifting copy of the pipeline."""
+    import skills.live_research as lr
+
+    monkeypatch.setattr(lr, "_research_dir", lambda: tmp_path)
+    monkeypatch.setattr(answers, "answer", lambda q, depth="standard", on_event=None: {
+        "error": "", "answer": "An answer [1].", "uncited_claims": [],
+        "dropped_citations": [],
+        "sources": [{"n": 1, "url": "https://a.com", "title": "A", "domain": "a.com",
+                     "status": answers.OK, "cited": True, "error": ""}],
+    })
+    out = lr.run({"query": "anything", "depth": "quick"})
+    assert "[1]" in out and "https://a.com" in out
+    assert list(tmp_path.glob("*.md"))
+
+
+def test_live_research_reports_engine_failure(monkeypatch):
+    import skills.live_research as lr
+    monkeypatch.setattr(answers, "answer", lambda q, depth="standard", on_event=None: {
+        "error": "no results found", "answer": "", "sources": [],
+        "uncited_claims": [], "dropped_citations": [],
+    })
+    assert "no results found" in lr.run({"query": "x"})
+
+
+# --- the scoring path (exercised without a real embedding model) -------------
+
+def _fake_embed_factory(vectors):
+    """Return an _embed stub producing real float32 blobs, so the numpy path in
+    _score_pairs runs for real even where sentence-transformers is absent."""
+    import numpy as np
+
+    def _embed(text):
+        vec = vectors.get(text)
+        if vec is None:
+            return None
+        return np.array(vec, dtype=np.float32).tobytes()
+    return _embed
+
+
+def test_score_pairs_ranks_by_cosine_similarity(monkeypatch):
+    from agent import longterm as _lt
+
+    vectors = {
+        "query": [1.0, 0.0],
+        "on topic": [1.0, 0.0],       # identical -> 1.0
+        "off topic": [0.0, 1.0],      # orthogonal -> 0.0
+    }
+    monkeypatch.setattr(_lt, "_embed", _fake_embed_factory(vectors))
+    pairs = [(answers.Source(n=1, url="u"), "on topic"),
+             (answers.Source(n=2, url="u"), "off topic")]
+    scores = answers._score_pairs("query", pairs)
+    assert scores is not None
+    assert scores[0] == pytest.approx(1.0, abs=1e-5)
+    assert scores[1] == pytest.approx(0.0, abs=1e-5)
+
+
+def test_score_pairs_returns_none_without_a_model(monkeypatch):
+    from agent import longterm as _lt
+    monkeypatch.setattr(_lt, "_embed", lambda t: None)
+    pairs = [(answers.Source(n=1, url="u"), "x")]
+    assert answers._score_pairs("q", pairs) is None
+
+
+def test_ranking_prefers_the_relevant_passage(monkeypatch):
+    """End of the retrieval story: the passage that actually answers the
+    question is what reaches the model, not whatever happened to be first."""
+    from agent import longterm as _lt
+    vectors = {
+        "capital": [1.0, 0.0],
+        "Canberra is the capital.": [1.0, 0.0],
+        "Unrelated boilerplate text.": [0.0, 1.0],
+    }
+    monkeypatch.setattr(_lt, "_embed", _fake_embed_factory(vectors))
+    src = answers.Source(n=1, url="https://a.com", status=answers.OK)
+    src.chunks = ["Unrelated boilerplate text.", "Canberra is the capital."]
+    selected = answers._rank_chunks("capital", [src])
+    assert selected[0][1] == "Canberra is the capital."
