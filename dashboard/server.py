@@ -1537,6 +1537,35 @@ async def research_save(request: Request):
     return {"ok": True, "id": doc["id"]}
 
 
+@app.get("/api/restraint")
+async def restraint_state():
+    """Why Apex is or is not talking right now.
+
+    A feature that silences notifications has to be able to answer "why didn't
+    you tell me?" — an unexplainable hold is indistinguishable from a dropped
+    message, and users are right not to trust either.
+    """
+    from agent import restraint
+    rate, n = restraint.receptiveness()
+    return {
+        "enabled": restraint.enabled(),
+        "moment": restraint.bucket(),
+        "engagement_rate": round(rate, 3),
+        "samples": n,
+        "learning": n < restraint.MIN_SAMPLES,
+        "held": restraint.held_count(),
+        "explain": restraint.explain(),
+    }
+
+
+@app.post("/api/restraint/release")
+async def restraint_release():
+    """Send everything held, now. The manual override for when the model is
+    wrong about you — which it will sometimes be."""
+    from agent import notify as _notify_mod
+    return {"released": _notify_mod.release_held(user_active=True)}
+
+
 # --- Compare: blind side-by-side model testing (complements the council) ---
 @app.get("/api/compare/roster")
 async def compare_roster():

@@ -342,6 +342,17 @@ class AwarenessMonitor:
                     except Exception as e:
                         print(f"[Cortex] Tick error: {e}")
 
+            # Restraint — score whether past pings landed, and release anything
+            # held now that the moment may have turned. Runs on the 15s tick so
+            # a held message surfaces promptly once you are back, rather than
+            # waiting out its ceiling.
+            try:
+                from agent import restraint as _restraint, notify as _notify_mod
+                _restraint.score_pending()
+                _notify_mod.release_held(user_active=bool(events))
+            except Exception as e:
+                print(f"[Restraint] release tick failed: {e}")
+
             # Memory consolidation — distils recent activity into reflections and
             # refreshes the preference digest injected into every system prompt.
             # Runs off-thread: a consolidation pass is a full model call, and

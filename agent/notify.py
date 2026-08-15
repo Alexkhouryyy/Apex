@@ -127,6 +127,32 @@ class Notifier:
         if dedup_key:
             payload["dedup_key"] = dedup_key
 
+        # Restraint: every interruption path in Apex funnels through here, so
+        # this is the one place that can ask whether now is a good moment.
+        # Wrapped so that any failure falls through to sending — a bug in
+        # restraint must never be able to silence Apex.
+        try:
+            from agent import restraint
+            hold_it, why = restraint.should_hold(kind, priority)
+            if hold_it:
+                restraint.hold(payload)
+                print(f"[Restraint] held {kind or 'notification'}: {why}")
+                return
+        except Exception as e:
+            print(f"[Restraint] bypassed ({e})")
+
+        self._deliver(payload)
+
+    def _deliver(self, payload: dict) -> None:
+        """Actually fan a payload out. Separate from notify() so held messages
+        can be released later without re-running the restraint decision."""
+        title, body = payload.get("title", ""), payload.get("body", "")
+        try:
+            from agent import restraint
+            restraint.record(payload.get("kind", ""), payload.get("priority", "normal"))
+        except Exception:
+            pass
+
         self._safe(self._ws_broadcast, payload)
         sent_push = self._safe(self._web_push, payload) or 0
         if self._tray_notify:
@@ -242,3 +268,28 @@ def notify(title: str, body: str, **kwargs) -> None:
 
 def set_tray(fn: Optional[Callable[[str, str], None]]) -> None:
     _notifier.set_tray(fn)
+
+
+def release_held(user_active: bool = False) -> int:
+    """Deliver anything Restraint parked. Returns how many went out.
+
+    Called from the awareness loop and whenever the user shows up. Held
+    messages bypass the restraint decision on the way out — they have already
+    been judged once, and re-judging them is how a held message becomes a lost
+    one.
+    """
+    try:
+        from agent import restraint
+        payloads = restraint.due(user_active=user_active)
+    except Exception as e:
+        print(f"[Restraint] release failed: {e}")
+        return 0
+    notifier = get_notifier()
+    for payload in payloads:
+        try:
+            notifier._deliver(payload)
+        except Exception:
+            pass
+    if payloads:
+        print(f"[Restraint] released {len(payloads)} held message(s)")
+    return len(payloads)

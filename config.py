@@ -135,6 +135,12 @@ SANDBOX_WORKDIR = os.getenv("SANDBOX_WORKDIR", "~/Documents/Apex/sandbox")
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").strip().lower() in ("1", "true", "yes")
 RERANK_N = max(2, min(4, int(os.getenv("RERANK_N", "2"))))
 
+# Restraint (agent/restraint.py): hold non-urgent notifications until a moment
+# you actually respond in. High-priority messages are never held, held messages
+# are never dropped, and an unknown moment is treated as a good one - it learns
+# to be quieter, it never starts quiet. Set false to make Apex always speak.
+RESTRAINT_ENABLED = os.getenv("RESTRAINT_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
 # Memory consolidation cadence (agent/reflection.consolidate_if_due).
 # Consolidation distils recent activity into reflections and refreshes the
 # preference digest that rides in every system prompt. It used to run only when
