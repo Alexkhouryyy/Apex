@@ -112,7 +112,7 @@ def _stub(monkeypatch, *, results, pages, reply):
 
     monkeypatch.setattr(_res, "fetch", _fetch)
     monkeypatch.setattr(answers, "_synthesize",
-                        lambda q, c, model=None, history=None: reply)
+                        lambda q, c, model=None, history=None, on_token=None: reply)
 
 
 def test_end_to_end_produces_cited_answer(monkeypatch):
@@ -315,8 +315,8 @@ def test_research_tab_exists_in_the_shell():
     assert 'data-tab="research"' in html and 'id="tab-research"' in html
     # Cache version must move with any frontend change or clients keep the old
     # bundle and the tab silently does not exist for them.
-    assert "v=omni24" in html
-    assert "apex-shell-v24" in (root / "sw.js").read_text()
+    assert "v=omni25" in html
+    assert "apex-shell-v25" in (root / "sw.js").read_text()
 
 
 def test_answer_html_is_escaped_before_formatting():
@@ -524,7 +524,8 @@ def test_followup_searches_the_rewritten_query(monkeypatch):
     monkeypatch.setattr(_res, "fetch", lambda u, max_chars=None: "Canberra content. " * 50)
     monkeypatch.setattr(provider, "complete", lambda *a, **k: "Canberra 1908 compromise")
     monkeypatch.setattr(answers, "_synthesize",
-                        lambda q, c, model=None, history=None: "Because of a compromise [1].")
+                        lambda q, c, model=None, history=None, on_token=None:
+                        "Because of a compromise [1].")
 
     out = answers.answer("why was it chosen?", depth="quick", history=HISTORY)
     assert seen["query"] == "Canberra 1908 compromise"
@@ -868,7 +869,8 @@ def test_ordinal_resolves_end_to_end(monkeypatch):
     monkeypatch.setattr(_res, "search", _search)
     monkeypatch.setattr(_res, "fetch", lambda u, max_chars=None: "Melbourne content. " * 40)
     monkeypatch.setattr(answers, "_synthesize",
-                        lambda q, c, model=None, history=None: "Melbourne is large [1].")
+                        lambda q, c, model=None, history=None, on_token=None:
+                        "Melbourne is large [1].")
 
     out = answers.answer("what about the second one?", depth="quick",
                          history=HISTORY_WITH_SOURCES)
@@ -887,3 +889,208 @@ def test_frontend_sends_source_titles_in_history():
     fn = js[js.index("async function runResearch"):]
     fn = fn[:fn.index("\nasync function ")]
     assert "sources:" in fn and "title: s.title" in fn
+
+
+# --- CitationGate: the guarantee has to hold mid-stream ----------------------
+#
+# Streaming puts text on screen exactly where the reader is looking. An invalid
+# marker visible for one frame breaks "a citation you can see is a citation that
+# resolves" just as thoroughly as one left in the final text.
+
+def _gate(valid=(1, 2)):
+    return answers.CitationGate(set(valid))
+
+
+def _stream(text, valid=(1, 2), chunk=None):
+    """Feed `text` through a gate. chunk=None means one shot; chunk=1 means
+    character by character."""
+    g = _gate(valid)
+    if chunk is None:
+        out = g.feed(text)
+    else:
+        out = "".join(g.feed(text[i:i + chunk]) for i in range(0, len(text), chunk))
+    return out + g.flush(), g
+
+
+def test_valid_marker_streams_through():
+    out, g = _stream("Canberra is the capital [1].")
+    assert out == "Canberra is the capital [1]."
+    assert g.cited == {1} and g.dropped == []
+
+
+def test_invalid_marker_never_appears_in_the_stream():
+    out, g = _stream("A claim [9]. Another [1].")
+    assert "[9]" not in out
+    assert out == "A claim . Another [1]."   # spacing is tidied in the final render
+    assert g.dropped == [9]
+
+
+def test_partly_valid_group_is_repaired_mid_stream():
+    out, _ = _stream("Both agree [2, 9].")
+    assert out == "Both agree [2]."
+
+
+def test_chunking_cannot_change_the_output():
+    """THE invariant. Network chunk boundaries are arbitrary — a gate that only
+    works when a marker arrives whole is a gate that fails in production."""
+    text = ("Canberra is the capital [1]. Sydney is largest [2, 9]. "
+            "A bad one [7]. See [note] and [1,2] together.")
+    whole, _ = _stream(text)
+    for size in (1, 2, 3, 5, 7, 13):
+        piece, _ = _stream(text, chunk=size)
+        assert piece == whole, f"chunk size {size} diverged"
+
+
+def test_marker_split_across_chunks_is_still_validated():
+    g = _gate()
+    out = g.feed("Claim [") + g.feed("9") + g.feed("]. Next [1") + g.feed("].")
+    assert "[9]" not in out + g.flush()
+    assert "[1]" in out
+
+
+def test_non_citation_brackets_pass_through_untouched():
+    for text in ("See [note] here.", "A [markdown](http://x) link.",
+                 "Nested [[1]] brackets.", "Empty [] bracket."):
+        out, _ = _stream(text)
+        assert out == text, text
+
+
+def test_a_trailing_open_bracket_is_flushed_not_swallowed():
+    """Stream ends mid-marker: the text must still be delivered."""
+    out, _ = _stream("Ends abruptly [1")
+    assert out == "Ends abruptly [1"
+
+
+def test_an_overlong_run_is_released_rather_than_held():
+    """A stray '[' followed by digits must not hold the rest of the stream."""
+    long_run = "[" + "1234567890" * 4
+    out, _ = _stream(f"Text {long_run} more text")
+    assert out.endswith("more text")
+    assert "1234567890" in out
+
+
+def test_gate_agrees_with_the_batch_validator_on_markers():
+    """The streamed text and the final text must not disagree about which
+    citations are real — only about whitespace tidying."""
+    text = "One [1]. Two [9]. Three [2, 9]. Four [3]."
+    streamed, g = _stream(text, valid=(1, 2))
+    final, cited, dropped = answers.validate_citations(text, {1, 2})
+    assert answers._CITE_RE.findall(streamed) == answers._CITE_RE.findall(final)
+    assert g.cited == cited
+    assert sorted(g.dropped) == sorted(dropped)
+
+
+# --- streaming through the engine and the provider ---------------------------
+
+def test_answer_streams_gated_tokens(monkeypatch):
+    """End to end: tokens arrive, and the invalid marker is not among them."""
+    from tools import research as _res
+
+    monkeypatch.setattr(_res, "search", lambda q, num_results=None:
+                        [{"title": "A", "url": "https://a.com", "snippet": ""}])
+    monkeypatch.setattr(_res, "fetch", lambda u, max_chars=None: "Content here. " * 40)
+
+    def _synth(q, c, model=None, history=None, on_token=None):
+        text = "A real claim [1]. A bogus one [9]."
+        for i in range(0, len(text), 3):        # awkward boundaries on purpose
+            on_token(text[i:i + 3])
+        return text
+
+    monkeypatch.setattr(answers, "_synthesize", _synth)
+    seen = []
+    out = answers.answer("q", depth="quick", on_token=seen.append)
+
+    streamed = "".join(seen)
+    assert "[1]" in streamed
+    assert "[9]" not in streamed          # never shown, not merely removed later
+    assert "[9]" not in out["answer"]
+    assert out["dropped_citations"] == [9]
+
+
+def test_streaming_is_optional(monkeypatch):
+    """Voice and skill callers pass no on_token and must be unaffected."""
+    _stub(monkeypatch,
+          results=[{"title": "A", "url": "https://a.com", "snippet": ""}],
+          pages={"https://a.com": "Content. " * 40},
+          reply="An answer [1].")
+    out = answers.answer("q", depth="quick")
+    assert out["answer"] == "An answer [1]."
+
+
+def test_provider_streaming_falls_back_to_blocking(monkeypatch):
+    """A slow answer beats no answer."""
+    from agent import provider
+
+    class _BadClient:
+        class messages:
+            @staticmethod
+            def stream(**kw):
+                raise RuntimeError("stream unsupported")
+
+    monkeypatch.setattr(provider, "get_client", lambda m: _BadClient())
+    monkeypatch.setattr(provider, "complete",
+                        lambda m, s, u, max_tokens=0: "fallback answer")
+    got = provider.stream_complete("claude-x", "sys", "user", on_token=lambda t: None)
+    assert got == "fallback answer"
+
+
+def test_provider_streaming_yields_tokens(monkeypatch):
+    from agent import provider
+    import types
+
+    class _Delta:
+        type = "text_delta"
+        def __init__(self, text): self.text = text
+
+    class _Ev:
+        type = "content_block_delta"
+        def __init__(self, text): self.delta = _Delta(text)
+
+    class _Stream:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def __iter__(self): return iter([_Ev("Hel"), _Ev("lo")])
+
+    client = types.SimpleNamespace(
+        messages=types.SimpleNamespace(stream=lambda **kw: _Stream()))
+    monkeypatch.setattr(provider, "get_client", lambda m: client)
+    seen = []
+    got = provider.stream_complete("claude-x", "s", "u", on_token=seen.append)
+    assert got == "Hello" and seen == ["Hel", "lo"]
+
+
+def test_a_broken_token_consumer_does_not_kill_generation(monkeypatch):
+    from agent import provider
+    import types
+
+    class _Delta:
+        type = "text_delta"
+        def __init__(self, text): self.text = text
+
+    class _Ev:
+        type = "content_block_delta"
+        def __init__(self, text): self.delta = _Delta(text)
+
+    class _Stream:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def __iter__(self): return iter([_Ev("Hel"), _Ev("lo")])
+
+    client = types.SimpleNamespace(
+        messages=types.SimpleNamespace(stream=lambda **kw: _Stream()))
+    monkeypatch.setattr(provider, "get_client", lambda m: client)
+    got = provider.stream_complete(
+        "claude-x", "s", "u",
+        on_token=lambda t: (_ for _ in ()).throw(RuntimeError("ws gone")))
+    assert got == "Hello"
+
+
+def test_frontend_streams_via_textcontent_not_innerhtml():
+    """Model text is untrusted until the final escaped render."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    fn = js[js.index("function _researchToken"):]
+    fn = fn[:fn.index("\nfunction ")]
+    assert "textContent +=" in fn
+    assert "innerHTML +=" not in fn
+    assert "research_token" in js

@@ -400,7 +400,7 @@ def _build_context(selected: list[Passage]) -> str:
 
 
 def _synthesize(query: str, context: str, model: str | None = None,
-                history: list[dict] | None = None) -> str:
+                history: list[dict] | None = None, on_token=None) -> str:
     from agent import provider
 
     model = model or config.AGENT_MODEL
@@ -415,8 +415,8 @@ def _synthesize(query: str, context: str, model: str | None = None,
     parts.append(f"QUESTION:\n{query}")
     parts.append(f"SOURCES:\n{context}")
     parts.append("Answer the question using only these sources, citing as instructed.")
-    return provider.complete(model, _SYNTH_SYSTEM, "\n\n".join(parts),
-                             max_tokens=_SYNTH_MAX_TOKENS)
+    return provider.stream_complete(model, _SYNTH_SYSTEM, "\n\n".join(parts),
+                                    max_tokens=_SYNTH_MAX_TOKENS, on_token=on_token)
 
 
 # --- citation validation -----------------------------------------------------
@@ -450,6 +450,88 @@ def validate_citations(text: str, valid: set[int]) -> tuple[str, set[int], list[
     clean = re.sub(r"[ \t]+([.,;:!?])", r"\1", clean)
     clean = re.sub(r"[ \t]{2,}", " ", clean)
     return clean.strip(), cited, dropped
+
+
+class CitationGate:
+    """Validate `[n]` markers mid-stream, so a bad one is never shown at all.
+
+    Streaming and the product's one guarantee — a citation you can see is a
+    citation that resolves — collide unless validation becomes incremental. A
+    model emits `[9]` when five sources exist; if tokens go straight to the
+    screen, that marker is visible exactly where the reader is looking, and
+    stripping it afterwards is too late.
+
+    A marker is self-contained and short, so only marker-shaped text is ever
+    held back: on `[`, buffer the run of digits, commas and spaces until it
+    closes, then emit it validated or drop it. Anything that stops looking like
+    a marker (`[note`, `[[`, a markdown link) is released untouched, and an
+    over-long buffer is released too, so a stray bracket cannot swallow the
+    stream.
+
+    Output must not depend on how the text was chopped into chunks — network
+    boundaries are arbitrary, and a gate that only works on tidy ones fails in
+    production. `feed()` is fully incremental; the tests pin that invariant.
+    """
+
+    #: Past this, the run is not a citation — release it rather than hold the stream.
+    MAX_BUFFER = 24
+
+    def __init__(self, valid: set[int]):
+        self.valid = set(valid or ())
+        self.cited: set[int] = set()
+        self.dropped: list[int] = []
+        self._buf = ""          # includes the leading '[' while buffering
+
+    def feed(self, text: str) -> str:
+        out = []
+        for ch in text or "":
+            if not self._buf:
+                if ch == "[":
+                    self._buf = "["
+                else:
+                    out.append(ch)
+                continue
+            # Buffering a possible marker.
+            if ch == "]":
+                out.append(self._resolve(self._buf + "]"))
+                self._buf = ""
+            elif ch.isdigit() or ch in ", \t":
+                self._buf += ch
+                if len(self._buf) > self.MAX_BUFFER:
+                    out.append(self._buf)
+                    self._buf = ""
+            else:
+                # Not a citation after all. Release what we held; the breaking
+                # character may itself open a new candidate.
+                out.append(self._buf)
+                self._buf = ""
+                if ch == "[":
+                    self._buf = "["
+                else:
+                    out.append(ch)
+        return "".join(out)
+
+    def flush(self) -> str:
+        """Release anything still held when the stream ends."""
+        out, self._buf = self._buf, ""
+        return out
+
+    def _resolve(self, marker: str) -> str:
+        body = marker[1:-1]
+        nums = [int(p) for p in re.split(r"\s*,\s*", body) if p.strip().isdigit()]
+        if not nums:
+            return marker            # "[]" or "[ ]" — not a citation, pass through
+        keep = []
+        for n in nums:
+            if n in self.valid:
+                if n not in keep:
+                    keep.append(n)
+            else:
+                self.dropped.append(n)
+        if not keep:
+            return ""
+        self.cited.update(keep)
+        return "[" + ", ".join(str(n) for n in keep) + "]"
 
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -553,7 +635,7 @@ def audit_support(text: str, passages: list[Passage],
 # --- the engine --------------------------------------------------------------
 
 def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None,
-           history: list[dict] | None = None) -> dict:
+           history: list[dict] | None = None, on_token=None) -> dict:
     """Research `query` and return a cited answer.
 
     `history` is prior [{query, answer, sources?}] turns in this thread.
@@ -562,9 +644,13 @@ def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None,
     the writer as context — never as a source. `sources` is optional and reaches
     the rewriter only, so ordinals like "the second one" can be resolved.
 
+    `on_token` streams the answer as it is written. Tokens pass through a
+    CitationGate first, so a marker reaches the screen only if it resolves — the
+    guarantee has to hold mid-stream, not just in the final result.
+
     Returns {query, search_query, answer, sources, uncited_claims,
-    dropped_citations, error}. `error` is set (and `answer` empty) only when
-    nothing could be produced.
+    dropped_citations, weak_claims, error}. `error` is set (and `answer` empty)
+    only when nothing could be produced.
     """
     # A disconnected dashboard must never fail a research run: progress
     # reporting is a courtesy, the answer is the product.
@@ -608,12 +694,32 @@ def answer(query: str, depth: str = _DEFAULT_DEPTH, on_event=None,
         return _fail(query, "sources had no readable content", sources=sources)
 
     on_event("writing", {"sources": len({p.n for p in selected})})
+
+    # The gate is armed before the first token: which sources are real is
+    # already settled by the time the writer starts.
+    valid = {s.n for s in live}
+    gated = None
+    if on_token is not None:
+        gate = CitationGate(valid)
+
+        def gated(text: str) -> None:
+            safe = gate.feed(text)
+            if safe:
+                on_token(safe)
+
     try:
-        raw = _synthesize(query, _build_context(selected), history=turns)
+        raw = _synthesize(query, _build_context(selected), history=turns,
+                          on_token=gated)
     except Exception as e:
         return _fail(query, f"synthesis failed: {e}", sources=sources)
+    if gated is not None:
+        tail = gate.flush()
+        if tail:
+            try:
+                on_token(tail)
+            except Exception:
+                pass
 
-    valid = {s.n for s in live}
     clean, cited, dropped = validate_citations(raw, valid)
     for s in sources:
         s.cited = s.n in cited

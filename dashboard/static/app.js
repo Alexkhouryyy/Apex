@@ -183,6 +183,7 @@ function connectWS() {
     if (msg.type === 'research_source_done') _researchSourceDone(msg);
     if (msg.type === 'research_ranking')     _researchStep('Selecting the relevant passages…');
     if (msg.type === 'research_writing')     _researchStep(`Writing from ${msg.sources} sources…`);
+    if (msg.type === 'research_token')       _researchToken(msg.delta);
     if (msg.type === 'research_result')      _researchResult(msg);
     if (msg.type === 'research_error')       _researchError(msg.error);
     // Refresh self-improvement panel when a rollback check completes
@@ -3933,6 +3934,22 @@ function _researchRewrite(msg) {
     el.textContent = `searched: ${msg.search_query}`;
     el.style.display = '';
   }
+}
+
+// Tokens land as plain text via textContent: the model's words are untrusted
+// until the final render escapes and formats them. Markers arriving here have
+// already cleared the server-side CitationGate, so nothing unbacked is shown.
+function _researchToken(delta) {
+  if (!_researchPending || !delta) return;
+  const box = _researchPending.querySelector('.research-answer');
+  let live = box.querySelector('.research-streaming');
+  if (!live) {
+    box.innerHTML = '';
+    live = document.createElement('p');
+    live.className = 'research-streaming';
+    box.appendChild(live);
+  }
+  live.textContent += delta;
 }
 
 function _researchDone() {

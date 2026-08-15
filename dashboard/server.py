@@ -1451,12 +1451,17 @@ async def research_endpoint(request: Request):
             {"type": f"research_{phase}", "phase": phase, **payload}
         )
 
+    def _token(delta: str):
+        ws_manager.broadcast_threadsafe({"type": "research_token", "delta": delta})
+
+    on_token = _token if getattr(config, "RESEARCH_STREAM_ENABLED", True) else None
+
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(
             None,
             lambda: answers.answer(query, depth=depth, on_event=_event,
-                                   history=history),
+                                   history=history, on_token=on_token),
         )
     except Exception as e:
         ws_manager.broadcast_threadsafe({"type": "research_error", "error": str(e)})

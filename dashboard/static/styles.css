@@ -2291,3 +2291,10 @@ pre.md-pre code { background: none; border: none; padding: 0; }
 .research-weak ul { margin: 8px 0 0 18px; }
 .research-weak li { margin-bottom: 6px; opacity: .9; }
 .research-weak .weak-cites { font-weight: 600; opacity: .7; }
+
+/* Streaming answer: plain text until the validated render replaces it. */
+.research-streaming { white-space: pre-wrap; }
+.research-streaming::after {
+  content: '▍'; opacity: .5; animation: research-caret 1s steps(2) infinite;
+}
+@keyframes research-caret { 50% { opacity: 0; } }

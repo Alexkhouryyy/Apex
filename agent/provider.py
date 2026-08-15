@@ -428,3 +428,50 @@ def complete(model: str, system: str, user: str, max_tokens: int = 2048) -> str:
     return "".join(
         getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text"
     ).strip()
+
+
+def stream_complete(model: str, system: str, user: str, max_tokens: int = 2048,
+                    on_token=None) -> str:
+    """Streaming counterpart to complete(). Returns the full text.
+
+    Works across every provider without branching: the Anthropic SDK yields
+    `content_block_delta` events natively, and OpenAIAdapter's _OpenAIStream
+    fabricates the same shape for OpenAI, Gemini and Ollama.
+
+    Falls back to the blocking path on any streaming failure — a slow answer is
+    strictly better than no answer, and the caller cannot tell the difference
+    apart from the tokens not arriving early.
+    """
+    if on_token is None:
+        return complete(model, system, user, max_tokens=max_tokens)
+
+    kwargs = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+    }
+    try:
+        client = get_client(model)
+        acc = []
+        with client.messages.stream(**kwargs) as stream:
+            for event in stream:
+                if getattr(event, "type", "") != "content_block_delta":
+                    continue
+                delta = getattr(event, "delta", None)
+                if delta is None or getattr(delta, "type", "") != "text_delta":
+                    continue
+                text = getattr(delta, "text", "")
+                if not text:
+                    continue
+                acc.append(text)
+                try:
+                    on_token(text)
+                except Exception:
+                    pass          # a broken consumer must not kill generation
+        out = "".join(acc).strip()
+        if out:
+            return out
+    except Exception as e:
+        print(f"[Provider] streaming failed ({e}); falling back to blocking call")
+    return complete(model, system, user, max_tokens=max_tokens)

