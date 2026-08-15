@@ -283,3 +283,44 @@ def test_format_markdown_marks_uncited_and_failed_sources():
     assert "not cited" in md
     assert "https://c.com" not in md          # failed sources are not listed
     assert "1 source(s) could not be fetched" in md
+
+
+# --- dashboard wiring --------------------------------------------------------
+
+def test_research_routes_are_registered():
+    from dashboard import server
+    paths = {r.path for r in server.app.routes if hasattr(r, "path")}
+    assert "/api/research" in paths and "/api/research/save" in paths
+
+
+def test_frontend_listens_for_the_events_the_engine_emits():
+    """The old research path broadcast progress events that no client ever
+    handled. This pins the contract so that cannot silently happen again."""
+    from pathlib import Path
+    app_js = Path(__file__).resolve().parents[1] / "dashboard/static/app.js"
+    js = app_js.read_text()
+    for phase in ("search", "sources", "reading", "source_done", "ranking",
+                  "writing", "result", "error"):
+        assert f"research_{phase}" in js, f"frontend ignores research_{phase}"
+
+
+def test_research_tab_exists_in_the_shell():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "dashboard/static"
+    html = (root / "index.html").read_text()
+    assert 'data-tab="research"' in html and 'id="tab-research"' in html
+    # Cache version must move with any frontend change or clients keep the old
+    # bundle and the tab silently does not exist for them.
+    assert "v=omni21" in html
+    assert "apex-shell-v21" in (root / "sw.js").read_text()
+
+
+def test_answer_html_is_escaped_before_formatting():
+    """The answer is synthesized from arbitrary web pages, so it is untrusted.
+    marked.parse() emits raw HTML and must not be what renders it."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    fn = js[js.index("function _researchFormat"):]
+    fn = fn[:fn.index("\nfunction ")]
+    assert "escapeHTML" in fn
+    assert "marked.parse" not in fn

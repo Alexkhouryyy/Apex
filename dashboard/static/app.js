@@ -176,6 +176,14 @@ function connectWS() {
     if (msg.type === 'constellation_answer')   _cstAnswer(msg);
     if (msg.type === 'constellation_done')     _cstDone(msg);
     if (msg.type === 'constellation_error')    _cstError(msg.error);
+    if (msg.type === 'research_search')      _researchStep(`Searching: ${msg.query}`);
+    if (msg.type === 'research_sources')     _researchSources(msg.sources);
+    if (msg.type === 'research_reading')     _researchStep(`Reading ${msg.count} sources…`);
+    if (msg.type === 'research_source_done') _researchSourceDone(msg);
+    if (msg.type === 'research_ranking')     _researchStep('Selecting the relevant passages…');
+    if (msg.type === 'research_writing')     _researchStep(`Writing from ${msg.sources} sources…`);
+    if (msg.type === 'research_result')      _researchResult(msg);
+    if (msg.type === 'research_error')       _researchError(msg.error);
     // Refresh self-improvement panel when a rollback check completes
     if (msg.type === 'rollback_done' && document.getElementById('tab-reflections')?.classList.contains('active')) {
       loadReflections();
@@ -234,6 +242,7 @@ async function loadTab(tab) {
     approvals: loadApprovals,
     learning: loadLearning,
     constellation: loadConstellation,
+    research: loadResearch,
   };
   if (fns[tab]) try { await fns[tab](); } catch (e) { console.error('loadTab', tab, e); }
 }
@@ -3785,3 +3794,194 @@ function _ellipse(ctx, x, y, rx, ry, fill) {
   ctx.fill();
 }
 
+
+// ---------------------------------------------------------------------------
+// RESEARCH — cited answers
+//
+// The answer text is synthesized from arbitrary web pages, so it is untrusted
+// input. It is escaped before any formatting runs, and citation links are built
+// from the server's source list rather than from anything the model emitted —
+// a page that asks the model to write a link cannot become one.
+// ---------------------------------------------------------------------------
+let _researchRunning = false;
+let _researchLast = null;
+
+function _researchReset() {
+  document.getElementById('research-sources').innerHTML = '';
+  document.getElementById('research-answer').innerHTML = '';
+  document.getElementById('research-warnings').innerHTML = '';
+  document.getElementById('research-save').style.display = 'none';
+  _researchLast = null;
+}
+
+function _researchStep(text) {
+  const box = document.getElementById('research-progress');
+  if (!box) return;
+  const d = document.createElement('div');
+  d.className = 'council-step';
+  d.textContent = text;
+  box.appendChild(d);
+}
+
+function _safeUrl(u) {
+  try {
+    const parsed = new URL(u);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.href : '';
+  } catch (e) { return ''; }
+}
+
+// Source cards render before the first answer token: seeing which pages are
+// being read is most of the perceived speed.
+function _researchSources(sources) {
+  const box = document.getElementById('research-sources');
+  if (!box) return;
+  box.innerHTML = '';
+  (sources || []).forEach(s => {
+    const card = document.createElement('a');
+    card.className = 'research-source pending';
+    card.id = 'research-src-' + s.n;
+    const href = _safeUrl(s.url);
+    if (href) { card.href = href; card.target = '_blank'; card.rel = 'noopener noreferrer'; }
+    card.innerHTML =
+      `<span class="research-src-n">${s.n}</span>` +
+      `<span class="research-src-body">` +
+      `<span class="research-src-title">${escapeHTML(s.title || s.domain || s.url)}</span>` +
+      `<span class="research-src-domain">${escapeHTML(s.domain || '')}</span></span>`;
+    box.appendChild(card);
+  });
+}
+
+function _researchSourceDone(s) {
+  const card = document.getElementById('research-src-' + s.n);
+  if (!card) return;
+  card.classList.remove('pending');
+  card.classList.add(s.status === 'ok' ? 'ok' : 'failed');
+  if (s.status !== 'ok') {
+    card.title = 'Could not fetch: ' + (s.error || 'unknown error');
+  }
+}
+
+// Minimal Markdown: headings, bold, bullets, paragraphs. Deliberately not
+// marked.parse() — that emits raw HTML, which would turn a hostile page into
+// script in this dashboard.
+function _researchFormat(text, sources) {
+  const byNum = {};
+  (sources || []).forEach(s => { byNum[s.n] = s; });
+
+  const cite = escaped => escaped.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, (m, group) => {
+    const links = group.split(',').map(part => {
+      const n = parseInt(part.trim(), 10);
+      const src = byNum[n];
+      const href = src ? _safeUrl(src.url) : '';
+      if (!href) return `<sup class="cite-dead">[${n}]</sup>`;
+      const label = escapeHTML(src.title || src.domain || src.url);
+      return `<a class="cite" href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer" title="${label}">[${n}]</a>`;
+    });
+    return `<sup class="cite-group">${links.join('')}</sup>`;
+  });
+
+  const inline = s => cite(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  const out = [];
+  let list = null;
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trim();
+    if (!line) { if (list) { out.push(list + '</ul>'); list = null; } continue; }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    const b = line.match(/^[-*+]\s+(.*)$/);
+    if (h) {
+      if (list) { out.push(list + '</ul>'); list = null; }
+      const lvl = Math.min(6, h[1].length + 2);
+      out.push(`<h${lvl}>${inline(escapeHTML(h[2]))}</h${lvl}>`);
+    } else if (b) {
+      if (!list) list = '<ul>';
+      list += `<li>${inline(escapeHTML(b[1]))}</li>`;
+    } else {
+      if (list) { out.push(list + '</ul>'); list = null; }
+      out.push(`<p>${inline(escapeHTML(line))}</p>`);
+    }
+  }
+  if (list) out.push(list + '</ul>');
+  return out.join('\n');
+}
+
+function _researchResult(data) {
+  _researchRunning = false;
+  const btn = document.getElementById('research-run');
+  btn.disabled = false; btn.textContent = 'Research';
+
+  if (data.error) { _researchError(data.error); return; }
+
+  _researchLast = data;
+  (data.sources || []).forEach(_researchSourceDone);
+  document.getElementById('research-answer').innerHTML =
+    _researchFormat(data.answer, data.sources);
+  document.getElementById('research-save').style.display = '';
+
+  // Be honest about the soft spots rather than presenting a uniform wall of
+  // confidence: a citation is a pointer to check, not a proof.
+  const warn = document.getElementById('research-warnings');
+  const bits = [];
+  const failed = (data.sources || []).filter(s => s.status !== 'ok').length;
+  if (failed) bits.push(`${failed} source${failed > 1 ? 's' : ''} could not be fetched.`);
+  if ((data.dropped_citations || []).length) {
+    bits.push(`${data.dropped_citations.length} citation(s) pointed at sources that don't exist and were removed.`);
+  }
+  const un = (data.uncited_claims || []).length;
+  if (un) bits.push(`${un} statement${un > 1 ? 's' : ''} carry no citation — treat as unverified.`);
+  warn.innerHTML = bits.length
+    ? `<div class="research-warn">${bits.map(escapeHTML).join(' ')}</div>` : '';
+}
+
+function _researchError(err) {
+  _researchRunning = false;
+  const btn = document.getElementById('research-run');
+  if (btn) { btn.disabled = false; btn.textContent = 'Research'; }
+  document.getElementById('research-answer').innerHTML =
+    `<div class="research-warn">${escapeHTML(err)}</div>`;
+}
+
+async function runResearch() {
+  if (_researchRunning) return;
+  const q = document.getElementById('research-query').value.trim();
+  if (!q) return;
+  _researchRunning = true;
+  _researchReset();
+  document.getElementById('research-progress').innerHTML = '';
+  const btn = document.getElementById('research-run');
+  btn.disabled = true; btn.textContent = 'Researching…';
+  try {
+    const result = await api('/api/research', {
+      method: 'POST',
+      body: { query: q, depth: document.getElementById('research-depth').value },
+    });
+    if (_researchRunning) _researchResult(result);   // fallback if WS missed it
+  } catch (e) {
+    _researchError('Request failed: ' + e.message);
+  }
+}
+
+async function saveResearch() {
+  if (!_researchLast) return;
+  const btn = document.getElementById('research-save');
+  btn.disabled = true;
+  try {
+    await api('/api/research/save', { method: 'POST', body: _researchLast });
+    btn.textContent = 'Saved ✓';
+    setTimeout(() => { btn.textContent = 'Save to Documents'; btn.disabled = false; }, 2000);
+  } catch (e) {
+    btn.textContent = 'Save failed';
+    btn.disabled = false;
+  }
+}
+
+async function loadResearch() {
+  const form = document.getElementById('research-form');
+  if (!form || form._wired) return;
+  form._wired = true;
+  form.addEventListener('submit', e => { e.preventDefault(); runResearch(); });
+  document.getElementById('research-save')
+    ?.addEventListener('click', () => saveResearch());
+}

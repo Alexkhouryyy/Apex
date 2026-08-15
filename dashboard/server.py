@@ -1431,6 +1431,58 @@ async def council_endpoint(request: Request):
     return {"ok": True, **payload}
 
 
+# --- Research: cited answers ---
+@app.post("/api/research")
+async def research_endpoint(request: Request):
+    body = await request.json()
+    query = (body.get("query") or "").strip()
+    depth = body.get("depth") or "standard"
+    if not query:
+        return JSONResponse({"error": "empty query"}, status_code=400)
+
+    from agent import answers
+
+    def _event(phase: str, payload: dict):
+        # Source cards render before the first answer token — showing which
+        # pages are being read is most of the perceived speed.
+        ws_manager.broadcast_threadsafe(
+            {"type": f"research_{phase}", "phase": phase, **payload}
+        )
+
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None, lambda: answers.answer(query, depth=depth, on_event=_event)
+        )
+    except Exception as e:
+        ws_manager.broadcast_threadsafe({"type": "research_error", "error": str(e)})
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    if result.get("error"):
+        ws_manager.broadcast_threadsafe(
+            {"type": "research_error", "error": result["error"]}
+        )
+    ws_manager.broadcast_threadsafe({"type": "research_result", **result})
+    return {"ok": not result.get("error"), **result}
+
+
+@app.post("/api/research/save")
+async def research_save(request: Request):
+    """Save a finished answer to Documents, citations and all."""
+    body = await request.json()
+    query = (body.get("query") or "").strip() or "Research"
+    if not body.get("answer"):
+        return JSONResponse({"error": "nothing to save"}, status_code=400)
+
+    from agent import answers, documents
+    md = answers.format_markdown({
+        "error": "", "answer": body.get("answer", ""),
+        "sources": body.get("sources") or [],
+    })
+    doc = documents.create(title=f"Research: {query}", content=md)
+    return {"ok": True, "id": doc["id"]}
+
+
 # --- Compare: blind side-by-side model testing (complements the council) ---
 @app.get("/api/compare/roster")
 async def compare_roster():

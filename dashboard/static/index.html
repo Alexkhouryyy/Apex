@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="Apex">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="/static/icons/favicon-64.png">
-<link rel="stylesheet" href="/static/styles.css?v=omni20">
-<link rel="stylesheet" href="/static/mobile.css?v=omni20">
+<link rel="stylesheet" href="/static/styles.css?v=omni21">
+<link rel="stylesheet" href="/static/mobile.css?v=omni21">
 <script src="/static/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
@@ -47,6 +47,7 @@
     <button data-tab="compare" class="nav-btn"><span class="icon">⚔</span>Compare</button>
     <button data-tab="documents" class="nav-btn"><span class="icon">✍</span>Documents</button>
     <button data-tab="constellation" class="nav-btn"><span class="icon">✷</span>Constellation</button>
+    <button data-tab="research" class="nav-btn"><span class="icon">⁂</span>Research</button>
 
     <div class="nav-group-label">Intelligence</div>
     <button data-tab="goals" class="nav-btn"><span class="icon">◇</span>Goals</button>
@@ -828,6 +829,32 @@
     <div id="council-transcript" class="council-transcript"></div>
   </section>
 
+  <!-- RESEARCH — cited answers -->
+  <section id="tab-research" class="tab">
+    <header class="page-head">
+      <h1>Research</h1>
+      <div class="page-sub">Searches the live web, reads the pages, and answers with every claim cited — click a <strong>[n]</strong> to open the source it came from.</div>
+    </header>
+    <form id="research-form" class="add-form vertical">
+      <textarea id="research-query" placeholder="Ask anything — you'll get an answer you can check…" rows="3" required></textarea>
+      <div class="council-controls">
+        <label class="chat-tool-field">Depth
+          <select id="research-depth">
+            <option value="quick">Quick — 3 sources</option>
+            <option value="standard" selected>Standard — 6 sources</option>
+            <option value="deep">Deep — 10 sources</option>
+          </select>
+        </label>
+        <button type="submit" id="research-run" class="primary-btn">Research</button>
+        <button type="button" id="research-save" class="ghost-btn" style="display:none">Save to Documents</button>
+      </div>
+    </form>
+    <div id="research-progress" class="council-progress"></div>
+    <div id="research-sources" class="research-sources"></div>
+    <div id="research-answer" class="research-answer"></div>
+    <div id="research-warnings" class="research-warnings"></div>
+  </section>
+
   <!-- COMPARE — blind side-by-side model testing -->
   <section id="tab-compare" class="tab">
     <header class="page-head">
@@ -1019,9 +1046,9 @@
   <button class="ib-no" id="install-no">Not now</button>
 </div>
 
-<script src="/static/app.js?v=omni20"></script>
-<script src="/static/voice-mobile.js?v=omni20"></script>
+<script src="/static/app.js?v=omni21"></script>
+<script src="/static/voice-mobile.js?v=omni21"></script>
 <script type="module" src="/static/avatar3d.js?v=vision3"></script>
-<script type="module" src="/static/cst3d.js?v=omni20"></script>
+<script type="module" src="/static/cst3d.js?v=omni21"></script>
 </body>
 </html>
