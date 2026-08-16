@@ -1371,11 +1371,21 @@ async def chat_endpoint(request: Request):
     body = await request.json()
     user_text = (body.get("message") or "").strip()
     chat_id = body.get("chat_id") or str(uuid.uuid4())[:8]
+    # Which conversation this belongs to. The client sends it back so a reload
+    # continues where you were rather than starting over.
+    from agent import conversations
+    thread_id = body.get("thread_id")
+    try:
+        thread_id = int(thread_id) if thread_id else conversations.create()
+    except (TypeError, ValueError):
+        thread_id = conversations.create()
 
     if not user_text:
         return JSONResponse({"error": "empty message"}, status_code=400)
     if not _agent_ref:
         return JSONResponse({"error": "agent not ready"}, status_code=503)
+
+    conversations.add_message(thread_id, "user", user_text)
 
     async with _chat_lock:
         streamer = ChatStreamer(chat_id)
@@ -1412,12 +1422,14 @@ async def chat_endpoint(request: Request):
     # feedback (👍/👎) to the right bubble.
     session_id = tel_mod._session_id
     turn_index = tel_mod.current_turn()
+    conversations.add_message(thread_id, "agent", response)
     ws_manager.broadcast_threadsafe({
         "type": "chat_done",
         "response": response,
         "chat_id": chat_id,
         "session_id": session_id,
         "turn_index": turn_index,
+        "thread_id": thread_id,
     })
     return {
         "ok": True,
@@ -1425,6 +1437,7 @@ async def chat_endpoint(request: Request):
         "chat_id": chat_id,
         "session_id": session_id,
         "turn_index": turn_index,
+        "thread_id": thread_id,
     }
 
 
@@ -1485,6 +1498,31 @@ async def council_endpoint(request: Request):
     }
     ws_manager.broadcast_threadsafe({"type": "council_done", **payload})
     return {"ok": True, **payload}
+
+
+# --- Chat conversations: history that survives closing the tab ---
+@app.get("/api/chat/threads")
+async def chat_threads():
+    from agent import conversations
+    return {"threads": conversations.list_threads()}
+
+
+@app.get("/api/chat/threads/{thread_id}")
+async def chat_thread(thread_id: int):
+    from agent import conversations
+    return {"id": thread_id, "messages": conversations.messages(thread_id)}
+
+
+@app.post("/api/chat/threads")
+async def chat_thread_new():
+    from agent import conversations
+    return {"id": conversations.create()}
+
+
+@app.delete("/api/chat/threads/{thread_id}")
+async def chat_thread_delete(thread_id: int):
+    from agent import conversations
+    return {"ok": conversations.delete(thread_id)}
 
 
 # --- Research: cited answers ---

@@ -164,7 +164,10 @@ function connectWS() {
       if (['skill_forge', 'cortex', 'write_approval'].includes(msg.kind)) refreshApprovalsBadge();
     }
     if (msg.type === 'chat_token') { _chatAppendToken(msg.delta, msg.chat_id); _setApexState('speaking'); }
-    if (msg.type === 'chat_done')  { _chatFinalize(msg.chat_id, msg.response, msg.session_id, msg.turn_index); _setApexState('idle'); }
+    if (msg.type === 'chat_done')  {
+      if (msg.thread_id) { _setActiveThread(msg.thread_id); _loadThreadList(); }
+      _chatFinalize(msg.chat_id, msg.response, msg.session_id, msg.turn_index); _setApexState('idle');
+    }
     if (msg.type === 'chat_error') { _chatError(msg.error, msg.chat_id); _setApexState('idle'); }
     if (msg.type === 'chat_tool')  { _chatToolEvent(msg); }
     if (msg.type === 'council_progress')    _councilProgress(msg.message);
@@ -1680,6 +1683,11 @@ function loadChat() {
   const sendBtn = document.getElementById('chat-send');
   loadModelPicker();
   _chatSyncEmpty();
+  if (!input._threadsWired) {
+    input._threadsWired = true;
+    document.getElementById('chat-new')?.addEventListener('click', _newThread);
+    _restoreConversation();
+  }
   if (input._chatWired) return;
   input._chatWired = true;
   sendBtn.addEventListener('click', sendChat);
@@ -1794,7 +1802,9 @@ async function sendChat() {
   activeChatId = chatId;
 
   try {
-    await api('/api/chat', { method: 'POST', body: { message: text, chat_id: chatId } });
+    await api('/api/chat', { method: 'POST', body: {
+      message: text, chat_id: chatId, thread_id: _activeThread(),
+    } });
   } catch (e) {
     if (activeChatId === chatId) _chatError(`HTTP error: ${e.message}`, chatId);
     return;
@@ -4240,4 +4250,76 @@ function _chatToolsFinalize() {
   // a fresh one instead of appending to the last answer's tools.
   const strip = document.getElementById('chat-tools-live');
   if (strip) strip.removeAttribute('id');
+}
+
+// ---------------------------------------------------------------------------
+// CONVERSATIONS — history that survives closing the tab.
+//
+// Chat history lived in sessionStorage, so a reload erased it. It now lives in
+// SQLite, in its own store rather than a view over turn_log: session_id there
+// is per-process, so an always-on Apex would show one endless thread.
+// ---------------------------------------------------------------------------
+const _THREAD_KEY = 'apex_active_thread';
+
+function _activeThread() {
+  try { return localStorage.getItem(_THREAD_KEY) || null; } catch (e) { return null; }
+}
+function _setActiveThread(id) {
+  try {
+    if (id == null) localStorage.removeItem(_THREAD_KEY);
+    else localStorage.setItem(_THREAD_KEY, String(id));
+  } catch (e) {}
+}
+
+async function _loadThreadList() {
+  const list = document.getElementById('chat-thread-list');
+  if (!list) return;
+  let threads = [];
+  try { threads = (await api('/api/chat/threads')).threads || []; } catch (e) { return; }
+  const active = _activeThread();
+  list.innerHTML = '';
+  threads.forEach(t => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-thread' + (String(t.id) === String(active) ? ' active' : '');
+    btn.textContent = t.title;
+    btn.title = `${t.messages} message(s)`;
+    btn.addEventListener('click', () => _openThread(t.id));
+    list.appendChild(btn);
+  });
+}
+
+async function _openThread(id) {
+  const msgs = document.getElementById('chat-messages');
+  if (!msgs) return;
+  _setActiveThread(id);
+  msgs.innerHTML = '';
+  try {
+    const data = await api(`/api/chat/threads/${id}`);
+    (data.messages || []).forEach(m => _appendChatMsg(m.role, m.text, { skipHistory: true }));
+  } catch (e) {}
+  _chatSyncEmpty();
+  _loadThreadList();
+}
+
+function _newThread() {
+  // Created lazily by the server on first send: clicking New should not litter
+  // the list with empty conversations you never used.
+  _setActiveThread(null);
+  const msgs = document.getElementById('chat-messages');
+  if (msgs) msgs.innerHTML = '';
+  _chatSyncEmpty();
+  _loadThreadList();
+  document.getElementById('chat-input')?.focus();
+}
+
+async function _restoreConversation() {
+  const id = _activeThread();
+  if (id) { await _openThread(id); return; }
+  // First visit on this device: reopen whatever you were last working on.
+  try {
+    const threads = (await api('/api/chat/threads')).threads || [];
+    if (threads.length) { await _openThread(threads[0].id); return; }
+  } catch (e) {}
+  _loadThreadList();
 }

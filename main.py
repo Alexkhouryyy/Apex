@@ -79,6 +79,7 @@ def main():
     from agent import reranker as _rr_init; _rr_init.init_db()
     from agent import documents as _docs_init; _docs_init.init_db()
     from agent import restraint as _restraint_init; _restraint_init.init_db()
+    from agent import conversations as _conv_init; _conv_init.init_db()
     from agent import lessons as _lessons_init; _lessons_init.init_db()
     from agent import initiative as _init_init; _init_init.init_db()
     session_id = longterm.start_session()

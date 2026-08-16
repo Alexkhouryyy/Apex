@@ -2370,3 +2370,29 @@ pre.md-pre code { background: none; border: none; padding: 0; }
   opacity: .8; max-height: 220px; overflow-y: auto;
 }
 .chat-tool.open .ct-preview { display: block; }
+
+/* ============== CONVERSATIONS — history that outlives the tab ============== */
+.chat-threads {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 10px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.chat-new-btn {
+  flex: 0 0 auto; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--panel); color: inherit;
+  font: inherit; font-size: 12.5px;
+}
+.chat-new-btn:hover { border-color: var(--accent); }
+.chat-thread-list {
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+.chat-thread {
+  flex: 0 0 auto; max-width: 230px; padding: 6px 10px; border-radius: 8px;
+  cursor: pointer; border: 1px solid transparent; background: var(--bg-2);
+  color: inherit; font: inherit; font-size: 12.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: .7;
+}
+.chat-thread:hover { opacity: 1; border-color: var(--border); }
+.chat-thread.active { opacity: 1; border-color: var(--accent); background: var(--panel); }
