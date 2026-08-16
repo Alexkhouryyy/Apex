@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="Apex">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="/static/icons/favicon-64.png">
-<link rel="stylesheet" href="/static/styles.css?v=omni26">
-<link rel="stylesheet" href="/static/mobile.css?v=omni26">
+<link rel="stylesheet" href="/static/styles.css?v=omni27">
+<link rel="stylesheet" href="/static/mobile.css?v=omni27">
 <script src="/static/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
@@ -773,24 +773,63 @@
       <h1>Chat</h1>
       <div class="page-sub">Talk to the agent directly — type or use the mic</div>
     </header>
-    <div class="chat-toolbar">
-      <label class="chat-tool-field">Model
-        <select id="chat-model"></select>
-      </label>
-      <label class="chat-tool-toggle">
-        <input type="checkbox" id="voice-output"> Speak replies
-      </label>
-      <label class="chat-tool-field">Voice
-        <select id="voice-engine">
-          <option value="browser">Browser</option>
-          <option value="openai">OpenAI</option>
-        </select>
-      </label>
-      <span id="chat-model-msg" class="chat-model-msg"></span>
-      <button type="button" id="chat-clear" class="chat-clear-btn" title="Clear chat history">Clear</button>
-    </div>
+    <!-- Settings are collapsed by default. They used to occupy the top of the
+         page while the conversation got the leftovers — config first, the thing
+         you came to do second. -->
+    <details class="chat-settings">
+      <summary>Settings</summary>
+      <div class="chat-toolbar">
+        <label class="chat-tool-field">Model
+          <select id="chat-model"></select>
+        </label>
+        <label class="chat-tool-toggle">
+          <input type="checkbox" id="voice-output"> Speak replies
+        </label>
+        <label class="chat-tool-field">Voice
+          <select id="voice-engine">
+            <option value="browser">Browser</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </label>
+        <span id="chat-model-msg" class="chat-model-msg"></span>
+        <button type="button" id="chat-clear" class="chat-clear-btn" title="Clear chat history">Clear</button>
+      </div>
+    </details>
     <div class="chat-wrap">
-      <div id="chat-messages" class="chat-messages"></div>
+      <div id="chat-messages" class="chat-messages">
+        <!-- Empty state. A blank page tells you nothing about what Apex can do,
+             so these four show its actual range: live cited research, memory,
+             goals, and real access to this machine. Clicking one fills the box. -->
+        <div id="chat-empty" class="chat-empty">
+          <div class="chat-empty-title">What do you need?</div>
+          <div class="chat-empty-sub">
+            Apex can search and cite the live web, run things on this machine,
+            remember what matters, and keep working when you're away.
+          </div>
+          <div class="chat-suggestions">
+            <button type="button" class="chat-suggestion" data-prompt="What's happened in AI this week? Cite your sources.">
+              <span class="cs-icon">⁂</span>
+              <span class="cs-text"><strong>Research something</strong>
+                <em>every claim cited, click to check it</em></span>
+            </button>
+            <button type="button" class="chat-suggestion" data-prompt="Check this machine's disk space and tell me if anything looks wrong.">
+              <span class="cs-icon">▣</span>
+              <span class="cs-text"><strong>Look at my machine</strong>
+                <em>real shell access, sandboxed when self-directed</em></span>
+            </button>
+            <button type="button" class="chat-suggestion" data-prompt="Remember that I prefer short, direct answers with no preamble.">
+              <span class="cs-icon">◎</span>
+              <span class="cs-text"><strong>Teach it something</strong>
+                <em>it carries this into every future reply</em></span>
+            </button>
+            <button type="button" class="chat-suggestion" data-prompt="What are my active goals, and is any of them stalled?">
+              <span class="cs-icon">◇</span>
+              <span class="cs-text"><strong>Check on your goals</strong>
+                <em>it tracks these while you're away</em></span>
+            </button>
+          </div>
+        </div>
+      </div>
       <form id="chat-form" class="chat-form" onsubmit="return false">
         <button type="button" id="chat-mic" class="chat-mic-btn" title="Tap to speak">🎙</button>
         <textarea id="chat-input" class="chat-input" placeholder="Type a message… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
@@ -1045,9 +1084,9 @@
   <button class="ib-no" id="install-no">Not now</button>
 </div>
 
-<script src="/static/app.js?v=omni26"></script>
-<script src="/static/voice-mobile.js?v=omni26"></script>
+<script src="/static/app.js?v=omni27"></script>
+<script src="/static/voice-mobile.js?v=omni27"></script>
 <script type="module" src="/static/avatar3d.js?v=vision3"></script>
-<script type="module" src="/static/cst3d.js?v=omni26"></script>
+<script type="module" src="/static/cst3d.js?v=omni27"></script>
 </body>
 </html>

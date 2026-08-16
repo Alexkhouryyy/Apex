@@ -1636,12 +1636,49 @@ function _historyClear() {
   try { sessionStorage.removeItem(_HIST_KEY); } catch(e) {}
   const msgs = document.getElementById('chat-messages');
   if (msgs) msgs.innerHTML = '';
+  _chatSyncEmpty();
+}
+
+// The empty state is the difference between "what can this do?" and a blank
+// page that answers nothing. It lives inside #chat-messages, so it is restored
+// on clear rather than destroyed once and gone.
+const _CHAT_EMPTY_HTML = (() => {
+  const el = document.getElementById('chat-empty');
+  return el ? el.outerHTML : '';
+})();
+
+function _chatSyncEmpty() {
+  const msgs = document.getElementById('chat-messages');
+  if (!msgs) return;
+  const hasMessages = !!msgs.querySelector('.chat-msg, .chat-message, [data-role]');
+  let empty = document.getElementById('chat-empty');
+  if (hasMessages) {
+    if (empty) empty.remove();
+    return;
+  }
+  if (!empty && _CHAT_EMPTY_HTML) {
+    msgs.insertAdjacentHTML('afterbegin', _CHAT_EMPTY_HTML);
+    empty = document.getElementById('chat-empty');
+  }
+  if (empty && !empty._wired) {
+    empty._wired = true;
+    empty.querySelectorAll('.chat-suggestion').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const input = document.getElementById('chat-input');
+        if (!input) return;
+        input.value = btn.dataset.prompt || '';
+        input.focus();
+        input.dispatchEvent(new Event('input'));   // let autosize react
+      });
+    });
+  }
 }
 
 function loadChat() {
   const input = document.getElementById('chat-input');
   const sendBtn = document.getElementById('chat-send');
   loadModelPicker();
+  _chatSyncEmpty();
   if (input._chatWired) return;
   input._chatWired = true;
   sendBtn.addEventListener('click', sendChat);
@@ -1716,6 +1753,9 @@ let _userScrolledUp = false;
 function _appendChatMsg(role, text, { skipHistory } = {}) {
   const msgs = document.getElementById('chat-messages');
   if (!msgs) return null;
+  // A conversation has started; the invitation has done its job.
+  const _empty = document.getElementById('chat-empty');
+  if (_empty) _empty.remove();
   const div = document.createElement('div');
   div.className = `chat-msg ${role}`;
   const rendered = role === 'user' ? escapeHTML(text) : renderMarkdown(text);

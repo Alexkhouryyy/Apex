@@ -315,8 +315,8 @@ def test_research_tab_exists_in_the_shell():
     assert 'data-tab="research"' in html and 'id="tab-research"' in html
     # Cache version must move with any frontend change or clients keep the old
     # bundle and the tab silently does not exist for them.
-    assert "v=omni26" in html
-    assert "apex-shell-v26" in (root / "sw.js").read_text()
+    assert "v=omni27" in html
+    assert "apex-shell-v27" in (root / "sw.js").read_text()
 
 
 def test_answer_html_is_escaped_before_formatting():
@@ -1094,3 +1094,55 @@ def test_frontend_streams_via_textcontent_not_innerhtml():
     assert "textContent +=" in fn
     assert "innerHTML +=" not in fn
     assert "research_token" in js
+
+
+# --- chat: the surface you actually live in -----------------------------------
+
+def _static(name):
+    from pathlib import Path
+    return (Path(__file__).resolve().parents[1] / "dashboard/static" / name).read_text()
+
+
+def test_chat_settings_are_collapsed_not_occupying_the_page():
+    """Model/voice/clear used to sit above the fold while the conversation got
+    the leftovers — config first, the thing you came to do second."""
+    html = _static("index.html")
+    chat = html[html.index('id="tab-chat"'):html.index('id="tab-council"')]
+    assert '<details class="chat-settings">' in chat
+    assert chat.index("chat-settings") < chat.index('id="chat-model"')
+
+
+def test_chat_offers_something_to_try():
+    """A blank page tells you nothing about what Apex can do."""
+    html = _static("index.html")
+    chat = html[html.index('id="tab-chat"'):html.index('id="tab-council"')]
+    assert 'id="chat-empty"' in chat
+    prompts = chat.count('class="chat-suggestion"')
+    assert prompts >= 4, f"only {prompts} suggestions"
+    # They must show range, not four variations of one thing.
+    for capability in ("Cite your sources", "disk space", "Remember that", "goals"):
+        assert capability in chat, f"no suggestion demonstrating {capability!r}"
+
+
+def test_the_composer_fits_on_screen():
+    """It was calc(100vh - 130px), which ignored the page header above it and
+    pushed the input off the bottom of the viewport on the main surface."""
+    css = _static("styles.css")
+    wrap = css[css.index(".chat-wrap {"):css.index(".chat-messages {")]
+    assert "190px" in wrap and "min-height" in wrap
+
+
+def test_a_started_conversation_removes_the_invitation():
+    js = _static("app.js")
+    fn = js[js.index("function _appendChatMsg"):]
+    fn = fn[:fn.index("\nfunction ")]
+    assert "chat-empty" in fn and "remove()" in fn
+
+
+def test_clearing_chat_restores_the_invitation():
+    """Otherwise Clear leaves you with the blank page this replaced."""
+    js = _static("app.js")
+    assert "_chatSyncEmpty" in js
+    fn = js[js.index("function _historyClear"):]
+    fn = fn[:fn.index("\n// The empty state")]
+    assert "_chatSyncEmpty()" in fn
