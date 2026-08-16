@@ -166,6 +166,7 @@ function connectWS() {
     if (msg.type === 'chat_token') { _chatAppendToken(msg.delta, msg.chat_id); _setApexState('speaking'); }
     if (msg.type === 'chat_done')  { _chatFinalize(msg.chat_id, msg.response, msg.session_id, msg.turn_index); _setApexState('idle'); }
     if (msg.type === 'chat_error') { _chatError(msg.error, msg.chat_id); _setApexState('idle'); }
+    if (msg.type === 'chat_tool')  { _chatToolEvent(msg); }
     if (msg.type === 'council_progress')    _councilProgress(msg.message);
     if (msg.type === 'council_round_start') _councilRoundStart(msg.round, msg.members);
     if (msg.type === 'council_answer')      _councilAnswer(msg);
@@ -1820,6 +1821,7 @@ function _chatAppendToken(delta, chatId) {
 
 function _chatFinalize(chatId, response, sessionId, turnIndex) {
   if (activeChatId !== chatId) return;
+  _chatToolsFinalize();
   if (currentAgentBubble) {
     currentAgentBubble.classList.remove('streaming');
     // Render final markdown now that streaming is complete
@@ -4145,4 +4147,97 @@ async function loadResearch() {
   document.getElementById('research-query')?.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runResearch(); }
   });
+}
+
+// ---------------------------------------------------------------------------
+// TOOL ACTIVITY — showing what Apex actually does, while it does it.
+//
+// This is the part a hosted assistant cannot copy: a real command against your
+// own machine. It was instrumented server-side from the start and shown only in
+// the Replay tab, after the fact, so live chat looked like a pause followed by
+// prose. Everything here is escaped — tool output is whatever the world handed
+// back, never trusted markup.
+// ---------------------------------------------------------------------------
+const _TOOL_ICONS = {
+  bash: '❯', run_python: '❯', python_exec: '❯',
+  web_search: '⌕', web_browse: '⇱', research: '⁂', deep_research: '⁂',
+  read_file: '▤', write_file: '✎', append_file: '✎',
+  search_memory: '◎', remember: '◎',
+  screenshot: '◉', click: '⊹', type_text: '⌨',
+  spawn_subagent: '⌥', run_skill: '⚙',
+};
+
+function _chatToolStrip() {
+  // Tool calls belong to the answer being written, so they render above the
+  // streaming text rather than in a separate panel you have to go looking at.
+  const msgs = document.getElementById('chat-messages');
+  if (!msgs) return null;
+  let strip = document.getElementById('chat-tools-live');
+  if (!strip) {
+    const empty = document.getElementById('chat-empty');
+    if (empty) empty.remove();
+    strip = document.createElement('div');
+    strip.id = 'chat-tools-live';
+    strip.className = 'chat-tools';
+    // Before the answer, not after: the work happened first, and rendering it
+    // below the reply reads as an afterthought rather than as the reasoning
+    // that produced it.
+    const bubble = (typeof currentAgentBubble !== 'undefined' && currentAgentBubble
+                    && currentAgentBubble.parentNode === msgs) ? currentAgentBubble : null;
+    if (bubble) msgs.insertBefore(strip, bubble);
+    else msgs.appendChild(strip);
+  }
+  return strip;
+}
+
+function _chatToolEvent(msg) {
+  const strip = _chatToolStrip();
+  if (!strip) return;
+  const key = `tool-${msg.name}-${strip.childElementCount}`;
+
+  if (msg.phase === 'start') {
+    const row = document.createElement('div');
+    row.className = 'chat-tool running';
+    row.dataset.pending = msg.name;
+    const icon = _TOOL_ICONS[msg.name] || '•';
+    row.innerHTML =
+      `<span class="ct-icon">${escapeHTML(icon)}</span>` +
+      `<span class="ct-name">${escapeHTML(msg.name)}</span>` +
+      `<span class="ct-subject">${escapeHTML(msg.subject || '')}</span>` +
+      `<span class="ct-status">running…</span>`;
+    strip.appendChild(row);
+    strip.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+
+  // Finish the most recent still-running row for this tool.
+  const rows = [...strip.querySelectorAll(`.chat-tool.running[data-pending="${CSS.escape(msg.name)}"]`)];
+  const row = rows[rows.length - 1];
+  if (!row) return;
+  const ok = msg.outcome === 'ok';
+  row.classList.remove('running');
+  row.classList.add(ok ? 'ok' : 'failed');
+  delete row.dataset.pending;
+
+  const ms = msg.duration_ms || 0;
+  const took = ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+  const status = row.querySelector('.ct-status');
+  if (status) status.textContent = ok ? took : (msg.error_kind || 'failed');
+
+  // The output is available but not shouted: click to see what came back.
+  if (msg.preview) {
+    const pre = document.createElement('pre');
+    pre.className = 'ct-preview';
+    pre.textContent = msg.preview;
+    row.appendChild(pre);
+    row.classList.add('expandable');
+    row.addEventListener('click', () => row.classList.toggle('open'));
+  }
+}
+
+function _chatToolsFinalize() {
+  // Once the answer lands, the strip stops being "live" so the next turn starts
+  // a fresh one instead of appending to the last answer's tools.
+  const strip = document.getElementById('chat-tools-live');
+  if (strip) strip.removeAttribute('id');
 }

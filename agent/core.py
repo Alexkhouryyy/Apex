@@ -1261,6 +1261,52 @@ def _broadcast_live_event(source: str, content: str) -> None:
         pass
 
 
+_tool_observer = None
+
+
+def set_tool_observer(fn) -> None:
+    """Watch every tool call as it happens.
+
+    Apex's whole difference from a chat product is that it *does things* — runs
+    shell, reads files, drives a browser. Until now none of that was visible
+    while it happened: the user saw a pause, then prose. A hosted assistant
+    cannot show you a command against your own machine; Apex can, and hiding it
+    threw away the one thing that makes it worth trusting.
+
+    Set by the dashboard. Called as fn(event: dict); exceptions are swallowed,
+    because observation must never break execution.
+    """
+    global _tool_observer
+    _tool_observer = fn
+
+
+def _observe(event: dict) -> None:
+    if _tool_observer is None:
+        return
+    try:
+        _tool_observer(event)
+    except Exception:
+        pass
+
+
+# Which input field actually identifies what a call is doing. Showing the whole
+# input dict would be noise at best and a way to leak a payload at worst.
+_TOOL_SUBJECT_KEYS = ("command", "path", "query", "url", "topic", "code",
+                      "to", "title", "name", "task")
+
+
+def tool_subject(inputs: dict, limit: int = 120) -> str:
+    """A short, human-readable 'what is this call about', or ''."""
+    if not isinstance(inputs, dict):
+        return ""
+    for key in _TOOL_SUBJECT_KEYS:
+        val = inputs.get(key)
+        if isinstance(val, str) and val.strip():
+            text = " ".join(val.split())
+            return text[:limit] + ("…" if len(text) > limit else "")
+    return ""
+
+
 def _execute_tool(name: str, inputs: dict) -> str:
     """Dispatch a tool call, capturing its outcome for trajectory learning.
 
@@ -1269,15 +1315,23 @@ def _execute_tool(name: str, inputs: dict) -> str:
     """
     import time as _t
     _started = _t.perf_counter()
+    _observe({"phase": "start", "name": name, "subject": tool_subject(inputs)})
     result = _execute_tool_inner(name, inputs)
     # Record the ORIGINAL result: recovery hints are appended below, and the
     # trajectory signal must reflect what the tool actually did, not our advice.
+    _elapsed_ms = int((_t.perf_counter() - _started) * 1000)
     try:
         from agent import trajectory as _traj
-        _traj.record(name, result, duration_ms=int((_t.perf_counter() - _started) * 1000),
-                     inputs=inputs)
+        _traj.record(name, result, duration_ms=_elapsed_ms, inputs=inputs)
+        _outcome, _kind = _traj.classify(result)
     except Exception:
-        pass
+        _outcome, _kind = "ok", ""
+    _observe({
+        "phase": "end", "name": name, "subject": tool_subject(inputs),
+        "outcome": _outcome, "error_kind": _kind, "duration_ms": _elapsed_ms,
+        # Enough to see what came back without pasting a whole file into the UI.
+        "preview": " ".join(str(result or "").split())[:400],
+    })
     # Self-recovery: turn a dead-end failure into an actionable next step.
     try:
         from agent import recovery as _rec

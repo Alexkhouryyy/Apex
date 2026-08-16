@@ -1379,8 +1379,25 @@ async def chat_endpoint(request: Request):
 
     async with _chat_lock:
         streamer = ChatStreamer(chat_id)
+
+        # Show what Apex actually DOES, live. This is the thing a hosted
+        # assistant structurally cannot show you: a real command against your
+        # own machine. It was fully instrumented server-side and rendered
+        # nowhere but the Replay tab, after the fact.
+        #
+        # Scoped to this request: the observer is a module-level hook, and the
+        # awareness loop, cortex and scheduler call the same tools constantly.
+        # Without clearing it, background work would appear inside your
+        # conversation as though you had asked for it.
+        from agent import core as _core
+
+        def _on_tool(event: dict):
+            ws_manager.broadcast_threadsafe(
+                {"type": "chat_tool", "chat_id": chat_id, **event})
+
         loop = asyncio.get_event_loop()
         try:
+            _core.set_tool_observer(_on_tool)
             response = await loop.run_in_executor(
                 None,
                 lambda: _agent_ref.run(user_text, include_screenshot=False, streamer=streamer, channel_id=f"dashboard:{chat_id}"),
@@ -1388,6 +1405,8 @@ async def chat_endpoint(request: Request):
         except Exception as e:
             ws_manager.broadcast_threadsafe({"type": "chat_error", "error": str(e), "chat_id": chat_id})
             return JSONResponse({"error": str(e)}, status_code=500)
+        finally:
+            _core.set_tool_observer(None)
 
     # Capture the turn this exchange landed on so the dashboard can attach
     # feedback (👍/👎) to the right bubble.

@@ -315,8 +315,8 @@ def test_research_tab_exists_in_the_shell():
     assert 'data-tab="research"' in html and 'id="tab-research"' in html
     # Cache version must move with any frontend change or clients keep the old
     # bundle and the tab silently does not exist for them.
-    assert "v=omni27" in html
-    assert "apex-shell-v27" in (root / "sw.js").read_text()
+    assert "v=omni28" in html
+    assert "apex-shell-v28" in (root / "sw.js").read_text()
 
 
 def test_answer_html_is_escaped_before_formatting():
@@ -1146,3 +1146,73 @@ def test_clearing_chat_restores_the_invitation():
     fn = js[js.index("function _historyClear"):]
     fn = fn[:fn.index("\n// The empty state")]
     assert "_chatSyncEmpty()" in fn
+
+
+# --- tool visibility: the thing a hosted assistant cannot show you ------------
+
+def test_every_tool_call_is_observable_from_one_seam():
+    """core._execute_tool wraps all ~100 handlers, so visibility needs one hook,
+    not instrumentation scattered across every tool."""
+    from agent import core
+    assert hasattr(core, "set_tool_observer")
+    src = _static_py("agent/core.py")
+    fn = src[src.index("def _execute_tool(name"):src.index("def _execute_tool_inner")]
+    assert '"phase": "start"' in fn and '"phase": "end"' in fn
+
+
+def _static_py(rel):
+    from pathlib import Path
+    return (Path(__file__).resolve().parents[1] / rel).read_text()
+
+
+def test_a_broken_observer_cannot_break_a_tool_call():
+    """Observation is a courtesy; execution is the product."""
+    from agent import core
+    core.set_tool_observer(lambda e: (_ for _ in ()).throw(RuntimeError("ui gone")))
+    try:
+        core._observe({"phase": "start", "name": "x"})   # must not raise
+    finally:
+        core.set_tool_observer(None)
+
+
+def test_the_subject_shows_what_a_call_is_doing():
+    from agent import core
+    assert core.tool_subject({"command": "df -h /"}) == "df -h /"
+    assert core.tool_subject({"path": "/etc/hosts"}) == "/etc/hosts"
+    assert core.tool_subject({"unknown_field": "x"}) == ""
+    assert core.tool_subject(None) == ""
+
+
+def test_the_subject_is_truncated():
+    from agent import core
+    out = core.tool_subject({"command": "x" * 500})
+    assert len(out) <= 121 and out.endswith("…")
+
+
+def test_the_observer_is_scoped_to_the_request():
+    """It is a module-level hook, and the awareness loop, cortex and scheduler
+    call the same tools constantly. Without clearing it, background work would
+    appear inside your conversation as though you had asked for it."""
+    src = _static_py("dashboard/server.py")
+    chat = src[src.index("streamer = ChatStreamer(chat_id)"):]
+    chat = chat[:chat.index("# Capture the turn")]
+    assert "set_tool_observer(_on_tool)" in chat
+    assert "finally:" in chat and "set_tool_observer(None)" in chat
+
+
+def test_tool_activity_renders_above_the_answer():
+    """The work happened first. Rendering it below the reply reads as an
+    afterthought rather than as the reasoning that produced it."""
+    js = _static("app.js")
+    fn = js[js.index("function _chatToolStrip"):]
+    fn = fn[:fn.index("\nfunction ")]
+    assert "insertBefore" in fn and "currentAgentBubble" in fn
+
+
+def test_tool_output_is_escaped():
+    """Tool output is whatever the world handed back — never trusted markup."""
+    js = _static("app.js")
+    fn = js[js.index("function _chatToolEvent"):]
+    fn = fn[:fn.index("\nfunction ")]
+    assert "escapeHTML(msg.name)" in fn
+    assert "pre.textContent = msg.preview" in fn   # never innerHTML

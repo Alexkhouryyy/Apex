@@ -2338,3 +2338,35 @@ pre.md-pre code { background: none; border: none; padding: 0; }
 /* The composer is the point of the page; give it presence. */
 .chat-form { padding-top: 14px; }
 .chat-input { min-height: 52px; font-size: 15px; padding: 14px 14px; }
+
+/* ============== TOOL ACTIVITY — what Apex is doing, as it does it ============== */
+.chat-tools { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 10px; }
+.chat-tool {
+  display: grid; grid-template-columns: 18px auto 1fr auto; gap: 8px;
+  align-items: baseline; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-2);
+  font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.chat-tool.expandable { cursor: pointer; }
+.chat-tool.expandable:hover { border-color: var(--accent); }
+.ct-icon { opacity: .75; }
+.ct-name { font-weight: 600; }
+.ct-subject {
+  opacity: .6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ct-status { opacity: .5; font-size: 11.5px; white-space: nowrap; }
+
+.chat-tool.running { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.chat-tool.running .ct-status { animation: ct-pulse 1.1s ease-in-out infinite; }
+@keyframes ct-pulse { 50% { opacity: .2; } }
+.chat-tool.failed { border-color: color-mix(in srgb, #f66 40%, var(--border)); }
+.chat-tool.failed .ct-status { color: #f88; opacity: .85; }
+
+/* Output is one click away, never shouted. */
+.ct-preview {
+  grid-column: 1 / -1; display: none; margin: 6px 0 0;
+  padding: 8px 10px; border-radius: 6px; background: var(--panel);
+  white-space: pre-wrap; word-break: break-word; font-size: 11.5px;
+  opacity: .8; max-height: 220px; overflow-y: auto;
+}
+.chat-tool.open .ct-preview { display: block; }
