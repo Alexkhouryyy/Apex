@@ -2396,3 +2396,15 @@ pre.md-pre code { background: none; border: none; padding: 0; }
 }
 .chat-thread:hover { opacity: 1; border-color: var(--border); }
 .chat-thread.active { opacity: 1; border-color: var(--accent); background: var(--panel); }
+
+/* Copy: present but quiet — visible on hover, never competing with the text. */
+.chat-msg-actions { margin-top: 4px; height: 20px; }
+.chat-copy-btn {
+  opacity: 0; transition: opacity .12s;
+  padding: 2px 8px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-2); color: inherit;
+  font: inherit; font-size: 11.5px;
+}
+.chat-msg:hover .chat-copy-btn, .chat-copy-btn:focus-visible { opacity: .7; }
+.chat-copy-btn:hover { opacity: 1 !important; border-color: var(--accent); }
+.chat-copy-btn.copied { opacity: 1 !important; border-color: var(--accent); }

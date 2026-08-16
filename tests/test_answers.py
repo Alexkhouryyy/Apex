@@ -315,8 +315,8 @@ def test_research_tab_exists_in_the_shell():
     assert 'data-tab="research"' in html and 'id="tab-research"' in html
     # Cache version must move with any frontend change or clients keep the old
     # bundle and the tab silently does not exist for them.
-    assert "v=omni29" in html
-    assert "apex-shell-v29" in (root / "sw.js").read_text()
+    assert "v=omni30" in html
+    assert "apex-shell-v30" in (root / "sw.js").read_text()
 
 
 def test_answer_html_is_escaped_before_formatting():

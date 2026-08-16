@@ -122,3 +122,47 @@ def test_the_chat_endpoint_records_both_sides():
     chat = src[src.index("user_text = (body.get"):src.index("# --- Council")]
     assert 'add_message(thread_id, "user"' in chat
     assert 'add_message(thread_id, "agent"' in chat
+
+
+# --- copy: the small affordance whose absence reads as unfinished ------------
+
+def _js():
+    from pathlib import Path
+    return (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+
+
+def test_every_message_gets_a_copy_button():
+    js = _js()
+    fn = js[js.index("function _appendChatMsg"):]
+    fn = fn[:fn.index("\nasync function sendChat")]
+    assert "chat-copy-btn" in fn
+
+
+def test_copying_uses_the_source_text_not_the_rendered_html():
+    """Agent content is rendered markdown; copying what is on screen would
+    paste mangled formatting instead of what was written."""
+    js = _js()
+    fn = js[js.index("function _appendChatMsg"):]
+    fn = fn[:fn.index("\nasync function sendChat")]
+    assert "div.dataset.raw = text" in fn
+    # And the streamed answer's raw text is only final once streaming ends.
+    fin = js[js.index("function _chatFinalize"):]
+    fin = fin[:fin.index("\nfunction ")]
+    assert "dataset.raw" in fin
+
+
+def test_copy_falls_back_outside_a_secure_context():
+    """navigator.clipboard does not exist over plain http on a LAN address —
+    exactly where a self-hosted dashboard is most likely to be opened."""
+    js = _js()
+    handler = js[js.index("const btn = e.target.closest('.chat-copy-btn')"):]
+    handler = handler[:handler.index("\n});")]
+    assert "isSecureContext" in handler
+    assert "execCommand('copy')" in handler
+
+
+def test_copy_is_delegated_so_restored_messages_work():
+    """Messages arrive three ways — streamed, restored from a thread, and
+    re-rendered on clear. Per-button wiring would miss two of them."""
+    js = _js()
+    assert "getElementById('chat-messages')?.addEventListener('click'" in js

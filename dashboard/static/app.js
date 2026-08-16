@@ -1768,8 +1768,14 @@ function _appendChatMsg(role, text, { skipHistory } = {}) {
   const div = document.createElement('div');
   div.className = `chat-msg ${role}`;
   const rendered = role === 'user' ? escapeHTML(text) : renderMarkdown(text);
+  // Keep the source text. Agent content is rendered markdown, so copying what
+  // is on screen would paste mangled formatting instead of what was written.
+  div.dataset.raw = text || '';
   div.innerHTML = `<div class="chat-msg-role">${role === 'user' ? 'You' : 'Agent'}</div>` +
-                  `<div class="chat-msg-content">${rendered}</div>`;
+                  `<div class="chat-msg-content">${rendered}</div>` +
+                  `<div class="chat-msg-actions">` +
+                  `<button type="button" class="chat-copy-btn" title="Copy this message">Copy</button>` +
+                  `</div>`;
   msgs.appendChild(div);
   if (!_userScrolledUp) msgs.scrollTop = msgs.scrollHeight;
   if (!skipHistory) _historyPush(role, text);
@@ -1832,6 +1838,7 @@ function _chatAppendToken(delta, chatId) {
 function _chatFinalize(chatId, response, sessionId, turnIndex) {
   if (activeChatId !== chatId) return;
   _chatToolsFinalize();
+  if (currentAgentBubble) currentAgentBubble.dataset.raw = response || currentAgentText || '';
   if (currentAgentBubble) {
     currentAgentBubble.classList.remove('streaming');
     // Render final markdown now that streaming is complete
@@ -4323,3 +4330,38 @@ async function _restoreConversation() {
   } catch (e) {}
   _loadThreadList();
 }
+
+// Copy, via delegation so it works for streamed, restored and future messages
+// without rewiring each one.
+document.getElementById('chat-messages')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.chat-copy-btn');
+  if (!btn) return;
+  const msg = btn.closest('.chat-msg');
+  const text = msg?.dataset.raw || msg?.querySelector('.chat-msg-content')?.innerText || '';
+  if (!text) return;
+  const done = (ok) => {
+    btn.textContent = ok ? 'Copied' : 'Press ⌘C';
+    btn.classList.toggle('copied', ok);
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1600);
+  };
+  try {
+    // navigator.clipboard needs a secure context. The dashboard can be reached
+    // over plain http on a LAN address, where it simply does not exist — so
+    // fall back rather than failing silently on the machines most likely to
+    // hit it.
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return done(true);
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    done(ok);
+  } catch (err) {
+    done(false);
+  }
+});
