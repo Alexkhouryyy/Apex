@@ -9,6 +9,7 @@ simple turn to the flagship if it starts doing real multi-step work.
 import re
 
 import config
+from agent.provider import provider_for
 
 _COMPLEX_MIN_WORDS = 100
 _SHORT_WORDS = 12
@@ -64,12 +65,21 @@ def route_model(user_text: str, current_model: str, use_thinking: bool = False):
     """Return (model_to_use, complexity|None).
 
     complexity is None when routing is disabled. Routing only ever *downgrades*
-    a simple query to the small model; it never upgrades past the user's choice.
+    a simple query to the small model; it never upgrades past the user's choice,
+    and never crosses providers.
     """
     if not getattr(config, "SMART_ROUTING_ENABLED", False):
         return current_model, None
     complexity = classify_query(user_text, use_thinking)
     if complexity == "simple":
         simple = getattr(config, "ROUTING_SIMPLE_MODEL", "") or config.PROACTIVE_MODEL
+        # The caller picks its client from the *user's* model and then sends the
+        # routed name, so a cross-provider downgrade posts a Claude model name to
+        # whatever endpoint the user actually selected. Ollama is the case that
+        # bites: the two cost-saving features — local models and routing simple
+        # queries to a cheap one — would break each other. There is nothing to
+        # save by downgrading a model that already costs nothing.
+        if provider_for(simple) != provider_for(current_model):
+            return current_model, complexity
         return simple, complexity
     return current_model, complexity

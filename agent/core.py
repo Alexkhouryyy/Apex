@@ -1906,8 +1906,7 @@ class AgentCore:
             api_key=config.ANTHROPIC_API_KEY,
             max_retries=config.API_MAX_RETRIES,
         )
-        self._openai_adapter = None          # lazily initialized on first OpenAI call
-        self._gemini_adapter = None          # lazily initialized on first Gemini call
+        self._provider_clients: dict = {}    # provider name -> client, built on first use
         self._model: str = config.AGENT_MODEL
         self.memory = Memory()               # main loop / voice channel
         self._mcp_tools: list[dict] = []
@@ -1920,18 +1919,28 @@ class AgentCore:
 
     @property
     def client(self):
-        """Returns the active provider client (Anthropic, OpenAI, or Gemini)."""
-        from agent.provider import provider_for, OpenAIAdapter, GEMINI_BASE_URL
+        """The client for the active model — Anthropic, OpenAI, Gemini or Ollama.
+
+        This used to re-implement provider.get_client() and had drifted: it knew
+        about three providers, not four, so every `ollama/*` model fell through
+        to `return self.anthropic`. set_model() would report "Switched to
+        ollama/llama3" and the turn then sent that model name to
+        api.anthropic.com. The one provider that costs nothing was the one
+        wired to the paid one, and it failed with a success message.
+
+        So it delegates now rather than duplicating. Anthropic is still read off
+        `self.anthropic` so the `client` setter — which tests use to inject a
+        mock — keeps working.
+        """
+        from agent.provider import provider_for, get_client
         p = provider_for(self._model)
-        if p == "gemini":
-            if self._gemini_adapter is None:
-                self._gemini_adapter = OpenAIAdapter(config.GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
-            return self._gemini_adapter
-        if p == "openai":
-            if self._openai_adapter is None:
-                self._openai_adapter = OpenAIAdapter(config.OPENAI_API_KEY)
-            return self._openai_adapter
-        return self.anthropic
+        if p == "anthropic":
+            return self.anthropic
+        # One adapter per provider: the model name travels per call, and
+        # strip_prefix is a property of the provider, not of the model.
+        if p not in self._provider_clients:
+            self._provider_clients[p] = get_client(self._model)
+        return self._provider_clients[p]
 
     @client.setter
     def client(self, value):
