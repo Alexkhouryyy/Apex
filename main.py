@@ -25,6 +25,25 @@ if not config.ANTHROPIC_API_KEY:
     sys.exit(1)
 
 
+# Returned by the text-mode reader when stdin is closed. A distinct object,
+# not "", because "" already means "you pressed enter" and the main loop's
+# response to that is to prompt again — which is exactly the wrong answer to
+# an EOF.
+_EOF = "\x00stdin-closed"
+
+
+def read_text_input() -> str:
+    """Read one line in text mode. Module-level so it is testable — the bug it
+    exists to prevent lived in a closure inside main(), where nothing could
+    reach it."""
+    try:
+        return input("YOU: ").strip()
+    except EOFError:
+        return _EOF
+    except KeyboardInterrupt:
+        return ""
+
+
 def build_parser():
     p = argparse.ArgumentParser(description="Voice AI Agent")
     p.add_argument("--text", action="store_true", help="Text I/O instead of voice")
@@ -118,11 +137,7 @@ def main():
         def speak(text: str):
             print(f"\nAGENT: {text}\n")
 
-        def listen() -> str:
-            try:
-                return input("YOU: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                return ""
+        listen = read_text_input
     else:
         from voice.tts import speak
         from voice.stt import listen, listen_streaming, warm_up as _stt_warm
@@ -378,6 +393,24 @@ def main():
         # Get input
         if args.text:
             user_input = listen()
+            if user_input is _EOF:
+                # stdin is closed, not empty — there is no terminal on the other
+                # end. Treating it as an empty turn sends us straight back to
+                # input(), which raises again immediately: a hot spin that pins a
+                # core and grows stdout without bound. The first real boot of
+                # `main.py --text` with no tty produced 129MB of "YOU: " in 90s.
+                # Anything that starts Apex detached — systemd, nohup, docker,
+                # `&` — lands here on the very first read.
+                #
+                # Shutting down would be the other wrong answer: the dashboard,
+                # scheduler and awareness monitor are already up and are the
+                # whole point of an always-on agent. Only the prompt is
+                # meaningless. So park until a signal arrives.
+                print("[Agent] stdin closed — no terminal attached. Running "
+                      "headless: dashboard, scheduler and awareness stay up. "
+                      "Send SIGTERM (or Ctrl-C) to stop.", flush=True)
+                shutdown_event.wait()
+                break
         elif args.wake:
             # Wait for wake trigger, then do full listen
             wake_event.wait()
