@@ -5,6 +5,7 @@ swap providers by changing self._model without touching any other code.
 """
 from __future__ import annotations
 import json
+import os
 from typing import Any
 
 
@@ -24,16 +25,22 @@ def provider_for(model: str) -> str:
 
 
 KNOWN_MODELS = {
-    # Anthropic
-    "claude-opus-4-7", "claude-opus-4-6",
+    # Anthropic — current generation. Model IDs are complete as written; never
+    # append a date suffix (`claude-sonnet-5`, not `claude-sonnet-5-2026...`).
+    "claude-opus-5",                       # default: 1M context, $5/$25
+    "claude-fable-5",                      # most capable, $10/$50
+    "claude-sonnet-5",
+    "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
     "claude-sonnet-4-6",
-    "claude-haiku-4-5-20251001",
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001",           # legacy alias, kept so old .env files boot
     # OpenAI
+    "gpt-5.1", "gpt-5", "gpt-5-mini",
     "gpt-4o", "gpt-4o-mini",
     "gpt-4-turbo",
-    "o1", "o1-mini",
-    "o3-mini",
+    "o3", "o3-mini", "o4-mini",
     # Google Gemini
+    "gemini-3-pro", "gemini-3-flash",
     "gemini-2.5-pro", "gemini-2.5-flash",
     "gemini-2.0-flash",
     # Ollama local — any model pulled with `ollama pull <name>`; use ollama/ prefix.
@@ -44,6 +51,55 @@ KNOWN_MODELS = {
     "ollama/phi4", "ollama/gemma3",
     "ollama/deepseek-r1",
 }
+
+# Providers ship models faster than this file gets edited, and being unable to
+# use one until someone patches a set literal is a bad trade. EXTRA_MODELS is the
+# escape hatch: `EXTRA_MODELS=gpt-6,gemini-4-pro` in .env and they are selectable
+# immediately. Anything unpriced bills as $0 in telemetry, which is the honest
+# failure — see config.MODEL_PRICING.
+KNOWN_MODELS |= {
+    m.strip() for m in os.getenv("EXTRA_MODELS", "").split(",") if m.strip()
+}
+
+
+# ── Per-model request capabilities ────────────────────────────────────────────
+# Claude 4.7 and later removed two request parameters outright. Sending either is
+# a 400, not a warning, so this has to be decided per model rather than globally:
+#
+#   thinking={"type": "enabled", "budget_tokens": N}  ->  400
+#   temperature / top_p / top_k                       ->  400
+#
+# Adaptive thinking replaces the fixed budget: the model decides how much to
+# think. Depth is steered with output_config.effort instead of a token count.
+
+_ADAPTIVE_ONLY = {
+    "claude-fable-5", "claude-opus-5", "claude-sonnet-5",
+    "claude-opus-4-8", "claude-opus-4-7",
+}
+# 4.6 accepts adaptive thinking too, but still allows sampling parameters.
+_ADAPTIVE_OK = _ADAPTIVE_ONLY | {"claude-opus-4-6", "claude-sonnet-4-6"}
+
+
+def thinking_params(model: str, budget: int | None = None) -> dict | None:
+    """The `thinking` value this model accepts, or None if it takes none.
+
+    Callers must omit the key entirely when this returns None — passing
+    `thinking=None` is not the same as not passing it.
+    """
+    if provider_for(model) != "anthropic":
+        return None
+    if model in _ADAPTIVE_OK:
+        return {"type": "adaptive"}
+    if budget:
+        return {"type": "enabled", "budget_tokens": int(budget)}
+    return None
+
+
+def supports_sampling(model: str) -> bool:
+    """Whether temperature/top_p/top_k may be sent. Removed on Claude 4.7+."""
+    if provider_for(model) != "anthropic":
+        return True
+    return model not in _ADAPTIVE_ONLY
 
 
 # ── Anthropic-compatible response objects ─────────────────────────────────────

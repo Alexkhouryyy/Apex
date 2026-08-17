@@ -53,7 +53,7 @@ def build_parser():
     p.add_argument("--no-screenshot", action="store_true", help="Don't auto-attach screenshot to each message")
     p.add_argument("--wake", action="store_true", help="Hands-free wake word mode (say 'Apex')")
     p.add_argument("--resident", action="store_true", help="Always-on background companion with tray icon and global hotkey")
-    p.add_argument("--model", type=str, default=None, help="Override starting model (e.g. gpt-4o, claude-sonnet-4-6)")
+    p.add_argument("--model", type=str, default=None, help="Override starting model (e.g. claude-sonnet-5, gpt-5.1, ollama/llama3)")
     return p
 
 

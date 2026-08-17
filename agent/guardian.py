@@ -244,7 +244,7 @@ class GuardianAngel:
                 memory=memory_ctx or "No specific memory available.",
             )
 
-            models = getattr(config, "GUARDIAN_MODELS", ["claude-haiku-4-5-20251001", "gpt-4o-mini"])
+            models = getattr(config, "GUARDIAN_MODELS", ["claude-haiku-4-5", "gpt-5-mini"])
             responses: list[str] = []
 
             from agent import provider as _prov

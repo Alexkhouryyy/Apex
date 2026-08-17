@@ -20,14 +20,14 @@ from agent import provider
 
 
 # (model, display label) — one flagship model per provider.
-# Gemini uses 2.5-flash: 2.5-pro is paid-tier only, so flash keeps the
+# Gemini uses the flash tier, not pro: pro is paid-tier only, so flash keeps the
 # council usable on Google's free tier.
 _ROSTER = [
-    ("claude-opus-4-7", "Claude"),
-    ("gpt-4o", "GPT"),
-    ("gemini-2.5-flash", "Gemini"),
+    ("claude-opus-5", "Claude"),
+    ("gpt-5.1", "GPT"),
+    ("gemini-3-flash", "Gemini"),
 ]
-_CHAIR = "claude-opus-4-7"
+_CHAIR = "claude-opus-5"
 
 _OPENING_SYS = (
     "You are one member of an expert council that will debate to find the best "

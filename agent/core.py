@@ -17,6 +17,7 @@ from agent import telemetry
 from agent import resilience
 from agent import skills as skills_mod
 from agent import budget as _budget
+from agent import provider
 from tools import computer, bash, research, files, browser, repl, vision, phone, image_gen, telegram, discord, slack, whatsapp, signal
 
 SYSTEM_PROMPT = """You are an advanced AI agent with voice interface, computer vision, computer control, \
@@ -2162,7 +2163,13 @@ class AgentCore:
                 )
 
                 if use_thinking:
-                    kwargs["thinking"] = {"type": "enabled", "budget_tokens": config.THINKING_BUDGET}
+                    # Shape depends on the model: 4.7+ removed budget_tokens and
+                    # rejects the old form with a 400, so ask the provider rather
+                    # than hardcoding one. None means "this model takes no
+                    # thinking parameter" — omit the key, don't pass None.
+                    _thinking = provider.thinking_params(_routed_model, config.THINKING_BUDGET)
+                    if _thinking is not None:
+                        kwargs["thinking"] = _thinking
 
                 # Stream if we have a speaker, otherwise non-stream. The SDK
                 # retries transient API errors; if one outlasts every retry,
@@ -2289,8 +2296,15 @@ class AgentCore:
 
             extra_kwargs = dict(kwargs)
             # Nudge sampling for diversity, but never alongside thinking (which
-            # requires temperature 1).
-            if "thinking" not in extra_kwargs:
+            # requires temperature 1) and never on a model that removed sampling
+            # entirely — Claude 4.7+ answers `temperature` with a 400, so best-of-n
+            # would fail on exactly the models it matters most for.
+            # `.get(k, default)` evaluates the default eagerly, so spelling this
+            # as extra_kwargs.get("model", self._model) touches self._model even
+            # when the key is present — enough to break callers that don't carry
+            # one. kwargs always sets "model"; the rest is belt and braces.
+            _rr_model = extra_kwargs.get("model") or getattr(self, "_model", "")
+            if "thinking" not in extra_kwargs and provider.supports_sampling(_rr_model):
                 extra_kwargs["temperature"] = 1.0
 
             for _ in range(max(0, n - 1)):

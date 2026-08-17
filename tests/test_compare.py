@@ -78,6 +78,12 @@ def test_leaderboard_win_rate(test_db, stub_models):
 
 
 def test_council_not_mutated(stub_models):
-    # Compare must not alter the council roster/chair.
-    assert council._CHAIR == "claude-opus-4-7"
-    assert any(m == "claude-opus-4-7" for m, _ in council._ROSTER)
+    # Compare must not alter the council roster/chair. `stub_models` replaces
+    # council.available_members; the real roster and chair must survive that.
+    #
+    # Asserted structurally rather than against a hardcoded model ID. The literal
+    # that used to be here tested nothing about compare — it only pinned whatever
+    # model was current, and broke on a routine upgrade.
+    assert len(council._ROSTER) == 3
+    assert council._CHAIR in {m for m, _ in council._ROSTER}
+    assert council._CHAIR.startswith("claude-")

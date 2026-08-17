@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Model
-AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-4-7")
-PROACTIVE_MODEL = "claude-haiku-4-5-20251001"
+AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-5")
+PROACTIVE_MODEL = "claude-haiku-4-5"
 THINKING_BUDGET = 8000  # tokens for extended thinking
 
 # API resilience
@@ -13,7 +13,7 @@ API_MAX_RETRIES = 4  # transient errors (429/500/529/network) retried by the SDK
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "anthropic/claude-3-5-sonnet")
 SMART_ROUTING_ENABLED = False   # set True to activate; routes simple queries to Haiku
-ROUTING_SIMPLE_MODEL = "claude-haiku-4-5-20251001"
+ROUTING_SIMPLE_MODEL = "claude-haiku-4-5"
 CURATOR_ENABLED = True
 CURATOR_INTERVAL_DAYS = 7
 CURATOR_MIN_IDLE_HOURS = 2
@@ -28,7 +28,7 @@ CURATOR_ARCHIVE_DAYS = 90
 CONSTELLATION_AUTO          = os.getenv("CONSTELLATION_AUTO", "false").lower() in {"1", "true", "yes"}
 CONSTELLATION_LEARN         = os.getenv("CONSTELLATION_LEARN", "true").lower() in {"1", "true", "yes"}
 CONSTELLATION_MAX_PLANETS   = int(os.getenv("CONSTELLATION_MAX_PLANETS", "4"))
-CONSTELLATION_PLANET_MODEL  = os.getenv("CONSTELLATION_PLANET_MODEL", "claude-sonnet-4-6")
+CONSTELLATION_PLANET_MODEL  = os.getenv("CONSTELLATION_PLANET_MODEL", "claude-sonnet-5")
 CONSTELLATION_SYNTH_MODEL   = os.getenv("CONSTELLATION_SYNTH_MODEL", AGENT_MODEL)
 CONSTELLATION_MEMORY_MODEL  = os.getenv("CONSTELLATION_MEMORY_MODEL", PROACTIVE_MODEL)
 CONSTELLATION_BRIEFING_MAXCHARS = int(os.getenv("CONSTELLATION_BRIEFING_MAXCHARS", "1500"))
@@ -214,19 +214,31 @@ IMAGE_GEN_OUTPUT_DIR = os.getenv("IMAGE_GEN_OUTPUT_DIR", "~/.voice_agent_images"
 # Telemetry — Anthropic per-million-token pricing (USD)
 # Update when models / prices change.
 MODEL_PRICING = {
-    # Anthropic
-    "claude-opus-4-7":           {"input": 15.0,  "output": 75.0,  "cache_read": 1.50, "cache_create": 18.75},
-    "claude-opus-4-6":           {"input": 15.0,  "output": 75.0,  "cache_read": 1.50, "cache_create": 18.75},
+    # Anthropic. These were badly stale: Opus was priced at $15/$75, which is
+    # 3x its real rate, so every budget reading and cost estimate Apex produced
+    # was inflated. Current rates below.
+    "claude-fable-5":            {"input": 10.0,  "output": 50.0,  "cache_read": 1.00, "cache_create": 12.50},
+    "claude-opus-5":             {"input": 5.0,   "output": 25.0,  "cache_read": 0.50, "cache_create": 6.25},
+    "claude-opus-4-8":           {"input": 5.0,   "output": 25.0,  "cache_read": 0.50, "cache_create": 6.25},
+    "claude-opus-4-7":           {"input": 5.0,   "output": 25.0,  "cache_read": 0.50, "cache_create": 6.25},
+    "claude-opus-4-6":           {"input": 5.0,   "output": 25.0,  "cache_read": 0.50, "cache_create": 6.25},
+    "claude-sonnet-5":           {"input": 3.0,   "output": 15.0,  "cache_read": 0.30, "cache_create": 3.75},
     "claude-sonnet-4-6":         {"input": 3.0,   "output": 15.0,  "cache_read": 0.30, "cache_create": 3.75},
-    "claude-haiku-4-5-20251001": {"input": 0.80,  "output": 4.0,   "cache_read": 0.08, "cache_create": 1.0},
+    "claude-haiku-4-5":          {"input": 1.0,   "output": 5.0,   "cache_read": 0.10, "cache_create": 1.25},
+    "claude-haiku-4-5-20251001": {"input": 1.0,   "output": 5.0,   "cache_read": 0.10, "cache_create": 1.25},
     # OpenAI
+    "gpt-5.1":                   {"input": 1.25,  "output": 10.0,  "cache_read": 0.125,"cache_create": 0.0},
+    "gpt-5":                     {"input": 1.25,  "output": 10.0,  "cache_read": 0.125,"cache_create": 0.0},
+    "gpt-5-mini":                {"input": 0.25,  "output": 2.0,   "cache_read": 0.025,"cache_create": 0.0},
     "gpt-4o":                    {"input": 2.5,   "output": 10.0,  "cache_read": 1.25, "cache_create": 0.0},
     "gpt-4o-mini":               {"input": 0.15,  "output": 0.60,  "cache_read": 0.075,"cache_create": 0.0},
     "gpt-4-turbo":               {"input": 10.0,  "output": 30.0,  "cache_read": 0.0,  "cache_create": 0.0},
-    "o1":                        {"input": 15.0,  "output": 60.0,  "cache_read": 7.5,  "cache_create": 0.0},
-    "o1-mini":                   {"input": 1.1,   "output": 4.4,   "cache_read": 0.55, "cache_create": 0.0},
+    "o3":                        {"input": 2.0,   "output": 8.0,   "cache_read": 0.50, "cache_create": 0.0},
     "o3-mini":                   {"input": 1.1,   "output": 4.4,   "cache_read": 0.55, "cache_create": 0.0},
+    "o4-mini":                   {"input": 1.1,   "output": 4.4,   "cache_read": 0.275,"cache_create": 0.0},
     # Google Gemini
+    "gemini-3-pro":              {"input": 2.0,   "output": 12.0,  "cache_read": 0.20, "cache_create": 0.0},
+    "gemini-3-flash":            {"input": 0.30,  "output": 2.50,  "cache_read": 0.03, "cache_create": 0.0},
     "gemini-2.5-pro":            {"input": 1.25,  "output": 10.0,  "cache_read": 0.31, "cache_create": 0.0},
     "gemini-2.5-flash":          {"input": 0.30,  "output": 2.50,  "cache_read": 0.075,"cache_create": 0.0},
     "gemini-2.0-flash":          {"input": 0.10,  "output": 0.40,  "cache_read": 0.025,"cache_create": 0.0},
@@ -277,12 +289,12 @@ CAMERA_DEVICE_INDEX = int(os.getenv("CAMERA_DEVICE_INDEX", "0"))
 GUARDIAN_ANGEL_ENABLED = os.getenv("GUARDIAN_ANGEL_ENABLED", "true").lower() in {"1", "true", "yes"}
 GUARDIAN_THRESHOLD = float(os.getenv("GUARDIAN_THRESHOLD", "0.70"))
 GUARDIAN_COOLDOWN_MINUTES = int(os.getenv("GUARDIAN_COOLDOWN_MINUTES", "20"))
-GUARDIAN_MODELS = [m.strip() for m in os.getenv("GUARDIAN_MODELS", "claude-haiku-4-5-20251001,gpt-4o-mini").split(",") if m.strip()]
+GUARDIAN_MODELS = [m.strip() for m in os.getenv("GUARDIAN_MODELS", "claude-haiku-4-5,gpt-5-mini").split(",") if m.strip()]
 
 # Time Capsule — long-horizon memory: bookmark goal/emotional statements and
 # surface them as unprompted callbacks days or weeks later.
 TIME_CAPSULE_ENABLED = os.getenv("TIME_CAPSULE_ENABLED", "true").lower() in {"1", "true", "yes"}
-TIME_CAPSULE_MODEL = os.getenv("TIME_CAPSULE_MODEL", "claude-haiku-4-5-20251001")
+TIME_CAPSULE_MODEL = os.getenv("TIME_CAPSULE_MODEL", "claude-haiku-4-5")
 TIME_CAPSULE_SCAN_INTERVAL_SECONDS = int(os.getenv("TIME_CAPSULE_SCAN_INTERVAL_SECONDS", "60"))
 TIME_CAPSULE_SURFACE_INTERVAL_SECONDS = int(os.getenv("TIME_CAPSULE_SURFACE_INTERVAL_SECONDS", "1800"))
 TIME_CAPSULE_DEFAULT_CALLBACK_DAYS = int(os.getenv("TIME_CAPSULE_DEFAULT_CALLBACK_DAYS", "14"))

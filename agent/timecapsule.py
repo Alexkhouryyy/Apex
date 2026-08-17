@@ -252,7 +252,7 @@ class TimeCapsule:
             self._store(extracted["statement"], extracted["kind"], extracted["callback_days"])
 
     def _extract(self, text: str) -> Optional[dict]:
-        model = getattr(config, "TIME_CAPSULE_MODEL", "claude-haiku-4-5-20251001")
+        model = getattr(config, "TIME_CAPSULE_MODEL", "claude-haiku-4-5")
         try:
             from agent import provider as _prov
             raw = _prov.complete(model, _SYSTEM, text[:1000], max_tokens=120)

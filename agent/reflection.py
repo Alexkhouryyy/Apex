@@ -279,14 +279,21 @@ def consolidate(client, hours: int = 24, autosave: bool = True) -> dict:
     data = _gather(hours)
     digest = _build_digest(data)
 
+    from agent import provider as _provider
+    _kw = {}
+    # 4.7+ rejects budget_tokens with a 400. Consolidation runs unattended on a
+    # heartbeat, so a 400 here would fail silently and forever.
+    _thinking = _provider.thinking_params(config.AGENT_MODEL, config.THINKING_BUDGET)
+    if _thinking is not None:
+        _kw["thinking"] = _thinking
     try:
         resp = telemetry.create(
             client,
             call_site="agent.reflection/consolidate",
             model=config.AGENT_MODEL,
             max_tokens=4000,
-            thinking={"type": "enabled", "budget_tokens": config.THINKING_BUDGET},
             messages=[{"role": "user", "content": _PROMPT + digest}],
+            **_kw,
         )
     except Exception as e:
         return {"error": f"Claude call failed: {e}", "created": 0, "applied": 0}

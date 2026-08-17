@@ -51,11 +51,11 @@ class Planet:
 
 
 def _flagship() -> str:
-    return getattr(config, "AGENT_MODEL", "claude-opus-4-7")
+    return getattr(config, "AGENT_MODEL", "claude-opus-5")
 
 
 def _planet_model() -> str:
-    return getattr(config, "CONSTELLATION_PLANET_MODEL", "claude-sonnet-4-6")
+    return getattr(config, "CONSTELLATION_PLANET_MODEL", "claude-sonnet-5")
 
 
 _SYS_TEMPLATE = (

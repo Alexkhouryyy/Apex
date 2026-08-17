@@ -149,7 +149,7 @@ def ai_edit(text: str, instruction: str = "", preset: str = "", max_tokens: int 
         return {"error": "No instruction or preset given."}
 
     user = f"INSTRUCTION: {instr}\n\nTEXT:\n{text}"
-    model = getattr(config, "AGENT_MODEL", None) or "claude-opus-4-7"
+    model = getattr(config, "AGENT_MODEL", None) or "claude-opus-5"
     try:
         result = provider.complete(model, _EDIT_SYS, user, max_tokens=max_tokens)
     except Exception as e:
