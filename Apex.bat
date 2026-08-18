@@ -75,14 +75,25 @@ set "NEEDKEY="
 if not exist ".env" set "NEEDKEY=1"
 if exist ".env" (
     findstr /c:"your_key_here" ".env" >nul 2>&1 && set "NEEDKEY=1"
+    findstr /b /c:"ANTHROPIC_API_KEY=" ".env" >nul 2>&1 || set "NEEDKEY=1"
 )
 if defined NEEDKEY (
     echo   Apex needs your Anthropic API key. This is asked once.
     echo   Get one at https://console.anthropic.com/settings/keys
     echo.
     set /p "APIKEY=  Paste your key here and press Enter: "
-    >".env" echo ANTHROPIC_API_KEY=!APIKEY!
-    echo   Saved.
+    REM Set just this one line. This used to be `>".env" echo KEY=value`, and a
+    REM single `>` truncates the file — anyone with a leftover placeholder on
+    REM another line lost DASHBOARD_TOKEN, VAPID_PRIVATE_KEY and their channel
+    REM tokens. The VAPID private key cannot be regenerated without breaking
+    REM every existing push subscription.
+    "%VPY%" scripts\set_env_key.py ANTHROPIC_API_KEY "!APIKEY!"
+    if errorlevel 1 (
+        echo   [X] Could not write .env - check the errors above.
+        echo.
+        pause
+        exit /b 1
+    )
     echo.
 )
 
