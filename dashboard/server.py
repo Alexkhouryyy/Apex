@@ -1970,29 +1970,65 @@ async def curator_rollback():
 
 # === Public API: start in a background thread ===
 def start_in_background(port: int = 7860, host: str | None = None) -> threading.Thread:
+    """Start the dashboard. Raises if it cannot actually serve.
+
+    Everything that decides *where* this ends up listening — the tokenless-bind
+    fallback, and the bind itself — happens here, in the caller's thread, on
+    purpose. It all used to live inside the thread body, which meant a failure
+    had nowhere to go: `[Dashboard] http://0.0.0.0:7860` was printed
+    unconditionally by main.py while uvicorn was separately dying of
+    "address already in use" inside the thread. Apex announced a URL that was
+    never serving, and the caller's try/except could not see it.
+
+    The bound address is attached to the returned thread as `.dashboard_url` so
+    callers print where it actually landed rather than where they asked for.
+    """
+    import socket
     import uvicorn
 
+    _host = host if host is not None else config.DASHBOARD_HOST
+    # Fail closed: never expose a tokenless dashboard on a public interface.
+    # (A tunnel like Cloudflare/Tailscale still reaches a loopback bind.)
+    loopback = {"127.0.0.1", "localhost", "::1"}
+    if _host not in loopback and not config.DASHBOARD_TOKEN:
+        print("[Dashboard] ⚠ Refusing to bind " + _host + " with an empty "
+              "DASHBOARD_TOKEN — anyone could run commands. Falling back to "
+              "127.0.0.1. Set DASHBOARD_TOKEN to expose Apex.")
+        _host = "127.0.0.1"
+
+    # Bind before returning, so "the port is taken" is an exception the caller
+    # gets rather than a line in a log nobody reads.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if os.name != "nt":
+        # SO_REUSEADDR means the opposite thing on Windows: it lets two sockets
+        # share a port, which would make this check pass while the dashboard is
+        # already running. Only set it where it means "reuse TIME_WAIT".
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((_host, port))
+        sock.listen(2048)
+    except OSError as e:
+        sock.close()
+        raise RuntimeError(
+            f"cannot bind {_host}:{port} — {e}. Another Apex is probably still "
+            f"running; stop it, or set DASHBOARD_PORT to a free port."
+        ) from e
+
+    # Say out loud which inbound webhooks are actually authenticated. Five of
+    # them were open for months behind a comment claiming otherwise; the only
+    # durable fix is that the state is visible on every boot.
+    try:
+        webhook_auth.print_audit()
+    except Exception as e:
+        print(f"[Webhooks] audit failed: {e}")
+
     def runner():
-        _host = host if host is not None else config.DASHBOARD_HOST
-        # Fail closed: never expose a tokenless dashboard on a public interface.
-        # (A tunnel like Cloudflare/Tailscale still reaches a loopback bind.)
-        loopback = {"127.0.0.1", "localhost", "::1"}
-        if _host not in loopback and not config.DASHBOARD_TOKEN:
-            print("[Dashboard] ⚠ Refusing to bind " + _host + " with an empty "
-                  "DASHBOARD_TOKEN — anyone could run commands. Falling back to "
-                  "127.0.0.1. Set DASHBOARD_TOKEN to expose Apex.")
-            _host = "127.0.0.1"
-        # Say out loud which inbound webhooks are actually authenticated. Five of
-        # them were open for months behind a comment claiming otherwise; the only
-        # durable fix is that the state is visible on every boot.
-        try:
-            webhook_auth.print_audit()
-        except Exception as e:
-            print(f"[Webhooks] audit failed: {e}")
-        cfg = uvicorn.Config(app, host=_host, port=port, log_level="warning")
-        server = uvicorn.Server(cfg)
-        server.run()
+        cfg = uvicorn.Config(app, log_level="warning")
+        uvicorn.Server(cfg).run(sockets=[sock])
 
     t = threading.Thread(target=runner, daemon=True, name="DashboardServer")
     t.start()
+    shown = "127.0.0.1" if _host == "0.0.0.0" else _host
+    t.dashboard_url = f"http://{shown}:{port}"
+    t.dashboard_host, t.dashboard_port = _host, port
     return t

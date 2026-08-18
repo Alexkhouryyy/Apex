@@ -235,10 +235,12 @@ def run_resident(model_override: Optional[str] = None) -> None:
         try:
             from dashboard import server as dash
             dash.set_agent(agent, awareness_log=None)
-            dash.start_in_background(port=getattr(config, "DASHBOARD_PORT", 7860))
+            _dash_t = dash.start_in_background(port=getattr(config, "DASHBOARD_PORT", 7860))
+            # Where it actually bound, not where we asked — see server.start_in_background.
+            _dashboard_url = getattr(_dash_t, "dashboard_url", _dashboard_url)
             logging.info(f"Dashboard: {_dashboard_url}")
         except Exception as e:
-            logging.error(f"Dashboard failed to start: {e}")
+            logging.error(f"Dashboard NOT running — {e}")
 
     # Jarvis: desktop orb (opt-in via ORB_ENABLED=true in .env)
     if getattr(config, "ORB_ENABLED", False):

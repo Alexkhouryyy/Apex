@@ -306,11 +306,13 @@ def main():
             if getattr(monitor, "timecapsule", None) is not None:
                 dash.set_timecapsule(monitor.timecapsule)
             port = getattr(config, "DASHBOARD_PORT", 7860)
-            host = getattr(config, "DASHBOARD_HOST", "127.0.0.1")
-            dash.start_in_background(port=port)
-            print(f"[Dashboard] http://{host}:{port}")
+            _dash_t = dash.start_in_background(port=port)
+            # Print where it actually bound. Printing config's host was wrong
+            # twice over: the tokenless-bind guard can move it to loopback, and
+            # a failed bind printed a working URL for a dead server.
+            print(f"[Dashboard] {getattr(_dash_t, 'dashboard_url', f'http://127.0.0.1:{port}')}")
         except Exception as e:
-            print(f"[Dashboard] Failed to start: {e}")
+            print(f"[Dashboard] NOT running — {e}")
 
     shutdown_event = threading.Event()
 
