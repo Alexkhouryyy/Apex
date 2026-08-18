@@ -588,8 +588,13 @@ def generate_profile_digest(client) -> str:
                 "SELECT kind, content, importance FROM memories WHERE importance >= 7 "
                 "ORDER BY importance DESC, ts DESC LIMIT 60"
             ).fetchall()
+            # `properties` is not a column — the schema calls it properties_json
+            # — so this query raised OperationalError every single time and the
+            # profile digest never once produced a file on any machine. The
+            # third column was never read anyway: ent_lines below uses only
+            # name and kind, so select what is actually used.
             ent_rows = c.execute(
-                "SELECT name, kind, properties FROM entities ORDER BY importance DESC, last_seen DESC LIMIT 20"
+                "SELECT name, kind FROM entities ORDER BY importance DESC, last_seen DESC LIMIT 20"
             ).fetchall()
 
         if not rows:

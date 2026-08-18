@@ -272,3 +272,40 @@ class TestRefineSkills:
 
         skills._registry.clear()
         skills._registry.update(saved)
+
+
+def test_profile_digest_actually_produces_a_file(tmp_path, monkeypatch):
+    """It never had, on any machine.
+
+    generate_profile_digest() ran `SELECT name, kind, properties FROM entities`
+    and `properties` is not a column — the schema calls it properties_json. Every
+    call raised OperationalError into a caller that printed one line and moved
+    on, so the feature looked present and did nothing for its whole existence.
+
+    The SQL audit pins the column name; this pins the outcome, which is the part
+    a user would notice.
+    """
+    # Point the module at a temp DB rather than reloading it. importlib.reload
+    # swaps the module object out from under everything that already imported
+    # it, which broke an unrelated test in this suite — and only when the two
+    # ran together.
+    from agent import longterm as _lt
+    from agent import entities as _ent, reflection as _refl
+    monkeypatch.setattr(_lt, "DB_PATH", str(tmp_path / "t.db"))
+
+    _lt.init_db()
+    _lt.remember("User is Alex, building Apex", kind="fact", importance=9)
+    _ent.upsert_entity("Apex", "project", {"status": "active"})
+    monkeypatch.setattr(_refl, "_MEME_PATH", tmp_path / "me.md")
+
+    class _Client:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                class _B: type = "text"; text = "## About Me\n- Alex"
+                class _R: content = [_B()]; stop_reason = "end_turn"
+                return _R()
+
+    out = _refl.generate_profile_digest(_Client())
+    assert "updated" in out, f"digest did not write a profile: {out!r}"
+    assert (tmp_path / "me.md").exists()
