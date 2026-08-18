@@ -321,6 +321,23 @@ TOOLS = [
         },
     },
     {
+        "name": "current_time",
+        "description": (
+            "The current date and time. The system prompt already carries it, so "
+            "only call this when a turn has run long enough that minutes matter "
+            "(after slow tool calls), or to get another timezone."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "timezone": {
+                    "type": "string",
+                    "description": "IANA name, e.g. 'Europe/Paris'. Omit for local time.",
+                },
+            },
+        },
+    },
+    {
         "name": "remember",
         "description": (
             "Save a durable memory across sessions. Use proactively for: user identity (name, role), "
@@ -1412,6 +1429,20 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
         elif name == "find_files":
             return files.find(inputs["pattern"], inputs.get("base", "."))
 
+        elif name == "current_time":
+            from datetime import datetime
+            tz_name = (inputs.get("timezone") or "").strip()
+            if tz_name:
+                try:
+                    from zoneinfo import ZoneInfo
+                    now = datetime.now(ZoneInfo(tz_name))
+                except Exception as e:
+                    return f"Unknown timezone '{tz_name}': {e}"
+            else:
+                now = datetime.now().astimezone()
+            return (f"{now:%A}, {now.day} {now:%B %Y}, {now:%H:%M:%S} "
+                    f"({now.tzname() or 'local time'}, UTC{now:%z})")
+
         elif name == "remember":
             _broadcast_live_event("memory", f"Stored: {inputs['content'][:120]}")
             return longterm.remember(
@@ -1901,6 +1932,36 @@ def _propose_skill(client, user_text: str, tool_names: list[str]) -> None:
         print(f"[AutoSkill] proposal failed: {e}")
 
 
+def time_block(now=None) -> str:
+    """The current date and time, for the system prompt.
+
+    Apex had no idea what day it was. Nothing in the prompt carried a clock and
+    there was no tool to ask — while the scheduler fired dated jobs, the Time
+    Capsule surfaced callbacks "days or weeks later", goals ran on day/week/
+    month/quarter horizons and lessons expired after 30 days. Every one of those
+    was being reasoned about by a model whose only sense of "now" was its
+    training data.
+
+    This failure mode is worse than a crash. A missing clock does not raise; the
+    model produces a confident, plausible, wrong date. Nothing logs, nothing
+    fails, and the answer looks fine.
+    """
+    from datetime import datetime
+    now = now or datetime.now().astimezone()
+    return (
+        "## CURRENT DATE AND TIME\n"
+        # Day interpolated rather than %-d: that directive is glibc-only and
+        # raises ValueError on Windows, which is where this runs.
+        f"{now:%A}, {now.day} {now:%B %Y}, {now:%H:%M} "
+        f"({now.tzname() or 'local time'}, UTC{now:%z})\n"
+        "This is authoritative and refreshed every turn. Your training data is "
+        "older than now, so you cannot know the date any other way — never guess "
+        "it, never infer it from the conversation, and never state a date that "
+        "contradicts this. Resolve every relative expression (\"today\", "
+        "\"tomorrow\", \"last week\", \"in 3 days\") against it."
+    )
+
+
 class AgentCore:
     def __init__(self):
         self.anthropic = anthropic.Anthropic(
@@ -2033,6 +2094,12 @@ class AgentCore:
                 blocks.append({"type": "text", "text": f"\n## PROCEDURAL SKILLS (use skill_manage to view full content):\n{skill_lines}\n"})
         except Exception:
             pass
+        # LAST, and after the cache_control breakpoint on SYSTEM_PROMPT, on
+        # purpose. This is the one block that changes every turn; placed any
+        # earlier it would invalidate the cached prefix on every single request
+        # and quietly multiply the bill. Last also makes it the most recent
+        # thing the model reads before the conversation.
+        blocks.append({"type": "text", "text": time_block()})
         return blocks
 
     def _get_channel(self, channel_id: str | None) -> tuple[Memory, threading.Lock]:
