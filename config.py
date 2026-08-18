@@ -245,6 +245,25 @@ MODEL_PRICING = {
     # Ollama local models: any ollama/* model not listed here defaults to $0 (see telemetry._pricing).
 }
 
+# Price a model this file has never heard of, without editing code — the
+# companion to EXTRA_MODELS. A discovered model with no price bills as $0, which
+# takes the budget cap offline for it, so this is how you put it back.
+#   MODEL_PRICING_JSON={"gpt-5.6-max": {"input": 5.0, "output": 25.0}}
+# Missing cache_read/cache_create default to 0.
+_pricing_json = os.getenv("MODEL_PRICING_JSON", "").strip()
+if _pricing_json:
+    try:
+        import json as _json
+        for _m, _p in _json.loads(_pricing_json).items():
+            MODEL_PRICING[_m] = {
+                "input": float(_p.get("input", 0.0)),
+                "output": float(_p.get("output", 0.0)),
+                "cache_read": float(_p.get("cache_read", 0.0)),
+                "cache_create": float(_p.get("cache_create", 0.0)),
+            }
+    except Exception as _e:
+        print(f"[Config] MODEL_PRICING_JSON ignored — could not parse: {_e}")
+
 # Reflection
 REFLECTION_AUTO_APPLY_THRESHOLD = 0.85
 

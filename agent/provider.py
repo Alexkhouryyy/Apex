@@ -472,6 +472,83 @@ def get_client(model: str):
     return OpenAIAdapter(config.OPENAI_API_KEY)
 
 
+# ── Live model discovery ──────────────────────────────────────────────────────
+# KNOWN_MODELS is a hand-written list, and hand-written lists of other people's
+# product names go stale — this one sat on claude-opus-4-7 and gpt-4o long after
+# both were superseded. Every provider publishes what it actually serves, so ask
+# instead of guessing: a model string invented from memory is a 404, and an
+# invented price silently breaks the budget cap.
+
+_DISCOVERED: dict[str, set[str]] = {}
+_DISCOVERED_AT: dict[str, float] = {}
+DISCOVERY_TTL_S = 3600.0
+
+
+def discover(provider_name: str, force: bool = False) -> set[str]:
+    """Model IDs this provider currently serves. Empty set on any failure.
+
+    Fails soft on purpose: no key, no network, or an endpoint that does not
+    implement /models must degrade to "I could not check", never to an
+    exception in a model picker.
+    """
+    import time
+
+    import config
+
+    now = time.time()
+    if (not force and provider_name in _DISCOVERED
+            and now - _DISCOVERED_AT.get(provider_name, 0) < DISCOVERY_TTL_S):
+        return _DISCOVERED[provider_name]
+
+    try:
+        if provider_name == "anthropic":
+            if not config.ANTHROPIC_API_KEY:
+                return set()
+            import anthropic
+            client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+            found = {m.id for m in client.models.list(limit=100)}
+        elif provider_name == "ollama":
+            from openai import OpenAI
+            oai = OpenAI(api_key="ollama", base_url=config.OLLAMA_BASE_URL)
+            # Re-prefix: Apex addresses local models as ollama/<name>, and the
+            # daemon reports the bare name.
+            found = {f"ollama/{m.id}" for m in oai.models.list().data}
+        elif provider_name in ("openai", "gemini"):
+            key = (config.OPENAI_API_KEY if provider_name == "openai"
+                   else config.GEMINI_API_KEY)
+            if not key:
+                return set()
+            from openai import OpenAI
+            oai = OpenAI(api_key=key,
+                         base_url=None if provider_name == "openai" else GEMINI_BASE_URL)
+            found = {m.id for m in oai.models.list().data}
+        else:
+            return set()
+    except Exception:
+        return set()
+
+    # Gemini reports ids as "models/gemini-3-pro"; Apex uses the bare name.
+    found = {m.split("/", 1)[1] if m.startswith("models/") else m for m in found}
+    _DISCOVERED[provider_name] = found
+    _DISCOVERED_AT[provider_name] = now
+    return found
+
+
+def discover_all(force: bool = False) -> dict[str, set[str]]:
+    return {p: discover(p, force) for p in ("anthropic", "openai", "gemini", "ollama")}
+
+
+def is_usable(model: str) -> bool:
+    """True if the model is in the curated list, or the provider confirms it.
+
+    This is what lets a model released after this file was written be selected
+    without editing code — the provider is the authority on its own catalogue.
+    """
+    if model in KNOWN_MODELS:
+        return True
+    return model in discover(provider_for(model))
+
+
 def complete(model: str, system: str, user: str, max_tokens: int = 2048) -> str:
     """One-shot text completion against any provider. Returns plain text."""
     client = get_client(model)

@@ -257,13 +257,24 @@ def list_models():
         "gemini": bool(config.GEMINI_API_KEY),
         "ollama": bool(config.OLLAMA_BASE_URL),
     }
+    # Union the curated list with what each provider says it serves right now.
+    # The curated list alone is what went stale — it sat on gpt-4o and
+    # claude-opus-4-7 long after both were superseded.
+    from agent.provider import discover_all
+    live: set[str] = set()
+    for found in discover_all().values():
+        live |= found
+
     models = [
-        {"model": m, "provider": provider_for(m), "available": have_key.get(provider_for(m), False)}
-        for m in sorted(KNOWN_MODELS)
+        {"model": m, "provider": provider_for(m),
+         "available": have_key.get(provider_for(m), False),
+         "live": m in live}
+        for m in sorted(KNOWN_MODELS | live)
     ]
     return {
         "current": _agent_ref._model if _agent_ref else config.AGENT_MODEL,
         "models": models,
+        "discovered": len(live),
     }
 
 

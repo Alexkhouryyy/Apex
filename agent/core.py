@@ -1950,9 +1950,15 @@ class AgentCore:
 
     def set_model(self, model: str) -> str:
         """Switch the active model at runtime. Returns a status string."""
-        from agent.provider import KNOWN_MODELS, provider_for
-        if model not in KNOWN_MODELS:
-            return f"Unknown model '{model}'. Known: {', '.join(sorted(KNOWN_MODELS))}"
+        from agent.provider import KNOWN_MODELS, provider_for, is_usable
+        if not is_usable(model):
+            # is_usable asks the provider before refusing, so a model released
+            # after this code was written still works. Only reject what nobody
+            # will admit to serving.
+            return (f"Unknown model '{model}' — not in the built-in list and "
+                    f"{provider_for(model)} does not report serving it. "
+                    f"Check the spelling, or add it to EXTRA_MODELS in .env. "
+                    f"Built-in: {', '.join(sorted(KNOWN_MODELS))}")
         p = provider_for(model)
         if p == "openai" and not config.OPENAI_API_KEY:
             return "OPENAI_API_KEY not set — add it to .env and restart."

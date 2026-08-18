@@ -39,9 +39,24 @@ def current_turn() -> int:
     return _turn_index
 
 
+_ZERO = {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_create": 0.0}
+_warned_unpriced: set = set()
+
+
 def _pricing(model: str) -> dict:
     prices = getattr(config, "MODEL_PRICING", {})
-    return prices.get(model, {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_create": 0.0})
+    if model in prices:
+        return prices[model]
+    # An unpriced model bills as $0, which does not merely mis-report a number —
+    # it takes the budget cap offline, silently, for that model. Local models
+    # really are free; anything else is a blind spot and has to say so. Once per
+    # model per process: this sits on the hot path of every API call.
+    if not model.startswith("ollama/") and model not in _warned_unpriced:
+        _warned_unpriced.add(model)
+        print(f"[Cost] No price for '{model}' — its spend counts as $0 and the "
+              f"budget cap cannot see it. Add it to MODEL_PRICING_JSON in .env, "
+              f"e.g. {{\"{model}\": {{\"input\": 5.0, \"output\": 25.0}}}}")
+    return _ZERO
 
 
 def _compute_cost(model: str, usage) -> float:

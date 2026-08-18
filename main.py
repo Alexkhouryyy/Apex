@@ -432,9 +432,20 @@ def main():
         if user_input.startswith("/model"):
             parts = user_input.split(None, 1)
             if len(parts) < 2:
-                from agent.provider import KNOWN_MODELS
-                current = agent._model
-                speak(f"Current model: {current}\nAvailable: {', '.join(sorted(KNOWN_MODELS))}")
+                from agent import provider as _prov
+                lines = [f"Current model: {agent._model}", ""]
+                # Ask each provider what it actually serves. The built-in list
+                # is a convenience, not the authority — it is what went stale.
+                for name, live in _prov.discover_all().items():
+                    if live:
+                        lines.append(f"{name} (live, {len(live)}): "
+                                     + ", ".join(sorted(live)))
+                    else:
+                        builtin = sorted(m for m in _prov.KNOWN_MODELS
+                                         if _prov.provider_for(m) == name)
+                        lines.append(f"{name} (could not check — no key or "
+                                     f"unreachable): {', '.join(builtin)}")
+                speak("\n".join(lines))
             else:
                 result = agent.set_model(parts[1].strip())
                 speak(result)
