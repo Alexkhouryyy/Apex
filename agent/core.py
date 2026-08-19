@@ -256,14 +256,26 @@ TOOLS = [
     {
         "name": "deep_research",
         "description": (
-            "Raw source dump on a topic: searches and reads a few pages, returning "
-            "their text uncited. Use `research` instead unless you specifically want "
-            "unsynthesised source material."
+            "A full research project, not a search: decomposes the question into "
+            "sub-questions, runs hundreds of searches, reads every page it finds, "
+            "extracts quote-backed findings, closes evidence gaps, and writes a "
+            "sectioned report where every claim carries a [n] citation to a page "
+            "actually read. Takes minutes and costs dollars — 'deep' is ~1000 "
+            "sources for roughly $7. Use `research` for a quick cited answer; use "
+            "this when the user asks for real research or a report."
         ),
         "input_schema": {
             "type": "object",
-            "properties": {"topic": {"type": "string"}},
-            "required": ["topic"],
+            "properties": {
+                "question": {"type": "string", "description": "The research question"},
+                "depth": {
+                    "type": "string",
+                    "enum": ["quick", "standard", "deep", "exhaustive"],
+                    "default": "deep",
+                    "description": "quick ~35 sources, standard ~260, deep ~1000, exhaustive ~3700",
+                },
+            },
+            "required": ["question"],
         },
     },
     {
@@ -1412,7 +1424,18 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return _answers.format_markdown(_res)
 
         elif name == "deep_research":
-            return research.deep_research(inputs["topic"])
+            from agent import deepresearch as _dr
+            q = inputs.get("question") or inputs.get("topic") or ""
+            depth = inputs.get("depth", _dr.DEFAULT_DEPTH)
+            est = _dr.estimate(depth)
+            _broadcast_live_event(
+                "research",
+                f"Deep research ({depth}): ~{est['expected_sources']} sources, "
+                f"~${est['estimated_usd']}")
+            out = _dr.run(q, depth=depth)
+            return (f"Run #{out['run_id']} — {out['sources_read']} sources read, "
+                    f"{out['notes']} grounded findings, "
+                    f"{out['sources_cited']} sources cited.\n\n{out['report']}")
 
         elif name == "read_file":
             return files.read(inputs["path"])
