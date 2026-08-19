@@ -158,9 +158,14 @@ def test_no_source_hardcodes_budget_tokens():
         # thinking_params() is the one place allowed to spell it — it is the
         # function that decides. Exempt that body only, not the whole file, so a
         # stray literal elsewhere in provider.py still fails.
+        # thinking_params() is the one place allowed to *build* the parameter;
+        # the smoke check is the one place allowed to *detect* it. Both are
+        # exempted by function, not by file, so a stray literal elsewhere in
+        # either module still fails.
+        allowed = {"thinking_params", "no_removed_parameters_are_sent"}
         exempt = {
             id(n) for fn in ast.walk(tree)
-            if isinstance(fn, ast.FunctionDef) and fn.name == "thinking_params"
+            if isinstance(fn, ast.FunctionDef) and fn.name in allowed
             for n in ast.walk(fn)
         }
         for node in ast.walk(tree):
