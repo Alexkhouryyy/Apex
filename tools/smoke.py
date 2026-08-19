@@ -174,6 +174,9 @@ class BootResult:
     returncode: int | None
     log_bytes: int
     dashboard_status: int | None = None
+    # Collected while the process is alive — see boot(). Checks run after it has
+    # been terminated, so anything needing a live server must be captured here.
+    dashboard_sweep: list = field(default_factory=list)
 
     def rows(self, table: str, where: str = "") -> list[tuple]:
         try:
@@ -233,6 +236,7 @@ def boot(say: str = "", script: list[dict] | None = None,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     dashboard_status = None
+    sweep: list = []
     try:
         if say:
             proc.stdin.write(say + "\n")
@@ -257,6 +261,12 @@ def boot(say: str = "", script: list[dict] | None = None,
 
         # Let the turn finish.
         time.sleep(6)
+
+        # Sweep the dashboard while it is still serving. Doing this in a check
+        # instead gave 61/61 "connection refused" — the checks run after the
+        # process is gone.
+        if dashboard_status == 200:
+            sweep = _sweep_dashboard_live(port)
     finally:
         proc.terminate()
         try:
@@ -269,7 +279,7 @@ def boot(say: str = "", script: list[dict] | None = None,
     return BootResult(
         stdout=out, db_path=work / "apex.db", home=work, dashboard_port=port,
         server=server, returncode=proc.returncode, log_bytes=len(out),
-        dashboard_status=dashboard_status,
+        dashboard_status=dashboard_status, dashboard_sweep=sweep,
     )
 
 
@@ -457,6 +467,134 @@ def core_tables_exist(r: BootResult) -> Finding:
     missing = want - have
     return Finding("core_tables_exist", not missing,
                    f"missing {sorted(missing)}" if missing else f"{len(have)} tables")
+
+
+# ── The dashboard tabs ────────────────────────────────────────────────────────
+# 26 tabs backed by ~66 GET endpoints. A tab whose endpoint 500s renders as an
+# empty panel, which is indistinguishable from "you have no goals yet" — the
+# same fail-open ambiguity as everywhere else in Apex, but in the surface the
+# user looks at most.
+
+# Routes deliberately not swept, each with the reason. Skipping without saying
+# so would be the same lie as a green check on an unexercised path.
+SKIP_ROUTES = {
+    "/": "the SPA shell, not JSON",
+    "/sw.js": "static asset",
+    "/manifest.webmanifest": "static asset",
+    "/api/events": "server-sent events — would hang a plain GET",
+    "/api/camera/frame": "binary JPEG, and there is no camera here",
+    "/api/pair/qr": "binary PNG",
+}
+
+# Path parameters that make a route callable. A value that is *expected* to be
+# absent is fine — 404 is a correct answer and is treated as such below.
+# An optional integration reporting that it is not set up is the *correct*
+# answer, not a defect — Apex ships email, calendar, Signal, Twilio and more that
+# most installs never configure. Distinguishing this from a real fault is the
+# whole difficulty of sweeping a dashboard: "Email not configured" is healthy,
+# "no such column: properties" is not. Counted and reported either way, because
+# an unconfigured endpoint is coverage this sweep did not achieve.
+NOT_CONFIGURED = (
+    "not configured", "not set", "no credentials", "not enabled",
+    "disabled", "unavailable", "no api key", "missing",
+)
+
+ROUTE_PARAMS = {
+    "thread_id": "1", "goal_id": "1", "doc_id": "1",
+    "session_id": "1", "uid": "1", "token_id": "1",
+}
+
+
+def dashboard_get_routes() -> tuple[list[str], list[str]]:
+    """(callable routes, skipped routes) parsed from the server source."""
+    src = (REPO / "dashboard" / "server.py").read_text(errors="replace")
+    routes = sorted(set(re.findall(r'@app\.get\("([^"]+)"', src)))
+    callable_routes, skipped = [], []
+    for route in routes:
+        if route in SKIP_ROUTES:
+            skipped.append(route)
+            continue
+        filled, ok = route, True
+        for name in re.findall(r"\{(\w+)\}", route):
+            if name in ROUTE_PARAMS:
+                filled = filled.replace("{" + name + "}", ROUTE_PARAMS[name])
+            else:
+                ok = False
+        (callable_routes if ok else skipped).append(filled if ok else route)
+    return callable_routes, skipped
+
+
+def _sweep_dashboard_live(port: int, timeout: float = 8.0) -> list[dict]:
+    """GET every dashboard endpoint. Must run while Apex is still up."""
+    import urllib.error
+    import urllib.request
+
+    routes, _ = dashboard_get_routes()
+    out = []
+    for route in routes:
+        url = f"http://127.0.0.1:{port}{route}"
+        req = urllib.request.Request(url, headers={
+            "Authorization": "Bearer smoke-token",
+            "Accept": "application/json",
+        })
+        entry = {"route": route}
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                entry["status"] = resp.status
+                entry["body"] = resp.read(20000).decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            entry["status"] = e.code
+            entry["body"] = e.read(4000).decode("utf-8", "replace")
+        except Exception as e:
+            entry["status"] = None
+            entry["body"] = f"{type(e).__name__}: {e}"
+        out.append(entry)
+    return out
+
+
+@check
+def every_dashboard_tab_answers(r: BootResult) -> Finding:
+    """No endpoint may 500, hang, or return an error payload.
+
+    A fresh database legitimately has no goals, memories or reflections, so
+    *empty* is a pass. What is never acceptable is the server failing to
+    answer — that is a broken tab wearing an empty tab's clothes.
+    """
+    results = r.dashboard_sweep
+    if not results:
+        return Finding("every_dashboard_tab_answers", False,
+                       "no sweep recorded — the dashboard never came up")
+    broken, unconfigured = [], []
+    for e in results:
+        status, body = e.get("status"), e.get("body", "")
+        if status is None:
+            broken.append(f"{e['route']} -> {body[:80]}")
+        elif status == 404:
+            continue                      # a made-up id is legitimately absent
+        elif status >= 500:
+            broken.append(f"{e['route']} -> HTTP {status}")
+        elif status == 401:
+            broken.append(f"{e['route']} -> 401 (token rejected)")
+        else:
+            # 200 with an error payload is the fail-open shape: the tab renders,
+            # the panel is empty, and the reason is buried in the JSON.
+            try:
+                data = json.loads(body)
+            except Exception:
+                continue
+            if isinstance(data, dict) and data.get("error"):
+                msg = str(data["error"])
+                if any(m in msg.lower() for m in NOT_CONFIGURED):
+                    unconfigured.append(f"{e['route']}: {msg[:50]}")
+                else:
+                    broken.append(f"{e['route']} -> error: {msg[:70]}")
+    detail = (f"{len(results) - len(broken) - len(unconfigured)} ok, "
+              f"{len(unconfigured)} unconfigured, {len(broken)} broken")
+    if broken:
+        detail += " — " + "; ".join(broken[:6])
+        if len(broken) > 6:
+            detail += f" (+{len(broken) - 6} more)"
+    return Finding("every_dashboard_tab_answers", not broken, detail)
 
 
 def run(say: str = "remember that my name is Alex", verbose: bool = True) -> list[Finding]:
