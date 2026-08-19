@@ -39,7 +39,7 @@ sets up the firewall, creates the systemd service, and starts Apex.
 ssh ubuntu@<oracle-public-ip>
 
 # On the Oracle VM — run the bootstrap (one command)
-curl -fsSL https://raw.githubusercontent.com/alexkhouryyy/ni/claude/brainstorm-project-ideas-asUsT/scripts/bootstrap-oracle.sh | bash
+curl -fsSL https://raw.githubusercontent.com/alexkhouryyy/ni/main/scripts/bootstrap-oracle.sh | bash
 ```
 
 The script will **pause twice** and tell you exactly what to do:
@@ -107,7 +107,7 @@ To pull new code onto the Oracle VM:
 ```bash
 ssh ubuntu@<oracle-tailscale-ip>
 cd ~/ni
-git pull origin claude/brainstorm-project-ideas-asUsT
+git pull origin main
 sudo systemctl restart apex@ubuntu
 ```
 

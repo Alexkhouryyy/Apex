@@ -11,14 +11,14 @@
 #
 # Usage (from your LAPTOP after SSH into the Oracle VM):
 #   ssh ubuntu@<oracle-public-ip>
-#   curl -fsSL https://raw.githubusercontent.com/alexkhouryyy/ni/claude/brainstorm-project-ideas-asUsT/scripts/bootstrap-oracle.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/alexkhouryyy/ni/main/scripts/bootstrap-oracle.sh | bash
 #
 # Or copy-paste the whole file and run: bash bootstrap-oracle.sh
 
 set -euo pipefail
 
 REPO_URL="https://github.com/alexkhouryyy/ni.git"
-REPO_BRANCH="claude/brainstorm-project-ideas-asUsT"   # change to main when merged
+REPO_BRANCH="main"
 REPO_DIR="$HOME/ni"
 USERNAME="$(whoami)"
 SERVICE_NAME="apex@${USERNAME}"
