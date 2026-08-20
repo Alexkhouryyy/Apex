@@ -106,19 +106,50 @@ uv pip install -r requirements.txt --quiet 2>/dev/null || \
 echo "Dependencies installed."
 
 # -------------------------------------------------------
-step "4c/6" ".env — copy yours from your laptop, then press Enter"
+step "4c/6" ".env — your API key"
 # -------------------------------------------------------
+# Two routes on purpose. Copying from a laptop is better: it brings every key
+# and token you already have. But it is impossible when the laptop is off and
+# you are setting this up from a phone, and the original script offered no
+# alternative — so the whole install dead-ended there.
 if [ ! -f "$REPO_DIR/.env" ]; then
     echo ""
-    echo "  No .env found. Run this from your LAPTOP to transfer it:"
+    echo "  No .env found. Two ways to fix that:"
     echo ""
-    echo "    scp $REPO_DIR/.env ${USERNAME}@${TAILSCALE_IP}:${REPO_DIR}/.env"
+    echo "  A) From your LAPTOP (best — brings all your existing keys):"
+    echo "       scp $REPO_DIR/.env ${USERNAME}@${TAILSCALE_IP}:${REPO_DIR}/.env"
+    echo "     ...then press Enter here."
     echo ""
-    echo "  The .env must contain at least: ANTHROPIC_API_KEY and DASHBOARD_TOKEN"
-    echo "  Do NOT paste secrets into this terminal."
+    echo "  B) Type your Anthropic key here now (fine from a phone)."
+    echo "     It is written straight to .env and never echoed back."
     echo ""
-    read -rp "  Press Enter once you have transferred .env..."
+    read -rp "  Press Enter for A, or type 'b' to enter the key here: " ENV_CHOICE
+
+    if [ "${ENV_CHOICE,,}" = "b" ]; then
+        # -s so the key is not echoed to the terminal or into scrollback.
+        read -rsp "  Anthropic API key (sk-ant-...): " APEX_KEY; echo ""
+        [ -n "$APEX_KEY" ] || die "no key entered — Apex cannot start without one."
+        read -rp  "  Dashboard password (make one up, you will type it on your phone): " APEX_TOKEN
+        [ -n "$APEX_TOKEN" ] || die "a dashboard password is required when Apex is reachable off-device."
+        umask 077                     # .env is readable only by you
+        {
+            echo "ANTHROPIC_API_KEY=$APEX_KEY"
+            echo "DASHBOARD_TOKEN=$APEX_TOKEN"
+            echo "DASHBOARD_HOST=0.0.0.0"
+        } > "$REPO_DIR/.env"
+        unset APEX_KEY
+        echo "  Wrote $REPO_DIR/.env (owner-only permissions)."
+    fi
+
     [ -f "$REPO_DIR/.env" ] || die ".env still missing — cannot start Apex without API keys."
+fi
+
+# Refuse to expose a passwordless dashboard. Apex itself falls back to loopback
+# in this case, which on a headless server means unreachable — better to say so
+# here than to leave you wondering why the phone cannot connect.
+if grep -q "^DASHBOARD_HOST=0.0.0.0" "$REPO_DIR/.env" && \
+   ! grep -q "^DASHBOARD_TOKEN=.\+" "$REPO_DIR/.env"; then
+    die "DASHBOARD_HOST is 0.0.0.0 but DASHBOARD_TOKEN is empty — that would put an agent with shell access on the open internet. Set DASHBOARD_TOKEN in $REPO_DIR/.env."
 fi
 
 # -------------------------------------------------------
