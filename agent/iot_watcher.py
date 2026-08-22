@@ -9,12 +9,51 @@ WebSocket protocol: https://developers.home-assistant.io/docs/api/websocket
 import json
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import config
 
 if TYPE_CHECKING:
     from agent.awareness import AwarenessLog
+
+
+def decide_event(msg: dict) -> Optional[str]:
+    """Should this Home Assistant message reach the awareness log, and as what?
+
+    Module-level and pure so it can be tested without a Home Assistant instance.
+    It used to sit inside _connect_and_listen's websocket loop, unreachable by
+    anything — the same shape as the wake matcher buried in voice/wake.py's
+    audio loop.
+
+    Returns the line to log, or None to drop. Four reasons to drop, in order:
+    not an event, not on the allowlist, the kill switch is off, or the state did
+    not actually change (Home Assistant re-emits unchanged states, and logging
+    those would bury the real ones).
+    """
+    if not isinstance(msg, dict) or msg.get("type") != "event":
+        return None
+
+    data = (msg.get("event") or {}).get("data") or {}
+    entity_id = data.get("entity_id") or ""
+    new_state = data.get("new_state") or {}
+    old_state = data.get("old_state") or {}
+
+    allowlist = config.IOT_AWARENESS_ENTITIES
+    if allowlist and entity_id not in allowlist:
+        return None
+
+    # Runtime kill switch, checked per event so it takes effect immediately
+    # rather than at the next reconnect.
+    from agent.iot import is_enabled
+    if not is_enabled():
+        return None
+
+    old_val = old_state.get("state", "?")
+    new_val = new_state.get("state", "?")
+    if old_val == new_val:
+        return None
+
+    return f"{entity_id}: {old_val} → {new_val}"
 
 
 class IoTWatcher(threading.Thread):
@@ -114,30 +153,10 @@ class IoTWatcher(threading.Thread):
             except Exception:
                 continue
 
-            if msg.get("type") != "event":
+            line = decide_event(msg)
+            if line is None:
                 continue
-
-            event_data = msg.get("event", {}).get("data", {})
-            entity_id: str = event_data.get("entity_id", "")
-            new_state = event_data.get("new_state") or {}
-            old_state = event_data.get("old_state") or {}
-
-            # Drop if not in allowlist (when allowlist is non-empty)
-            allowlist = config.IOT_AWARENESS_ENTITIES
-            if allowlist and entity_id not in allowlist:
-                continue
-
-            # Check kill switch per event (toggleable at runtime)
-            from agent.iot import is_enabled
-            if not is_enabled():
-                continue
-
-            old_val = old_state.get("state", "?")
-            new_val = new_state.get("state", "?")
-            if old_val == new_val:
-                continue  # state didn't actually change
-
-            self.log.add("iot", f"{entity_id}: {old_val} → {new_val}")
+            self.log.add("iot", line)
 
         ws.close()
         self._ws = None

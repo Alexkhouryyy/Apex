@@ -45,14 +45,14 @@ this: every citation here must resolve to a file or test that actually exists.
 
 | Label | Count |
 |---|---|
-| WORKS | 30 |
-| UNPROVEN | 7 |
-| PARTIAL | 10 |
+| WORKS | 33 |
+| UNPROVEN | 3 |
+| PARTIAL | 12 |
 | OFF | 1 |
 | MISSING | 13 |
 | NEEDS_REFACTOR | 1 |
 
-62 rows across 54 sections — some sections carry more than one row where the
+63 rows across 54 sections — some sections carry more than one row where the
 document describes separable capabilities (e.g. §6 tracking, limits, prices and
 cost-aware routing have four different answers).
 
@@ -62,13 +62,21 @@ control, car integration). The unproven ones are features believed to work,
 sitting in production, with nothing demonstrating they ever execute — the exact
 category all seventeen bugs found so far have lived in.
 
-Three headline sections — **§11 self-improvement engine**, **§17 personality**
-and **§40 proactive intelligence** — were resolved on 2026-08-20: skill_forge and
-persona now have tests, and the old screenshot poller agent/proactive.py was deleted as
-superseded by `agent/awareness.py`. Proving them surfaced two real defects: `acquire()`
-reported the approval gate to the user as *"didn't install cleanly"*, and
-`--no-proactive` had never done anything under the default config. Seven UNPROVEN
-rows remain.
+All the rows that were unproven for want of a *test* have been closed. Doing so
+found a defect each time, which is the argument for the exercise:
+
+| Row | What proving it found |
+|---|---|
+| §11 skill_forge | `acquire()` reported the approval gate as *"didn't install cleanly"* — a success described as a failure |
+| §40 proactive | `--no-proactive` had never done anything under the default config |
+| §23 wake word | A substring match woke Apex on any sentence *containing* "apex" |
+| §7.2 perception | The FTS index had no triggers, so `query_perception` had **never** returned a result |
+
+The three UNPROVEN rows left are a different class. §15 outcome learning, §16
+blocker adjustment and §41 council correlation are not untested — they are
+unmeasured. Each needs a mechanism that does not exist yet (real-world results
+fed back, adjustment efficacy tracked, inter-model correlation computed). A test
+cannot close them; only building the measurement can.
 
 ---
 
@@ -90,6 +98,7 @@ rows remain.
 |---|---|---|---|
 | 7.1 | Working memory | WORKS | `agent/memory.py`; `tests/test_memory.py` |
 | 7.2 | Episodic memory | WORKS | `agent/longterm.py` `turn_log`, `sessions`; `tests/test_memory.py` |
+| 7.2 | Durable perception log + search | WORKS | `agent/perception.py`; `tests/test_perception.py`. Search had **never returned a result** — the external-content FTS5 index had no triggers, so `MATCH` found nothing and did not raise, meaning the LIKE fallback never ran either |
 | 7.3 | Semantic user memory | WORKS | `agent/longterm.py` `memories`; smoke check `tool_calls_take_effect` |
 | 7.4 | **Project memory** (per-project context) | **MISSING** | No project scoping anywhere in the schema |
 | 7.5 | Procedural memory | WORKS | `agent/lessons.py`; `tests/test_lessons.py` |
@@ -144,16 +153,16 @@ rows remain.
 | § | Feature | Label | Evidence |
 |---|---|---|---|
 | 23 | Voice: STT → agent → TTS | WORKS | `voice/stt.py`, `voice/tts.py`; `tests/test_tui.py` covers the text path |
-| 23 | Wake word | UNPROVEN | `voice/wake.py`, `--wake` flag; no test |
+| 23 | Wake word | WORKS | `voice/wake.py` `matches_wake_phrase`; `tests/test_wake.py`. Was mislabelled UNPROVEN — `tests/test_resident.py` already covered mute/unmute. Proving the *matching* found a false-wake bug: a substring test meant any sentence containing "apex" woke it |
 | 23 | Streaming speech, interruption, speaker recognition | PARTIAL | Streaming STT present; no speaker recognition |
-| 24 | Vision / camera | UNPROVEN | `tools/vision.py`, `tools/screen_vision.py`, `agent/perception.py`; `tests/test_camera.py` covers the device API only, not understanding |
+| 24 | Vision / camera | PARTIAL | `tests/test_camera.py` (device), `tests/test_vision.py` (dispatch — notably that `click_on` never clicks on a miss). OCR and screen *understanding* need a real display and stay unproven |
 | 25, 26 | Hand tracking + gesture safety | MISSING | No mediapipe/gesture code |
 
 ## Hardware
 
 | § | Feature | Label | Evidence |
 |---|---|---|---|
-| 30 | Raspberry Pi / IoT bridge | UNPROVEN | `agent/iot.py`, `agent/iot_watcher.py`; `tests/test_iot.py` covers `agent/iot.py`, nothing covers the watcher |
+| 30 | Raspberry Pi / IoT bridge | PARTIAL | `tests/test_iot.py` (bridge), `tests/test_iot_watcher.py` (`decide_event` — allowlist, kill switch, unchanged-state noise). The Home Assistant WebSocket needs an instance and stays unproven |
 | 27, 28 | 3D printing + gesture-driven printer UI | MISSING | — |
 | 29 | Physical object copying | MISSING | — |
 
@@ -175,7 +184,7 @@ rows remain.
 | § | Feature | Label | Evidence |
 |---|---|---|---|
 | 36, 38 | Dashboard with the described modules | WORKS | 26 tabs / 61 endpoints; smoke check `every_dashboard_tab_answers` — 60 ok, 1 unconfigured, 0 broken |
-| 37 | Council visualization (live per-model state) | UNPROVEN | `/api/council/roster` exists; no test or smoke check for the live debate view |
+| 37 | Council visualization (live per-model state) | WORKS | `tests/test_council_events.py` pins the five `council_*` events emitted by `dashboard/server.py` against the handlers in `dashboard/static/app.js`, both directions |
 | 17 | Personality separated from reasoning | WORKS | `agent/persona.py`; `tests/test_persona.py` — prefix present, first block, absent when disabled |
 | 51 | Cinematic must not substitute for useful | WORKS | Stated and followed; the audits exist precisely to enforce it |
 

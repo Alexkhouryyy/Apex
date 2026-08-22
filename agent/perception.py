@@ -28,10 +28,39 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_perc_source ON perception_log(source, ts DESC)"
         )
         try:
+            had_trigger = c.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='perception_ai'"
+            ).fetchone()
             c.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS perception_fts
                 USING fts5(content, content="perception_log", content_rowid="id")
             """)
+            # An external-content FTS5 table is NOT populated by writes to its
+            # content table — it needs triggers. There were none, so the index
+            # stayed empty and `content MATCH ?` matched nothing. It did not
+            # raise either, so the LIKE fallback below never ran: query() has
+            # always returned [] and the query_perception tool has never found a
+            # single event. Same pattern as turn_log_fts in agent/longterm.py.
+            c.execute("""
+                CREATE TRIGGER IF NOT EXISTS perception_ai AFTER INSERT ON perception_log BEGIN
+                  INSERT INTO perception_fts(rowid, content) VALUES (new.id, new.content);
+                END
+            """)
+            c.execute("""
+                CREATE TRIGGER IF NOT EXISTS perception_ad AFTER DELETE ON perception_log BEGIN
+                  INSERT INTO perception_fts(perception_fts, rowid, content) VALUES('delete', old.id, old.content);
+                END
+            """)
+            c.execute("""
+                CREATE TRIGGER IF NOT EXISTS perception_au AFTER UPDATE ON perception_log BEGIN
+                  INSERT INTO perception_fts(perception_fts, rowid, content) VALUES('delete', old.id, old.content);
+                  INSERT INTO perception_fts(rowid, content) VALUES (new.id, new.content);
+                END
+            """)
+            if not had_trigger:
+                # Backfill everything already logged — on an existing database
+                # that is every event Apex has ever observed.
+                c.execute("INSERT INTO perception_fts(perception_fts) VALUES('rebuild')")
         except Exception:
             pass  # FTS5 unavailable — query() falls back to LIKE
 

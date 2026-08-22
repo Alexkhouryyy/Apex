@@ -23,6 +23,42 @@ DEFAULT_WAKE_PHRASES = [
 ]
 
 
+def matches_wake_phrase(text: str, phrases: list[str]) -> bool:
+    """Does this transcript begin with a wake phrase?
+
+    Module-level and pure, so it can be tested without a microphone. It used to
+    live inside _run() as `any(p in text for p in self.wake_phrases)` — a plain
+    substring test, wrapped in sounddevice and faster_whisper, unreachable by
+    anything.
+
+    Two things that test was wrong about:
+
+    - **Substring, not word.** "apex" matched inside "apexes".
+    - **Anywhere, not at the start.** Any sentence *containing* the word woke
+      Apex — "the apex predator", "apex is running", a sentence someone else in
+      the room says. For a user who talks about Apex by name constantly, that is
+      a false wake several times an hour.
+
+    So the phrase must open the utterance and end on a word boundary. That is
+    deliberately strict: "um, apex" will not wake it. A missed wake costs one
+    repetition; a false wake means Apex starts listening, transcribing and
+    possibly acting while you were talking about it to someone else.
+    """
+    if not text:
+        return False
+    cleaned = text.strip().lower().lstrip(" ,.!?:;-\"'")
+    for phrase in sorted((p.lower() for p in phrases), key=len, reverse=True):
+        if not phrase:
+            continue
+        if not cleaned.startswith(phrase):
+            continue
+        rest = cleaned[len(phrase):]
+        # End of utterance, or a real boundary — never mid-word ("apexes").
+        if not rest or not (rest[0].isalnum() or rest[0] == "_"):
+            return True
+    return False
+
+
 class WakeWordListener:
     def __init__(self, wake_phrases: list[str] = None, window_seconds: float = 2.0):
         self.wake_phrases = [p.lower() for p in (wake_phrases or DEFAULT_WAKE_PHRASES)]
@@ -100,7 +136,7 @@ class WakeWordListener:
                     if not text:
                         continue
 
-                    if any(p in text for p in self.wake_phrases):
+                    if matches_wake_phrase(text, self.wake_phrases):
                         print(f"[Wake] Triggered by: {text!r}")
                         if self._on_wake:
                             try:
