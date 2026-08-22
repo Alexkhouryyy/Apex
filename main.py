@@ -279,9 +279,14 @@ def main():
         print("[Cortex] Autonomous cortex active (trusted allowlist mode).")
         print("[SkillForge] Skill forge active.")
     else:
-        # Fall back to original screenshot-only proactive
-        from agent.proactive import ProactiveMonitor
-        monitor = ProactiveMonitor(agent, speak)
+        # No monitor at all. The old ProactiveMonitor lived here — a 30-second
+        # screenshot poller that awareness replaced ("Screen (mss): periodic
+        # screenshot (kept from old proactive monitor)"). With AWARENESS_ENABLED
+        # defaulting True it had been unreachable for a long time, and
+        # app/resident.py never had it, so the always-on path already ran
+        # without it. Turning awareness off now means no watching, which is what
+        # turning it off should mean.
+        monitor = None
 
     # Let reflection pull awareness events at consolidation time
     if hasattr(monitor, "log"):
@@ -320,7 +325,8 @@ def main():
     def shutdown(sig=None, frame=None):
         print("\n[Agent] Shutting down...")
         shutdown_event.set()
-        monitor.stop()
+        if monitor is not None:
+            monitor.stop()
         try:
             longterm.end_session(session_id, summary=agent.memory.summary)
         except Exception:
@@ -342,7 +348,8 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    monitor.start()
+    if monitor is not None:
+        monitor.start()
 
     # TUI mode: hand off to the terminal UI, which owns the input loop.
     if args.tui:

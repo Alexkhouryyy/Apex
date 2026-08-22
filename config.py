@@ -54,7 +54,6 @@ OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "alloy")   # alloy|echo|fable|o
 OPENAI_STT_ENGINE = os.getenv("OPENAI_STT_ENGINE", "local")  # local|openai
 
 # Proactive monitor
-PROACTIVE_INTERVAL = 30         # seconds between screen checks
 PROACTIVE_ENABLED = True
 
 # Wake word
@@ -70,7 +69,10 @@ RESIDENT_MUTE_HOTKEY = os.getenv("RESIDENT_MUTE_HOTKEY", "<ctrl>+<alt>+m")
 RESIDENT_WAKE_REQUIRE_CONTINUATION = True  # "apex" alone won't trigger — must be followed by a request
 
 # Awareness watchers
-AWARENESS_ENABLED = True
+# Env-readable. It was a hardcoded True, so the only way to turn awareness
+# off was to edit this file — which left main.py's "no monitor" branch
+# unreachable by configuration, i.e. dead code.
+AWARENESS_ENABLED = os.getenv("AWARENESS_ENABLED", "true").strip().lower() in ("1", "true", "yes")
 AWARENESS_REVIEW_INTERVAL = 60        # seconds — how often to review event log
 AWARENESS_WATCH_PATHS = [             # file watcher dirs
     "~/Documents", "~/Desktop", "~/Downloads",

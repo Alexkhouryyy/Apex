@@ -379,6 +379,18 @@ class AwarenessMonitor:
             summary = "\n".join(
                 f"[{e['source']}] {e['content']}" for e in events[-20:]
             )
+            # --no-proactive means "do not speak up unprompted". Honoured here
+            # rather than by skipping the monitor, so the cortex, Guardian and
+            # Time Capsule keep working — those are awareness, not interruption.
+            #
+            # This flag had no effect at all until now: the only code that read
+            # it was ProactiveMonitor.start(), and ProactiveMonitor only ran when
+            # AWARENESS_ENABLED was False, which is not the default. So
+            # --no-proactive printed "Proactive: off" and changed nothing. That
+            # predates the deletion of proactive.py; removing the module is what
+            # made it visible.
+            if not getattr(config, "PROACTIVE_ENABLED", True):
+                continue
             try:
                 observation = self.proactive_check(summary)
                 if observation and observation != last_summary:

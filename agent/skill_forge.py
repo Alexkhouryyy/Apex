@@ -1,9 +1,14 @@
 """Skill Forge — Apex writes its own tools when it hits a capability gap.
 
 When the agent can't do something, skill_forge.attempt_forge(client, gap) asks
-Claude to write a Python tool, validates it in a subprocess sandbox, then either:
-  - auto-registers it (read-only tools, trusted allowlist 'always')
-  - stages it and pushes a notification for user approval (write/external tools)
+Claude to write a Python tool, validates it in a Docker sandbox, and stages it
+for user approval. **Every** forged tool stages — there is no auto-register path.
+The model-declared `is_read_only` flag is deliberately not trusted, because it
+was never checked against the code, so an injected "is_read_only": true would
+otherwise ship host-executing tools unattended.
+
+(An earlier version of this docstring described auto-registering read-only
+tools. That path was removed; the text outlived it.)
 
 Approved tools are registered via agent/self_mod.register_new_tool() and persist
 across restarts in ~/.voice_agent_overlay.json.
@@ -344,10 +349,15 @@ def acquire(client, description: str, *, allow_network: bool = False,
             trigger: str = "expert") -> str:
     """Forge a brand-new skill on demand for a capability gap.
 
-    Offline skills are validated and installed immediately (the expert can run
-    them the same turn). Networked skills are staged for one-time user approval,
-    then become available to every expert and the core agent. Returns a status
-    string for the expert to relay to the user.
+    Both kinds end up staged for approval, by different routes: offline skills
+    go through skills.create_skill(), which gates any trigger that is not
+    "manual" into approvals.stage(); networked skills are written straight into
+    forged_tools with needs_network=1. Returns a status string for the expert to
+    relay to the user.
+
+    This docstring previously said offline skills were "installed immediately
+    (the expert can run them the same turn)". That stopped being true when the
+    trigger gate was added, and nothing caught it because no test existed.
     """
     prop = _propose(client, description, allow_network)
     if not prop:
@@ -361,6 +371,14 @@ def acquire(client, description: str, *, allow_network: bool = False,
             msg = _skills.create_skill(name, desc, code, _trigger=trigger)
         except Exception as e:
             return f"Forged '{name}' but installation failed: {e}"
+        # create_skill gates anything whose trigger is not "manual" into
+        # approvals.stage() — which is the safety gate doing its job. Reporting
+        # that as "didn't install cleanly" told the user a success was a
+        # failure, and made the gate look like a bug worth removing.
+        if "STAGED for approval" in msg:
+            return (f"Forged a skill '{name}': {desc}. It is staged for your "
+                    f"approval — approve it in the dashboard and I can run it "
+                    f"from then on.")
         if "created and loaded" not in msg and "kept at previous" not in msg:
             return f"Forged '{name}' but it didn't install cleanly: {msg}"
         return (f"Installed a new skill '{name}': {desc}. It's live now — run it with "

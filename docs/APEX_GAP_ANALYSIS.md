@@ -45,8 +45,8 @@ this: every citation here must resolve to a file or test that actually exists.
 
 | Label | Count |
 |---|---|
-| WORKS | 27 |
-| UNPROVEN | 10 |
+| WORKS | 30 |
+| UNPROVEN | 7 |
 | PARTIAL | 10 |
 | OFF | 1 |
 | MISSING | 13 |
@@ -62,9 +62,13 @@ control, car integration). The unproven ones are features believed to work,
 sitting in production, with nothing demonstrating they ever execute — the exact
 category all seventeen bugs found so far have lived in.
 
-Three are headline sections: **§11 self-improvement engine**,
-**§17 personality**, and **§40 proactive intelligence**. No test references
-`agent/skill_forge.py`, `agent/persona.py`, or `agent/proactive.py`.
+Three headline sections — **§11 self-improvement engine**, **§17 personality**
+and **§40 proactive intelligence** — were resolved on 2026-08-20: skill_forge and
+persona now have tests, and the old screenshot poller agent/proactive.py was deleted as
+superseded by `agent/awareness.py`. Proving them surfaced two real defects: `acquire()`
+reported the approval gate to the user as *"didn't install cleanly"*, and
+`--no-proactive` had never done anything under the default config. Seven UNPROVEN
+rows remain.
 
 ---
 
@@ -99,7 +103,7 @@ Three are headline sections: **§11 self-improvement engine**,
 
 | § | Feature | Label | Evidence |
 |---|---|---|---|
-| 11 | **Self-improvement engine** (detect gap → propose skill) | **UNPROVEN** | `agent/skill_forge.py` — no test references this module |
+| 11 | Self-improvement engine (detect gap → propose skill) | WORKS | `agent/skill_forge.py`; `tests/test_skill_forge.py` — every forged tool stages, a model-declared `is_read_only` is not honoured |
 | 12 | Skill system + registry + metadata | WORKS | `agent/skills.py`, `agent/skill_md.py`; `tests/test_skills.py`, `tests/test_skill_md_usage.py` |
 | 12 | Skill metadata: success_rate, last_evaluated | PARTIAL | Name/description/version present; no reliability tracking |
 | 13 | Skill creation safety (sandbox → approval → install) | WORKS | `agent/skills.py` AST parse not exec, `tools/sandbox.py`, `agent/approvals.py`; `tests/test_skill_autonomy.py`, `tests/test_sandbox.py` |
@@ -131,7 +135,7 @@ Three are headline sections: **§11 self-improvement engine**,
 | 21 | Mobile / PWA | WORKS | `dashboard/static/sw.js`, `dashboard/static/manifest.webmanifest`, QR pairing |
 | 33 | Many channels (Telegram, Discord, Slack, WhatsApp, Signal) | WORKS | `tools/*.py` per channel; `tests/test_telegram.py`, `tests/test_discord.py`, `dashboard/webhook_auth.py` |
 | 39 | Notifications with priority + quiet hours | WORKS | `agent/notify.py` VAPID push, `agent/restraint.py` holds; `tests/test_notify.py`, `tests/test_restraint.py` |
-| 40 | **Proactive intelligence** | **UNPROVEN** | `agent/proactive.py` — no test references this module |
+| 40 | Proactive intelligence | WORKS | `agent/awareness.py` review loop; `tests/test_persona.py` pins that `--no-proactive` gates it. the superseded screenshot poller (agent/proactive.py) was deleted |
 | 22 | Car / Drive Mode | MISSING | — |
 | 50 | One brain, many interfaces | WORKS | Single SQLite brain; `docs/OMNIPRESENCE.md` |
 
@@ -172,7 +176,7 @@ Three are headline sections: **§11 self-improvement engine**,
 |---|---|---|---|
 | 36, 38 | Dashboard with the described modules | WORKS | 26 tabs / 61 endpoints; smoke check `every_dashboard_tab_answers` — 60 ok, 1 unconfigured, 0 broken |
 | 37 | Council visualization (live per-model state) | UNPROVEN | `/api/council/roster` exists; no test or smoke check for the live debate view |
-| 17 | **Personality separated from reasoning** | **UNPROVEN** | `agent/persona.py` — no test references this module |
+| 17 | Personality separated from reasoning | WORKS | `agent/persona.py`; `tests/test_persona.py` — prefix present, first block, absent when disabled |
 | 51 | Cinematic must not substitute for useful | WORKS | Stated and followed; the audits exist precisely to enforce it |
 
 ## Sections that are process, not features
@@ -199,7 +203,7 @@ capabilities nothing has ever exercised.
 The highest-value work available is not on that ladder:
 
 1. **Prove or delete the nine UNPROVEN rows.** Start with `skill_forge`,
-   `persona`, `proactive` — no test touches them, and two of the three run
+   `persona`, `proactive` — done 2026-08-20; see the rows above. Two of the three ran
    unattended.
 2. **§7.4 project memory** — the largest genuinely missing piece of the memory
    architecture, and the one most likely to be felt daily.
