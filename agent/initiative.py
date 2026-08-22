@@ -30,6 +30,7 @@ Three properties do the safety work, and none of them is a prompt instruction:
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import Optional
 
@@ -52,6 +53,9 @@ _STALL_MULTIPLIER = 1.0
 DECLINE_MEMORY_DAYS = 90
 
 KIND = "goal_proposal"
+# Below this, the comparison is anecdote. Deliberately low — this is one
+# person's goals, not a population; waiting for 30 would mean never.
+MIN_CASES_FOR_EFFECT = 6
 
 
 def init_db() -> None:
@@ -219,3 +223,107 @@ def run(now: Optional[float] = None) -> dict:
     except Exception as e:
         print(f"[Initiative] pass failed: {e}")
         return {"proposed": 0, "keys": []}
+
+# ── Did any of this help? ──────────────────────────────────────────────────────
+
+def intervention_effect(days: int = 90, now: Optional[float] = None) -> dict:
+    """Measure whether proposing something for a stalled goal unstuck it.
+
+    CLAUDE.md §16 asks Apex to identify blockers and adjust strategy. It does
+    propose — but nothing measured whether proposing changed anything, so the
+    row sat UNPROVEN: not untested, unmeasured.
+
+    For every goal_proposal raised about a stalled goal, this asks one question:
+    did that goal record progress afterwards? Grouped by whether you accepted
+    the proposal, which gives a comparison group for free.
+
+    ## The caveat is the point, so it ships inside the result
+
+    This is not a trial. You choose which proposals to accept, and you accept
+    the ones about goals you already meant to return to. So accepted proposals
+    will precede progress even if the proposing did nothing at all — the
+    selection explains the correlation on its own.
+
+    What the number can honestly do is fail: if accepted proposals are followed
+    by *no more* progress than declined ones, the feature is not working, and
+    that conclusion is safe because selection bias points the other way. A
+    positive result is suggestive; a null result is informative.
+    """
+    now = time.time() if now is None else now
+    cutoff = now - days * 86400
+
+    with longterm._conn() as c:
+        rows = c.execute(
+            "SELECT ts, payload_json, status FROM staged_writes "
+            "WHERE kind = ? AND ts >= ? ORDER BY ts",
+            (KIND, cutoff)).fetchall()
+
+    groups: dict[str, dict] = {
+        "accepted": {"n": 0, "moved": 0},
+        "not_accepted": {"n": 0, "moved": 0},
+    }
+    cases: list[dict] = []
+
+    for ts, payload_json, status in rows:
+        try:
+            payload = json.loads(payload_json)
+        except Exception:
+            continue
+        key = str(payload.get("evidence_key") or "")
+        if not key.startswith("stalled:"):
+            continue          # lesson-driven proposals have no goal to move
+        try:
+            goal_id = int(key.split(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+
+        with longterm._conn() as c:
+            moved = c.execute(
+                "SELECT COUNT(*) FROM goal_progress WHERE goal_id = ? AND ts > ?",
+                (goal_id, ts)).fetchone()[0]
+            closed = c.execute(
+                "SELECT status FROM goals WHERE id = ?", (goal_id,)).fetchone()
+
+        # Closing a stalled goal is a resolution too — deciding to drop it is
+        # exactly what the proposal offers as the alternative to reviving it.
+        resolved = bool(moved) or bool(closed and closed[0] in ("done", "abandoned"))
+
+        bucket = "accepted" if status == "approved" else "not_accepted"
+        groups[bucket]["n"] += 1
+        groups[bucket]["moved"] += 1 if resolved else 0
+        cases.append({"goal_id": goal_id, "status": status,
+                      "progress_after": moved, "resolved": resolved})
+
+    def _rate(g):
+        return round(g["moved"] / g["n"], 3) if g["n"] else None
+
+    acc, non = groups["accepted"], groups["not_accepted"]
+    acc_rate, non_rate = _rate(acc), _rate(non)
+    lift = (round(acc_rate - non_rate, 3)
+            if acc_rate is not None and non_rate is not None else None)
+
+    if acc["n"] + non["n"] < MIN_CASES_FOR_EFFECT:
+        verdict = (f"Too few interventions to say anything "
+                   f"({acc['n'] + non['n']}/{MIN_CASES_FOR_EFFECT}).")
+    elif lift is None:
+        verdict = "Only one group has cases — nothing to compare against."
+    elif lift <= 0:
+        verdict = ("Accepted proposals are followed by no more progress than "
+                   "declined ones. Selection bias favours the opposite result, "
+                   "so this is real: the proposing is not helping.")
+    else:
+        verdict = (f"Accepted proposals precede progress {lift:+.0%} more often. "
+                   f"Suggestive, not causal — you accept proposals for goals you "
+                   f"already intended to resume.")
+
+    return {
+        "days": days,
+        "accepted": {**acc, "rate": acc_rate},
+        "not_accepted": {**non, "rate": non_rate},
+        "lift": lift,
+        "cases": cases,
+        "verdict": verdict,
+        "caveat": ("Observational. Acceptance is your choice, not a random "
+                   "assignment, so a positive lift is consistent with the "
+                   "proposal doing nothing."),
+    }

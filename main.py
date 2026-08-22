@@ -102,6 +102,7 @@ def main():
     from agent import lessons as _lessons_init; _lessons_init.init_db()
     from agent import initiative as _init_init; _init_init.init_db()
     from agent import deepresearch as _dr_init; _dr_init.init_db()
+    from agent import outcomes as _out_init; _out_init.init_db()
     session_id = longterm.start_session()
     telemetry.set_session(session_id)
     print(f"[Memory] Session #{session_id} started. DB: {longterm.DB_PATH}")

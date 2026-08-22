@@ -350,6 +350,29 @@ TOOLS = [
         },
     },
     {
+        "name": "record_outcome",
+        "description": (
+            "Record what actually happened after you recommended something — days "
+            "or weeks later, when the user tells you how it went. This is the only "
+            "way Apex learns whether its advice works, as distinct from whether it "
+            "sounded good at the time. Use it whenever the user reports a result "
+            "('that landed me two interviews', 'the fix didn't hold'). Set success "
+            "only when the outcome is genuinely clear; leave it out otherwise."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "recommendation": {"type": "string", "description": "What Apex advised"},
+                "result": {"type": "string", "description": "What actually happened"},
+                "success": {"type": "boolean", "description": "Omit if genuinely unclear"},
+                "action_taken": {"type": "string", "description": "What the user actually did"},
+                "impact": {"type": "number", "description": "0-1, how much it mattered"},
+                "domain": {"type": "string", "description": "e.g. job-search, code, health"},
+            },
+            "required": ["recommendation", "result"],
+        },
+    },
+    {
         "name": "remember",
         "description": (
             "Save a durable memory across sessions. Use proactively for: user identity (name, role), "
@@ -1465,6 +1488,19 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                 now = datetime.now().astimezone()
             return (f"{now:%A}, {now.day} {now:%B %Y}, {now:%H:%M:%S} "
                     f"({now.tzname() or 'local time'}, UTC{now:%z})")
+
+        elif name == "record_outcome":
+            from agent import outcomes as _out
+            rid = _out.record(
+                recommendation=inputs["recommendation"],
+                result=inputs["result"],
+                success=inputs.get("success"),
+                action_taken=inputs.get("action_taken", ""),
+                impact=inputs.get("impact"),
+                domain=inputs.get("domain", ""),
+            )
+            _broadcast_live_event("memory", f"Outcome recorded: {inputs['result'][:100]}")
+            return f"Recorded outcome #{rid}. This feeds recommendation accuracy."
 
         elif name == "remember":
             _broadcast_live_event("memory", f"Stored: {inputs['content'][:120]}")

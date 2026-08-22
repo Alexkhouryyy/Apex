@@ -45,9 +45,9 @@ this: every citation here must resolve to a file or test that actually exists.
 
 | Label | Count |
 |---|---|
-| WORKS | 33 |
-| UNPROVEN | 3 |
-| PARTIAL | 12 |
+| WORKS | 35 |
+| UNPROVEN | 0 |
+| PARTIAL | 13 |
 | OFF | 1 |
 | MISSING | 13 |
 | NEEDS_REFACTOR | 1 |
@@ -72,11 +72,21 @@ found a defect each time, which is the argument for the exercise:
 | §23 wake word | A substring match woke Apex on any sentence *containing* "apex" |
 | §7.2 perception | The FTS index had no triggers, so `query_perception` had **never** returned a result |
 
-The three UNPROVEN rows left are a different class. §15 outcome learning, §16
-blocker adjustment and §41 council correlation are not untested — they are
-unmeasured. Each needs a mechanism that does not exist yet (real-world results
-fed back, adjustment efficacy tracked, inter-model correlation computed). A test
-cannot close them; only building the measurement can.
+The last three were a different class — unmeasured rather than untested — and
+the measurements now exist:
+
+| Row | The measurement, and what it is allowed to conclude |
+|---|---|
+| §41 | `consensus.agreement()` reports overlap and unanimous specifics, and never a confidence score. Agreement between models trained on overlapping corpora is exactly as strong when they are wrong |
+| §15 | `outcomes.recommendation_accuracy()` withholds a rate below 5 decided outcomes, and `coverage()` publishes how few outcomes exist at all |
+| §16 | `initiative.intervention_effect()` compares accepted against declined proposals. Selection bias favours a positive result, so only a *null* result is trustworthy — which is exactly what makes it worth running |
+
+Each was built to be able to return a verdict against the feature it measures. A
+metric that can only flatter its subject is decoration.
+
+**No UNPROVEN rows remain.** The 13 PARTIAL rows are honest limits — OCR needs a
+display, the Home Assistant socket needs an instance, real-world outcomes need
+you to report them — not work quietly left undone.
 
 ---
 
@@ -89,7 +99,7 @@ cannot close them; only building the measurement can.
 | 5 | Tiered routing (fast / smart / council / deep) | OFF | `config.py` — `SMART_ROUTING_ENABLED = False`. Implemented in `agent/router.py`, disabled by default |
 | 5 | Automatic escalation decision | MISSING | Routing only ever *downgrades*; nothing escalates on uncertainty |
 | 41 | Distinguishes model knowledge vs. retrieved vs. verified | PARTIAL | `agent/answers.py` cites only fetched sources; `agent/verification.py` exists. No explicit provenance class on an answer |
-| 41 | Council must not create false confidence from correlated knowledge | UNPROVEN | Nothing measures correlation between council members |
+| 41 | Council must not create false confidence from correlated knowledge | WORKS | `agent/consensus.py`, attached to every `CouncilResult`; `tests/test_consensus.py`. Measures agreement and refuses to convert it into confidence — unanimity on a time-sensitive figure is reported as a reason to verify |
 | 49 | Orchestrator / model router / provider abstraction | WORKS | `agent/orchestrator.py`, `agent/router.py`, `agent/provider.py`; `tests/test_provider_routing.py`, `tests/test_model_discovery.py` |
 
 ## Memory
@@ -117,7 +127,7 @@ cannot close them; only building the measurement can.
 | 12 | Skill metadata: success_rate, last_evaluated | PARTIAL | Name/description/version present; no reliability tracking |
 | 13 | Skill creation safety (sandbox → approval → install) | WORKS | `agent/skills.py` AST parse not exec, `tools/sandbox.py`, `agent/approvals.py`; `tests/test_skill_autonomy.py`, `tests/test_sandbox.py` |
 | 14 | Self-improvement logs (what changed, why, rollback) | PARTIAL | `agent/reflection.py` + `agent/rollback.py`; no numbered improvement record with evaluation result |
-| 15 | Outcome learning | UNPROVEN | `agent/outcomes.py`, `tests/test_outcomes.py` exist, but nothing feeds real-world results back in |
+| 15 | Outcome learning | PARTIAL | `agent/outcomes.py` `record()` / `recommendation_accuracy()` / `coverage()`, `record_outcome` tool; `tests/test_outcome_measurement.py`. Results are reported by the user, not observed — `coverage()` states that ratio so the accuracy figure cannot pass as a track record |
 | 42 | Reliability metrics | PARTIAL | `agent/telemetry.py` tracks cost/latency; `agent/eval.py` exists. No task-success or council-vs-single comparison |
 | 43 | **Model reputation system** | **MISSING** | No per-task model scoring anywhere |
 | 44 | Model performance learning | MISSING | No `{task_type, model, quality}` record |
@@ -177,7 +187,7 @@ cannot close them; only building the measurement can.
 | 46 | **Audit log of important actions** | **MISSING** | `tool_events` records tool calls, but there is no human-readable action log as described |
 | 2 | Self-improvement observable/reversible/permission-aware | WORKS | `agent/approvals.py`, `agent/rollback.py`, `tools/autonomy_audit.py`; `tests/test_autonomy.py` |
 | 16 | Mission Mode (goals, milestones, progress) | WORKS | `agent/goals.py`; `tests/test_goals.py` |
-| 16 | Blocker identification + strategy adjustment | UNPROVEN | `agent/initiative.py` proposes from stalled goals; nothing measures whether adjustments help |
+| 16 | Blocker identification + strategy adjustment | WORKS | `agent/initiative.py` `intervention_effect()`; `tests/test_outcome_measurement.py`. Observational, not a trial — selection bias favours a positive result, so a null result is the trustworthy one and the verdict says so |
 
 ## UI
 

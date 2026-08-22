@@ -240,3 +240,153 @@ def overall(days: int = 7) -> dict:
         "best_reflections": best_reflections,
         "worst_reflections": worst_reflections,
     }
+
+# ── Real-world outcomes ───────────────────────────────────────────────────────
+#
+# Everything above measures 👍/👎 — whether you liked an answer at the moment you
+# read it. CLAUDE.md §15 asks for something different and much harder:
+#
+#     Apex recommends: Use CV version B.
+#     Later: Version B generated 3 interviews. Version A generated 0.
+#
+# Liking an answer and the answer working are different variables, and they come
+# apart precisely where it matters: confident, fluent, wrong advice is rated
+# highly at the time. So this stores results that arrive *later* and links them
+# back to the recommendation that caused them.
+#
+# It cannot be automatic. Nothing on this machine can observe whether you got the
+# interview, so the loop closes only when you tell it. That is a real limit, and
+# `coverage()` reports it rather than letting a handful of recorded outcomes
+# masquerade as a track record.
+
+import json as _json
+
+MIN_OUTCOMES_FOR_RATE = 5
+
+
+def init_db() -> None:
+    with longterm._conn() as c:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS recommendation_outcomes (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts             REAL NOT NULL,
+                recommended_at REAL,
+                recommendation TEXT NOT NULL,
+                action_taken   TEXT DEFAULT '',
+                result         TEXT NOT NULL,
+                success        INTEGER,
+                impact         REAL,
+                domain         TEXT DEFAULT '',
+                turn_id        INTEGER
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_rec_outcomes_ts "
+                  "ON recommendation_outcomes(ts DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_rec_outcomes_domain "
+                  "ON recommendation_outcomes(domain, ts DESC)")
+
+
+def record(recommendation: str, result: str, success: Optional[bool] = None,
+           action_taken: str = "", impact: Optional[float] = None,
+           domain: str = "", recommended_at: Optional[float] = None,
+           turn_id: Optional[int] = None) -> int:
+    """Record what actually happened after Apex recommended something.
+
+    `success` is deliberately tri-state. None means "reported, outcome unclear" —
+    most real outcomes are partial, and forcing them into a boolean would turn
+    the rate into a measure of how decisively things get logged.
+    """
+    if not (recommendation or "").strip() or not (result or "").strip():
+        raise ValueError("an outcome needs both the recommendation and what happened")
+    now = time.time()
+    with longterm._conn() as c:
+        cur = c.execute(
+            "INSERT INTO recommendation_outcomes "
+            "(ts, recommended_at, recommendation, action_taken, result, success, "
+            " impact, domain, turn_id) VALUES (?,?,?,?,?,?,?,?,?)",
+            (now, recommended_at, recommendation.strip(), action_taken.strip(),
+             result.strip(), None if success is None else int(bool(success)),
+             impact, (domain or "").strip().lower(), turn_id))
+        return int(cur.lastrowid)
+
+
+def recommendation_accuracy(days: int = 180, domain: Optional[str] = None) -> dict:
+    """How often did taking Apex's advice actually work out?
+
+    Counts only outcomes with a decided success value; `undecided` is reported
+    separately rather than folded in, because an outcome nobody could call is
+    evidence about the outcome, not about the advice.
+    """
+    cutoff = time.time() - days * 86400
+    q = ("SELECT success, impact, domain FROM recommendation_outcomes "
+         "WHERE ts >= ?")
+    args: list = [cutoff]
+    if domain:
+        q += " AND domain = ?"
+        args.append(domain.strip().lower())
+
+    with longterm._conn() as c:
+        rows = c.execute(q, args).fetchall()
+
+    decided = [r for r in rows if r[0] is not None]
+    wins = [r for r in decided if r[0] == 1]
+    impacts = [r[1] for r in wins if r[1] is not None]
+
+    rate = round(len(wins) / len(decided), 3) if decided else None
+    enough = len(decided) >= MIN_OUTCOMES_FOR_RATE
+
+    return {
+        "days": days,
+        "domain": domain,
+        "recorded": len(rows),
+        "decided": len(decided),
+        "undecided": len(rows) - len(decided),
+        "worked": len(wins),
+        "rate": rate if enough else None,
+        "mean_impact": round(sum(impacts) / len(impacts), 3) if impacts else None,
+        "note": (
+            f"{len(decided)} decided outcomes — need {MIN_OUTCOMES_FOR_RATE} "
+            f"before a rate means anything."
+            if not enough else
+            f"{len(wins)}/{len(decided)} recommendations worked out."
+        ),
+    }
+
+
+def by_domain(days: int = 180) -> list[dict]:
+    """Accuracy split by domain, so 'Apex is good at X, poor at Y' is a
+    measurement rather than an impression."""
+    with longterm._conn() as c:
+        domains = [r[0] for r in c.execute(
+            "SELECT DISTINCT domain FROM recommendation_outcomes "
+            "WHERE domain != '' AND ts >= ?",
+            (time.time() - days * 86400,)).fetchall()]
+    out = [recommendation_accuracy(days=days, domain=d) for d in sorted(domains)]
+    return [o for o in out if o["decided"]]
+
+
+def coverage(days: int = 180) -> dict:
+    """What fraction of rated turns ever got a real-world outcome?
+
+    The honest headline for §15. A high accuracy over four recorded outcomes is
+    not a track record, and without this number it would read like one.
+    """
+    cutoff = time.time() - days * 86400
+    with longterm._conn() as c:
+        outcomes = c.execute(
+            "SELECT COUNT(*) FROM recommendation_outcomes WHERE ts >= ?",
+            (cutoff,)).fetchone()[0]
+        try:
+            rated = c.execute(
+                "SELECT COUNT(*) FROM feedback WHERE ts >= ?", (cutoff,)
+            ).fetchone()[0]
+        except Exception:
+            rated = 0
+    return {
+        "days": days,
+        "outcomes_recorded": outcomes,
+        "turns_rated": rated,
+        "ratio": round(outcomes / rated, 3) if rated else None,
+        "note": ("Outcomes are recorded by you, not observed. This ratio is the "
+                 "ceiling on what the accuracy figure is worth."),
+    }

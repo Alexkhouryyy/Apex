@@ -97,6 +97,11 @@ class CouncilResult:
     confidence: str | None = None        # "high" | "medium" | "low"
     confidence_note: str | None = None   # the short reason after the dash
     disagreement: str | None = None      # the council-split text, or "the council agreed"
+    # Measured agreement across the *opening* answers — see agent/consensus.py.
+    # Deliberately separate from `confidence`, which is the chair's own opinion:
+    # a chair that read three similar answers will report high confidence for
+    # the same reason the answers were similar, so it cannot be the check.
+    agreement: dict | None = None
 
 
 _CONFIDENCE_RE = re.compile(
@@ -295,6 +300,14 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
 
     clean, confidence, confidence_note, disagreement = _parse_verdict(final)
 
+    try:
+        from agent import consensus
+        measured = consensus.agreement(transcript)
+    except Exception as e:
+        # Never lose a completed council answer to a measurement fault.
+        print(f"[Council] agreement measurement failed: {e}")
+        measured = None
+
     return CouncilResult(
         question=question,
         final_answer=clean,
@@ -303,4 +316,5 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
         confidence=confidence,
         confidence_note=confidence_note,
         disagreement=disagreement,
+        agreement=measured,
     )
