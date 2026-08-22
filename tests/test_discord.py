@@ -33,6 +33,19 @@ def _keypair(monkeypatch):
     return priv
 
 
+def _allow(monkeypatch, *user_ids):
+    """Allowlist these Discord user ids.
+
+    Channels are deny-by-default when the allowlist is empty (see
+    tools/discord._is_allowed), so any test that expects a command to get past
+    authorization has to say who is allowed. Without this the test passes only
+    on a machine whose .env happens to list the id.
+    """
+    monkeypatch.setattr(
+        config, "DISCORD_ALLOWED_USER_IDS", list(user_ids), raising=False
+    )
+
+
 def _command(value="hi", user_id="1"):
     return {
         "type": 2,
@@ -76,12 +89,14 @@ class TestDispatchInteraction:
         resp = discord.dispatch_interaction({"type": 99})
         assert resp["type"] == 4
 
-    def test_command_without_agent_says_not_ready(self):
+    def test_command_without_agent_says_not_ready(self, monkeypatch):
+        _allow(monkeypatch, "1")
         resp = discord.dispatch_interaction(_command())
         assert resp["type"] == 4
         assert "not ready" in resp["data"]["content"]
 
     def test_command_without_text_rejected(self, monkeypatch):
+        _allow(monkeypatch, "1")
         monkeypatch.setattr(discord, "_agent_run_fn", lambda *a, **k: "x")
         bad = _command()
         bad["data"]["options"] = []
@@ -90,10 +105,30 @@ class TestDispatchInteraction:
         assert "No message" in resp["data"]["content"]
 
     def test_disallowed_user_rejected(self, monkeypatch):
-        monkeypatch.setattr(config, "DISCORD_ALLOWED_USER_IDS", ["999"], raising=False)
+        _allow(monkeypatch, "999")
         monkeypatch.setattr(discord, "_agent_run_fn", lambda *a, **k: "x")
         resp = discord.dispatch_interaction(_command(user_id="1"))
         assert resp["type"] == 4
+        assert "not authorized" in resp["data"]["content"]
+
+    def test_empty_allowlist_rejects_everyone(self, monkeypatch):
+        """Deny-by-default: an unconfigured allowlist is not an open door."""
+        monkeypatch.setattr(discord, "_agent_run_fn", lambda *a, **k: "x")
+        resp = discord.dispatch_interaction(_command(user_id="1"))
+        assert "not authorized" in resp["data"]["content"]
+
+    def test_authorization_is_checked_before_anything_else(self, monkeypatch):
+        """An unauthorized caller learns nothing about Apex's internal state.
+
+        The auth check has to come first. If readiness or argument validation
+        ran ahead of it, a stranger's probe would tell them whether the agent
+        is running and whether their payload parsed — free reconnaissance,
+        and each is a different reply, so probes are distinguishable.
+        """
+        bad = _command(user_id="1")
+        bad["data"]["options"] = []          # would trip "No message provided."
+        assert discord._agent_run_fn is None  # would trip "Agent not ready yet."
+        resp = discord.dispatch_interaction(bad)
         assert "not authorized" in resp["data"]["content"]
 
     def test_happy_path_defers_and_runs_agent(self, monkeypatch):
@@ -109,6 +144,7 @@ class TestDispatchInteraction:
             captured["edit"] = (app_id, token, content)
             done.set()
 
+        _allow(monkeypatch, "1")
         monkeypatch.setattr(discord, "_agent_run_fn", fake_run)
         monkeypatch.setattr(discord, "_edit_original", fake_edit)
 
