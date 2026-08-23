@@ -154,6 +154,40 @@ TOOLS = [
         },
     },
     {
+        "name": "board_present",
+        "description": (
+            "Put something on the barehands glass board — the hand-tracked "
+            "surface floating over the user's camera. Reach for this whenever "
+            "the user asks to SEE something ('show me', 'put it up', 'pull up "
+            "X') instead of answering with a wall of text. Requires the "
+            "barehands server to be running and its stage open in Chrome; the "
+            "result says plainly if it is not, so believe the result rather "
+            "than assuming the card appeared."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Headline on the card"},
+                "body": {"type": "string", "description": "Card text. Optional.", "default": ""},
+                "spotlight": {
+                    "type": "boolean",
+                    "description": "True (default) lands it centre stage, enlarged, everything else dimmed. False stages it as one of the ensemble.",
+                    "default": True,
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "board_state",
+        "description": (
+            "Look at the barehands board and report what is actually on it. "
+            "The user moves things with their hands, so never answer from "
+            "memory — run this before commenting on the board."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "click",
         "description": "Click at screen coordinates.",
         "input_schema": {
@@ -1414,6 +1448,21 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             except Exception as e:
                 return f"[Camera] {e}"
             return json.dumps({"__screenshot__": b64, "size": list(size)})
+
+        elif name == "board_present":
+            from tools import barehands as _board
+            cmd = {
+                "a": "present" if inputs.get("spotlight", True) else "add_card",
+                "title": inputs["title"],
+                "body": inputs.get("body", ""),
+            }
+            out = _board.board_command(cmd)
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name == "board_state":
+            from tools import barehands as _board
+            return _board.board_state()
 
         elif name == "click":
             return computer.click(inputs["x"], inputs["y"], inputs.get("button", "left"), inputs.get("double", False))

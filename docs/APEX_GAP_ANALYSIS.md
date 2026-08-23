@@ -3,7 +3,7 @@
 Feature-by-feature status for all 54 sections of the proposed `CLAUDE.md`,
 checked against the code rather than recalled.
 
-**Generated:** 2026-08-20 · **Basis:** 1008 tests, 13 smoke checks, 3 static audits
+**Generated:** 2026-08-23 · **Basis:** 1258 tests, 14 smoke checks, 3 static audits
 
 ---
 
@@ -47,9 +47,9 @@ this: every citation here must resolve to a file or test that actually exists.
 |---|---|
 | WORKS | 35 |
 | UNPROVEN | 0 |
-| PARTIAL | 13 |
+| PARTIAL | 14 |
 | OFF | 1 |
-| MISSING | 13 |
+| MISSING | 12 |
 | NEEDS_REFACTOR | 1 |
 
 63 rows across 54 sections — some sections carry more than one row where the
@@ -166,7 +166,7 @@ you to report them — not work quietly left undone.
 | 23 | Wake word | WORKS | `voice/wake.py` `matches_wake_phrase`; `tests/test_wake.py`. Was mislabelled UNPROVEN — `tests/test_resident.py` already covered mute/unmute. Proving the *matching* found a false-wake bug: a substring test meant any sentence containing "apex" woke it |
 | 23 | Streaming speech, interruption, speaker recognition | PARTIAL | Streaming STT present; no speaker recognition |
 | 24 | Vision / camera | PARTIAL | `tests/test_camera.py` (device), `tests/test_vision.py` (dispatch — notably that `click_on` never clicks on a miss). OCR and screen *understanding* need a real display and stay unproven |
-| 25, 26 | Hand tracking + gesture safety | MISSING | No mediapipe/gesture code |
+| 25, 26 | Hand tracking + gesture safety | PARTIAL | `agent/barehands_watcher.py` (recognizer), `tools/barehands.py` (board + ring); `tests/test_barehands_recognizer.py`, `tests/test_barehands_bridge.py`, smoke `hand_tracking_survives_a_dark_board`. Apex derives its own gestures from barehands' cursor stream — barehands recognizes clap/claw/throw in its browser page and exports none of them. **Not WORKS:** MediaPipe runs in Chrome, so real fingers → real cursors is unproven until run on a machine with a webcam. The bridge tests boot the real barehands server and drive it with a synthetic hand |
 
 ## Hardware
 
@@ -229,5 +229,7 @@ The highest-value work available is not on that ladder:
 3. **§43/§44 model reputation** — completely absent, and the thing that would
    make §5 routing decisions empirical instead of hardcoded.
 
-Gesture control and 3D printing are correctly last, and §52 Phase D already says
-not to start there.
+3D printing is correctly last. Gesture control was too, on the premise that
+nothing existed to integrate — that premise expired when `barehands` turned out
+to be a working, externally-drivable tracker, so §25/§26 moved to PARTIAL
+without a line of it being copied into Apex.

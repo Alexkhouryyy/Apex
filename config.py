@@ -370,3 +370,29 @@ IOT_AWARENESS_ENTITIES = [e.strip() for e in os.getenv("IOT_AWARENESS_ENTITIES",
 # Comma-separated entity_id allowlist for inbound trigger webhooks.
 # Leave blank to block all inbound triggers.
 IOT_TRIGGER_ALLOWED_ENTITIES = [e.strip() for e in os.getenv("IOT_TRIGGER_ALLOWED_ENTITIES", "").split(",") if e.strip()]
+
+
+# barehands — hand tracking + the glass board (opt-in, off by default).
+# barehands runs as its OWN process (python3 server.py on 127.0.0.1:8794) with a
+# Chrome tab owning the webcam; Apex only speaks HTTP to localhost and writes the
+# ring's state files. Nothing of barehands is vendored, so Apex stays MIT.
+BAREHANDS_ENABLED = os.getenv("BAREHANDS_ENABLED", "false").lower() in {"1", "true", "yes"}
+BAREHANDS_URL = os.getenv("BAREHANDS_URL", "http://127.0.0.1:8794")
+# Absolute path to the barehands checkout — needed only for the ring, whose
+# protocol is "write a word into <repo>/state/state".
+BAREHANDS_DIR = os.getenv("BAREHANDS_DIR", "")
+# 20 Hz, not 10: a natural wave runs 2-3 Hz, and at 10 Hz a 3 Hz wave aliases
+# away entirely (~3.3 samples/cycle). See agent/barehands_watcher.WAVE_MAX_HZ.
+BAREHANDS_POLL_HZ = float(os.getenv("BAREHANDS_POLL_HZ", "20"))
+# The server keeps no timestamp and requestAnimationFrame pauses on a
+# backgrounded tab, so a frozen hand and a held hand are byte-identical. Beyond
+# this many seconds of unchanged bytes WITH hands up, the tracker is gone.
+BAREHANDS_STALE_SECONDS = float(os.getenv("BAREHANDS_STALE_SECONDS", "2.0"))
+BAREHANDS_GESTURE_COOLDOWN_SECONDS = float(os.getenv("BAREHANDS_GESTURE_COOLDOWN_SECONDS", "3"))
+# Comma-separated gesture:action pairs — the ONLY place a gesture acquires
+# power. Deny-by-default: an unmapped gesture is still logged (so you can see it
+# was recognized) but does nothing. Leave blank for look-but-don't-touch.
+# Known gestures: wave, pinch_hold, swipe_left/right/up/down, hands_present, hands_gone.
+# Known actions: wake, listen, stop.
+BAREHANDS_GESTURE_ACTIONS = [e.strip() for e in os.getenv(
+    "BAREHANDS_GESTURE_ACTIONS", "wave:wake,pinch_hold:listen,swipe_down:stop").split(",") if e.strip()]

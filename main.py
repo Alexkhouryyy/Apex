@@ -299,15 +299,8 @@ def main():
             from dashboard import server as dash
             dash.set_agent(agent, awareness_log=getattr(monitor, "log", None))
             # Hook awareness events into the WebSocket broadcaster
-            if hasattr(monitor, "log"):
-                _orig_add = monitor.log.add
-                def _add_and_broadcast(source, content):
-                    _orig_add(source, content)
-                    dash.ws_manager.broadcast_threadsafe({
-                        "type": "event", "ts": __import__("time").time(),
-                        "source": source, "content": content,
-                    })
-                monitor.log.add = _add_and_broadcast
+            from agent import awareness as _aw_mod
+            _aw_mod.attach_live_feed(monitor, dash)
             if hasattr(monitor, "guardian") and monitor.guardian is not None:
                 dash.set_guardian(monitor.guardian)
             if getattr(monitor, "timecapsule", None) is not None:

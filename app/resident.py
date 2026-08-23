@@ -130,6 +130,30 @@ class ResidentState:
                 pass
 
 
+def resident_confirm(reason: str) -> bool:
+    """Answer safety.check() when there is nobody to ask.
+
+    Module-level so it can be tested — the same reason `iot_watcher.decide_event`
+    is. It used to not exist at all: `main.py` injects a voice prompt via
+    `safety.set_confirm_fn`, resident mode injected nothing, and `safety.check`
+    falls back to `input("Proceed? (y/N): ")`. On a daemon whose stdout is a log
+    file and whose stdin nobody is attached to, that blocks the turn for ever.
+
+    The answer has to be NO. An action risky enough to require confirmation must
+    not happen merely because the user was not at the keyboard — that is the
+    whole point of the gate. It is announced rather than silently refused, so a
+    blocked action is something you find out about.
+    """
+    logging.warning(f"Safety refused — nobody to ask in resident mode: {reason}")
+    try:
+        from agent import notify as _n
+        _n.notify(title="Apex blocked a risky action",
+                  body=str(reason)[:300], kind="safety", priority="high")
+    except Exception:
+        pass
+    return False
+
+
 def run_resident(model_override: Optional[str] = None) -> None:
     """Main entry point. Blocks until quit."""
     _setup_logging()
@@ -219,6 +243,9 @@ def run_resident(model_override: Optional[str] = None) -> None:
         except Exception as e:
             logging.error(f"Awareness monitor failed to start in resident mode: {e}")
 
+    from agent import safety as _safety_ref
+    _safety_ref.set_confirm_fn(resident_confirm)
+
     # Resident-mode greeting policy: never speak on boot
     logging.info(f"Silent boot: {config.RESIDENT_SILENT_BOOT}")
 
@@ -234,7 +261,14 @@ def run_resident(model_override: Optional[str] = None) -> None:
     if getattr(config, "DASHBOARD_ENABLED", True):
         try:
             from dashboard import server as dash
-            dash.set_agent(agent, awareness_log=None)
+            # Was `awareness_log=None`, which meant the live feed got no
+            # snapshot backlog and — with the rebind below missing too — no
+            # events at all in resident mode. Everything the watchers observed
+            # was invisible in exactly the mode that runs unattended.
+            dash.set_agent(agent, awareness_log=getattr(awareness_monitor, "log", None))
+            if awareness_monitor is not None:
+                from agent import awareness as _aw_mod
+                _aw_mod.attach_live_feed(awareness_monitor, dash)
             _dash_t = dash.start_in_background(port=getattr(config, "DASHBOARD_PORT", 7860))
             # Where it actually bound, not where we asked — see server.start_in_background.
             _dashboard_url = getattr(_dash_t, "dashboard_url", _dashboard_url)
@@ -391,6 +425,43 @@ def run_resident(model_override: Optional[str] = None) -> None:
     if config.WAKE_WORD_ENABLED:
         wake_listener = WakeWordListener(wake_phrases=config.WAKE_PHRASES)
         wake_listener.start(on_wake=_on_wake)
+
+    # --- barehands: the ring becomes Apex's face, and gestures can wake it ---
+    if getattr(config, "BAREHANDS_ENABLED", False):
+        try:
+            from tools import barehands as _bh
+            logging.info(_bh.attach_to_resident_state(state))
+
+            def _on_gesture(gesture: str, action: str) -> None:
+                """A gesture never calls a tool. It reaches one of the same
+                attention verbs the hotkey uses, and inherits the mute check
+                with them — a camera that can wake a muted Apex is worse than
+                no camera."""
+                if action in ("wake", "listen"):
+                    # The same thing in resident mode, and worth saying rather
+                    # than implying two paths: a turn already begins by opening
+                    # the mic, so "wake" and push-to-talk "listen" land on one
+                    # handler. The audit will label the turn "[hotkey]"; the
+                    # gesture itself is durably recorded in perception_log by
+                    # the watcher, which is the trail that matters.
+                    _on_hotkey_wake()
+                elif action == "stop":
+                    if state.get() == ResidentState.SPEAKING:
+                        state.set(ResidentState.IDLE)
+                else:
+                    logging.warning(
+                        f"Gesture '{gesture}' is mapped to unknown action "
+                        f"'{action}' — check BAREHANDS_GESTURE_ACTIONS.")
+
+            if awareness_monitor is not None and \
+                    getattr(awareness_monitor, "barehands", None) is not None:
+                awareness_monitor.barehands.on_gesture = _on_gesture
+            else:
+                logging.warning(
+                    "BAREHANDS_ENABLED is set but no watcher is running — "
+                    "gestures will not be seen (is AWARENESS_ENABLED off?).")
+        except Exception as e:
+            logging.error(f"barehands wiring failed: {e}")
 
     # --- Tray icon ---
     def _do_mute(minutes: int) -> None:

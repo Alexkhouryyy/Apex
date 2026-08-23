@@ -262,3 +262,120 @@ class TestResidentConfig:
         assert hasattr(config, "RESIDENT_AUDIT_FILE")
         assert hasattr(config, "RESIDENT_GLOBAL_HOTKEY")
         assert hasattr(config, "RESIDENT_MUTE_HOTKEY")
+
+
+# ── The headless safety gate ─────────────────────────────────────────────────
+
+class TestResidentSafetyConfirm:
+    """`safety.check()` falls back to `input("Proceed? (y/N): ")` when nothing
+    is injected. main.py injects a voice prompt; resident mode injected nothing,
+    so on a daemon whose stdin nobody is attached to, any risky tool call
+    blocked the turn for ever. These pin the fix."""
+
+    def test_a_risky_action_is_refused_not_asked(self):
+        from app.resident import resident_confirm
+        assert resident_confirm("running arbitrary Python on the host") is False
+
+    def test_it_never_touches_stdin(self, monkeypatch):
+        """The failure mode was a blocking read, so the test has to be that no
+        read happens at all — not merely that the answer is no."""
+        import builtins
+        monkeypatch.setattr(builtins, "input", lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("resident mode must never read stdin")))
+        from app.resident import resident_confirm
+        assert resident_confirm("disk overwrite (dd)") is False
+
+    def test_a_broken_notifier_still_refuses(self, monkeypatch):
+        """Refusal must not depend on the notification working — otherwise a
+        push failure turns a blocked action into an allowed one."""
+        from agent import notify
+        monkeypatch.setattr(notify, "notify", lambda **k: (_ for _ in ()).throw(
+            RuntimeError("push is down")))
+        from app.resident import resident_confirm
+        assert resident_confirm("unlocking a door") is False
+
+    def test_resident_actually_injects_it(self):
+        """The function existing is not the same as it being wired. This is the
+        half that was missing."""
+        import inspect
+        from app import resident
+        src = inspect.getsource(resident.run_resident)
+        assert "set_confirm_fn(resident_confirm)" in src
+
+
+# ── The dashboard live feed ──────────────────────────────────────────────────
+
+class TestLiveFeedAttachment:
+    """Nine lines of this were pasted inline in main.py and absent from
+    resident.py, so the always-on mode showed an empty live feed while every
+    watcher worked perfectly. One shared helper now, used by both."""
+
+    class _Dash:
+        def __init__(self):
+            self.sent = []
+
+        class _WS:
+            def __init__(self, out):
+                self.out = out
+
+            def broadcast_threadsafe(self, payload):
+                self.out.append(payload)
+
+        @property
+        def ws_manager(self):
+            return self._WS(self.sent)
+
+    def _monitor(self):
+        from agent.awareness import AwarenessLog
+
+        class _M:
+            log = AwarenessLog()
+        return _M()
+
+    def test_events_reach_the_feed_once_attached(self, monkeypatch, tmp_path):
+        from agent import awareness, perception
+        monkeypatch.setattr(perception, "log_event", lambda *a, **k: None)
+        m, dash = self._monitor(), self._Dash()
+        assert awareness.attach_live_feed(m, dash) is True
+        m.log.add("gesture", "hands are up in front of the camera")
+        assert dash.sent and dash.sent[0]["source"] == "gesture"
+        assert dash.sent[0]["type"] == "event"
+
+    def test_attaching_twice_does_not_double_every_event(self, monkeypatch):
+        """Both entry points call this, and resident builds its dashboard after
+        the monitor. A second call must be a no-op, not a second wrapper."""
+        from agent import awareness, perception
+        monkeypatch.setattr(perception, "log_event", lambda *a, **k: None)
+        m, dash = self._monitor(), self._Dash()
+        awareness.attach_live_feed(m, dash)
+        awareness.attach_live_feed(m, dash)
+        m.log.add("window", "Switched to: Terminal")
+        assert len(dash.sent) == 1
+
+    def test_a_broken_feed_never_loses_the_observation(self, monkeypatch):
+        """The live feed is a view. Losing an event because a websocket is down
+        would make the durable perception log lie."""
+        from agent import awareness, perception
+        recorded = []
+        monkeypatch.setattr(perception, "log_event",
+                            lambda s, c, ts=None: recorded.append((s, c)))
+        m = self._monitor()
+
+        class _Broken:
+            class ws_manager:
+                @staticmethod
+                def broadcast_threadsafe(payload):
+                    raise RuntimeError("no loop")
+
+        awareness.attach_live_feed(m, _Broken())
+        m.log.add("gesture", "wave")
+        assert recorded == [("gesture", "wave")]
+
+    def test_both_entry_points_use_the_shared_helper(self):
+        """The bug was two copies, one of which went missing. Assert there is
+        one."""
+        import inspect
+        from app import resident
+        import main
+        assert "attach_live_feed" in inspect.getsource(resident.run_resident)
+        assert "attach_live_feed" in inspect.getsource(main)

@@ -276,12 +276,31 @@ class AwarenessMonitor:
             from agent.iot_watcher import IoTWatcher
             self.iot = IoTWatcher(self.log)
 
+        # Hand tracking via barehands. Gated on the flag ALONE, deliberately:
+        # the IoT watcher above also requires a non-empty allowlist, so an empty
+        # list silently disables the whole subsystem while looking configured.
+        # Here an empty BAREHANDS_GESTURE_ACTIONS means look-but-don't-touch —
+        # gestures are still recognized and logged, they just cannot act.
+        self.barehands: Optional[threading.Thread] = None
+        if getattr(config, "BAREHANDS_ENABLED", False):
+            from agent.barehands_watcher import BarehandsWatcher
+            self.barehands = BarehandsWatcher(self.log)
+
     def start(self) -> None:
         self.window.start()
         self.clipboard.start()
         self.files.start()
         if self.iot is not None:
             self.iot.start()
+        if self.barehands is not None:
+            self.barehands.start()
+            # Only the watcher polls often enough to tell a live stage from a
+            # frozen one, so it answers that question for tools/barehands.py.
+            try:
+                from tools import barehands as _bh_tools
+                _bh_tools.set_tracker_probe(lambda: self.barehands.recognizer.tracker)
+            except Exception as e:
+                print(f"[Barehands] could not register the tracker probe: {e}")
         self._reviewer = threading.Thread(target=self._review_loop, daemon=True, name="AwarenessReviewer")
         self._reviewer.start()
         print(f"[Awareness] Monitor started (review every {self.review_interval}s).")
@@ -293,6 +312,8 @@ class AwarenessMonitor:
         self.files.stop()
         if self.iot is not None:
             self.iot.stop()
+        if self.barehands is not None:
+            self.barehands.stop()
 
     def _review_loop(self) -> None:
         last_summary = ""
@@ -399,6 +420,42 @@ class AwarenessMonitor:
                     self.speak(f"Heads up. {observation}")
             except Exception as e:
                 print(f"[Awareness] Review error: {e}")
+
+
+def attach_live_feed(monitor, dash) -> bool:
+    """Make everything the monitor observes appear in the dashboard live feed.
+
+    Shared by both entry points on purpose. This used to be nine lines pasted
+    inline in `main.py` and simply absent from `app/resident.py`, so the
+    always-on mode — the one that actually runs unattended — showed an empty
+    live feed while every watcher was working perfectly. Two copies of wiring
+    is how one of them goes missing; there is now one.
+
+    Returns True if the feed was attached. Idempotent: attaching twice would
+    double every event, so a second call is a no-op.
+    """
+    log = getattr(monitor, "log", None)
+    if log is None:
+        return False
+    if getattr(log.add, "_apex_live_feed", False):
+        return True
+
+    original = log.add
+
+    def _add_and_broadcast(source, content):
+        original(source, content)
+        try:
+            dash.ws_manager.broadcast_threadsafe({
+                "type": "event", "ts": time.time(),
+                "source": source, "content": content,
+            })
+        except Exception:
+            # The live feed is a view, never a reason to lose an observation.
+            pass
+
+    _add_and_broadcast._apex_live_feed = True
+    log.add = _add_and_broadcast
+    return True
 
 
 def build_monitor(agent, speak_fn, notify_fn=None):

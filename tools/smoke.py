@@ -227,6 +227,14 @@ def boot(say: str = "", script: list[dict] | None = None,
         "DASHBOARD_TOKEN": "smoke-token",
         "TELEGRAM_POLLING": "false",
         "PYTHONUNBUFFERED": "1",
+        # Hand tracking ON, pointed at a port with nothing behind it. Booting
+        # the ENABLED path is the point: the disabled path does nothing by
+        # definition, so exercising it proves nothing. This is how we learn that
+        # Apex still boots cleanly when barehands is configured but not running,
+        # which is the normal state of any machine that has not opened Chrome
+        # yet. no_silent_failures polices the "cleanly" half.
+        "BAREHANDS_ENABLED": "true",
+        "BAREHANDS_URL": f"http://127.0.0.1:{free_port()}",
     })
     env.update(extra_env or {})
 
@@ -595,6 +603,30 @@ def every_dashboard_tab_answers(r: BootResult) -> Finding:
         if len(broken) > 6:
             detail += f" (+{len(broken) - 6} more)"
     return Finding("every_dashboard_tab_answers", not broken, detail)
+
+
+@check
+def hand_tracking_survives_a_dark_board(r: BootResult) -> Finding:
+    """barehands is enabled in the smoke env and aimed at a dead port.
+
+    Three things have to be true and only one of them is obvious. The watcher
+    must actually start (a subsystem gated behind a flag is exactly the shape
+    that gets built and never constructed); it must NAME the condition rather
+    than going quiet, because "the board is dark" and "hand tracking is broken"
+    are otherwise the same silence; and it must not trip a failure marker, which
+    no_silent_failures checks independently.
+    """
+    started = "[Barehands] Watching" in r.stdout
+    named = "the board is dark" in r.stdout
+    if started and named:
+        return Finding("hand_tracking_survives_a_dark_board", True,
+                       "watcher up, dark board reported")
+    missing = []
+    if not started:
+        missing.append("the watcher never started")
+    if not named:
+        missing.append("nothing said the board was dark")
+    return Finding("hand_tracking_survives_a_dark_board", False, "; ".join(missing))
 
 
 def run(say: str = "remember that my name is Alex", verbose: bool = True) -> list[Finding]:
