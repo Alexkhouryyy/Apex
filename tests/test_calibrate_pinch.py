@@ -165,3 +165,55 @@ class TestDescribe:
 
     def test_no_readings_says_so(self):
         assert "no readings" in cal.describe("pinched", [])
+
+
+class TestExplainNoReadings:
+    """Zero readings has three causes needing three different fixes, and the
+    first live run reported "try better light" without knowing which it was.
+
+    Advice for the wrong failure is worse than none: it sends someone to fix a
+    thing that was never broken. On 2026-08-23 this printed a lighting hint for
+    a run where the camera may have delivered nothing at all.
+    """
+
+    def test_no_frames_is_a_capture_problem_not_a_hand_problem(self):
+        out = cal.explain_no_readings({"frames": 0, "dropped": 120, "hands": 0},
+                                      {"frames": 0, "dropped": 118, "hands": 0})
+        assert "no frames" in out.lower()
+        assert "not a hand problem" in out.lower()
+        assert "opencv" in out.lower(), "must name the likeliest cause"
+        assert "light" not in out.lower(), \
+            "lighting advice here sends you to fix the wrong thing"
+
+    def test_frames_but_no_hands_is_light_or_framing(self):
+        out = cal.explain_no_readings({"frames": 120, "dropped": 0, "hands": 0},
+                                      {"frames": 118, "dropped": 0, "hands": 0})
+        assert "camera works" in out.lower()
+        assert "light" in out.lower() or "framing" in out.lower()
+
+    def test_hands_but_no_ratios_is_the_pose(self):
+        """Landmarks arriving but pinch_ratio refusing them means a degenerate
+        span — a hand seen edge-on, where wrist and knuckle collapse together."""
+        out = cal.explain_no_readings({"frames": 120, "dropped": 0, "hands": 60},
+                                      {"frames": 118, "dropped": 0, "hands": 55})
+        assert "squarely" in out.lower() or "edge-on" in out.lower()
+
+    def test_the_three_causes_read_differently(self):
+        """The whole point. Three failures that used to produce one sentence
+        must now produce three."""
+        cases = [
+            ({"frames": 0, "dropped": 5, "hands": 0},) * 2,
+            ({"frames": 100, "dropped": 0, "hands": 0},) * 2,
+            ({"frames": 100, "dropped": 0, "hands": 50},) * 2,
+        ]
+        said = {cal.explain_no_readings(a, b) for a, b in cases}
+        assert len(said) == 3, said
+
+    @pytest.mark.parametrize("junk", [{}, {"frames": None}])
+    def test_missing_stats_do_not_raise(self, junk):
+        """This runs on the failure path — raising here would replace a
+        diagnosis with a traceback."""
+        try:
+            cal.explain_no_readings(junk, junk)
+        except TypeError:
+            pytest.fail("must survive incomplete stats")

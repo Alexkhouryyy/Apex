@@ -152,26 +152,106 @@ def describe(label: str, samples) -> str:
 
 # ── The interactive half, which needs a camera ───────────────────────────────
 
-def collect(landmarker, cap, mp, seconds: float, frame_no: int) -> tuple:
-    """Sample pinch_ratio for `seconds`. Returns (samples, next_frame_no)."""
+def collect(landmarker, cap, mp, seconds: float, frame_no: int,
+            preview: bool = False) -> tuple:
+    """Sample pinch_ratio for `seconds`. Returns (samples, next_frame_no, stats).
+
+    `stats` counts frames the camera delivered alongside hands MediaPipe found,
+    because "0 readings" has two completely different causes — a camera handing
+    over nothing, and a camera working fine with no hand in front of it — and
+    the first version of this reported them identically. One is fixed by
+    reinstalling a driver, the other by turning a light on.
+    """
     import cv2
     samples, deadline = [], time.time() + seconds
+    frames_ok = frames_failed = hands_seen = 0
     while time.time() < deadline:
         ok, frame = cap.read()
         if not ok or frame is None:
+            frames_failed += 1
             continue
+        frames_ok += 1
         frame_no += 1
         image = mp.Image(image_format=mp.ImageFormat.SRGB,
                          data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         result = landmarker.detect_for_video(image, frame_no * 50)
-        for lms in result.hand_landmarks or []:
+        hands = result.hand_landmarks or []
+        hands_seen += len(hands)
+        for lms in hands:
             r = handtrack.pinch_ratio(lms)
             if r is not None:
                 samples.append(r)
+        if preview:
+            _show(cv2, frame, hands)
         left = max(0.0, deadline - time.time())
-        print(f"\r    {left:4.1f}s  ({len(samples)} readings)", end="", flush=True)
+        print(f"\r    {left:4.1f}s   frames {frames_ok}   hands {hands_seen}   "
+              f"readings {len(samples)}   ", end="", flush=True)
     print()
-    return samples, frame_no
+    return samples, frame_no, {"frames": frames_ok, "dropped": frames_failed,
+                               "hands": hands_seen}
+
+
+def _show(cv2, frame, hands) -> None:
+    """Draw what the camera sees, with any detected landmarks on top.
+
+    Seeing the frame answers in one second what the numbers take a support
+    conversation to establish: whether the camera works at all, and whether the
+    hand is in shot.
+    """
+    try:
+        h, w = frame.shape[:2]
+        for lms in hands:
+            for lm in lms:
+                cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 3,
+                           (0, 255, 0), -1)
+        cv2.putText(frame, f"hands: {len(hands)}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.imshow("calibrate_pinch - press any key to abort", frame)
+        cv2.waitKey(1)
+    except Exception:
+        # Preview is a convenience. A build of OpenCV without GUI support must
+        # not take the measurement down with it.
+        pass
+
+
+def explain_no_readings(stats_open: dict, stats_pinch: dict) -> str:
+    """Say WHICH failure produced zero readings.
+
+    This exists because the first live run reported "hand was not detected —
+    try better light" when the actual cause was unknown and could equally have
+    been a camera delivering nothing. Advice for the wrong failure is worse
+    than no advice: it sends you to fix something that was never broken.
+    """
+    def total(key: str) -> int:
+        # `.get(key, 0)` is not enough: a key present with a None value returns
+        # None, and None + None raises. This runs on the failure path, where a
+        # traceback would replace the diagnosis with nothing.
+        out = 0
+        for stats in (stats_open, stats_pinch):
+            try:
+                out += int((stats or {}).get(key) or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return out
+
+    frames, dropped, hands = total("frames"), total("dropped"), total("hands")
+
+    if frames == 0:
+        return (f"The camera opened but delivered no frames at all ({dropped} "
+                f"failed reads). That is a capture problem, not a hand problem. "
+                f"Most likely: two OpenCV packages fighting over one cv2 install "
+                f"(uninstall opencv-python-headless), another app holding the "
+                f"camera, or a privacy shutter. Re-run with --preview to see "
+                f"whether any picture arrives.")
+    if hands == 0:
+        return (f"The camera works — {frames} frames arrived — but MediaPipe "
+                f"found no hand in any of them. That is light, distance or "
+                f"framing. Get your whole hand in shot, palm to the camera, "
+                f"well lit, roughly an arm's length away. --preview shows you "
+                f"exactly what it sees.")
+    return (f"{frames} frames, {hands} hand detections, but no usable pinch "
+            f"ratio — the landmarks came back degenerate. Face the camera "
+            f"squarely rather than edge-on.")
 
 
 def countdown(message: str, seconds: int = 3) -> None:
@@ -190,6 +270,8 @@ def main(argv=None) -> int:
                     help="camera index (default: CAMERA_DEVICE_INDEX)")
     ap.add_argument("--write", action="store_true",
                     help="write the result to .env without asking")
+    ap.add_argument("--preview", action="store_true",
+                    help="show the camera feed with detected landmarks drawn")
     args = ap.parse_args(argv)
 
     ok, why = handtrack.available()
@@ -236,18 +318,34 @@ def main(argv=None) -> int:
 
         countdown("1/2  Hold your hand OPEN — fingers spread, thumb away "
                   "from the index finger.")
-        open_samples, n = collect(landmarker, cap, mp, args.seconds, 0)
+        open_samples, n, stats_open = collect(
+            landmarker, cap, mp, args.seconds, 0, args.preview)
 
         countdown("2/2  Now PINCH — thumb and index fingertip touching — "
                   "and hold it there.")
-        pinch_samples, _ = collect(landmarker, cap, mp, args.seconds, n)
+        pinch_samples, _, stats_pinch = collect(
+            landmarker, cap, mp, args.seconds, n, args.preview)
     finally:
         cap.release()
         landmarker.close()
+        if args.preview:
+            try:
+                import cv2 as _c
+                _c.destroyAllWindows()
+            except Exception:
+                pass
 
     print("\nWhat was measured:")
-    print(describe("open  ", open_samples))
+    print(f"  camera : {stats_open['frames'] + stats_pinch['frames']} frames "
+          f"delivered, {stats_open['dropped'] + stats_pinch['dropped']} dropped")
+    print(f"  hands  : {stats_open['hands'] + stats_pinch['hands']} detections")
+    print(describe("open   ", open_samples))
     print(describe("pinched", pinch_samples))
+
+    if not clean(open_samples) and not clean(pinch_samples):
+        print(f"\nNo threshold recommended.\n  "
+              f"{explain_no_readings(stats_open, stats_pinch)}")
+        return 2
 
     value, reason = recommend_threshold(open_samples, pinch_samples)
     print()
