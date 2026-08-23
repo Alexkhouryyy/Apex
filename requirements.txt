@@ -16,6 +16,12 @@ uvicorn[standard]
 websockets
 pytesseract
 opencv-python-headless
+# NOTE: `pip install mediapipe` (below, optional) pulls opencv-contrib-python,
+# which installs into the SAME cv2 directory as this one and overwrites files
+# from it. Two OpenCV distributions is a supported-by-nobody configuration —
+# cv2 still imports and quietly misbehaves. If you install mediapipe, uninstall
+# this one; agent/handtrack.opencv_conflict() warns at startup when both are
+# present.
 faster-whisper
 sounddevice
 numpy

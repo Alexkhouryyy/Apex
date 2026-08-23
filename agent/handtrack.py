@@ -77,6 +77,41 @@ def model_path() -> Path:
     return base / MODEL_NAME
 
 
+# Every distribution that installs a module called `cv2`. Two of these on one
+# machine is a supported-by-nobody configuration.
+_OPENCV_DISTS = (
+    "opencv-python", "opencv-python-headless",
+    "opencv-contrib-python", "opencv-contrib-python-headless",
+)
+
+
+def _dists_installed() -> set:
+    """Lowercased names of every installed distribution. Its own function so a
+    test can substitute one without inventing packages on the machine."""
+    from importlib.metadata import distributions
+    return {d.metadata["Name"].lower() for d in distributions()
+            if d.metadata and d.metadata.get("Name")}
+
+
+def opencv_conflict() -> list[str]:
+    """Which OpenCV distributions are installed, if more than one.
+
+    `pip install mediapipe` pulls `opencv-contrib-python`, while Apex's
+    requirements.txt pins `opencv-python-headless`. Both write into the same
+    `cv2` package directory, so the second install overwrites files from the
+    first and you get a `cv2` that imports fine and is missing pieces of
+    whichever one lost. Nothing errors; things just stop working oddly. Worth
+    naming out loud rather than debugging from symptoms.
+    """
+    try:
+        found = _dists_installed()
+    except Exception:
+        # A diagnostic must never be the thing that stops hand tracking.
+        return []
+    hits = sorted(n for n in _OPENCV_DISTS if n in found)
+    return hits if len(hits) > 1 else []
+
+
 def available() -> tuple[bool, str]:
     """(usable, why-not). Reports which piece is missing rather than one
     unhelpful False — the two failure modes need different fixes."""
@@ -272,6 +307,14 @@ class HandTracker(threading.Thread):
             print(f"[HandTrack] Hand tracking is off: {why}")
             self._stop.wait()          # park; never spin
             return
+        clash = opencv_conflict()
+        if clash:
+            # Not fatal, so this is a warning and not a refusal — but it is the
+            # first thing to suspect if cv2 starts behaving strangely.
+            print(f"[HandTrack] WARNING: {len(clash)} OpenCV packages installed "
+                  f"({', '.join(clash)}). They share one cv2 directory and "
+                  f"overwrite each other. Keep opencv-contrib-python (mediapipe "
+                  f"needs it) and uninstall the others.")
         if ensure_model() is None:
             print("[HandTrack] Hand tracking is off: no model file.")
             self._stop.wait()

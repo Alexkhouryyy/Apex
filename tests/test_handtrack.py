@@ -166,6 +166,38 @@ class TestAvailability:
             assert "mediapipe" in why
 
 
+class TestOpenCVConflict:
+    """`pip install mediapipe` pulls opencv-contrib-python; requirements.txt
+    pins opencv-python-headless. Both write into the SAME cv2 directory, so the
+    second install overwrites files from the first. Nothing errors — cv2 imports
+    and quietly misbehaves, which is unbudgeted debugging time unless something
+    names it."""
+
+    def test_one_opencv_is_not_a_conflict(self, monkeypatch):
+        monkeypatch.setattr(handtrack, "_dists_installed",
+                            lambda: {"opencv-contrib-python", "numpy"},
+                            raising=False)
+        assert handtrack.opencv_conflict() == []
+
+    def test_two_opencvs_are_named(self, monkeypatch):
+        monkeypatch.setattr(handtrack, "_dists_installed",
+                            lambda: {"opencv-python-headless",
+                                     "opencv-contrib-python"},
+                            raising=False)
+        found = handtrack.opencv_conflict()
+        assert len(found) == 2
+        assert "opencv-contrib-python" in found
+        assert "opencv-python-headless" in found
+
+    def test_a_broken_metadata_read_does_not_raise(self, monkeypatch):
+        """This runs on the tracker's startup path. A raise here would stop
+        hand tracking over a diagnostic."""
+        def _boom():
+            raise RuntimeError("metadata is unreadable")
+        monkeypatch.setattr(handtrack, "_dists_installed", _boom, raising=False)
+        assert handtrack.opencv_conflict() == []
+
+
 class TestCameraCoexistence:
     """The webcam is exclusive. While the tracker holds it, a second
     VideoCapture fails — including Apex's own camera_capture tool, which would
