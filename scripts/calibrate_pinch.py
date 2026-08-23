@@ -43,6 +43,14 @@ MIN_SAMPLES = 20
 # held differently tomorrow. Still returns a value, with a warning.
 COMFORTABLE_GAP = 0.15
 
+# Below this the clouds are technically ordered but the margin is measurement
+# noise — a couple of hundredths either side. Found by running the calibrator
+# against a "hand not opened properly" case: it happily returned 0.55 for a gap
+# of 0.02 and called it fragile. Fragile understates it. A threshold fitted to
+# noise is a confident wrong answer, which is the one thing this must not
+# produce, so this is a refusal rather than a warning.
+MIN_USABLE_GAP = 0.05
+
 # Where in the gap the boundary sits. Biased toward the open-hand side so a lazy
 # pinch — thumb and finger close but not touching — still registers, since the
 # cost of missing a pinch is a gesture that appears broken.
@@ -110,6 +118,15 @@ def recommend_threshold(open_samples, pinch_samples) -> tuple:
         )
 
     gap = open_lo - pinch_hi
+    if gap < MIN_USABLE_GAP:
+        return None, (
+            f"The readings are ordered but only {gap:.3f} apart (pinched up to "
+            f"{pinch_hi:.2f}, open from {open_lo:.2f}) — that is measurement "
+            f"noise, not separation, and a threshold fitted to it would be a "
+            f"confident wrong answer. Open your hand wider, spreading the thumb "
+            f"well away from the index finger, and run this again."
+        )
+
     value = round(pinch_hi + gap * GAP_BIAS, 2)
     if gap < COMFORTABLE_GAP:
         return value, (

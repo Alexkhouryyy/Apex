@@ -98,12 +98,27 @@ class TestRecommendThreshold:
         assert "light" in reason.lower() or "closer" in reason.lower(), \
             "must point at the real cause rather than the threshold"
 
-    def test_a_thin_gap_returns_a_value_and_warns(self):
+    def test_a_noise_width_gap_refuses(self):
+        """Ordered is not the same as separated.
+
+        Found by running the calibrator against a plausible "hand not opened
+        properly" case: it returned 0.55 for a gap of 0.02 and called it
+        fragile. Two hundredths is the width of the measurement itself — the
+        ordering could reverse on the next frame. Calling that fragile
+        understates it, and the whole point of this function is that it does not
+        emit confident wrong answers.
+        """
+        value, reason = cal.recommend_threshold(
+            _spread(0.62, width=0.06), _spread(0.48, width=0.06))
+        assert value is None, f"returned {value} for a noise-width gap"
+        assert "noise" in reason.lower()
+
+    def test_a_thin_but_real_gap_returns_a_value_and_warns(self):
         """Separated is not the same as robust. Silently returning a fragile
         number is how it works on the day you tuned it and not afterwards."""
         value, reason = cal.recommend_threshold(
-            _spread(0.62, width=0.01), _spread(0.48, width=0.01))
-        assert value is not None
+            _spread(0.60, width=0.01), _spread(0.50, width=0.01))
+        assert value is not None, reason
         assert "fragile" in reason.lower()
 
     def test_one_empty_side_refuses(self):
