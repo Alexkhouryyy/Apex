@@ -246,6 +246,14 @@ def run_resident(model_override: Optional[str] = None) -> None:
     from agent import safety as _safety_ref
     _safety_ref.set_confirm_fn(resident_confirm)
 
+    try:
+        from agent import awareness as _aw_report
+        _line = _aw_report.report_hand_tracking(awareness_monitor)
+        if _line:
+            logging.info(_line)
+    except Exception as e:
+        logging.warning(f"Hand-tracking status report failed: {e}")
+
     # Resident-mode greeting policy: never speak on boot
     logging.info(f"Silent boot: {config.RESIDENT_SILENT_BOOT}")
 

@@ -422,6 +422,32 @@ class AwarenessMonitor:
                 print(f"[Awareness] Review error: {e}")
 
 
+def report_hand_tracking(monitor) -> str:
+    """Say, at boot, whether hand tracking is running — and if not, why not.
+
+    Silence is a terrible status report. A user with BAREHANDS_ENABLED=true and
+    no `[Barehands]` line in the console cannot tell apart: the flag did not
+    take, the code is not on this machine, or AWARENESS_ENABLED is off and took
+    hand tracking down with it as a side effect. All three look identical, and
+    working looks identical too until the watcher thread gets a slice.
+
+    That last case is the nasty one: two independent flags where the wrong one
+    silently wins. Returns the line it printed, for tests.
+    """
+    if not getattr(config, "BAREHANDS_ENABLED", False):
+        return ""
+    if monitor is None:
+        line = ("[Barehands] BAREHANDS_ENABLED is on but the awareness monitor "
+                "is not running, so hand tracking is OFF. Set AWARENESS_ENABLED=true.")
+    elif getattr(monitor, "barehands", None) is None:
+        line = ("[Barehands] BAREHANDS_ENABLED is on but no watcher was built — "
+                "this Apex is older than the hand-tracking code. Pull and restart.")
+    else:
+        line = f"[Barehands] Hand tracking on, polling {config.BAREHANDS_URL}."
+    print(line)
+    return line
+
+
 def attach_live_feed(monitor, dash) -> bool:
     """Make everything the monitor observes appear in the dashboard live feed.
 

@@ -21,3 +21,12 @@ secrets/
 # itself un-excluded so reusable skills below can be re-included and versioned.
 .claude/*
 !.claude/skills/
+
+# barehands — a SEPARATE AGPL-3.0 program Apex drives over localhost.
+# Apex integrates with it by aggregation (HTTP to 127.0.0.1:8794 plus three
+# small state files), never by vendoring, which is the only reason Apex can stay
+# MIT. Committing a copy of it into this tree would make Apex AGPL permanently,
+# and the network clause means anyone who reached the dashboard could then demand
+# Apex's full source. It gets cloned next to Apex, not inside it — this line
+# exists because cloning it inside is an easy accident.
+barehands/

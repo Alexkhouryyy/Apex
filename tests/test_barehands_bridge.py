@@ -404,3 +404,74 @@ class TestAgainstTheRealServer:
             barehands.urllib.request.urlopen(req, timeout=3).read()
             w._tick(1000.0 + i * 0.05)
         assert any("swipe_right" in c for _s, c in log.events), log.events
+
+
+# ── Saying why hand tracking is off ──────────────────────────────────────────
+
+class TestHandTrackingStatusReport:
+    """Silence is a terrible status report.
+
+    A user with BAREHANDS_ENABLED=true and no `[Barehands]` line cannot tell
+    apart: stale code, a flag that did not take, or AWARENESS_ENABLED being off
+    and taking hand tracking down as a side effect. This happened for real on
+    2026-08-23 and cost twenty minutes of guessing.
+    """
+
+    def test_nothing_is_said_when_the_feature_is_off(self, monkeypatch, capsys):
+        """No noise for the overwhelming majority who do not use barehands."""
+        from agent import awareness
+        monkeypatch.setattr(config, "BAREHANDS_ENABLED", False, raising=False)
+        assert awareness.report_hand_tracking(None) == ""
+        assert capsys.readouterr().out == ""
+
+    def test_awareness_being_off_is_named_as_the_cause(self, monkeypatch):
+        """Two independent flags, and the wrong one silently wins. Without this
+        line, BAREHANDS_ENABLED=true plus AWARENESS_ENABLED=false is completely
+        indistinguishable from working."""
+        from agent import awareness
+        monkeypatch.setattr(config, "BAREHANDS_ENABLED", True, raising=False)
+        line = awareness.report_hand_tracking(None)
+        assert "AWARENESS_ENABLED" in line and "OFF" in line
+
+    def test_stale_code_is_named_as_the_cause(self, monkeypatch):
+        """The monitor exists but predates the watcher — exactly what a machine
+        that has not pulled looks like."""
+        from agent import awareness
+
+        class _OldMonitor:
+            pass
+        monkeypatch.setattr(config, "BAREHANDS_ENABLED", True, raising=False)
+        line = awareness.report_hand_tracking(_OldMonitor())
+        assert "older than" in line and "Pull" in line
+
+    def test_working_says_where_it_is_polling(self, monkeypatch):
+        from agent import awareness
+        monkeypatch.setattr(config, "BAREHANDS_ENABLED", True, raising=False)
+        monkeypatch.setattr(config, "BAREHANDS_URL", "http://127.0.0.1:8794",
+                            raising=False)
+
+        class _Monitor:
+            barehands = object()
+        line = awareness.report_hand_tracking(_Monitor())
+        assert "Hand tracking on" in line and "8794" in line
+
+    def test_every_outcome_is_distinguishable(self, monkeypatch):
+        """The whole point: three failure modes that used to produce identical
+        silence must now produce three different sentences."""
+        from agent import awareness
+        monkeypatch.setattr(config, "BAREHANDS_ENABLED", True, raising=False)
+
+        class _Old:
+            pass
+
+        class _Ok:
+            barehands = object()
+        lines = {awareness.report_hand_tracking(m) for m in (None, _Old(), _Ok())}
+        assert len(lines) == 3, lines
+
+    def test_both_entry_points_report_it(self):
+        import inspect
+        from app import resident
+        import main
+        assert "report_hand_tracking" in inspect.getsource(resident.run_resident)
+        assert "report_hand_tracking" in inspect.getsource(main)

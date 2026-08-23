@@ -339,6 +339,9 @@ def main():
             speak("Signing off.")
         sys.exit(0)
 
+    from agent import awareness as _aw_report
+    _aw_report.report_hand_tracking(monitor)
+
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
