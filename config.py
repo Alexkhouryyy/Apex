@@ -396,3 +396,26 @@ BAREHANDS_GESTURE_COOLDOWN_SECONDS = float(os.getenv("BAREHANDS_GESTURE_COOLDOWN
 # Known actions: wake, listen, stop.
 BAREHANDS_GESTURE_ACTIONS = [e.strip() for e in os.getenv(
     "BAREHANDS_GESTURE_ACTIONS", "wave:wake,pinch_hold:listen,swipe_down:stop").split(",") if e.strip()]
+
+
+# Hand tracking — Apex's OWN MediaPipe tracker, reading the webcam directly.
+# Distinct from BAREHANDS_*, which polls a barehands server whose MediaPipe runs
+# inside a Chrome tab. The native tracker needs no browser, so it keeps working
+# when nothing is open — the browser path goes blind whenever its tab is
+# backgrounded, which is what the BAREHANDS_STALE_SECONDS machinery detects.
+HANDTRACK_ENABLED = os.getenv("HANDTRACK_ENABLED", "false").lower() in {"1", "true", "yes"}
+HANDTRACK_POLL_HZ = float(os.getenv("HANDTRACK_POLL_HZ", "20"))
+# Selfie space. A raw webcam frame is NOT mirrored, so without this a hand moving
+# to your right travels left in the image and swipe_right fires for a leftward
+# wave. Set false only if your camera already mirrors.
+HANDTRACK_MIRROR = os.getenv("HANDTRACK_MIRROR", "true").lower() in {"1", "true", "yes"}
+# Pinch = thumb-to-index distance as a fraction of the hand's own span, so it is
+# scale-invariant and does not change with how far away you sit. This default was
+# chosen WITHOUT a camera to test against — set HANDTRACK_DEBUG=true, watch the
+# measured ratios, and set this from data rather than trusting the number.
+HANDTRACK_PINCH_RATIO = float(os.getenv("HANDTRACK_PINCH_RATIO", "0.45"))
+HANDTRACK_DEBUG = os.getenv("HANDTRACK_DEBUG", "false").lower() in {"1", "true", "yes"}
+# The webcam is exclusive: while Apex holds it, no video call can open it. This
+# is how long `release_camera` hands it back before tracking resumes on its own,
+# so forgetting to resume cannot silently end hand tracking.
+HANDTRACK_RELEASE_SECONDS = float(os.getenv("HANDTRACK_RELEASE_SECONDS", "300"))

@@ -286,12 +286,36 @@ class AwarenessMonitor:
             from agent.barehands_watcher import BarehandsWatcher
             self.barehands = BarehandsWatcher(self.log)
 
+        # Apex's own MediaPipe tracker — no browser, so it keeps seeing hands
+        # when nothing is open. Independent of the barehands watcher above:
+        # running both would put two gesture streams into one log and double
+        # every wave, so the native tracker wins when both are enabled.
+        self.handtrack: Optional[threading.Thread] = None
+        if getattr(config, "HANDTRACK_ENABLED", False):
+            from agent import handtrack as _ht
+            self.handtrack = _ht.HandTracker(self.log)
+            _ht.set_active_tracker(self.handtrack)
+            if self.barehands is not None:
+                print("[HandTrack] Both HANDTRACK_ENABLED and BAREHANDS_ENABLED "
+                      "are set. Using the native tracker for gestures; barehands "
+                      "stays available for the board and the ring.")
+                self.barehands.gestures_enabled = False
+
     def start(self) -> None:
         self.window.start()
         self.clipboard.start()
         self.files.start()
         if self.iot is not None:
             self.iot.start()
+        if self.handtrack is not None:
+            self.handtrack.start()
+            # The tracker holds the webcam, so Apex's own camera_capture tool
+            # has to take frames from it rather than open the device again.
+            try:
+                from tools import camera as _cam
+                _cam.set_tracker_frame_source(self.handtrack.latest_frame)
+            except Exception as e:
+                print(f"[HandTrack] could not share frames with camera_capture: {e}")
         if self.barehands is not None:
             self.barehands.start()
             # Only the watcher polls often enough to tell a live stage from a
@@ -314,6 +338,8 @@ class AwarenessMonitor:
             self.iot.stop()
         if self.barehands is not None:
             self.barehands.stop()
+        if self.handtrack is not None:
+            self.handtrack.stop()
 
     def _review_loop(self) -> None:
         last_summary = ""
@@ -434,16 +460,21 @@ def report_hand_tracking(monitor) -> str:
     That last case is the nasty one: two independent flags where the wrong one
     silently wins. Returns the line it printed, for tests.
     """
-    if not getattr(config, "BAREHANDS_ENABLED", False):
+    native = getattr(config, "HANDTRACK_ENABLED", False)
+    board = getattr(config, "BAREHANDS_ENABLED", False)
+    if not (native or board):
         return ""
     if monitor is None:
-        line = ("[Barehands] BAREHANDS_ENABLED is on but the awareness monitor "
-                "is not running, so hand tracking is OFF. Set AWARENESS_ENABLED=true.")
-    elif getattr(monitor, "barehands", None) is None:
-        line = ("[Barehands] BAREHANDS_ENABLED is on but no watcher was built — "
-                "this Apex is older than the hand-tracking code. Pull and restart.")
-    else:
+        line = ("[HandTrack] Hand tracking is enabled but the awareness monitor "
+                "is not running, so it is OFF. Set AWARENESS_ENABLED=true.")
+    elif native and getattr(monitor, "handtrack", None) is not None:
+        line = ("[HandTrack] Hand tracking on — Apex's own camera tracker, "
+                "no browser needed.")
+    elif board and getattr(monitor, "barehands", None) is not None:
         line = f"[Barehands] Hand tracking on, polling {config.BAREHANDS_URL}."
+    else:
+        line = ("[HandTrack] Hand tracking is enabled but no watcher was built — "
+                "this Apex is older than the hand-tracking code. Pull and restart.")
     print(line)
     return line
 

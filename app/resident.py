@@ -439,6 +439,16 @@ def run_resident(model_override: Optional[str] = None) -> None:
         try:
             from tools import barehands as _bh
             logging.info(_bh.attach_to_resident_state(state))
+        except Exception as e:
+            logging.error(f"barehands ring wiring failed: {e}")
+
+    # Gestures wake Apex from EITHER source — the native tracker or the
+    # barehands board. Gated on either flag, not just BAREHANDS_ENABLED, or
+    # turning on the native tracker would recognize gestures that could never
+    # do anything.
+    if getattr(config, "HANDTRACK_ENABLED", False) or \
+            getattr(config, "BAREHANDS_ENABLED", False):
+        try:
 
             def _on_gesture(gesture: str, action: str) -> None:
                 """A gesture never calls a tool. It reaches one of the same
@@ -461,15 +471,18 @@ def run_resident(model_override: Optional[str] = None) -> None:
                         f"Gesture '{gesture}' is mapped to unknown action "
                         f"'{action}' — check BAREHANDS_GESTURE_ACTIONS.")
 
-            if awareness_monitor is not None and \
-                    getattr(awareness_monitor, "barehands", None) is not None:
-                awareness_monitor.barehands.on_gesture = _on_gesture
-            else:
+            wired = False
+            for attr in ("handtrack", "barehands"):
+                src = getattr(awareness_monitor, attr, None) if awareness_monitor else None
+                if src is not None:
+                    src.on_gesture = _on_gesture
+                    wired = True
+            if not wired:
                 logging.warning(
-                    "BAREHANDS_ENABLED is set but no watcher is running — "
+                    "Hand tracking is enabled but no watcher is running — "
                     "gestures will not be seen (is AWARENESS_ENABLED off?).")
         except Exception as e:
-            logging.error(f"barehands wiring failed: {e}")
+            logging.error(f"gesture wiring failed: {e}")
 
     # --- Tray icon ---
     def _do_mute(minutes: int) -> None:

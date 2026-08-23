@@ -154,6 +154,27 @@ TOOLS = [
         },
     },
     {
+        "name": "release_camera",
+        "description": (
+            "Hand the webcam back to the rest of the machine for a while. Use "
+            "this when the user says they are joining a call, or that their "
+            "camera is busy or broken — while Apex's hand tracking is running "
+            "it holds the camera exclusively, and Zoom or Teams will simply "
+            "fail to open it. Hand tracking pauses and resumes automatically."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "seconds": {
+                    "type": "integer",
+                    "description": "How long to give it up. Default 300 (5 minutes).",
+                    "default": 300,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "board_present",
         "description": (
             "Put something on the barehands glass board — the hand-tracked "
@@ -1448,6 +1469,16 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             except Exception as e:
                 return f"[Camera] {e}"
             return json.dumps({"__screenshot__": b64, "size": list(size)})
+
+        elif name == "release_camera":
+            from agent import handtrack as _ht
+            tracker = _ht.active_tracker()
+            if tracker is None:
+                return ("Hand tracking is not running, so nothing is holding "
+                        "the camera.")
+            return tracker.release_for(
+                float(inputs.get("seconds",
+                                 getattr(config, "HANDTRACK_RELEASE_SECONDS", 300))))
 
         elif name == "board_present":
             from tools import barehands as _board

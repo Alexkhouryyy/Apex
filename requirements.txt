@@ -40,3 +40,7 @@ plyer           # cross-platform desktop notifications (--resident)
 pywebpush       # Web Push (VAPID) for cross-device proactive notifications
 qrcode          # QR pairing of mobile devices to this Apex (Omnipresence)
 pytest>=8.0
+# Hand tracking (optional, HANDTRACK_ENABLED). Apache 2.0. ~38 MB wheel plus a
+# ~7.5 MB model downloaded on first run. Only imported when the tracker starts,
+# so Apex boots fine without it.
+mediapipe

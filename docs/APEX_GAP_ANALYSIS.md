@@ -3,7 +3,7 @@
 Feature-by-feature status for all 54 sections of the proposed `CLAUDE.md`,
 checked against the code rather than recalled.
 
-**Generated:** 2026-08-23 · **Basis:** 1258 tests, 14 smoke checks, 3 static audits
+**Generated:** 2026-08-23 · **Basis:** 1296 tests, 14 smoke checks, 3 static audits
 
 ---
 
@@ -166,7 +166,7 @@ you to report them — not work quietly left undone.
 | 23 | Wake word | WORKS | `voice/wake.py` `matches_wake_phrase`; `tests/test_wake.py`. Was mislabelled UNPROVEN — `tests/test_resident.py` already covered mute/unmute. Proving the *matching* found a false-wake bug: a substring test meant any sentence containing "apex" woke it |
 | 23 | Streaming speech, interruption, speaker recognition | PARTIAL | Streaming STT present; no speaker recognition |
 | 24 | Vision / camera | PARTIAL | `tests/test_camera.py` (device), `tests/test_vision.py` (dispatch — notably that `click_on` never clicks on a miss). OCR and screen *understanding* need a real display and stay unproven |
-| 25, 26 | Hand tracking + gesture safety | PARTIAL | `agent/barehands_watcher.py` (recognizer), `tools/barehands.py` (board + ring); `tests/test_barehands_recognizer.py`, `tests/test_barehands_bridge.py`, smoke `hand_tracking_survives_a_dark_board`. Apex derives its own gestures from barehands' cursor stream — barehands recognizes clap/claw/throw in its browser page and exports none of them. **Not WORKS:** MediaPipe runs in Chrome, so real fingers → real cursors is unproven until run on a machine with a webcam. The bridge tests boot the real barehands server and drive it with a synthetic hand |
+| 25, 26 | Hand tracking + gesture safety | PARTIAL | **Two sources, one recognizer.** `agent/handtrack.py` is Apex's own MediaPipe tracker reading the webcam directly (Apache 2.0, no browser); `agent/barehands_watcher.py` polls a barehands board over localhost. Shared core in `agent/gestures.py`. Tests: `tests/test_handtrack.py`, `tests/test_barehands_recognizer.py`, `tests/test_barehands_bridge.py`, smoke `hand_tracking_survives_a_dark_board`. **Not WORKS:** no camera on any machine that runs the suite, so real fingers → real landmarks stays unproven. Everything up to that boundary is exercised, including the bridge against a real barehands server driven with a synthetic hand |
 
 ## Hardware
 
