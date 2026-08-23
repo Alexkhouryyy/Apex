@@ -14,13 +14,34 @@ running at all.
 Both sources feed the same `agent/gestures.GestureRecognizer`, which never knew
 where the numbers came from. Adding this cost the recognizer nothing.
 
-## Licensing
+## Provenance, stated accurately
 
-MediaPipe is Apache 2.0 and `mediapipe-models` are Google's, so this is an
-ordinary dependency. Nothing here is derived from `barehands`: the geometry below
-comes from MediaPipe's documented 21-point hand model, and the thresholds are
-Apex's own, arrived at independently and tunable because a threshold fitted to
-one person's hand is not a constant.
+MediaPipe is Apache 2.0 and its models are Google's, so that is an ordinary
+dependency. `barehands` is AGPL-3.0, and the honest account of what this module
+owes it is:
+
+**No barehands code was copied.** Not a line, and none of `stage.html` is
+vendored anywhere in Apex.
+
+**Its source was read first, and one choice matches theirs.** barehands computes
+its pinch from landmarks 4 and 8 against a span of 0 to 9, and its README states
+the principle — "the gates measure hand *shape* as ratios, not size, so they hold
+at any camera distance". `pinch_ratio` below uses the same four landmarks for the
+same reason. That convergence is not an accident of independent invention and
+should not be described as one: thumb tip, index tip, wrist and middle knuckle
+are the obvious four points, and a distance divided by another distance carries
+no creative expression to infringe — but the ordering of events was read-then-
+write, and a provenance note that says otherwise would be cited with confidence
+by whoever read it next.
+
+**What is Apex's own:** every threshold here (demonstrably, since they are
+untuned — see `scripts/calibrate_pinch.py`), the recognizer in `agent/gestures.py`
+and its architecture, the handedness ordering barehands' page cannot export, and
+the gesture set. barehands' actual gestures — clap, claw, throw, the exploded-view
+scrub — are deliberately not reimplemented.
+
+`agent/barehands_watcher.py` speaks their HTTP protocol to talk to their running
+program, which is interoperability and leaves Apex MIT.
 
 ## Two things worth knowing before reading the code
 
