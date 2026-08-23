@@ -18,10 +18,18 @@ pytesseract
 opencv-python-headless
 # NOTE: `pip install mediapipe` (below, optional) pulls opencv-contrib-python,
 # which installs into the SAME cv2 directory as this one and overwrites files
-# from it. Two OpenCV distributions is a supported-by-nobody configuration —
-# cv2 still imports and quietly misbehaves. If you install mediapipe, uninstall
-# this one; agent/handtrack.opencv_conflict() warns at startup when both are
-# present.
+# from it. Two OpenCV distributions is a supported-by-nobody configuration.
+#
+# Do NOT fix that by uninstalling one of them. pip removes files by the
+# uninstalled package's manifest, and since the two overlap, that deletes files
+# the survivor still needs — leaving a cv2 that imports fine with no
+# VideoCapture. Remove them ALL and install exactly one:
+#
+#   pip uninstall -y opencv-python opencv-python-headless \
+#       opencv-contrib-python opencv-contrib-python-headless
+#   pip install opencv-contrib-python
+#
+# agent/handtrack.available() detects the gutted state and prints that command.
 faster-whisper
 sounddevice
 numpy

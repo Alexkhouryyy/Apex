@@ -240,7 +240,7 @@ def explain_no_readings(stats_open: dict, stats_pinch: dict) -> str:
         return (f"The camera opened but delivered no frames at all ({dropped} "
                 f"failed reads). That is a capture problem, not a hand problem. "
                 f"Most likely: two OpenCV packages fighting over one cv2 install "
-                f"(uninstall opencv-python-headless), another app holding the "
+                f"(repair: {handtrack.opencv_repair_command()}), another app holding the "
                 f"camera, or a privacy shutter. Re-run with --preview to see "
                 f"whether any picture arrives.")
     if hands == 0:
@@ -281,8 +281,9 @@ def main(argv=None) -> int:
     clash = handtrack.opencv_conflict()
     if clash:
         print(f"WARNING: {len(clash)} OpenCV packages installed "
-              f"({', '.join(clash)}). They overwrite each other; keep "
-              f"opencv-contrib-python and uninstall the rest.\n")
+              f"({', '.join(clash)}). They overwrite each other. Do NOT just "
+              f"uninstall one — that deletes files the survivor needs. Remove "
+              f"them all and install one:\n  {handtrack.opencv_repair_command()}\n")
     import cv2
     import mediapipe as mp
     from mediapipe.tasks.python import BaseOptions, vision

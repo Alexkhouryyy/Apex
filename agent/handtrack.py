@@ -133,13 +133,46 @@ def opencv_conflict() -> list[str]:
     return hits if len(hits) > 1 else []
 
 
+# The only safe way to end up with one OpenCV. Uninstalling the "loser" of two
+# is NOT safe — see opencv_repair_command.
+_REPAIR = ("pip uninstall -y opencv-python opencv-python-headless "
+           "opencv-contrib-python opencv-contrib-python-headless && "
+           "pip install opencv-contrib-python")
+
+
+def opencv_repair_command() -> str:
+    """How to fix a broken cv2, as one command.
+
+    Learned the hard way on 2026-08-23. Every opencv-* wheel installs into the
+    SAME `cv2/` directory, so a second install overwrites the first's files
+    while pip keeps the first's manifest. Uninstalling either one then deletes
+    files the survivor still needs, and `import cv2` succeeds while
+    `cv2.VideoCapture` is simply gone.
+
+    So "uninstall the other one" — which is what this module used to advise —
+    breaks the install it was trying to protect. The only safe sequence is to
+    remove them ALL and install exactly one.
+    """
+    return _REPAIR
+
+
 def available() -> tuple[bool, str]:
     """(usable, why-not). Reports which piece is missing rather than one
-    unhelpful False — the two failure modes need different fixes."""
+    unhelpful False — the failure modes need different fixes."""
     try:
-        import cv2  # noqa: F401
+        import cv2
     except ImportError:
-        return False, "opencv is not installed (pip install opencv-python)"
+        return False, ("opencv is not installed — " + _REPAIR)
+    # A half-deleted cv2 imports fine and is missing its guts. Without this the
+    # first symptom is `AttributeError: module 'cv2' has no attribute
+    # 'VideoCapture'` from somewhere deep in a camera loop, which reads like a
+    # code bug rather than a packaging one.
+    for attr in ("VideoCapture", "cvtColor", "COLOR_BGR2RGB"):
+        if not hasattr(cv2, attr):
+            return False, (f"cv2 is installed but broken — no `{attr}`. Two "
+                           f"OpenCV packages overwrote each other and "
+                           f"uninstalling one deleted files the other needs. "
+                           f"Repair with: " + _REPAIR)
     try:
         import mediapipe  # noqa: F401
     except ImportError:
@@ -334,8 +367,9 @@ class HandTracker(threading.Thread):
             # first thing to suspect if cv2 starts behaving strangely.
             print(f"[HandTrack] WARNING: {len(clash)} OpenCV packages installed "
                   f"({', '.join(clash)}). They share one cv2 directory and "
-                  f"overwrite each other. Keep opencv-contrib-python (mediapipe "
-                  f"needs it) and uninstall the others.")
+                  f"overwrite each other. Do NOT just uninstall one — that "
+                  f"deletes files the survivor needs and leaves a cv2 with no "
+                  f"VideoCapture. Remove them all and install one: {_REPAIR}")
         if ensure_model() is None:
             print("[HandTrack] Hand tracking is off: no model file.")
             self._stop.wait()

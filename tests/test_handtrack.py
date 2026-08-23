@@ -198,6 +198,44 @@ class TestOpenCVConflict:
         assert handtrack.opencv_conflict() == []
 
 
+class TestBrokenOpenCVInstall:
+    """A half-deleted cv2 imports fine and has no VideoCapture.
+
+    This happened for real on 2026-08-23. The conflict warning said "keep
+    opencv-contrib-python and uninstall the others" — following it deleted files
+    contrib still needed, because every opencv-* wheel writes into the SAME cv2
+    directory and pip uninstalls by the removed package's manifest. The advice
+    broke the install it was protecting, and the symptom was an AttributeError
+    from inside a camera loop, which reads like a code bug.
+    """
+
+    def test_a_gutted_cv2_is_diagnosed_not_left_to_crash(self, monkeypatch):
+        import sys
+        import types as _t
+        stub = _t.ModuleType("cv2")          # imports fine, has nothing
+        monkeypatch.setitem(sys.modules, "cv2", stub)
+        ok, why = handtrack.available()
+        assert ok is False
+        assert "VideoCapture" in why
+        assert "uninstall" in why.lower(), "must say how to repair it"
+
+    def test_the_repair_removes_every_opencv_before_installing_one(self):
+        """The load-bearing property. Removing only the loser is what broke it;
+        the fix has to name all four packages."""
+        cmd = handtrack.opencv_repair_command()
+        for pkg in handtrack._OPENCV_DISTS:
+            assert pkg in cmd, f"{pkg} must be uninstalled too"
+        assert cmd.index("uninstall") < cmd.index("install opencv-contrib"), \
+            "uninstall must come before the reinstall"
+
+    def test_the_conflict_warning_no_longer_advises_the_destructive_fix(self):
+        """The old wording is the bug. Assert it cannot come back."""
+        import inspect
+        src = inspect.getsource(handtrack.HandTracker.run)
+        assert "uninstall the others" not in src.lower()
+        assert "do not just uninstall" in src.lower()
+
+
 class TestCameraCoexistence:
     """The webcam is exclusive. While the tracker holds it, a second
     VideoCapture fails — including Apex's own camera_capture tool, which would
