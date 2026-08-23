@@ -1,0 +1,256 @@
+"""Measure HANDTRACK_PINCH_RATIO against a real hand instead of guessing it.
+
+The shipped default (0.45) was chosen on a machine with no camera. It is the one
+number that decides whether pinch works at all, and if it is wrong **pinch simply
+never fires and nothing says why** — the gesture is silently absent, which is the
+failure shape this project keeps producing.
+
+The alternative on offer was HANDTRACK_DEBUG, which prints a line per hand per
+frame at 20 Hz and asks a person to read values out of a scrolling log. That is a
+bad instrument: it samples whichever frames the eye happens to catch, it cannot
+show the spread, and a number transcribed by hand is exactly how a threshold ends
+up subtly wrong in a way that surfaces weeks later as "pinch is unreliable".
+
+    python scripts/calibrate_pinch.py
+
+Hold your hand open when asked, then pinch. It reports both distributions and,
+when they are cleanly separated, a threshold — and offers to write it.
+
+## Why this is allowed to fail
+
+`recommend_threshold` returns None when the two clouds overlap. That is the
+point. A calibrator that always produces a number is worse than none at all,
+because it converts "I could not tell" into a confident setting that misfires
+for ever while looking measured.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from agent import handtrack  # noqa: E402
+
+# Below this many usable readings the hand was not really detected — bad light,
+# too far from the lens, out of frame. That is not a threshold problem and must
+# not be answered with a threshold.
+MIN_SAMPLES = 20
+
+# A gap narrower than this separates the clouds but leaves no room for a hand
+# held differently tomorrow. Still returns a value, with a warning.
+COMFORTABLE_GAP = 0.15
+
+# Where in the gap the boundary sits. Biased toward the open-hand side so a lazy
+# pinch — thumb and finger close but not touching — still registers, since the
+# cost of missing a pinch is a gesture that appears broken.
+GAP_BIAS = 0.6
+
+
+def percentile(values: list, pct: float) -> float:
+    """Simple nearest-rank percentile. Written out rather than pulled from a
+    library so it behaves predictably on the small samples this collects."""
+    if not values:
+        raise ValueError("no values")
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    k = (len(ordered) - 1) * (pct / 100.0)
+    lo, hi = int(k), min(int(k) + 1, len(ordered) - 1)
+    return ordered[lo] + (ordered[hi] - ordered[lo]) * (k - lo)
+
+
+def clean(samples) -> list:
+    """Drop anything that is not a usable number.
+
+    pinch_ratio returns None for landmarks it cannot use, and a NaN would poison
+    every comparison downstream while silently passing an `isinstance` check.
+    """
+    out = []
+    for s in samples or []:
+        if isinstance(s, bool) or not isinstance(s, (int, float)):
+            continue
+        if s != s or s in (float("inf"), float("-inf")):   # NaN / inf
+            continue
+        out.append(float(s))
+    return out
+
+
+def recommend_threshold(open_samples, pinch_samples) -> tuple:
+    """(value | None, reason). Pure, so the judgement is testable without a hand.
+
+    Separation is judged on the tails, not the medians: what matters is whether
+    the WORST pinch still reads lower than the LOOSEST open hand. Two
+    distributions can have far-apart medians and still overlap badly, and a
+    threshold placed between the medians would then misfire on both sides.
+    """
+    o, p = clean(open_samples), clean(pinch_samples)
+
+    if len(o) < MIN_SAMPLES or len(p) < MIN_SAMPLES:
+        return None, (
+            f"Not enough readings ({len(o)} open, {len(p)} pinched; need "
+            f"{MIN_SAMPLES} of each). Your hand was not detected for most of "
+            f"the window — try better light, or move closer to the camera. "
+            f"This is not a threshold problem, so guessing one would not help."
+        )
+
+    pinch_hi = percentile(p, 95)     # the loosest pinch that still counts
+    open_lo = percentile(o, 5)       # the tightest open hand
+
+    if pinch_hi >= open_lo:
+        return None, (
+            f"These cannot be separated: the loosest pinches reach "
+            f"{pinch_hi:.2f} while the tightest open readings go down to "
+            f"{open_lo:.2f}, so they overlap by {pinch_hi - open_lo:.2f}. Any "
+            f"threshold would misfire in both directions. Usually this means "
+            f"the open hand was not open enough, or the hand was angled so the "
+            f"thumb was hidden — try again facing the camera squarely."
+        )
+
+    gap = open_lo - pinch_hi
+    value = round(pinch_hi + gap * GAP_BIAS, 2)
+    if gap < COMFORTABLE_GAP:
+        return value, (
+            f"Separated, but only by {gap:.2f}. {value} will work today and is "
+            f"likely to be fragile — if pinch starts misfiring, re-run this "
+            f"rather than nudging the number by hand."
+        )
+    return value, (
+        f"Cleanly separated by {gap:.2f} (pinched up to {pinch_hi:.2f}, open "
+        f"from {open_lo:.2f}). {value} sits in the gap, biased toward the open "
+        f"side so a lazy pinch still registers."
+    )
+
+
+def describe(label: str, samples) -> str:
+    s = clean(samples)
+    if not s:
+        return f"  {label}: no readings"
+    return (f"  {label}: {len(s)} readings, "
+            f"median {percentile(s, 50):.2f}, "
+            f"range {min(s):.2f}–{max(s):.2f}")
+
+
+# ── The interactive half, which needs a camera ───────────────────────────────
+
+def collect(landmarker, cap, mp, seconds: float, frame_no: int) -> tuple:
+    """Sample pinch_ratio for `seconds`. Returns (samples, next_frame_no)."""
+    import cv2
+    samples, deadline = [], time.time() + seconds
+    while time.time() < deadline:
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            continue
+        frame_no += 1
+        image = mp.Image(image_format=mp.ImageFormat.SRGB,
+                         data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        result = landmarker.detect_for_video(image, frame_no * 50)
+        for lms in result.hand_landmarks or []:
+            r = handtrack.pinch_ratio(lms)
+            if r is not None:
+                samples.append(r)
+        left = max(0.0, deadline - time.time())
+        print(f"\r    {left:4.1f}s  ({len(samples)} readings)", end="", flush=True)
+    print()
+    return samples, frame_no
+
+
+def countdown(message: str, seconds: int = 3) -> None:
+    print(f"\n{message}")
+    for i in range(seconds, 0, -1):
+        print(f"  starting in {i}…", end="\r", flush=True)
+        time.sleep(1)
+    print("  go!            ")
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--seconds", type=float, default=4.0,
+                    help="how long to sample each pose (default 4)")
+    ap.add_argument("--device", type=int, default=None,
+                    help="camera index (default: CAMERA_DEVICE_INDEX)")
+    ap.add_argument("--write", action="store_true",
+                    help="write the result to .env without asking")
+    args = ap.parse_args(argv)
+
+    ok, why = handtrack.available()
+    if not ok:
+        print(f"Cannot calibrate: {why}")
+        return 1
+    clash = handtrack.opencv_conflict()
+    if clash:
+        print(f"WARNING: {len(clash)} OpenCV packages installed "
+              f"({', '.join(clash)}). They overwrite each other; keep "
+              f"opencv-contrib-python and uninstall the rest.\n")
+    import cv2
+    import mediapipe as mp
+    from mediapipe.tasks.python import BaseOptions, vision
+
+    # Camera BEFORE model: the download is 7.5 MB and there is no point paying
+    # for it to then discover there is nothing to point at.
+    import config
+    idx = args.device if args.device is not None else \
+        getattr(config, "CAMERA_DEVICE_INDEX", 0)
+    cap = cv2.VideoCapture(idx)
+    if not cap.isOpened():
+        # The webcam is exclusive, and a running Apex is the likeliest holder.
+        print(f"Could not open camera {idx}. If Apex is running with hand "
+              f"tracking on, it is holding the camera — quit Apex and try "
+              f"again, or ask it to release the camera first.")
+        return 1
+
+    if handtrack.ensure_model() is None:
+        cap.release()
+        print("Cannot calibrate: the hand model could not be downloaded.")
+        return 1
+
+    landmarker = vision.HandLandmarker.create_from_options(
+        vision.HandLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=str(handtrack.model_path())),
+            running_mode=vision.RunningMode.VIDEO, num_hands=1))
+
+    try:
+        print("=" * 62)
+        print("  Pinch calibration — measuring HANDTRACK_PINCH_RATIO")
+        print("=" * 62)
+        print("\nKeep one hand in frame, palm toward the camera, throughout.")
+
+        countdown("1/2  Hold your hand OPEN — fingers spread, thumb away "
+                  "from the index finger.")
+        open_samples, n = collect(landmarker, cap, mp, args.seconds, 0)
+
+        countdown("2/2  Now PINCH — thumb and index fingertip touching — "
+                  "and hold it there.")
+        pinch_samples, _ = collect(landmarker, cap, mp, args.seconds, n)
+    finally:
+        cap.release()
+        landmarker.close()
+
+    print("\nWhat was measured:")
+    print(describe("open  ", open_samples))
+    print(describe("pinched", pinch_samples))
+
+    value, reason = recommend_threshold(open_samples, pinch_samples)
+    print()
+    if value is None:
+        print(f"No threshold recommended.\n  {reason}")
+        return 2
+    print(f"Recommended HANDTRACK_PINCH_RATIO = {value}\n  {reason}")
+
+    if not args.write:
+        answer = input("\nWrite this to .env now? (y/N): ").strip().lower()
+        if answer not in {"y", "yes"}:
+            print("Not written. Set it yourself with:\n"
+                  f"  python scripts/set_env_key.py HANDTRACK_PINCH_RATIO {value}")
+            return 0
+
+    from scripts.set_env_key import set_key
+    what = set_key(Path(".env"), "HANDTRACK_PINCH_RATIO", str(value))
+    print(f"[env] HANDTRACK_PINCH_RATIO {what} in .env — restart Apex to use it.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
