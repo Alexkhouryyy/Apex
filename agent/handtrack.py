@@ -205,6 +205,72 @@ def ensure_model(timeout: float = 120.0) -> Optional[Path]:
         return None
 
 
+# MediaPipe's own default detection confidence is 0.5, which hallucinates.
+# barehands' source carries a comment from live use: a busy background is full of
+# hand-shaped clutter, a ghost hand appeared with none in frame, and 0.65 was not
+# enough to kill it. On Apex a phantom hand does not merely grab a card — it can
+# fire a gesture and wake you when nobody moved. Their note also warns that past
+# 0.75 real tracking suffers, which is why this is not simply cranked higher.
+DEFAULT_MIN_CONFIDENCE = 0.7
+
+
+def choose_delegate(preference: str, try_create):
+    """Build a landmarker on the best delegate available. Returns (obj, used, note).
+
+    `try_create(delegate_name)` does the actual construction and raises if that
+    delegate is unusable. Injected so the decision is testable without a GPU —
+    which matters, because the machine this was written on has neither a GPU nor
+    a camera.
+
+    Verified beforehand that MediaPipe RAISES when a GPU context cannot be
+    created rather than quietly falling back:
+
+        RuntimeError: Service "kGpuService", required by node ...
+
+    A silent fallback would be the worse outcome by far: you would believe you
+    were on GPU for ever. Hence `used` is returned and always reported.
+    """
+    pref = (preference or "auto").strip().lower()
+    if pref not in ("auto", "gpu", "cpu"):
+        pref = "auto"
+
+    if pref == "cpu":
+        return try_create("CPU"), "CPU", ""
+
+    try:
+        return try_create("GPU"), "GPU", ""
+    except Exception as e:
+        detail = f"{type(e).__name__}: {str(e)[:120]}"
+        # An EXPLICIT request that could not be honoured is a louder event than
+        # auto quietly settling: the user asked for something and did not get it,
+        # and running on CPU while they think otherwise is the fail-open shape.
+        note = (f"GPU was requested but is unavailable, falling back to CPU "
+                f"({detail})") if pref == "gpu" else \
+               (f"GPU unavailable, using CPU ({detail})")
+        return try_create("CPU"), "CPU", note
+
+
+def build_landmarker(num_hands: int = 2):
+    """The real factory. Returns (landmarker, delegate_used, note)."""
+    from mediapipe.tasks.python import BaseOptions, vision
+
+    def _create(delegate_name: str):
+        delegate = getattr(BaseOptions.Delegate, delegate_name)
+        return vision.HandLandmarker.create_from_options(
+            vision.HandLandmarkerOptions(
+                base_options=BaseOptions(model_asset_path=str(model_path()),
+                                         delegate=delegate),
+                running_mode=vision.RunningMode.VIDEO,
+                num_hands=num_hands,
+                min_hand_detection_confidence=getattr(
+                    config, "HANDTRACK_MIN_CONFIDENCE", DEFAULT_MIN_CONFIDENCE),
+            )
+        )
+
+    return choose_delegate(
+        getattr(config, "HANDTRACK_DELEGATE", "auto"), _create)
+
+
 def pinch_ratio(lms) -> Optional[float]:
     """Thumb-to-index distance as a fraction of the hand's own span.
 
@@ -411,14 +477,14 @@ class HandTracker(threading.Thread):
             self._say("camera_open", "[HandTrack] Camera open.")
         if self._landmarker is None:
             import mediapipe as mp
-            from mediapipe.tasks.python import BaseOptions, vision
-            self._landmarker = vision.HandLandmarker.create_from_options(
-                vision.HandLandmarkerOptions(
-                    base_options=BaseOptions(model_asset_path=str(model_path())),
-                    running_mode=vision.RunningMode.VIDEO,
-                    num_hands=2,
-                )
-            )
+            self._landmarker, used, note = build_landmarker(num_hands=2)
+            if note:
+                print(f"[HandTrack] {note}")
+            # Always stated, never inferred. Running on CPU while believing you
+            # are on GPU is exactly the kind of quiet wrongness this codebase
+            # keeps producing.
+            print(f"[HandTrack] Inference on {used}, detection confidence "
+                  f"{getattr(config, 'HANDTRACK_MIN_CONFIDENCE', DEFAULT_MIN_CONFIDENCE)}.")
             self._mp = mp
         return True
 

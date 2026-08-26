@@ -372,3 +372,87 @@ class TestMissingObservationIsNotStillness:
         rec.feed_cursors([(0.5, 0.5, False)], 1000.0)
         rec.feed_cursors(None, 1000.1)
         assert rec.feed_cursors([(0.5, 0.5, False)], 1000.2) == ["hands_present"]
+
+
+class TestDelegateChoice:
+    """Which processor the model runs on, and saying so.
+
+    Measured: 17.6 ms/frame on CPU, ~35% of one core at 20 Hz. Worth moving to
+    GPU. Also verified that MediaPipe RAISES when a GPU context cannot be
+    created (`RuntimeError: Service "kGpuService" ...`) rather than degrading
+    quietly, which is what makes a fallback safe to write.
+    """
+
+    def _fake(self, gpu_works: bool):
+        calls = []
+
+        def try_create(delegate):
+            calls.append(delegate)
+            if delegate == "GPU" and not gpu_works:
+                raise RuntimeError('Service "kGpuService", required by node ...')
+            return f"landmarker-on-{delegate}"
+        return try_create, calls
+
+    def test_gpu_is_used_when_it_works(self):
+        try_create, calls = self._fake(gpu_works=True)
+        obj, used, note = handtrack.choose_delegate("auto", try_create)
+        assert used == "GPU" and obj == "landmarker-on-GPU"
+        assert calls == ["GPU"], "must not build a CPU one it does not need"
+        assert note == ""
+
+    def test_it_falls_back_rather_than_leaving_you_with_nothing(self):
+        try_create, calls = self._fake(gpu_works=False)
+        obj, used, note = handtrack.choose_delegate("auto", try_create)
+        assert used == "CPU" and obj == "landmarker-on-CPU"
+        assert calls == ["GPU", "CPU"]
+        assert "GPU unavailable" in note
+
+    def test_an_explicit_gpu_request_that_fails_is_louder(self):
+        """Asking for GPU and silently getting CPU is the fail-open shape: you
+        would believe you were on GPU for ever. `auto` settling is unremarkable;
+        an unhonoured explicit request is not."""
+        try_create, _ = self._fake(gpu_works=False)
+        _obj, used, note = handtrack.choose_delegate("gpu", try_create)
+        assert used == "CPU"
+        assert "requested" in note.lower()
+
+    def test_cpu_never_touches_the_gpu(self):
+        try_create, calls = self._fake(gpu_works=True)
+        _obj, used, _note = handtrack.choose_delegate("cpu", try_create)
+        assert used == "CPU" and calls == ["CPU"]
+
+    @pytest.mark.parametrize("junk", ["", None, "Metal", "  AUTO  ", "cuda"])
+    def test_an_unknown_preference_behaves_as_auto(self, junk):
+        """A typo in .env must not disable hand tracking."""
+        try_create, _ = self._fake(gpu_works=True)
+        _obj, used, _note = handtrack.choose_delegate(junk, try_create)
+        assert used == "GPU"
+
+    def test_the_delegate_actually_used_is_always_returned(self):
+        """The whole reason this returns `used` rather than just the object:
+        the caller has to be able to state it instead of assuming."""
+        for works in (True, False):
+            try_create, _ = self._fake(gpu_works=works)
+            _obj, used, _n = handtrack.choose_delegate("auto", try_create)
+            assert used in ("GPU", "CPU")
+
+    def test_the_tracker_reports_the_delegate_it_got(self):
+        import inspect
+        src = inspect.getsource(handtrack.HandTracker._open)
+        assert "Inference on" in src, "a silent delegate is an assumed delegate"
+
+
+class TestDetectionConfidence:
+    def test_the_default_is_above_mediapipes_hallucinating_one(self):
+        """MediaPipe defaults to 0.5, which invents hands in a cluttered
+        background. On Apex a phantom hand does not just grab a card — it can
+        fire a gesture and wake you when nobody moved."""
+        assert handtrack.DEFAULT_MIN_CONFIDENCE > 0.5
+
+    def test_it_is_not_cranked_so_high_that_real_hands_are_missed(self):
+        assert handtrack.DEFAULT_MIN_CONFIDENCE <= 0.75
+
+    def test_it_is_configurable(self):
+        import inspect
+        src = inspect.getsource(handtrack.build_landmarker)
+        assert "HANDTRACK_MIN_CONFIDENCE" in src

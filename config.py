@@ -419,3 +419,14 @@ HANDTRACK_DEBUG = os.getenv("HANDTRACK_DEBUG", "false").lower() in {"1", "true",
 # is how long `release_camera` hands it back before tracking resumes on its own,
 # so forgetting to resume cannot silently end hand tracking.
 HANDTRACK_RELEASE_SECONDS = float(os.getenv("HANDTRACK_RELEASE_SECONDS", "300"))
+
+# Which MediaPipe delegate the hand tracker runs on: auto | gpu | cpu.
+# "auto" tries GPU and falls back to CPU, reporting which it got — measured at
+# 17.6 ms/frame on CPU, which is ~35% of one core at 20 Hz. MediaPipe raises
+# rather than silently degrading when a GPU context cannot be made, so the
+# fallback is safe; the delegate actually used is printed at startup either way.
+HANDTRACK_DELEGATE = os.getenv("HANDTRACK_DELEGATE", "auto").strip().lower()
+# MediaPipe's own default is 0.5 and hallucinates hands in a cluttered
+# background. A phantom hand can fire a gesture and wake Apex when nobody moved.
+# Above ~0.75 real tracking starts to suffer.
+HANDTRACK_MIN_CONFIDENCE = float(os.getenv("HANDTRACK_MIN_CONFIDENCE", "0.7"))

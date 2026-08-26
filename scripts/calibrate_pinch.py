@@ -286,7 +286,6 @@ def main(argv=None) -> int:
               f"them all and install one:\n  {handtrack.opencv_repair_command()}\n")
     import cv2
     import mediapipe as mp
-    from mediapipe.tasks.python import BaseOptions, vision
 
     # Camera BEFORE model: the download is 7.5 MB and there is no point paying
     # for it to then discover there is nothing to point at.
@@ -306,10 +305,12 @@ def main(argv=None) -> int:
         print("Cannot calibrate: the hand model could not be downloaded.")
         return 1
 
-    landmarker = vision.HandLandmarker.create_from_options(
-        vision.HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=str(handtrack.model_path())),
-            running_mode=vision.RunningMode.VIDEO, num_hands=1))
+    # Same delegate and confidence the tracker will use — calibrating against
+    # different settings than you run with would measure the wrong thing.
+    landmarker, delegate_used, note = handtrack.build_landmarker(num_hands=1)
+    if note:
+        print(f"  {note}")
+    print(f"  Inference on {delegate_used}.")
 
     try:
         print("=" * 62)
