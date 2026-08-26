@@ -156,7 +156,10 @@ def main():
         speak(f"Safety check. {reason}. Say yes to proceed.")
         answer = listen() if not (args.text or args.tui) else input("Proceed? (y/N): ").strip()
         return answer.lower() in {"yes", "y", "yeah", "yep", "do it", "confirm"}
-    _safety.set_confirm_fn(_voice_confirm)
+    # Only THIS thread owns the console. A scheduled task, the cortex or an
+    # inbound channel hitting a safety rule must not be able to seize the
+    # prompt — see safety.interactive_only for what that looked like live.
+    _safety.set_confirm_fn(_safety.interactive_only(_voice_confirm))
 
     # Start scheduler
     from agent import scheduler as sched

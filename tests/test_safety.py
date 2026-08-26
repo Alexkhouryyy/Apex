@@ -118,3 +118,92 @@ class TestReason:
         ok, reason = safety.check("bash", {"command": "pwd"})
         assert ok
         assert reason == ""
+
+
+# ── Only the console's owner may ask for confirmation ────────────────────────
+
+class TestInteractiveOnly:
+    """`check()` runs on whichever thread dispatched the tool, and most of
+    Apex's threads do not hold the console: the APScheduler worker, the
+    autonomous cortex, the skill forge, inbound channels.
+
+    Observed live on 2026-08-23, in a real terminal:
+
+        YOU: Proceed? (y
+
+    A scheduled nightly reflection tripped a safety rule on a worker thread and
+    called input() while the main loop was already blocked in its own input().
+    Two readers on one stdin split the user's keystrokes between them and
+    neither prompt could be answered.
+    """
+
+    def test_the_owning_thread_is_still_asked(self):
+        from agent import safety
+        seen = []
+        fn = safety.interactive_only(lambda r: (seen.append(r), True)[1],
+                                     announce=lambda _l: None)
+        assert fn("running arbitrary Python on the host") is True
+        assert len(seen) == 1
+
+    def test_a_background_thread_is_refused(self):
+        import threading
+        from agent import safety
+        fn = safety.interactive_only(lambda _r: True, announce=lambda _l: None)
+        out = {}
+        t = threading.Thread(target=lambda: out.update(r=fn("disk overwrite")))
+        t.start(); t.join()
+        assert out["r"] is False, "a background task must not self-approve"
+
+    def test_a_background_thread_never_prompts(self):
+        """THE regression test. The failure was not a wrong answer — it was a
+        second reader on stdin. So the assertion has to be that the prompt is
+        never REACHED, not merely that the result is False."""
+        import threading
+        from agent import safety
+        prompted = []
+
+        def _prompt(reason):
+            prompted.append(reason)
+            raise AssertionError("a background thread must never read stdin")
+
+        fn = safety.interactive_only(_prompt, announce=lambda _l: None)
+        t = threading.Thread(target=lambda: fn("recursive delete"))
+        t.start(); t.join()
+        assert prompted == []
+
+    def test_the_refusal_is_announced_with_its_reason(self):
+        """A silently refused action is indistinguishable from one that never
+        happened. The notification is how you find out the cortex wanted
+        something."""
+        import threading
+        from agent import safety
+        said = []
+        fn = safety.interactive_only(lambda _r: True, announce=said.append)
+        t = threading.Thread(target=lambda: fn("unlocking a door"))
+        t.start(); t.join()
+        assert said and "unlocking a door" in said[0]
+        assert "background" in said[0].lower()
+
+    def test_a_broken_announcer_still_refuses(self):
+        """Refusal must not depend on the reporting working."""
+        import threading
+        from agent import safety
+
+        def _boom(_line):
+            raise RuntimeError("notifier is down")
+
+        fn = safety.interactive_only(lambda _r: True, announce=_boom)
+        out = {}
+        t = threading.Thread(target=lambda: out.update(r=fn("dd")))
+        t.start(); t.join()
+        assert out["r"] is False
+
+    def test_main_wires_the_guard_rather_than_the_raw_prompt(self):
+        """The wrapper existing is not the same as it being used. This is the
+        half that was missing."""
+        import inspect
+        import main
+        src = inspect.getsource(main)
+        assert "interactive_only(_voice_confirm)" in src
+        assert "set_confirm_fn(_voice_confirm)" not in src, \
+            "the raw prompt must not be installed directly"

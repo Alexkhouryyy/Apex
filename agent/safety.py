@@ -1,5 +1,6 @@
 """Safety layer — intercepts dangerous tool calls and requires confirmation."""
 import re
+import threading
 
 # (tool_name, input_key, pattern) → human-readable risk description
 _RULES: list[tuple[str, str, re.Pattern, str]] = [
@@ -35,6 +36,45 @@ _confirm_fn = None  # injected at startup: a callable(prompt: str) -> bool
 def set_confirm_fn(fn) -> None:
     global _confirm_fn
     _confirm_fn = fn
+
+
+def interactive_only(prompt_fn, *, announce=None):
+    """Wrap a confirming prompt so ONLY the thread that installed it may ask.
+
+    `check()` runs on whatever thread dispatched the tool, and plenty of Apex's
+    threads are not the one holding the console: the APScheduler worker firing a
+    nightly reflection, the autonomous cortex, the skill forge, an inbound
+    channel. When one of those hit a `_RULES` match, `input("Proceed? (y/N): ")`
+    ran on that worker while the main loop was already blocked in
+    `input("YOU: ")`. Two readers, one stdin. Observed live:
+
+        YOU: Proceed? (y
+
+    Your keystrokes get split between the two prompts, so neither gets a clean
+    answer and the console is unusable until one of them gives up.
+
+    The rule is not "make the prompt thread-safe" — there is no safe way for a
+    background task to seize the keyboard. A risky action nobody asked for must
+    not be able to interrupt you to demand permission for itself. So it is
+    refused, and announced, exactly as resident mode does when there is nobody
+    to ask at all.
+
+    `announce(reason)` reports the refusal; it defaults to printing.
+    """
+    owner = threading.current_thread()
+
+    def _confirm(reason: str) -> bool:
+        if threading.current_thread() is owner:
+            return prompt_fn(reason)
+        line = (f"[Safety] Refused — a background task asked to do something "
+                f"risky and cannot take over the console to ask you: {reason}")
+        try:
+            (announce or print)(line)
+        except Exception:
+            pass
+        return False
+
+    return _confirm
 
 
 def check(tool_name: str, inputs: dict) -> tuple[bool, str]:
