@@ -177,3 +177,176 @@ def test_settings_sources_are_pinned_empty():
     """Without setting_sources=[] the SDK inherits whatever CLAUDE.md sits in the
     working directory, and Apex's persona is silently replaced by a file."""
     assert re.search(r"setting_sources\s*=\s*\[\]", SRC)
+
+
+# ── Wiring the conversation onto the subscription ────────────────────────────
+
+class TestTranscriptPrompt:
+    """The SDK's streamed prompt accepts only `{"type": "user", ...}` messages —
+    verified against the installed package. There is no way to hand it a prior
+    ASSISTANT turn, so a conversation cannot be replayed as native turns.
+
+    The alternative was `resume=<session_id>`, letting Claude Code's session
+    store own the history. That is a divergence bug by construction: Apex's
+    Memory would still be doing summarization and long-term-memory injection, so
+    two histories would exist, and the first fallback to the API — the whole
+    point of having a fallback — would make them disagree about what was said.
+    """
+
+    def test_both_roles_survive_the_crossing(self):
+        from agent import subscription as sub
+        out = sub.transcript_prompt(
+            [{"role": "user", "content": "my name is Alex"},
+             {"role": "assistant", "content": "Noted."}], "what is my name?")
+        assert "Alex" in out and "Noted." in out
+
+    def test_tool_traffic_is_summarized_not_replayed(self):
+        """Replaying full tool results would blow the prompt up with output the
+        next reply does not need."""
+        from agent import subscription as sub
+        out = sub.transcript_prompt([{"role": "assistant", "content": [
+            {"type": "text", "text": "saving that"},
+            {"type": "tool_use", "name": "remember", "input": {"content": "x"}},
+        ]}], "ok")
+        assert "remember" in out and "input" not in out
+
+    def test_it_says_which_message_to_answer(self):
+        """Handed a transcript with no framing, a model will sometimes answer
+        the first message in it."""
+        from agent import subscription as sub
+        assert "LAST user message" in sub.transcript_prompt(
+            [{"role": "user", "content": "hi"}], "and now?")
+
+    def test_trimming_drops_the_OLDEST_turns(self):
+        """The newest turns are what the next reply depends on. Keeping the
+        opening and dropping the tail would be exactly backwards."""
+        from agent import subscription as sub
+        msgs = [{"role": "user", "content": f"message number {i} " + "x" * 400}
+                for i in range(60)]
+        out = sub.transcript_prompt(msgs, "latest", max_chars=3000)
+        assert "message number 59" in out
+        assert "message number 0 " not in out
+
+    def test_a_trimmed_transcript_admits_it(self):
+        """Silently truncating history is how a model confidently contradicts
+        something it was told earlier."""
+        from agent import subscription as sub
+        msgs = [{"role": "user", "content": "x" * 500} for _ in range(40)]
+        assert "trimmed" in sub.transcript_prompt(msgs, "?", max_chars=2000)
+
+    def test_an_empty_history_is_just_the_question(self):
+        from agent import subscription as sub
+        assert sub.transcript_prompt([], "hello") == "hello"
+
+    @pytest.mark.parametrize("junk", [None, ["not a dict"], [{}], [{"role": "system"}]])
+    def test_garbage_history_does_not_raise(self, junk):
+        """This runs on the conversation path; a raise would end the turn."""
+        from agent import subscription as sub
+        sub.transcript_prompt(junk, "hello")
+
+
+class TestShouldUse:
+    def test_off_by_default(self, monkeypatch):
+        import config
+        from agent import subscription as sub
+        monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", False, raising=False)
+        ok, why = sub.should_use("agent.core/main")
+        assert ok is False and "SUBSCRIPTION_ENABLED" in why
+
+    def test_a_call_site_outside_the_list_is_refused_by_name(self, monkeypatch):
+        """The measurement said background work is 3x DEARER here than Haiku.
+        Nothing should reach the subscription just because it is enabled."""
+        import config
+        from agent import subscription as sub
+        monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", True, raising=False)
+        monkeypatch.setattr(config, "SUBSCRIPTION_CALL_SITES", ["agent.core/main"],
+                            raising=False)
+        ok, why = sub.should_use("deepresearch/extract")
+        assert ok is False and "deepresearch/extract" in why
+
+    def test_it_says_why_rather_than_just_no(self, monkeypatch):
+        """"The subscription did not get used" has several causes with
+        different fixes."""
+        import config
+        from agent import subscription as sub
+        monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", False, raising=False)
+        assert sub.should_use("agent.core/main")[1]
+
+
+class TestConversationFallback:
+    """Any failure must land on the API with the conversation intact. An
+    exhausted five-hour window cannot be allowed to stop Apex working."""
+
+    def _core(self):
+        from agent.core import AgentCore
+        return AgentCore.__new__(AgentCore)
+
+    class _Mem:
+        def __init__(self): self.added = []
+        def get_messages(self): return [{"role": "user", "content": "hi"}]
+        def add_assistant(self, content): self.added.append(content)
+
+    def test_disabled_returns_none_so_the_api_path_runs(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", False, raising=False)
+        core, mem = self._core(), self._Mem()
+        assert core._try_subscription("hi", mem) is None
+        assert mem.added == [], "a skipped turn must not touch memory"
+
+    def test_a_raising_sdk_falls_back(self, monkeypatch):
+        import config
+        from agent import subscription as sub
+        monkeypatch.setattr(sub, "should_use", lambda _s: (True, ""))
+        monkeypatch.setattr(sub, "run_turn", lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError("rate limit reached")))
+        core, mem = self._core(), self._Mem()
+        monkeypatch.setattr(type(core), "_effective_system_prompt",
+                            lambda self: "sys", raising=False)
+        monkeypatch.setattr(type(core), "_model", "claude-opus-5", raising=False)
+        assert core._try_subscription("hi", mem) is None
+        assert mem.added == []
+
+    def test_an_empty_reply_falls_back_rather_than_returning_nothing(self, monkeypatch):
+        """A blank turn that 'succeeded' would show the user an empty response
+        and never try the API — the fail-open shape."""
+        import config
+        from agent import subscription as sub
+        monkeypatch.setattr(sub, "should_use", lambda _s: (True, ""))
+        monkeypatch.setattr(sub, "run_turn",
+                            lambda *a, **k: {"text": "   ", "is_error": False})
+        core, mem = self._core(), self._Mem()
+        monkeypatch.setattr(type(core), "_effective_system_prompt",
+                            lambda self: "sys", raising=False)
+        monkeypatch.setattr(type(core), "_model", "claude-opus-5", raising=False)
+        assert core._try_subscription("hi", mem) is None
+
+    def test_an_errored_turn_falls_back(self, monkeypatch):
+        from agent import subscription as sub
+        monkeypatch.setattr(sub, "should_use", lambda _s: (True, ""))
+        monkeypatch.setattr(sub, "run_turn",
+                            lambda *a, **k: {"text": "partial", "is_error": True})
+        core, mem = self._core(), self._Mem()
+        monkeypatch.setattr(type(core), "_effective_system_prompt",
+                            lambda self: "sys", raising=False)
+        monkeypatch.setattr(type(core), "_model", "claude-opus-5", raising=False)
+        assert core._try_subscription("hi", mem) is None
+
+    def test_a_good_turn_is_recorded_in_apex_memory(self, monkeypatch):
+        """THE property that keeps the two paths from drifting: whichever ran,
+        Apex's Memory holds the conversation, so a later fallback sees it."""
+        from agent import subscription as sub
+        monkeypatch.setattr(sub, "should_use", lambda _s: (True, ""))
+        monkeypatch.setattr(sub, "run_turn", lambda *a, **k: {
+            "text": "done", "is_error": False, "would_have_cost_usd": 0.11})
+        core, mem = self._core(), self._Mem()
+        monkeypatch.setattr(type(core), "_effective_system_prompt",
+                            lambda self: "sys", raising=False)
+        monkeypatch.setattr(type(core), "_model", "claude-opus-5", raising=False)
+        assert core._try_subscription("hi", mem) == "done"
+        assert mem.added == [[{"type": "text", "text": "done"}]]
+
+    def test_run_actually_calls_it(self):
+        """The method existing is not the same as run() using it."""
+        import inspect
+        from agent.core import AgentCore
+        assert "_try_subscription" in inspect.getsource(AgentCore.run)

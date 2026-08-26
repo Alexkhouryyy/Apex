@@ -175,6 +175,112 @@ def _permission_hook(confirm: Optional[Callable[[str, dict], bool]]):
     return _pre_tool_use
 
 
+# ── Carrying Apex's conversation across ──────────────────────────────────────
+# The SDK's streamed prompt accepts only `{"type": "user", ...}` messages —
+# checked against the installed package, not assumed. There is no way to hand it
+# a prior ASSISTANT turn, so a conversation cannot be replayed as native turns.
+#
+# That leaves two options and only one of them is honest:
+#
+#   * `resume=<session_id>` lets Claude Code's own session store keep the
+#     history. Cheaper per turn, and a divergence bug by construction: Apex's
+#     Memory would still be doing summarization, long-term-memory injection and
+#     the context prefix, so there would be TWO histories. The moment a turn
+#     falls back to the API — which is the whole point of the fallback — the two
+#     disagree about what was said.
+#
+#   * Serialize Apex's history into the prompt. Apex's Memory stays the single
+#     source of truth, both paths read the same thing, and falling back
+#     mid-conversation is seamless. The model sees a transcript rather than
+#     native turns, which is a real cost, but a smaller one than two
+#     conversations that quietly drift apart.
+#
+# The second is what this does.
+
+_ROLE_LABEL = {"user": "User", "assistant": "Assistant"}
+
+
+def _block_text(block) -> str:
+    """One content block as text. Tool traffic is summarized, not replayed."""
+    if isinstance(block, str):
+        return block
+    if not isinstance(block, dict):
+        return ""
+    kind = block.get("type")
+    if kind == "text":
+        return str(block.get("text") or "")
+    if kind == "tool_use":
+        return f"[called {block.get('name', 'a tool')}]"
+    if kind == "tool_result":
+        body = block.get("content")
+        if isinstance(body, list):
+            body = " ".join(_block_text(b) for b in body)
+        return f"[tool result: {str(body or '')[:300]}]"
+    return ""
+
+
+def transcript_prompt(messages: list, user_text: str, *, max_chars: int = 24000) -> str:
+    """Apex's conversation as a prompt the SDK will accept.
+
+    Trimmed from the FRONT when long: the newest turns are the ones the next
+    reply depends on, and dropping the tail to keep the opening would be exactly
+    backwards. The trim is announced in the text so the model knows it is seeing
+    a window rather than the whole conversation — silently truncating history is
+    how a model confidently contradicts something it was told earlier.
+    """
+    lines: list[str] = []
+    for msg in messages or []:
+        if not isinstance(msg, dict):
+            continue
+        role = _ROLE_LABEL.get(msg.get("role"))
+        if not role:
+            continue
+        content = msg.get("content")
+        if isinstance(content, list):
+            body = " ".join(t for t in (_block_text(b) for b in content) if t)
+        else:
+            body = str(content or "")
+        body = body.strip()
+        if body:
+            lines.append(f"{role}: {body}")
+
+    if not lines:
+        return user_text
+
+    transcript = "\n\n".join(lines)
+    trimmed = False
+    while len(transcript) > max_chars and lines:
+        lines.pop(0)
+        trimmed = True
+        transcript = "\n\n".join(lines)
+
+    header = ("This is an ongoing conversation. Earlier turns are shown below "
+              "for context; reply to the LAST user message.")
+    if trimmed:
+        header += (" The earliest turns have been trimmed — say so rather than "
+                   "guessing if something seems to be missing.")
+    return f"{header}\n\n{transcript}"
+
+
+def should_use(call_site: str) -> tuple[bool, str]:
+    """(route it here?, why-not). Config first, then availability.
+
+    Deliberately NOT a bare bool: "the subscription did not get used" has
+    several causes with different fixes, and a caller that cannot tell them
+    apart writes a log line that helps nobody.
+    """
+    import config as _cfg
+    if not getattr(_cfg, "SUBSCRIPTION_ENABLED", False):
+        return False, "SUBSCRIPTION_ENABLED is false"
+    sites = getattr(_cfg, "SUBSCRIPTION_CALL_SITES", []) or []
+    if call_site not in sites:
+        return False, f"{call_site} is not in SUBSCRIPTION_CALL_SITES"
+    ok, why = available()
+    if not ok:
+        return False, why
+    return True, ""
+
+
 def run_turn(system: str, user_text: str, tools: list[dict],
              dispatch: Callable[[str, dict], str], *,
              model: Optional[str] = None, max_turns: int = 12,

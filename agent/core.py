@@ -2329,6 +2329,56 @@ class AgentCore:
 
         threading.Thread(target=_worker, daemon=True, name="SkillAutoCreate").start()
 
+    def _try_subscription(self, user_text: str, memory, *, streamer=None):
+        """Run this turn on the Claude subscription, or return None to use the API.
+
+        Returns the reply text on success and None on every other outcome, so
+        the caller's fall-through is the single fallback path rather than a
+        second one that could drift.
+
+        Conversation history is serialized into the prompt rather than handed to
+        the SDK's own session store — see subscription.transcript_prompt for why
+        two histories would be a divergence bug rather than an optimization.
+        """
+        from agent import subscription as _sub
+
+        ok, why = _sub.should_use("agent.core/main")
+        if not ok:
+            # Only worth saying when it was asked for and did not happen; the
+            # off-by-default case would print on every single turn.
+            if getattr(config, "SUBSCRIPTION_ENABLED", False):
+                print(f"[Subscription] Using the API this turn: {why}")
+            return None
+
+        try:
+            result = _sub.run_turn(
+                self._effective_system_prompt(),
+                _sub.transcript_prompt(memory.get_messages(), user_text),
+                TOOLS,
+                _execute_tool,
+                model=self._model,
+                confirm=lambda name, inputs: safety.check(name, inputs)[0],
+                on_text=(streamer.feed if streamer is not None
+                         and hasattr(streamer, "feed") else None),
+            )
+        except Exception as e:
+            # Rate limit, auth, a dead CLI — all the same answer: use the API.
+            print(f"[Subscription] Falling back to the API: {type(e).__name__}: {e}")
+            return None
+
+        text = (result or {}).get("text") or ""
+        if result.get("is_error") or not text.strip():
+            print("[Subscription] Empty or errored turn — falling back to the API.")
+            return None
+
+        # Apex's Memory stays the source of truth on BOTH paths, so a later
+        # fallback mid-conversation sees everything that was said here.
+        memory.add_assistant([{"type": "text", "text": text}])
+        saved = result.get("would_have_cost_usd")
+        print(f"[Subscription] Turn ran on the subscription"
+              + (f" (~${saved:.4f} not spent on API credits)." if saved else "."))
+        return text
+
     def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None) -> str:
         """Run a full agent turn. Returns the final text response.
 
@@ -2415,6 +2465,16 @@ class AgentCore:
                     if cap_msg:
                         memory.add("assistant", cap_msg)
                         return cap_msg
+
+                # The subscription path owns the whole agent loop, so it is
+                # taken or not taken for the entire turn — it cannot be slotted
+                # into the middle of this one. Any failure falls through to the
+                # API below with the conversation untouched, which is the point:
+                # an exhausted five-hour window must not stop Apex working.
+                _sub_text = self._try_subscription(
+                    user_text, memory, streamer=streamer)
+                if _sub_text is not None:
+                    return _sub_text
 
                 from agent import router as _router
                 _routed_model, _complexity = _router.route_model(user_text, self._model, use_thinking)

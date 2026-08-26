@@ -430,3 +430,15 @@ HANDTRACK_DELEGATE = os.getenv("HANDTRACK_DELEGATE", "auto").strip().lower()
 # background. A phantom hand can fire a gesture and wake Apex when nobody moved.
 # Above ~0.75 real tracking starts to suffer.
 HANDTRACK_MIN_CONFIDENCE = float(os.getenv("HANDTRACK_MIN_CONFIDENCE", "0.7"))
+
+# Run Apex's conversation on a Claude subscription instead of metered API
+# credits. Off by default: it needs the `claude` CLI installed and logged in,
+# and it draws on the SAME five-hour window as your own Claude Code sessions.
+SUBSCRIPTION_ENABLED = os.getenv("SUBSCRIPTION_ENABLED", "false").lower() in {"1", "true", "yes"}
+# Which call sites route there. Measured: the SDK carries ~26.5k tokens of
+# Claude Code harness per call, which makes it 3x DEARER than Haiku for
+# high-volume background work — so deep research and the awareness loop stay on
+# the API. The conversation is the opposite case: one Opus turn with 90 tools is
+# ~$0.11 on the API, and dozens a day is real money.
+SUBSCRIPTION_CALL_SITES = [s.strip() for s in os.getenv(
+    "SUBSCRIPTION_CALL_SITES", "agent.core/main").split(",") if s.strip()]
