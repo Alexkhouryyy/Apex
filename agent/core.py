@@ -183,7 +183,9 @@ TOOLS = [
             "X') instead of answering with a wall of text. Requires the "
             "barehands server to be running and its stage open in Chrome; the "
             "result says plainly if it is not, so believe the result rather "
-            "than assuming the card appeared."
+            "than assuming the card appeared. Pass `src` to show an image or a "
+            "3D model instead of text — call board_props first to see which "
+            "ones exist, since only files inside the media airlock can stage."
         ),
         "input_schema": {
             "type": "object",
@@ -195,9 +197,42 @@ TOOLS = [
                     "description": "True (default) lands it centre stage, enlarged, everything else dimmed. False stages it as one of the ensemble.",
                     "default": True,
                 },
+                "src": {
+                    "type": "string",
+                    "description": "Optional image or 3D model to show instead of a text card, as an airlock-relative path like 'models/engine.glb' or 'misc/diagram.png'. Call board_props first to see what exists — only files already inside barehands' media/ folder can ever be staged.",
+                    "default": "",
+                },
             },
             "required": ["title"],
         },
+    },
+    {
+        "name": "board_hand",
+        "description": (
+            "Deliver a prop into the user's actual hand on the barehands board "
+            "— it flies to where their hand is and they can then throw, rotate "
+            "or scale it. Use when handing something over is the point: 'give "
+            "me the engine', 'let me hold it'. Takes an airlock-relative path "
+            "like 'models/engine.glb'. Call board_props first to see what "
+            "exists."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "src": {"type": "string", "description": "Airlock-relative path, e.g. models/engine.glb"},
+            },
+            "required": ["src"],
+        },
+    },
+    {
+        "name": "board_props",
+        "description": (
+            "List every image and 3D model the barehands board is allowed to "
+            "stage. Run this before board_present with a src, or board_hand — "
+            "only files already inside barehands' media/ folder can appear, so "
+            "guessing a filename fails."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "board_state",
@@ -1482,14 +1517,31 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
 
         elif name == "board_present":
             from tools import barehands as _board
-            cmd = {
-                "a": "present" if inputs.get("spotlight", True) else "add_card",
-                "title": inputs["title"],
-                "body": inputs.get("body", ""),
-            }
+            src = (inputs.get("src") or "").strip()
+            if src:
+                # An image or model, not a card. `present` spotlights it;
+                # `add_img` stages it as one of the ensemble.
+                cmd = {"a": "present" if inputs.get("spotlight", True) else "add_img",
+                       "src": src, "title": inputs["title"]}
+            else:
+                cmd = {
+                    "a": "present" if inputs.get("spotlight", True) else "add_card",
+                    "title": inputs["title"],
+                    "body": inputs.get("body", ""),
+                }
             out = _board.board_command(cmd)
             _broadcast_live_event("board", out)
             return out
+
+        elif name == "board_hand":
+            from tools import barehands as _board
+            out = _board.board_command({"a": "hand", "src": inputs["src"]})
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name == "board_props":
+            from tools import barehands as _board
+            return _board.describe_props()
 
         elif name == "board_state":
             from tools import barehands as _board

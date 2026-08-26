@@ -475,3 +475,86 @@ class TestHandTrackingStatusReport:
         import main
         assert "report_hand_tracking" in inspect.getsource(resident.run_resident)
         assert "report_hand_tracking" in inspect.getsource(main)
+
+
+# ── The props airlock ────────────────────────────────────────────────────────
+
+class TestProps:
+    """barehands jails staging to its own media/ folder — nothing outside it can
+    ever reach the board, which is a safety property. So the only useful
+    question is what is already inside, and Apex has to be able to ask.
+
+    This exists because board_present originally sent only title and body: it
+    dropped `src` on the floor, so Apex could stage text cards and NOTHING else.
+    Images, 3D models and anything handed to you were unreachable, and nothing
+    said so — the tool reported success for the card it did send.
+    """
+
+    def _tree(self):
+        return json.dumps({
+            "name": "Props",
+            "items": ["logo.png"],
+            "dirs": [
+                {"name": "models", "items": ["models/engine.glb"], "dirs": []},
+                {"name": "holo", "items": ["holo/engine.glb"], "dirs": [
+                    {"name": "deep", "items": ["holo/deep/x.glb"], "dirs": []}]},
+            ],
+        }).encode()
+
+    def test_props_are_listed_from_every_depth(self, monkeypatch):
+        monkeypatch.setattr(barehands, "_get", lambda *a, **k: self._tree())
+        props = barehands.list_props()
+        assert "logo.png" in props
+        assert "models/engine.glb" in props
+        assert "holo/deep/x.glb" in props, "nested folders must not be lost"
+
+    def test_a_dark_server_lists_nothing_rather_than_raising(self, monkeypatch):
+        monkeypatch.setattr(barehands, "_get", lambda *a, **k: None)
+        assert barehands.list_props() == []
+
+    @pytest.mark.parametrize("junk", [b"not json", b"[]", b'{"items": "no"}'])
+    def test_garbage_does_not_raise(self, monkeypatch, junk):
+        """core dispatches into this; a raise would end the turn."""
+        monkeypatch.setattr(barehands, "_get", lambda *a, **k: junk)
+        barehands.list_props()
+
+    def test_an_empty_airlock_says_where_to_put_files(self, monkeypatch):
+        """"Nothing to show" is useless on its own — the folders and what each
+        one means are the actual answer."""
+        monkeypatch.setattr(barehands, "_get",
+                            lambda *a, **k: json.dumps({"items": [], "dirs": []}).encode())
+        monkeypatch.setattr(barehands, "tracker_status", lambda: bh.TRACKER_LIVE)
+        out = barehands.describe_props()
+        assert "media/models/" in out and "hologram" in out
+
+    def test_a_dark_board_is_distinguished_from_an_empty_one(self, monkeypatch):
+        monkeypatch.setattr(barehands, "_get", lambda *a, **k: None)
+        monkeypatch.setattr(barehands, "tracker_status", lambda: bh.TRACKER_DOWN)
+        assert "isn't running" in barehands.describe_props()
+
+
+class TestBoardToolsReachTheAirlock:
+    """The gap this closes: a tool that can only ever send text."""
+
+    def _tools(self):
+        from agent import core
+        return {t["name"]: t for t in core.TOOLS}
+
+    def test_board_present_can_send_a_model_not_just_a_card(self):
+        props = self._tools()["board_present"]["input_schema"]["properties"]
+        assert "src" in props, "without this, only text cards can ever be staged"
+
+    def test_there_is_a_way_to_put_something_in_your_hand(self):
+        """`hand` is barehands' deliver-to-reach verb, and it was unreachable."""
+        assert "board_hand" in self._tools()
+
+    def test_there_is_a_way_to_discover_what_can_be_staged(self):
+        """Only files inside the airlock can appear, so guessing a filename
+        fails. The model needs to be able to look."""
+        assert "board_props" in self._tools()
+
+    def test_the_prop_tools_tell_the_model_to_look_first(self):
+        t = self._tools()
+        for name in ("board_hand", "board_present"):
+            assert "board_props" in t[name]["description"], \
+                f"{name} must point at the way to discover valid paths"

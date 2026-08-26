@@ -239,6 +239,68 @@ def board_command(cmd: dict) -> str:
     return f"[Barehands] '{action}' is on the board."
 
 
+# What the airlock will stage, mirrored from barehands' server so a wrong
+# extension fails here with a readable message instead of an opaque 400.
+PROP_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".webm", ".glb", ".gltf")
+
+# The airlock's folders, and what each one means on the board.
+_PROP_FOLDERS = {
+    "misc": "images",
+    "fx": "transparent props (no frame)",
+    "models": "3D models, solid",
+    "holo": "3D models, rendered as a blue hologram wireframe",
+}
+
+
+def list_props() -> list:
+    """Every file the board is allowed to stage, as airlock-relative paths.
+
+    barehands jails staging to its own `media/` folder — nothing outside it can
+    ever appear, which is a safety property rather than an inconvenience. So the
+    only useful question is what is already inside, and `/props` answers it from
+    the live filesystem: drop a file in, and it is listed without a restart.
+    """
+    body = _get("/props")
+    if body is None:
+        return []
+    try:
+        tree = json.loads(body)
+    except Exception:
+        return []
+
+    out: list = []
+
+    def walk(node, prefix=""):
+        if not isinstance(node, dict):
+            return
+        for item in node.get("items") or []:
+            out.append(str(item).replace("\\", "/"))
+        for sub in node.get("dirs") or []:
+            walk(sub, prefix)
+
+    walk(tree)
+    return sorted(out)
+
+
+def describe_props() -> str:
+    """The airlock as something a model can read and choose from."""
+    if not is_configured():
+        return "[Barehands] disabled (BAREHANDS_ENABLED=false)."
+    props = list_props()
+    if not props:
+        status = tracker_status()
+        if status == TRACKER_DOWN:
+            return "[Barehands] the board is dark — the barehands server isn't running."
+        return ("The props airlock is empty. Drop files into barehands' media/ "
+                "folder: " + "; ".join(f"media/{k}/ = {v}"
+                                       for k, v in _PROP_FOLDERS.items()))
+    lines = [f"{len(props)} prop(s) the board can stage:"]
+    lines += [f"  {p}" for p in props[:60]]
+    if len(props) > 60:
+        lines.append(f"  … and {len(props) - 60} more")
+    return "\n".join(lines)
+
+
 def board_state() -> str:
     """What is on the board right now — Apex's eyes, so it can look before it
     talks. The user moves things by hand, so memory is never the answer."""
