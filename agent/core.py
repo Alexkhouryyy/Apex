@@ -2374,9 +2374,16 @@ class AgentCore:
         # Apex's Memory stays the source of truth on BOTH paths, so a later
         # fallback mid-conversation sees everything that was said here.
         memory.add_assistant([{"type": "text", "text": text}])
-        saved = result.get("would_have_cost_usd")
+        # NOT "saved". The SDK reports what THIS call would have cost, and this
+        # call carried ~26.5k tokens of Claude Code harness that Apex's own API
+        # path never sends — so the same turn on the API costs less than this.
+        # Printing it as a saving would overstate the benefit every single turn,
+        # which is a flattering number rather than a true one. It is a usage
+        # figure: what this turn drew from the window, priced in dollars.
+        cost = result.get("would_have_cost_usd")
         print(f"[Subscription] Turn ran on the subscription"
-              + (f" (~${saved:.4f} not spent on API credits)." if saved else "."))
+              + (f" — ${cost:.4f} of plan usage, billed to no card."
+                 if cost else "."))
         return text
 
     def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None) -> str:

@@ -350,3 +350,30 @@ class TestConversationFallback:
         import inspect
         from agent.core import AgentCore
         assert "_try_subscription" in inspect.getsource(AgentCore.run)
+
+
+class TestCostReporting:
+    """A number that flatters is worse than no number.
+
+    The first live run printed "~$0.2213 not spent on API credits". That
+    overstates it: the SDK reports what the call it just made would have cost,
+    and that call carried ~26.5k tokens of Claude Code harness which Apex's own
+    API path never sends. The same turn on the API is cheaper than the figure
+    being claimed as a saving — so the message was inflating the benefit on
+    every single turn.
+    """
+
+    def test_it_does_not_claim_a_saving(self):
+        import inspect
+        from agent.core import AgentCore
+        src = inspect.getsource(AgentCore._try_subscription)
+        assert "not spent on API credits" not in src
+        assert "plan usage" in src, "report usage, not an invented saving"
+
+    def test_the_reason_is_written_down_next_to_it(self):
+        """The next person to read this will want to 'improve' it back into a
+        savings figure unless the arithmetic is on the page."""
+        import inspect
+        from agent.core import AgentCore
+        src = inspect.getsource(AgentCore._try_subscription)
+        assert "harness" in src.lower()
