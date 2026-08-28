@@ -17,6 +17,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Apex — Board</title>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
 <style>
   :root {
     --glass: rgba(18, 22, 30, 0.55);
@@ -38,6 +44,9 @@
   #cam.off { display: none; }
 
   #stage { position: fixed; inset: 0; }
+  /* Models sit between the camera and the cards: you can put a note in front
+     of an object, which is what makes the two worth having together. */
+  #gl { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
   .card {
     position: absolute; width: 22vw; min-height: 9vh; max-height: 34vh;
@@ -86,6 +95,7 @@
 </head>
 <body>
 <img id="cam" class="off" alt="">
+<canvas id="gl"></canvas>
 <div id="stage"></div>
 <div id="hint">
   <h1>Apex board</h1>
@@ -93,8 +103,10 @@
 </div>
 <div id="status">—</div>
 
-<script>
+<script type="module">
 "use strict";
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const stage = document.getElementById("stage");
 const cam = document.getElementById("cam");
@@ -154,6 +166,113 @@ function renderCursors(list) {
   });
 }
 
+// ── 3D ────────────────────────────────────────────────────────────────────
+// Models are drawn by three.js on their own canvas; cards stay as DOM, because
+// text in WebGL is a font-atlas project and DOM already does it perfectly.
+const glCanvas = document.getElementById("gl");
+let renderer = null, scene = null, camera3 = null;
+const loader = new GLTFLoader();
+const models = new Map();       // card id -> { group, src }
+const pending = new Set();      // ids mid-load, so one card loads once
+
+function init3D() {
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas: glCanvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    scene = new THREE.Scene();
+    // Orthographic, sized 0..1 in both axes, so a model's position is the SAME
+    // window fraction a card's is. A perspective camera would need every
+    // coordinate converted and the two layers would drift apart on resize.
+    camera3 = new THREE.OrthographicCamera(0, 1, 0, 1, -100, 100);
+    camera3.position.z = 10;
+    scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+    const key = new THREE.DirectionalLight(0xbcd8ff, 2.2);
+    key.position.set(1, 2, 3);
+    scene.add(key);
+    resize3D();
+    addEventListener("resize", resize3D);
+    return true;
+  } catch (e) {
+    console.warn("3D unavailable:", e);
+    return false;
+  }
+}
+
+function resize3D() {
+  if (!renderer) return;
+  renderer.setSize(innerWidth, innerHeight, false);
+  // y is flipped so 0 is the TOP, matching how cards are positioned and how
+  // the cursor stream arrives from Python. Without this a model tracks your
+  // hand upside down while the card next to it does not.
+  camera3.left = 0; camera3.right = 1;
+  camera3.top = 0; camera3.bottom = 1;
+  camera3.updateProjectionMatrix();
+}
+
+function fitToUnitBox(obj) {
+  // Models arrive at wildly different scales — some are metres, some are
+  // millimetres. Normalizing to a fixed on-screen size means a prop is usable
+  // the moment it is dropped in the folder, without editing it first.
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+  const largest = Math.max(size.x, size.y, size.z) || 1;
+  obj.position.sub(centre);
+  const wrap = new THREE.Group();
+  wrap.add(obj);
+  wrap.scale.setScalar(0.18 / largest);
+  return wrap;
+}
+
+function syncModels(cards) {
+  if (!renderer) return;
+  const seen = new Set();
+  for (const c of cards) {
+    if (c.kind !== "model" || !c.src) continue;
+    seen.add(c.id);
+    let entry = models.get(c.id);
+    if (!entry) {
+      if (pending.has(c.id)) continue;
+      pending.add(c.id);
+      loader.load("/board/prop/" + c.src.split("/").map(encodeURIComponent).join("/"),
+        (gltf) => {
+          pending.delete(c.id);
+          const wrap = fitToUnitBox(gltf.scene);
+          scene.add(wrap);
+          models.set(c.id, { group: wrap, src: c.src, base: wrap.scale.x });
+        },
+        undefined,
+        (err) => {
+          // A model that will not load must say so rather than leaving an
+          // empty space that looks like the board is broken.
+          pending.delete(c.id);
+          console.warn("prop failed to load:", c.src, err);
+          say("could not load " + c.src);
+        });
+      continue;
+    }
+    const g = entry.group;
+    g.position.set(c.x, c.y, 0);
+    g.rotation.y = c.rot || 0;
+    // `base` is the fit-to-screen factor captured at load. Multiplying by it
+    // rather than reading g.scale.x means the user's scale is applied to the
+    // ORIGINAL size every frame — reading the current scale would compound it,
+    // and the model would grow without bound while being held.
+    g.scale.setScalar(entry.base * (c.scale || 1));
+  }
+  for (const [id, entry] of models) {
+    if (!seen.has(id)) { scene.remove(entry.group); models.delete(id); }
+  }
+}
+
+function draw3D() {
+  if (renderer) renderer.render(scene, camera3);
+  requestAnimationFrame(draw3D);
+}
+
+const has3D = init3D();
+if (has3D) draw3D();
+
 let lastFrameAt = 0;
 
 function connect() {
@@ -166,7 +285,10 @@ function connect() {
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
 
-    renderCards(msg.cards || []);
+    // Cards and models are two layers of one board: text stays DOM, geometry
+    // goes to WebGL, and both read the same positions from Python.
+    renderCards((msg.cards || []).filter(c => c.kind !== "model"));
+    syncModels(msg.cards || []);
     renderCursors(msg.cursors || []);
 
     if (msg.frame) {

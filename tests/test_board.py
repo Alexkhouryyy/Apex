@@ -46,19 +46,19 @@ class TestGrabbing:
         b = Board()
         c = self._at(b, 0.5, 0.5)
         b.apply_hands([(0.52, 0.52, True)])
-        assert c.held_by == 0
+        assert c.held_by == [0]
 
     def test_an_open_hand_grabs_nothing(self):
         b = Board()
         c = self._at(b, 0.5, 0.5)
         b.apply_hands([(0.5, 0.5, False)])
-        assert c.held_by is None
+        assert c.held_by == []
 
     def test_a_pinch_out_of_reach_grabs_nothing(self):
         b = Board()
         c = self._at(b, 0.1, 0.1)
         b.apply_hands([(0.9, 0.9, True)])
-        assert c.held_by is None
+        assert c.held_by == []
 
     def test_the_card_does_not_jump_into_your_hand(self):
         """THE feel test. Snapping the card's centre to the fingertip makes it
@@ -76,7 +76,7 @@ class TestGrabbing:
         c = self._at(b, 0.5, 0.5)
         b.apply_hands([(0.5, 0.5, True)])
         b.apply_hands([(0.5, 0.5, False)])
-        assert c.held_by is None
+        assert c.held_by == []
 
     def test_hands_leaving_the_frame_release_everything(self):
         """Without this a card stays welded to a hand that is no longer there,
@@ -85,9 +85,9 @@ class TestGrabbing:
         b = Board()
         c = self._at(b, 0.5, 0.5)
         b.apply_hands([(0.5, 0.5, True)])
-        assert c.held_by == 0
+        assert c.held_by == [0]
         b.apply_hands([])
-        assert c.held_by is None
+        assert c.held_by == []
 
     def test_the_topmost_card_wins(self):
         """Two cards in the same place: you are reaching for the one you can
@@ -96,21 +96,27 @@ class TestGrabbing:
         under = self._at(b, 0.5, 0.5)
         over = self._at(b, 0.5, 0.5)
         b.apply_hands([(0.5, 0.5, True)])
-        assert over.held_by == 0 and under.held_by is None
+        assert over.held_by == [0] and under.held_by == []
 
     def test_two_hands_hold_two_different_cards(self):
         b = Board()
         left = self._at(b, 0.2, 0.5)
         right = self._at(b, 0.8, 0.5)
         b.apply_hands([(0.2, 0.5, True), (0.8, 0.5, True)])
-        assert {left.held_by, right.held_by} == {0, 1}
+        assert {left.held_by[0], right.held_by[0]} == {0, 1}
 
-    def test_one_card_cannot_be_held_by_two_hands(self):
+    def test_two_hands_on_one_object_is_a_two_handed_grab(self):
+        """Not a conflict — this is how scaling and rotating begin."""
         b = Board()
         c = self._at(b, 0.5, 0.5)
         b.apply_hands([(0.5, 0.5, True), (0.51, 0.5, True)])
-        held = [x for x in (c.held_by,) if x is not None]
-        assert len(held) == 1
+        assert sorted(c.held_by) == [0, 1]
+
+    def test_a_third_hand_cannot_join(self):
+        b = Board()
+        c = self._at(b, 0.5, 0.5)
+        b.apply_hands([(0.5, 0.5, True), (0.51, 0.5, True), (0.52, 0.5, True)])
+        assert len(c.held_by) == 2
 
     def test_a_card_cannot_be_dragged_off_the_glass(self):
         """Off-screen is unreachable — a card pushed past the edge could never
@@ -279,3 +285,94 @@ class TestApexBoardTools:
                             lambda cmd: seen.append(cmd) or "[Barehands] ok")
         core._execute_tool("board_present", {"title": "HI"})
         assert seen and seen[0]["title"] == "HI"
+
+
+# ── 3D models, and the two-handed grab ───────────────────────────────────────
+
+class TestModels:
+    """One hand drags; two hands scale and rotate.
+
+    This is the touchscreen pinch-to-zoom everyone already knows, lifted to two
+    hands — chosen over barehands' hold-still-to-rotate on purpose. Theirs is
+    their interaction design, tuned over weeks; this one is discoverable without
+    being taught.
+    """
+
+    def _model(self, b, x=0.5, y=0.5):
+        return b.add("model", "Engine", src="models/engine.glb", x=x, y=y)
+
+    def test_a_model_carries_its_prop_path(self):
+        b = Board()
+        c = self._model(b)
+        d = b.cards()[0]
+        assert d["kind"] == "model" and d["src"] == "models/engine.glb"
+
+    def test_hands_spreading_apart_scale_it_up(self):
+        b = Board()
+        c = self._model(b)
+        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])   # span 0.10
+        b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])   # span 0.20
+        assert c.scale == pytest.approx(2.0, abs=0.01)
+
+    def test_hands_coming_together_scale_it_down(self):
+        b = Board()
+        c = self._model(b)
+        b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])   # span 0.20
+        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])   # span 0.10
+        assert c.scale == pytest.approx(0.5, abs=0.01)
+
+    def test_it_does_not_jump_on_the_second_hand_landing(self):
+        """THE feel test for two hands. Without a remembered starting span the
+        object leaps to whatever scale the current hand distance implies, the
+        instant the second hand arrives."""
+        b = Board()
+        c = self._model(b)
+        b.apply_hands([(0.30, 0.5, True), (0.70, 0.5, True)])
+        assert c.scale == pytest.approx(1.0, abs=1e-6), "it resized on grab"
+
+    def test_turning_your_hands_rotates_it(self):
+        import math
+        b = Board()
+        c = self._model(b)
+        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])   # flat
+        b.apply_hands([(0.5, 0.45, True), (0.5, 0.55, True)])   # quarter turn
+        assert abs(c.rot) == pytest.approx(math.pi / 2, abs=0.05)
+
+    def test_scale_is_clamped_at_both_ends(self):
+        """Scaled to nothing it cannot be grabbed again; scaled past the screen
+        it cannot be seen. Neither has an undo."""
+        from agent.board import MAX_SCALE, MIN_SCALE
+        b = Board()
+        c = self._model(b)
+        b.apply_hands([(0.499, 0.5, True), (0.501, 0.5, True)])
+        b.apply_hands([(0.0, 0.5, True), (1.0, 0.5, True)])
+        assert c.scale <= MAX_SCALE
+        b2 = Board()
+        c2 = self._model(b2)
+        b2.apply_hands([(0.0, 0.5, True), (1.0, 0.5, True)])
+        b2.apply_hands([(0.4999, 0.5, True), (0.5001, 0.5, True)])
+        assert c2.scale >= MIN_SCALE
+
+    def test_dropping_to_one_hand_goes_back_to_dragging(self):
+        b = Board()
+        c = self._model(b)
+        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])
+        b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])
+        grown = c.scale
+        b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, False)])  # right hand opens
+        b.apply_hands([(0.30, 0.5, True), (0.60, 0.5, False)])  # left drags
+        assert len(c.held_by) == 1
+        assert c.scale == pytest.approx(grown, abs=1e-6), "letting go resized it"
+        assert c.x < 0.5, "it should have moved with the remaining hand"
+
+    def test_re_grabbing_scales_from_where_it_was_left(self):
+        """A second two-handed grab must continue from the current size, not
+        reset to 1.0 — otherwise every regrab throws away your work."""
+        b = Board()
+        c = self._model(b)
+        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])
+        b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])
+        assert c.scale == pytest.approx(2.0, abs=0.01)
+        b.apply_hands([])                                        # let go
+        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])    # grab again
+        assert c.scale == pytest.approx(2.0, abs=0.01)

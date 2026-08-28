@@ -235,6 +235,24 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
+        "name": "board_model",
+        "description": (
+            "Put a 3D model on Apex's glass board, where the user can pick it "
+            "up with one hand and scale or rotate it with two. Takes a path "
+            "relative to the props folder, like 'models/engine.glb'. Run "
+            "board_props first — only files already in the folder can be shown, "
+            "so guessing a filename fails."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "src": {"type": "string", "description": "Prop path, e.g. models/engine.glb"},
+                "title": {"type": "string", "description": "What to call it. Optional.", "default": ""},
+            },
+            "required": ["src"],
+        },
+    },
+    {
         "name": "board_clear",
         "description": "Sweep everything off the glass board. Use when the user asks to clear it, start fresh, or when the board is cluttered enough to be in the way.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
@@ -1555,8 +1573,29 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return out
 
         elif name == "board_props":
+            if getattr(config, "BOARD_ENABLED", False):
+                from agent import props as _props
+                return _props.describe()
             from tools import barehands as _board
             return _board.describe_props()
+
+        elif name == "board_model":
+            from agent import props as _props
+            from agent.board import get_board
+            src = (inputs.get("src") or "").strip()
+            if _props.resolve(src) is None:
+                # Says what is actually wrong. "Failed" would leave the model
+                # guessing between a typo, a missing file and a rejected type.
+                return (f"'{src}' is not a prop Apex can show. It must already "
+                        f"be inside {_props.props_root()} and end in .glb or "
+                        f".gltf. Run board_props to see what is there.")
+            if not _props.is_model(src):
+                return f"'{src}' is an image, not a 3D model — use board_present with src."
+            card = get_board().add("model", inputs.get("title") or src.rsplit("/", 1)[-1],
+                                   src=src)
+            out = f"'{card.title}' is on the board — grab it with one hand, two to scale."
+            _broadcast_live_event("board", out)
+            return out
 
         elif name == "board_clear":
             if getattr(config, "BOARD_ENABLED", False):

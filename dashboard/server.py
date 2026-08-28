@@ -1902,6 +1902,22 @@ async def board_page():
     return FileResponse(str(path))
 
 
+@app.get("/board/prop/{rel:path}")
+async def board_prop(rel: str):
+    """Serve one prop out of the jail.
+
+    Every guard lives in agent/props.resolve — traversal, drive letters, symlink
+    escapes and the extension allowlist — so this route cannot be the place the
+    rule is subtly different. A refusal is 404 rather than 403: telling an
+    attacker which paths exist but are forbidden is free reconnaissance.
+    """
+    from agent import props as _props
+    path = _props.resolve(rel)
+    if path is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(str(path), media_type=_props.media_type(path))
+
+
 @app.websocket("/ws/board")
 async def ws_board(ws: WebSocket):
     """Stream cursors, cards and the camera backdrop to the board.
