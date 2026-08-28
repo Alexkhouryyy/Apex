@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<!--
+  Apex's glass board.
+
+  This page draws and decides NOTHING. It never runs MediaPipe, never sees a
+  landmark, and never opens the camera — it cannot, because Python is holding it
+  exclusively. Cursor positions, card positions and the backdrop all arrive over
+  one websocket already decided.
+
+  That is the whole architectural difference from a board that tracks in the
+  page: closing this tab does not stop Apex seeing your hands, because nothing
+  about the tracking lives here. A board that runs MediaPipe in the browser goes
+  blind the moment you switch tabs, since browsers pause requestAnimationFrame.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Apex — Board</title>
+<style>
+  :root {
+    --glass: rgba(18, 22, 30, 0.55);
+    --edge:  rgba(150, 190, 255, 0.30);
+    --ink:   #e8eefc;
+    --accent:#6ea8ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #05070c; }
+  body { font: 15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+
+  /* The backdrop is a still, replaced ~15x a second. An <img> rather than a
+     <video> because the frames arrive as individual JPEGs over a websocket —
+     there is no stream for a video element to attach to. */
+  #cam {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; filter: saturate(0.75) brightness(0.62);
+  }
+  #cam.off { display: none; }
+
+  #stage { position: fixed; inset: 0; }
+
+  .card {
+    position: absolute; width: 22vw; min-height: 9vh; max-height: 34vh;
+    padding: 14px 16px; border-radius: 16px;
+    background: var(--glass); border: 1px solid var(--edge);
+    backdrop-filter: blur(14px) saturate(1.2);
+    box-shadow: 0 10px 40px rgba(0,0,0,.45);
+    transform: translate(-50%, -50%);
+    /* Only the visual settle is animated. Position is NOT transitioned: a card
+       being dragged must track the hand exactly, and easing it would feel like
+       lag in the tracking rather than like smoothing. */
+    transition: box-shadow .18s ease, border-color .18s ease;
+    overflow: hidden;
+  }
+  .card.held {
+    border-color: var(--accent);
+    box-shadow: 0 16px 60px rgba(110,168,255,.35);
+  }
+  .card h3 {
+    font-size: 13px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 6px; font-weight: 600;
+  }
+  .card p { font-size: 14px; opacity: .92; white-space: pre-wrap; word-break: break-word; }
+
+  /* One ring per hand. Filled when pinched, so you can see the grab register
+     before you find out whether it caught a card. */
+  .ring {
+    position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+    border: 2px solid var(--accent); border-radius: 50%;
+    pointer-events: none; transition: background .08s linear, transform .08s linear;
+  }
+  .ring.pinched { background: rgba(110,168,255,.45); transform: scale(.72); }
+
+  #status {
+    position: fixed; left: 16px; bottom: 14px; font-size: 12px;
+    letter-spacing: .06em; opacity: .55; text-transform: uppercase;
+  }
+  #hint {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    text-align: center; max-width: 34rem; opacity: .8;
+  }
+  #hint h1 { font-size: 20px; margin-bottom: 10px; font-weight: 600; }
+  #hint p { font-size: 14px; opacity: .75; }
+  #hint.hidden { display: none; }
+</style>
+</head>
+<body>
+<img id="cam" class="off" alt="">
+<div id="stage"></div>
+<div id="hint">
+  <h1>Apex board</h1>
+  <p id="hint-body">Connecting…</p>
+</div>
+<div id="status">—</div>
+
+<script>
+"use strict";
+
+const stage = document.getElementById("stage");
+const cam = document.getElementById("cam");
+const statusEl = document.getElementById("status");
+const hint = document.getElementById("hint");
+const hintBody = document.getElementById("hint-body");
+
+// The token is already in the URL that opened this page; reuse it rather than
+// asking again. Same scheme the main dashboard's live socket uses.
+const token = new URLSearchParams(location.search).get("token") || "";
+
+const cards = new Map();   // id -> element
+const rings = [];          // one per hand, created lazily
+
+function say(text) { statusEl.textContent = text; }
+
+function renderCards(list) {
+  const seen = new Set();
+  for (const c of list) {
+    seen.add(c.id);
+    let el = cards.get(c.id);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML = '<h3></h3><p></p>';
+      stage.appendChild(el);
+      cards.set(c.id, el);
+    }
+    // Only write when changed. Setting textContent every frame at 15fps forces
+    // a needless relayout on every card, and with a dozen up that is visible.
+    const h = el.firstElementChild, p = el.lastElementChild;
+    if (h.textContent !== c.title) h.textContent = c.title;
+    if (p.textContent !== c.body) p.textContent = c.body || "";
+    el.style.left = (c.x * 100) + "%";
+    el.style.top = (c.y * 100) + "%";
+    el.classList.toggle("held", !!c.held);
+  }
+  for (const [id, el] of cards) {
+    if (!seen.has(id)) { el.remove(); cards.delete(id); }
+  }
+}
+
+function renderCursors(list) {
+  while (rings.length < list.length) {
+    const r = document.createElement("div");
+    r.className = "ring";
+    stage.appendChild(r);
+    rings.push(r);
+  }
+  rings.forEach((r, i) => {
+    const c = list[i];
+    if (!c) { r.style.display = "none"; return; }
+    r.style.display = "block";
+    r.style.left = (c.x * 100) + "%";
+    r.style.top = (c.y * 100) + "%";
+    r.classList.toggle("pinched", !!c.p);
+  });
+}
+
+let lastFrameAt = 0;
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws/board?token=${encodeURIComponent(token)}`);
+
+  ws.onopen = () => say("connected");
+
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+
+    renderCards(msg.cards || []);
+    renderCursors(msg.cursors || []);
+
+    if (msg.frame) {
+      cam.src = "data:image/jpeg;base64," + msg.frame;
+      cam.classList.remove("off");
+      lastFrameAt = Date.now();
+    } else if (Date.now() - lastFrameAt > 2000) {
+      cam.classList.add("off");
+    }
+
+    // Three states, three different things to do about them — the page should
+    // never leave you guessing which.
+    const n = (msg.cursors || []).length;
+    if (!msg.tracking) {
+      say("hand tracking is off");
+      hintBody.textContent =
+        "Set HANDTRACK_ENABLED=true and BOARD_ENABLED=true, then restart Apex.";
+      hint.classList.remove("hidden");
+    } else if (n === 0) {
+      say("tracking — no hands in frame");
+      hintBody.textContent = "Hold a hand up in front of the camera.";
+      hint.classList.toggle("hidden", (msg.cards || []).length > 0);
+    } else {
+      say(`${n} hand${n > 1 ? "s" : ""} · ${(msg.cards || []).length} card${(msg.cards || []).length === 1 ? "" : "s"}`);
+      hint.classList.add("hidden");
+    }
+  };
+
+  // Reconnect rather than dying. Apex restarts more often than this page does,
+  // and a board that needs a manual refresh after every restart is a board
+  // nobody leaves open.
+  ws.onclose = () => { say("reconnecting…"); setTimeout(connect, 1500); };
+  ws.onerror = () => ws.close();
+}
+
+connect();
+</script>
+</body>
+</html>

@@ -442,3 +442,13 @@ SUBSCRIPTION_ENABLED = os.getenv("SUBSCRIPTION_ENABLED", "false").lower() in {"1
 # ~$0.11 on the API, and dozens a day is real money.
 SUBSCRIPTION_CALL_SITES = [s.strip() for s in os.getenv(
     "SUBSCRIPTION_CALL_SITES", "agent.core/main").split(",") if s.strip()]
+
+# Apex's own glass board — cards you move with your hands, at /board on the
+# dashboard. Distinct from BAREHANDS_*: this one is Apex's, needs no second
+# program, and is rendered from the tracker Apex already runs in Python, so it
+# keeps working when the tab is not in front. Needs HANDTRACK_ENABLED.
+BOARD_ENABLED = os.getenv("BOARD_ENABLED", "false").lower() in {"1", "true", "yes"}
+# Frames per second for the board's video backdrop. The picture has to come from
+# Python because it holds the camera exclusively; 15 is smooth enough behind
+# cards and a third of the bandwidth of 45.
+BOARD_FPS = float(os.getenv("BOARD_FPS", "15"))

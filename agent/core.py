@@ -235,6 +235,11 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
+        "name": "board_clear",
+        "description": "Sweep everything off the glass board. Use when the user asks to clear it, start fresh, or when the board is cluttered enough to be in the way.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "board_state",
         "description": (
             "Look at the barehands board and report what is actually on it. "
@@ -1516,6 +1521,16 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                                  getattr(config, "HANDTRACK_RELEASE_SECONDS", 300))))
 
         elif name == "board_present":
+            # Apex's own board first when it is running — it needs no second
+            # program and no Chrome tab in front. barehands stays the fallback
+            # so nothing that worked yesterday stops working today.
+            if getattr(config, "BOARD_ENABLED", False):
+                from agent.board import get_board
+                card = get_board().add("card", inputs["title"],
+                                       inputs.get("body", ""))
+                out = f"'{card.title}' is on the board ({get_board().count()} up)."
+                _broadcast_live_event("board", out)
+                return out
             from tools import barehands as _board
             src = (inputs.get("src") or "").strip()
             if src:
@@ -1543,7 +1558,24 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             from tools import barehands as _board
             return _board.describe_props()
 
+        elif name == "board_clear":
+            if getattr(config, "BOARD_ENABLED", False):
+                from agent.board import get_board
+                return f"Cleared {get_board().clear()} card(s) from the board."
+            from tools import barehands as _board
+            return _board.board_command({"a": "clear"})
+
         elif name == "board_state":
+            if getattr(config, "BOARD_ENABLED", False):
+                from agent.board import get_board
+                cards = get_board().cards()
+                if not cards:
+                    return "The board is empty."
+                lines = [f"{len(cards)} card(s) on the board:"]
+                for c in cards:
+                    held = "  [in your hand]" if c["held"] else ""
+                    lines.append(f"  - {c['title']}{held}")
+                return "\n".join(lines)
             from tools import barehands as _board
             return _board.board_state()
 

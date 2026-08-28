@@ -1893,6 +1893,75 @@ async def speak_endpoint(request: Request):
 
 
 # --- WebSocket live stream ---
+@app.get("/board", response_class=HTMLResponse)
+async def board_page():
+    """Apex's glass board. Rendered from the tracker Apex already runs."""
+    path = STATIC_DIR / "board.html"
+    if not path.is_file():
+        return HTMLResponse("<h1>board.html is missing</h1>", status_code=404)
+    return FileResponse(str(path))
+
+
+@app.websocket("/ws/board")
+async def ws_board(ws: WebSocket):
+    """Stream cursors, cards and the camera backdrop to the board.
+
+    The browser draws and decides nothing: it never sees a landmark, never runs
+    MediaPipe, and never opens the camera — it cannot, because Python is holding
+    it. That is the whole architectural difference from a board that tracks in
+    the page, and it is why closing this tab does not stop Apex seeing your
+    hands.
+    """
+    token = config.DASHBOARD_TOKEN
+    if token:
+        qtoken = ws.query_params.get("token")
+        ok = bool(qtoken) and hmac.compare_digest(qtoken, token)
+        if not ok:
+            try:
+                from agent import access_tokens
+                ok = access_tokens.verify(qtoken)
+            except Exception:
+                ok = False
+        if not ok:
+            await ws.close(code=1008)
+            return
+
+    await ws.accept()
+    from agent import board as _board_mod
+    from agent import handtrack as _ht
+    board = _board_mod.get_board()
+    interval = 1.0 / max(1.0, float(getattr(config, "BOARD_FPS", 15)))
+    import base64
+
+    try:
+        while True:
+            tracker = _ht.active_tracker()
+            payload = {
+                "cards": board.cards(),
+                "cursors": [],
+                "frame": None,
+                # Said explicitly rather than inferred from empty cursors: a
+                # tracker that is off and a tracker that sees no hands look
+                # identical on the wire, and the page should be able to tell you
+                # which without guessing.
+                "tracking": tracker is not None,
+            }
+            if tracker is not None:
+                payload["cursors"] = [
+                    {"x": round(c[0], 4), "y": round(c[1], 4), "p": 1 if c[2] else 0}
+                    for c in tracker.latest_cursors()
+                ]
+                jpeg = tracker.latest_jpeg()
+                if jpeg:
+                    payload["frame"] = base64.b64encode(jpeg).decode()
+            await ws.send_json(payload)
+            await asyncio.sleep(interval)
+    except Exception:
+        # Any disconnect ends the loop. Nothing here is worth logging: a closed
+        # tab is the normal way this finishes.
+        pass
+
+
 @app.websocket("/ws/live")
 async def ws_live(ws: WebSocket):
     # HTTP middleware does not run for WebSocket upgrades, so the dashboard

@@ -374,6 +374,7 @@ class HandTracker(threading.Thread):
         self._lock = threading.Lock()
         self._latest_frame = None       # BGR ndarray, for tools/camera.py
         self._latest_ts = 0.0
+        self._latest_cursors: list = []
         self._cap = None
         self._landmarker = None
         self._frame_no = 0
@@ -404,6 +405,34 @@ class HandTracker(threading.Thread):
     @property
     def paused(self) -> bool:
         return time.time() < self._paused_until
+
+    def latest_jpeg(self, quality: int = 55, max_width: int = 640):
+        """The current frame as JPEG bytes, for the board's video background.
+
+        Python holds the camera exclusively, so the browser cannot open it and
+        the picture has to travel the other way. Downscaled and middling quality
+        on purpose: this is a backdrop behind cards at ~15 fps over localhost,
+        not footage anyone will look at closely, and a full-resolution stream
+        would spend real CPU on something nobody can see.
+        """
+        frame = self.latest_frame()
+        if frame is None:
+            return None
+        try:
+            import cv2
+            h, w = frame.shape[:2]
+            if w > max_width:
+                frame = cv2.resize(frame, (max_width, int(h * max_width / w)))
+            ok, buf = cv2.imencode(".jpg", frame,
+                                   [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+            return bytes(buf) if ok else None
+        except Exception:
+            return None
+
+    def latest_cursors(self):
+        """This frame's hands, for anything that needs them outside the loop."""
+        with self._lock:
+            return list(self._latest_cursors)
 
     def latest_frame(self):
         """The most recent camera frame, or None.
@@ -552,6 +581,21 @@ class HandTracker(threading.Thread):
                       f"y={cur[1]:.3f} pinch_ratio={shown} pinched={cur[2]}")
 
         cursors = order_by_handedness(cursors, labels)
+
+        # The board reads the SAME cursor list the recognizer does, rather than
+        # tracking hands a second time. Two readings of one camera would drift,
+        # and then a card would be somewhere your gesture said you were not.
+        with self._lock:
+            self._latest_cursors = list(cursors)
+
+        if getattr(config, "BOARD_ENABLED", False):
+            try:
+                from agent.board import get_board
+                get_board().apply_hands(cursors)
+            except Exception as e:
+                # The board is a view. Losing it must not cost us gestures.
+                print(f"[Board] apply_hands failed: {e}")
+
         for g in self.recognizer.feed_cursors(cursors, now):
             self._dispatch(g)
 
