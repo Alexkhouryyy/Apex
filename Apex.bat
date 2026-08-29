@@ -97,11 +97,31 @@ if defined NEEDKEY (
     echo.
 )
 
-REM ---- 5. Launch Apex ----
+REM ---- 5. Launch Apex, and keep launching it ----
+REM
+REM APEX_SUPERVISED tells Apex that something is watching this process and will
+REM start it again. Without that flag the dashboard's Restart button refuses,
+REM because exiting is easy and coming back is not - an unsupervised "restart"
+REM leaves you with a dead console and no dashboard to fix it from.
+REM
+REM Exit code 42 means "start me again". Every other code - a crash, Ctrl-C,
+REM a clean quit - falls out of the loop. Restarting on ANY exit would turn a
+REM crash-on-boot into an infinite respawn.
+set "APEX_SUPERVISED=1"
 echo   Starting Apex. Type 'quit' to exit.
 echo.
-"%VPY%" main.py --tui
 
+:apex_run
+"%VPY%" main.py --tui
+if errorlevel 43 goto apex_done
+if errorlevel 42 (
+    echo.
+    echo   Restarting Apex...
+    echo.
+    goto apex_run
+)
+
+:apex_done
 echo.
 echo   Apex has stopped.
 pause

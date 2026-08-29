@@ -1901,6 +1901,86 @@ async def speak_endpoint(request: Request):
     return Response(content=audio, media_type="audio/mpeg")
 
 
+# --- Control: config, keys, restart, update, MCP -------------------------
+#
+# Every route here is master-token only. A per-device token may USE Apex; it may
+# not rewrite its credentials, restart it, or pull new code into it. That is the
+# same line `/api/auth/tokens` already draws, and these are strictly more
+# dangerous than minting a device token.
+#
+# When DASHBOARD_TOKEN is empty the middleware waves everything through and
+# `is_master` is never set, so `_require_master` is False and these would refuse
+# on a tokenless local instance. That is deliberate: a tokenless Apex is one an
+# anonymous request can reach, and "restart the agent" is not something to hand
+# out anonymously.
+def _control_guard(request: Request):
+    if not _require_master(request):
+        return JSONResponse(
+            {"error": "Only the master dashboard token can operate Apex. "
+                      "A per-device token cannot change settings or restart."},
+            status_code=403)
+    return None
+
+
+@app.get("/api/control/settings")
+def control_settings(request: Request):
+    """Every setting, with secrets masked. Values never cross this boundary."""
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import control
+    return {"settings": control.entries(),
+            "env_file": str(control.env_path()),
+            "restart": control.restart_status(),
+            "exit_code": control.EXIT_RESTART}
+
+
+@app.post("/api/control/settings")
+async def control_set_setting(request: Request):
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import control
+    body = await request.json()
+    ok, message = control.set_setting(body.get("key", ""), body.get("value", ""))
+    return JSONResponse({"ok": ok, "message": message},
+                        status_code=200 if ok else 400)
+
+
+@app.get("/api/control/update")
+def control_update_status(request: Request):
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import control
+    return control.update_status()
+
+
+@app.post("/api/control/update")
+def control_update(request: Request):
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import control
+    result = control.do_update()
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+@app.post("/api/control/restart")
+def control_restart(request: Request):
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import control
+    ok, message = control.request_restart()
+    return JSONResponse({"ok": ok, "message": message},
+                        status_code=200 if ok else 409)
+
+
+@app.get("/api/control/mcp")
+def control_mcp(request: Request):
+    """What MCP is doing. A failed server is otherwise completely silent."""
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import mcp_client
+    return mcp_client.status()
+
+
 # --- WebSocket live stream ---
 @app.get("/board", response_class=HTMLResponse)
 async def board_page():

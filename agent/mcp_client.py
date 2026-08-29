@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,22 @@ _loop: Optional[asyncio.AbstractEventLoop] = None
 _loop_thread: Optional[threading.Thread] = None
 _sessions: dict = {}       # server_name -> (session, tools)
 _tool_registry: dict = {}  # full_tool_name -> (server_name, original_tool_name)
+
+# What happened to each server, kept after discovery rather than only printed.
+#
+# A server that fails to start printed one line at boot and then vanished: the
+# agent simply had fewer tools than you thought, with nothing anywhere saying
+# why. That is this codebase's signature failure — built, wired, silently not
+# running — and it is invisible precisely because a missing tool looks like a
+# tool the model chose not to use.
+_status: dict = {}
+_discovered_at: float = 0.0
+_ran = False
+# Which settings file each server came from. Kept beside the configs rather than
+# inside them: the config dict is passed straight to the MCP client, and adding
+# our own key to it makes "what did we read?" and "what did we launch?" the same
+# object, which they are not.
+_source_of: dict = {}
 
 
 def _ensure_loop() -> asyncio.AbstractEventLoop:
@@ -59,6 +76,7 @@ def _load_mcp_configs() -> dict:
             for k, v in data.get("mcpServers", {}).items():
                 if not k.startswith("_"):
                     servers[k] = v
+                    _source_of[k] = str(path)
         except Exception as e:
             print(f"[MCP] Could not read {path}: {e}")
     return servers
@@ -91,9 +109,21 @@ async def _connect_server(name: str, config: dict) -> list[dict]:
                     for t in (tools_result.tools or [])
                 ]
                 print(f"[MCP] {name}: {len(tools)} tools")
+                _status[name] = {
+                    "server": name, "state": "connected",
+                    "tools": len(tools),
+                    "tool_names": [t["_original"] for t in tools][:60],
+                    "command": cmd, "source": _source_of.get(name, ""),
+                    "error": "",
+                }
                 return tools
     except Exception as e:
         print(f"[MCP] {name}: failed to connect — {e}")
+        _status[name] = {
+            "server": name, "state": "failed", "tools": 0, "tool_names": [],
+            "command": cmd, "source": _source_of.get(name, ""),
+            "error": f"{type(e).__name__}: {e}",
+        }
         return []
 
 
@@ -126,7 +156,10 @@ _mcp_configs: dict = {}
 
 def discover() -> list[dict]:
     """Connect to all configured MCP servers, return their tool definitions for Claude."""
-    global _mcp_configs, _tool_registry
+    global _mcp_configs, _tool_registry, _discovered_at, _ran
+    _status.clear()
+    _ran = True
+    _discovered_at = time.time()
     _mcp_configs = _load_mcp_configs()
 
     if not _mcp_configs:
@@ -161,3 +194,47 @@ def call(full_tool_name: str, inputs: dict) -> str:
 
 def get_registered_names() -> list[str]:
     return list(_tool_registry.keys())
+
+
+def status() -> dict:
+    """What MCP is actually doing, for the dashboard and for `smoke`.
+
+    Three states are reported separately because they need three different
+    fixes, and one boolean would flatten them into "no MCP":
+
+      never_ran     — discovery was not called. The tools do not exist and the
+                      model was never told about them.
+      no_config     — discovery ran and found no `mcpServers` anywhere. Nothing
+                      is broken; nothing is configured either.
+      ok / degraded — servers were tried. `degraded` means at least one failed,
+                      and its exception is kept here rather than left in a boot
+                      log that has long since scrolled away.
+    """
+    servers = sorted(_status.values(), key=lambda s: s["server"])
+    failed = [s for s in servers if s["state"] != "connected"]
+    if not _ran:
+        state = "never_ran"
+        detail = ("MCP discovery has not run in this process, so no MCP tool "
+                  "exists. In interactive mode it runs at boot; in resident "
+                  "mode it runs on a background thread shortly after.")
+    elif not servers:
+        state = "no_config"
+        detail = ("No mcpServers found. Add them to mcp_servers.json in the "
+                  "Apex folder, or to ~/.claude/settings.json.")
+    elif failed:
+        state = "degraded"
+        detail = (f"{len(failed)} of {len(servers)} server(s) failed to start. "
+                  f"Their tools are missing, which looks identical to the model "
+                  f"choosing not to use them.")
+    else:
+        state = "ok"
+        detail = f"{len(servers)} server(s) connected."
+    return {
+        "state": state,
+        "detail": detail,
+        "ran": _ran,
+        "discovered_at": _discovered_at,
+        "servers": servers,
+        "tool_count": sum(s["tools"] for s in servers),
+        "config_files": [str(p) for p in _find_settings_files()],
+    }

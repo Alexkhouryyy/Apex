@@ -257,6 +257,7 @@ async function loadTab(tab) {
     learning: loadLearning,
     constellation: loadConstellation,
     research: loadResearch,
+    control: loadControl,
   };
   if (fns[tab]) try { await fns[tab](); } catch (e) { console.error('loadTab', tab, e); }
 }
@@ -4365,3 +4366,194 @@ document.getElementById('chat-messages')?.addEventListener('click', async (e) =>
     done(false);
   }
 });
+
+
+// ============== CONTROL ==============
+// Settings, appearance, MCP, update and restart — the things that used to mean
+// opening a terminal, finding the right directory, and hoping.
+//
+// Every endpoint here is master-token only, so a paired device sees a clean 403
+// rather than a broken tab. That is reported, not swallowed: a Control tab that
+// silently shows nothing is indistinguishable from one whose server died.
+
+// Themes are applied by stamping `data-theme` on <html>; styles.css does the
+// rest through its variables. The list lives here and in styles.css, and
+// tests/test_control.py asserts the two agree — a theme in the dropdown with no
+// palette behind it renders as the default and looks like the click did nothing.
+const THEMES = [
+  { id: 'midnight',  label: 'Midnight (default)' },
+  { id: 'cyberpunk', label: 'Cyberpunk' },
+  { id: 'daylight',  label: 'Daylight' },
+  { id: 'ember',     label: 'Ember' },
+  { id: 'ice',       label: 'Ice' },
+];
+const _THEME_KEY = 'apex_theme';
+
+function applyTheme(id) {
+  const known = THEMES.some(t => t.id === id);
+  document.documentElement.setAttribute('data-theme', known ? id : 'midnight');
+}
+
+function initTheme() {
+  let saved = 'midnight';
+  try { saved = localStorage.getItem(_THEME_KEY) || 'midnight'; } catch (e) {}
+  applyTheme(saved);
+  return saved;
+}
+// Applied before any tab is opened. Loading the dashboard in your chosen theme
+// only after visiting Control would mean a flash of the default on every visit.
+initTheme();
+
+function _renderThemePicker() {
+  const sel = document.getElementById('ctl-theme');
+  if (!sel || sel.dataset.built) return;
+  sel.dataset.built = '1';
+  sel.innerHTML = THEMES.map(t =>
+    `<option value="${t.id}">${escapeHTML(t.label)}</option>`).join('');
+  let saved = 'midnight';
+  try { saved = localStorage.getItem(_THEME_KEY) || 'midnight'; } catch (e) {}
+  sel.value = saved;
+  sel.addEventListener('change', () => {
+    applyTheme(sel.value);
+    try { localStorage.setItem(_THEME_KEY, sel.value); } catch (e) {}
+  });
+}
+
+function _controlDenied(el, e) {
+  // 403 means a device token, not a broken server. Say which.
+  const denied = String(e && e.message || '').includes('403');
+  if (el) el.textContent = denied
+    ? 'This device is paired with a device token. Only the master dashboard token can operate Apex.'
+    : `Could not reach Apex: ${e && e.message || e}`;
+  return denied;
+}
+
+async function loadControl() {
+  _renderThemePicker();
+  await Promise.all([_loadControlSettings(), _loadControlUpdate(), _loadControlMcp()]);
+}
+
+let _ctlSettings = [];
+
+async function _loadControlSettings() {
+  const box = document.getElementById('ctl-settings');
+  try {
+    const d = await api('/api/control/settings');
+    _ctlSettings = d.settings || [];
+    document.getElementById('ctl-env-path').textContent = d.env_file || '.env';
+    const note = document.getElementById('ctl-restart-note');
+    if (note) note.textContent = d.restart && d.restart.ok ? '' : (d.restart || {}).detail || '';
+    const btn = document.getElementById('ctl-restart');
+    if (btn) btn.disabled = !(d.restart && d.restart.ok);
+    _renderSettings();
+  } catch (e) { _controlDenied(box, e); }
+}
+
+function _renderSettings() {
+  const box = document.getElementById('ctl-settings');
+  if (!box) return;
+  const q = (document.getElementById('ctl-filter')?.value || '').toUpperCase();
+  const rows = _ctlSettings.filter(s => !q || s.key.includes(q));
+  if (!rows.length) { box.innerHTML = '<div class="muted">No setting matches.</div>'; return; }
+  box.innerHTML = rows.map(s => `
+    <div class="setting-row" data-key="${escapeHTML(s.key)}">
+      <span class="k">${escapeHTML(s.key)}</span>
+      ${s.editable
+        ? `<input class="edit" type="${s.secret ? 'password' : 'text'}"
+                  placeholder="${escapeHTML(s.display || (s.secret ? 'not set' : 'empty'))}">
+           <button class="ghost-btn ctl-save">Save</button>`
+        : `<span class="v">${escapeHTML(s.display || 'not set')}</span>
+           <span class="locked" title="${escapeHTML(s.locked_reason)}">locked</span>`}
+    </div>`).join('');
+  box.querySelectorAll('.ctl-save').forEach(b => {
+    b.addEventListener('click', async () => {
+      const row = b.closest('.setting-row');
+      const key = row.dataset.key;
+      const value = row.querySelector('input.edit').value;
+      if (!value.trim()) { alert('Nothing to save — the box is empty.'); return; }
+      b.disabled = true;
+      try {
+        const r = await fetch('/api/control/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json',
+                     'Authorization': `Bearer ${getToken()}` },
+          body: JSON.stringify({ key, value }),
+        });
+        const d = await r.json();
+        alert(d.message || (r.ok ? 'Saved.' : 'Refused.'));
+        if (r.ok) { row.querySelector('input.edit').value = ''; _loadControlSettings(); }
+      } catch (e) { alert(`Could not save: ${e.message}`); }
+      b.disabled = false;
+    });
+  });
+}
+
+document.getElementById('ctl-filter')?.addEventListener('input', _renderSettings);
+
+async function _loadControlUpdate() {
+  const stateEl = document.getElementById('ctl-update-state');
+  const detailEl = document.getElementById('ctl-update-detail');
+  const runBtn = document.getElementById('ctl-update-run');
+  try {
+    const d = await api('/api/control/update');
+    stateEl.textContent = d.detail || d.state;
+    runBtn.disabled = !d.can_update;
+    if (d.changes && d.changes.length) {
+      detailEl.style.display = ''; detailEl.textContent = d.changes.join('\n');
+    } else { detailEl.style.display = 'none'; }
+  } catch (e) { _controlDenied(stateEl, e); runBtn.disabled = true; }
+}
+
+document.getElementById('ctl-update-refresh')?.addEventListener('click', _loadControlUpdate);
+
+document.getElementById('ctl-update-run')?.addEventListener('click', async () => {
+  const btn = document.getElementById('ctl-update-run');
+  const stateEl = document.getElementById('ctl-update-state');
+  const detailEl = document.getElementById('ctl-update-detail');
+  btn.disabled = true; stateEl.textContent = 'Pulling…';
+  try {
+    const r = await fetch('/api/control/update', {
+      method: 'POST', headers: { 'Authorization': `Bearer ${getToken()}` } });
+    const d = await r.json();
+    stateEl.textContent = d.detail || d.state || 'done';
+    const lines = (d.commits || []).join('\n') || d.output || '';
+    if (lines) { detailEl.style.display = ''; detailEl.textContent = lines; }
+    // Only offer the restart when something actually arrived. "Updated —
+    // restart?" after a pull that fetched nothing is the same lie as a board
+    // command reporting success with no stage open.
+    if (d.changed) alert('Update pulled. Restart Apex to run it.');
+  } catch (e) { stateEl.textContent = `Update failed: ${e.message}`; }
+  _loadControlUpdate();
+});
+
+document.getElementById('ctl-restart')?.addEventListener('click', async () => {
+  if (!confirm('Restart Apex now? Any in-flight turn is lost.')) return;
+  const note = document.getElementById('ctl-restart-note');
+  try {
+    const r = await fetch('/api/control/restart', {
+      method: 'POST', headers: { 'Authorization': `Bearer ${getToken()}` } });
+    const d = await r.json();
+    note.textContent = d.message || '';
+    if (d.ok) setTimeout(() => location.reload(), 6000);
+  } catch (e) { note.textContent = `Could not restart: ${e.message}`; }
+});
+
+async function _loadControlMcp() {
+  const stateEl = document.getElementById('ctl-mcp-state');
+  const listEl = document.getElementById('ctl-mcp-list');
+  try {
+    const d = await api('/api/control/mcp');
+    stateEl.textContent = d.detail || d.state;
+    listEl.innerHTML = (d.servers || []).map(sv => `
+      <div class="mcp-row">
+        <span class="dot ${sv.state === 'connected' ? 'ok' : 'bad'}"></span>
+        <span style="flex:0 0 160px">${escapeHTML(sv.server)}</span>
+        <span class="v" style="flex:1 1 auto">${
+          sv.state === 'connected'
+            ? `${sv.tools} tool${sv.tools === 1 ? '' : 's'}`
+            : escapeHTML(sv.error || 'failed')}</span>
+      </div>`).join('') || '<div class="muted">No servers configured.</div>';
+  } catch (e) { _controlDenied(stateEl, e); listEl.innerHTML = ''; }
+}
+
+document.getElementById('ctl-mcp-refresh')?.addEventListener('click', _loadControlMcp);

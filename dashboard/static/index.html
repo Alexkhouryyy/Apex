@@ -74,6 +74,9 @@
     <button data-tab="inbox" class="nav-btn"><span class="icon">✉</span>Inbox</button>
     <button data-tab="calendar" class="nav-btn"><span class="icon">◷</span>Calendar</button>
     <button data-tab="camera" class="nav-btn"><span class="icon">◉</span>Vision</button>
+
+    <div class="nav-group-label">System</div>
+    <button data-tab="control" class="nav-btn"><span class="icon">⚙</span>Control</button>
   </nav>
 
   <div class="sidebar-footer">
@@ -372,6 +375,66 @@
   </section>
 
   <!-- TELEMETRY -->
+  <section id="tab-control" class="tab">
+    <header class="page-head">
+      <h1>Control</h1>
+      <div class="page-sub">Settings, appearance, MCP, update and restart — without a terminal</div>
+    </header>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>Appearance</h3></div>
+      <div class="panel-body">
+        <div class="controls">
+          <label>Theme:</label>
+          <select id="ctl-theme"></select>
+          <span class="muted" id="ctl-theme-note">Applies instantly and is remembered on this device.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head">
+        <h3>Version</h3>
+        <button id="ctl-update-refresh" class="ghost-btn">Check</button>
+      </div>
+      <div class="panel-body">
+        <div id="ctl-update-state" class="muted">Checking…</div>
+        <div id="ctl-update-detail" class="mono-block" style="display:none"></div>
+        <div class="controls" style="margin-top:10px">
+          <button id="ctl-update-run" disabled>Pull updates</button>
+          <button id="ctl-restart" class="danger">Restart Apex</button>
+          <span class="muted" id="ctl-restart-note"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head">
+        <h3>MCP servers</h3>
+        <button id="ctl-mcp-refresh" class="ghost-btn">Refresh</button>
+      </div>
+      <div class="panel-body">
+        <div id="ctl-mcp-state" class="muted">Loading…</div>
+        <div id="ctl-mcp-list"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Settings</h3>
+        <input id="ctl-filter" type="text" placeholder="filter…" style="max-width:200px">
+      </div>
+      <div class="panel-body">
+        <div class="muted" style="margin-bottom:10px">
+          Secret values are never sent to this page — only their length. Changes
+          are written to <span id="ctl-env-path" class="mono"></span> and take
+          effect on restart.
+        </div>
+        <div id="ctl-settings"></div>
+      </div>
+    </div>
+  </section>
+
   <section id="tab-telemetry" class="tab">
     <header class="page-head">
       <h1>Telemetry</h1>
