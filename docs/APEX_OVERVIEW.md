@@ -1,157 +1,185 @@
-# APEX — Complete Overview (feature-discussion briefing)
+# Apex
 
-_A self-contained snapshot of the Apex agent, written to be pasted into a fresh
-chat so you can brainstorm and add features with full context. Current as of
-2026-07-03. ~25K lines Python + ~6.6K frontend, 30 test files._
+**A self-hosted, voice-first, always-on personal AI agent — MIT licensed, runs
+on your own hardware, model-agnostic, no subscription required beyond the model
+you choose to use.**
 
----
+Repo: https://github.com/Alexkhouryyy/ni
+License: MIT
+Author: Alex Khoury
 
-## 1. What Apex is
-
-Apex is a **voice-first, always-on personal AI agent** that runs on the user's own
-hardware (laptop and/or a free Oracle Cloud VM), model-agnostic (Claude / GPT /
-Gemini / Ollama with zero lock-in). It has deep persistent memory, autonomous
-behavior, self-improvement, a web dashboard, and reaches the user across six
-messaging channels + web push. It is a single "brain" (one SQLite DB) that every
-device is a window into.
-
-**Stack:** Python 3.11 · FastAPI + uvicorn · SQLite (+ sentence-transformers
-embeddings, FTS5) · APScheduler · Anthropic SDK (+ OpenAI-compatible for GPT/
-Gemini/Ollama) · pywebpush (VAPID) · vanilla-JS SPA dashboard with Three.js.
-
-**Entry points:** `python main.py` (voice) · `--text` · `--tui` · `--resident`
-(always-on background) · `--wake` (wake word) · `--think`.
-
-**Deploy:** local, or one-command Oracle Cloud free-tier VM (`scripts/bootstrap-oracle.sh`)
-under systemd, reachable from anywhere via Tailscale or Cloudflare tunnel.
+_Written as a submission-ready overview — current as of 2026-08-29. Numbers
+below are measured from the repository, not estimated: 29,102 lines of Python
+across `agent/`, `tools/`, `app/`, `dashboard/`, `skills/`; 9,529 lines of
+frontend (JS/HTML/CSS); 1,529 tests across 83 test files; 104 tools the agent
+can call; 27 dashboard tabs._
 
 ---
 
-## 2. Subsystems (what's actually built)
+## The pitch
 
-**Core agent** — `core.py` (the main loop, tool dispatch, extended thinking,
-screen vision), `provider.py` (multi-model), `router.py` (cheap-vs-flagship
-routing), `resilience.py` (fallback), `memory.py` (conversation memory with
-compression), `persona.py` (JARVIS British-butler tone), `app_context.py` (shifts
-tone to the foreground app).
+Most AI agents are a chat window. Apex is a persistent presence: it remembers
+everything across every conversation, watches for what needs attention while
+you're away, reaches you on whatever channel you're on, and runs entirely on
+hardware you own. There is no vendor cloud in the loop except whichever model
+provider you choose — and even that is swappable, because Apex speaks
+Anthropic, OpenAI, Gemini, and local Ollama models through the same interface.
 
-**Memory & knowledge** — `longterm.py` (SQLite + semantic embeddings + FTS5 turn
-search), `entities.py` (knowledge graph), `knowledge.py` (RAG over your files),
-`vault.py` (Obsidian-compatible Markdown vault), `perception.py` (everything Apex
-observed), `world_model.py` (live context snapshot), `threads.py` (serendipity
-engine over embeddings — newest, uncommitted).
-
-**Autonomy** — `cortex.py` (OODA loop that advances goals unprompted), `awareness.py`
-(watchers: active window, clipboard, files + a review loop), `guardian.py`
-(decision-moment mini-council), `timecapsule.py` (long-horizon nudges),
-`scheduler.py` (persistent cron/interval/date tasks), `proactive.py`, `goals.py`.
-
-**Self-improvement** — `skill_forge.py` (Apex writes its own tools on a capability
-gap), `skills.py` + `skill_md.py` (Python + Markdown skills), `curator.py`
-(7-day background skill maintenance), `reflection.py` (nightly learning),
-`rollback.py` (auto-revert skill rewrites that hurt approval), `self_mod.py`
-(controlled prompt/tool self-modification), `feedback.py` / `outcomes.py` /
-`prefs.py` / `eval.py` (the feedback loop).
-
-**Multi-model reasoning** — `council.py` (Claude+GPT+Gemini debate → chair
-synthesis), `constellation.py` (12 standing domain-expert "planets"),
-`compare.py` (blind side-by-side model testing + preference leaderboard).
-
-**Safety & governance** — `safety.py` (dangerous-command gate), `approvals.py`
-(write-approval staging), `budget.py` (spend caps), `access_tokens.py`
-(revocable per-device dashboard tokens), `tools/sandbox.py` (Docker/local
-execution backend).
-
-**I/O & reach** — `tools/`: bash, browser, computer control, camera, screen
-vision, research, files, repl, image_gen, email (IMAP/SMTP), calendar (CalDAV),
-IoT (Home Assistant), and channels: telegram, discord, slack, whatsapp, signal,
-phone (Twilio). `notify.py` fans one alert to WebSocket + Web Push + Telegram.
-`mcp_client.py` connects MCP servers.
-
-**Skills shipped** — control_pc, email_triage, live_research, publish_website, work_mode.
+It ships as one Python process with a web dashboard, not a hosted SaaS product.
+Clone it, add your API key, run it.
 
 ---
 
-## 3. The dashboard (23 tabs)
+## What makes it different
 
-`overview` (command center + 3D globe) · `live` (event feed) · `chat` · `council` ·
-`compare` · `documents` (writing-first AI editor) · `constellation` (3D expert
-planets) · `goals` · `memory` · `graph` (knowledge graph) · `reflections` ·
-`evolution` (self-improvement ledger) · `telemetry` (cost/usage) · `replay` ·
-`briefing` · `schedule` · `subagents` · `knowledge` · `selfmod` · `phone` ·
-`inbox` (email triage) · `calendar` · `camera` (vision).
-
-Served by `dashboard/server.py` (FastAPI, ~60 endpoints, WebSocket live stream).
-PWA with service worker; per-device token auth; fail-closed public bind.
-
----
-
-## 4. How memory / autonomy works (the important mental model)
-
-- **One SQLite brain.** All memory, goals, skills, tokens, telemetry live in one
-  DB. Memories carry an importance score (1–10) and a semantic embedding.
-- **The cortex** ticks on a timer (in `main.py`/resident via the awareness review
-  loop): reads goals + world-state + recent events, asks a cheap model for ONE
-  safe next action, auto-executes read-only tools, and **stages** risky ones for
-  your approval (push notification → approve from dashboard).
-- **Self-improvement loop:** skill_forge writes tools → curator maintains them →
-  reflection consolidates nightly → rollback reverts regressions. Feedback
-  (👍/👎) and Compare preferences are logged.
-- **Reach when away:** Telegram polling + dashboard over Tailscale/Cloudflare +
-  Web Push, all backed by the always-on Oracle VM.
-
----
-
-## 5. Current state & known gaps (from a fresh security+quality audit)
-
-**Recently shipped this cycle:** Docker execution sandbox, Compare tab,
-per-device tokens, Documents editor (+ agent write + vault export), 3 autonomy
-bug fixes, and a large batch of hardening (path-traversal, XSS→token-theft,
-pair-token leak, atomic approvals, injection filters, WAL, bounded recall, FTS
-sync triggers). Full detail: `docs/audit/apex-full-audit-v2-2026-07.md`.
-
-**Still open (roadmap `docs/ROADMAP.md`):**
-- **Security (needs decisions):** sandbox is OFF by default; forged tools can
-  auto-install on a model-declared "read-only" flag; Telegram/Twilio/Signal
-  webhooks lack signature verification; empty channel allowlists = allow-all.
-- **Correctness/cost:** council/compare/documents spend bypasses the budget caps;
-  no data retention (logs grow unbounded); several silent `except: pass` sites.
-- **Product gaps:** 27 backend endpoints have no UI — notably the cortex
-  `pending-actions` and skill-forge `forged-tools` **approval flows can't be
-  actioned from the dashboard** (only staged-writes has UI).
+- **One brain, not a chat log.** A single SQLite database holds memory, goals,
+  skills, telemetry and every device is a window into the same state — start a
+  conversation on your phone, finish it at your desk.
+- **Model-agnostic by design.** Claude, GPT, Gemini, or a local Ollama model,
+  switchable at runtime (`/model gpt-4o`) with zero code changes. A 3-way
+  **council** mode has the models debate a question to a synthesized answer.
+- **Actually autonomous, with a governor.** A background OODA loop (`cortex.py`)
+  reads goals and world-state on a timer and proposes the next action — safe
+  actions run automatically, risky ones stage for a push-notification approval.
+  Nothing acts on your computer without that gate.
+- **Self-improving.** When Apex hits a capability gap it can write its own tool
+  (`skill_forge.py`), and a nightly reflection pass consolidates what worked —
+  with automatic rollback if a change measurably hurts approval rates.
+- **Reaches you everywhere.** Telegram, Discord, Slack, WhatsApp, Signal, and
+  phone/SMS via Twilio, plus a installable PWA dashboard with web push — all
+  backed by the same brain, from a Tailscale-reachable HTTPS URL if you want it.
+- **Runs on your subscription, not per-token billing.** Turns can route through
+  the Claude Agent SDK against your existing Claude subscription instead of
+  metered API credits, with an automatic, honest fallback if that's unavailable.
+- **Sees your hands.** A native MediaPipe-based hand tracker (no browser
+  dependency, no third-party service) drives a 3D "glass board" you can
+  literally reach into and drag, scale, and rotate cards and 3D models with two
+  hands — architected so tracking survives the browser tab being backgrounded
+  or closed, because Python holds the camera, not the page.
+- **Operable from itself.** A Control tab lets you edit settings, see MCP server
+  health, switch themes, pull updates, and restart the agent — no terminal
+  required after first setup.
+- **Extensible via MCP.** Connects to Model Context Protocol servers (Slack,
+  Notion, Gmail, Calendar, and anything else in the ecosystem) and surfaces
+  which ones are actually connected, rather than failing silently.
 
 ---
 
-## 6. Where it's going (candidate features on the table)
+## Feature map
 
-- **Restraint** — a receptiveness model that learns *when not to interrupt*
-  (per-context win-rate over your reactions), with a "Held Back" panel + a
-  calibration score. The governor on autonomy.
-- **Threads** (in progress) — surfaces non-obvious cross-domain links between
-  memories using the embeddings already stored.
-- **Learning loop** — turn Compare/feedback into a reward signal that reranks
-  responses (the one thing no competitor has); optionally a local fine-tune later.
-- **Distribution** — onboarding wizard, iMessage adapter, public skill hub.
+**Core agent** — multi-model routing (cheap-vs-flagship), extended thinking,
+live screen vision, fallback on provider failure, persona tone that shifts with
+the foreground app.
+
+**Memory & knowledge** — SQLite + semantic embeddings + full-text search;
+knowledge graph over entities; RAG over your own files; an Obsidian-compatible
+Markdown vault; a "world model" live-context snapshot; a serendipity engine that
+surfaces non-obvious links between memories.
+
+**Autonomy** — the cortex OODA loop; awareness watchers (active window,
+clipboard, files, camera-based hand tracking); a decision-moment mini-council
+for judgment calls; long-horizon nudges; persistent cron/interval scheduling;
+a learned "Restraint" model that decides when *not* to interrupt you.
+
+**Self-improvement** — agent-written tools on a capability gap; Python and
+Markdown skill formats; 7-day background skill maintenance; nightly reflection;
+automatic rollback of regressions; a full feedback loop (thumbs up/down,
+blind-comparison preference logging, evaluation).
+
+**Multi-model reasoning** — Claude/GPT/Gemini debate-to-consensus council; a
+standing panel of domain-expert "planets"; blind side-by-side model comparison
+with a preference leaderboard.
+
+**Safety & governance** — dangerous-command gating; write-approval staging;
+spend-budget caps; revocable per-device dashboard tokens (a device can use Apex
+without being able to reconfigure or restart it); a Docker/local execution
+sandbox; every inbound webhook signature-verified.
+
+**Reach & I/O** — bash, browser, computer control, camera, screen vision, live
+web research, file access, a REPL, image generation, email (IMAP/SMTP),
+calendar (CalDAV), IoT (Home Assistant), and channels: Telegram, Discord, Slack,
+WhatsApp, Signal, phone/SMS via Twilio. One notification fans out to WebSocket +
+Web Push + Telegram simultaneously.
+
+**Skills shipped** — PC control, email triage, live research, website
+publishing, a focused "work mode."
+
+**Hand tracking & the glass board** — a native webcam hand tracker (thumb/index
+pinch, wave, swipe, hold gestures) feeding a shared recognizer; a 3D board
+where a pinch drags a card, two hands scale and rotate it — including real 3D
+models (glTF) through a path-jailed props folder.
+
+**The Control tab** — live settings editor (secrets masked, never sent to the
+browser), MCP server connection status, five visual themes, git-pull update
+checking, and a supervised restart — all gated to the master device token.
 
 ---
 
-## 7. Guardrails for adding features (context for the discussion)
+## The dashboard (27 tabs)
 
-- **One brain, additive modules.** New capability = a new `agent/*.py` or
-  `tools/*.py` module + a dashboard tab, wired via `init_db()` at boot and an
-  endpoint in `server.py`. Don't fork the DB.
-- **Everything testable.** Deterministic cores get a `tests/test_*.py`; the suite
-  is the safety net (30 files). Prefer pure logic that doesn't need live API calls.
-- **Safety posture:** risky actions stage for approval; execution should route
-  through the sandbox; secrets stay in `.env` (git-ignored); the dashboard is
-  token-gated and fails closed.
-- **Frontend:** vanilla JS in `app.js`; escape all user/agent content; bump the
-  `?v=omniNN` + service-worker cache version on any frontend change.
-- **Voice-first:** features should degrade gracefully to headless/voice, not
-  assume a screen.
+Overview (command center) · Live feed · Chat · Council · Compare · Documents
+(writing-first AI editor) · Constellation (3D expert panel) · Goals · Memory ·
+Knowledge graph · Reflections · Evolution (self-improvement ledger) · Learning ·
+Telemetry (cost/usage) · Replay · Briefing · Schedule · Sub-agents · Knowledge
+base · Self-mod · Phone · Inbox (email triage) · Calendar · Vision (camera) ·
+Approvals · Research · Board (hand-tracked 3D board) · **Control**.
+
+Served by FastAPI (~150 routes) with a WebSocket live stream, installable as a
+PWA with a service worker, per-device token auth, and a fail-closed public bind
+— Apex refuses to listen on a public interface without a token configured.
 
 ---
 
-_To go deeper on any subsystem, ask for the file — e.g. "show me how the cortex
-decides" (`agent/cortex.py`) or "how does skill_forge validate a tool"
-(`agent/skill_forge.py`)._
+## Tech stack
+
+Python 3.11 · FastAPI + uvicorn · SQLite (WAL mode, FTS5, sentence-transformer
+embeddings) · APScheduler · Anthropic SDK (+ OpenAI-compatible interface for
+GPT/Gemini/Ollama) · MediaPipe (Apache 2.0) for hand tracking · Three.js for the
+3D board and constellation view · pywebpush (VAPID) for browser push · vanilla
+JS single-page dashboard, no framework, no build step.
+
+---
+
+## Setup
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env          # add your API key(s)
+python main.py --text         # text mode, no mic/speaker needed
+```
+
+`python main.py` alone runs full voice mode; `--resident` runs it always-on in
+the background; `--wake` adds a wake word. Only `ANTHROPIC_API_KEY` is
+required — adding `OPENAI_API_KEY` and/or `GEMINI_API_KEY` unlocks GPT/Gemini
+and the multi-model council. Remote access works over Tailscale with a
+dashboard password, or a one-command free-tier Oracle Cloud VM deploy under
+systemd.
+
+---
+
+## Honest state — what's proven vs. what isn't
+
+- **1,529 tests, 83 test files.** Deterministic logic (recognizers, safety
+  gates, memory, scheduling, the props jail, the auth boundary) is covered with
+  adversarial tests, not just happy-path ones — every guard in the codebase is
+  reverted individually during development to confirm its test actually fails
+  without it.
+- **Hand tracking and the board are architecturally complete and unit-tested,
+  but the last mile — real fingers in front of a real camera — has only been
+  exercised on the author's own machine, not on a wide range of hardware.**
+- The self-modification and skill-forging subsystems are real and tested, but
+  are the newest and least battle-tested parts of the system; they ship
+  disabled by default and require explicit opt-in.
+- Every "risky" capability — computer control, tool self-writing, spend, and
+  now dashboard restart/update — is gated behind either a master token, an
+  approval step, or both. None of it is on by default.
+
+---
+
+## License
+
+MIT. Use it, fork it, run your own version, no attribution obligations beyond
+keeping the license notice. This is a from-scratch build — where it draws on
+external protocols (MCP) or techniques from other projects (hand-tracking
+landmark geometry, itself an unprotectable technique), that provenance is
+documented in the relevant source file's docstring rather than left implicit.
