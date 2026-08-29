@@ -236,6 +236,137 @@ class TestBoardEndpoints:
                 ws.receive_json()
 
 
+class TestBoardAuthInABrowser:
+    """The board reached the way a person actually reaches it: by typing the URL.
+
+    Every other endpoint test in this file sets `DASHBOARD_TOKEN=""`, which
+    disables the auth middleware entirely — and that is precisely why `/board`
+    shipped answering **401 to a browser**. A browser navigating to a URL cannot
+    attach an `Authorization: Bearer` header; nothing can. So the one client the
+    page exists for was the one client never exercised, and the suite was green
+    the whole time.
+
+    Everything here runs with a REAL token set and NO header, because that is the
+    only configuration in which the bug is visible.
+    """
+
+    TOKEN = "board-test-token"
+
+    def _client(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        import config
+        from dashboard import server
+        monkeypatch.setattr(config, "DASHBOARD_TOKEN", self.TOKEN, raising=False)
+        monkeypatch.setattr(config, "BOARD_ENABLED", True, raising=False)
+        monkeypatch.setattr(config, "BOARD_FPS", 60, raising=False)
+        # The middleware throttles repeated bad tokens per IP, and every test
+        # client shares one. Without this, a test that deliberately fails auth
+        # ten times would start handing 429s to unrelated tests.
+        server._throttle.reset("testclient")
+        return TestClient(server.app)
+
+    def test_a_browser_can_open_the_board(self, monkeypatch):
+        """THE regression test. No Authorization header, token configured.
+
+        Revert the `/board` exemption in dashboard/server.py's `_auth` and this
+        returns 401 — which is exactly what the laptop's browser showed.
+        """
+        r = self._client(monkeypatch).get("/board")
+        assert r.status_code == 200, \
+            "a browser cannot send a bearer header; the shell must load without one"
+        assert "Apex" in r.text
+
+    def test_the_exemption_does_not_leak_the_props_route(self, monkeypatch, tmp_path):
+        """The shell is exempt; the files it loads are not.
+
+        Written as an exact-match check on purpose: `path.startswith("/board")`
+        would look like the same fix and would serve every prop to anyone who
+        asked, with no token at all.
+
+        A REAL prop sits behind the route, not a missing one. Against a missing
+        file the leaky version answers 404, so the test would still fail — but
+        for the wrong reason, and it would go on passing the day someone put a
+        file there. With real bytes present, the failure is the actual harm: the
+        file came back.
+        """
+        from agent import props
+        (tmp_path / "engine.glb").write_bytes(b"glTF-SECRET-BYTES")
+        monkeypatch.setattr(props, "props_root", lambda: tmp_path)
+        r = self._client(monkeypatch).get("/board/prop/engine.glb")
+        assert b"SECRET-BYTES" not in r.content, "the prop was served with no token"
+        assert r.status_code == 401, "props must stay behind the token"
+
+    def test_the_rest_of_the_dashboard_is_still_shut(self, monkeypatch):
+        """Proof the exemption is one path and not a hole in the middleware."""
+        c = self._client(monkeypatch)
+        for path in ("/api/status", "/api/devices"):
+            assert c.get(path).status_code in (401, 429), path
+
+    def test_the_socket_accepts_the_configured_token(self, monkeypatch):
+        """The shell being open is only useful if the data path then opens too —
+        otherwise the fix trades a 401 page for a blank one."""
+        from agent.board import get_board
+        get_board().clear()
+        get_board().add("card", "AUTHORIZED", "")
+        c = self._client(monkeypatch)
+        with c.websocket_connect(f"/ws/board?token={self.TOKEN}") as ws:
+            msg = ws.receive_json()
+        assert [x["title"] for x in msg["cards"]] == ["AUTHORIZED"]
+        get_board().clear()
+
+    def test_the_socket_refuses_a_page_that_has_no_token(self, monkeypatch):
+        """Opening the shell must not be the same as being logged in."""
+        c = self._client(monkeypatch)
+        with pytest.raises(Exception):
+            with c.websocket_connect("/ws/board") as ws:
+                ws.receive_json()
+
+
+class TestBoardPageCredentials:
+    """What the page does about the token, read out of the page itself.
+
+    Stated plainly: these are source assertions, not behaviour. Nothing here runs
+    JavaScript, so they can prove the code is present and cannot prove it works —
+    that is the browser half, and it stays the browser's to prove. They exist
+    because both defects below are invisible to every other test in this file,
+    and both were shipped.
+    """
+
+    def _page(self):
+        """The page with every comment stripped.
+
+        Load-bearing. The first version of the 1008 assertion below searched the
+        raw file and passed while reading nothing but the comment that explains
+        the branch — so deleting the branch left it green. A test that a comment
+        can satisfy is testing the comment.
+        """
+        import re
+        from pathlib import Path
+        src = Path("dashboard/static/board.html").read_text(encoding="utf-8")
+        src = re.sub(r"<!--.*?-->", "", src, flags=re.S)
+        src = re.sub(r"^\s*//.*$", "", src, flags=re.M)
+        return src
+
+    def test_the_page_falls_back_to_the_stored_token(self):
+        """`?token=` alone means typing /board in the address bar connects to
+        nothing. The dashboard already stores the credential under `apex_token`
+        on the same origin, so the page should read it rather than demand a
+        hand-built URL."""
+        page = self._page()
+        assert "apex_token" in page and "localStorage" in page, \
+            "the board must reuse the token the dashboard stored"
+
+    def test_a_refused_token_is_not_reported_as_a_reconnect(self):
+        """1008 is the close code for a bad token. Retrying it renders as
+        'reconnecting…', which is identical to Apex being down — so a wrong
+        password would look like a crash, forever."""
+        page = self._page()
+        assert "1008" in page, \
+            "a rejected token must be told apart from a dropped connection"
+        assert "ws.onclose = () =>" not in page, \
+            "a close handler that ignores its close code cannot tell them apart"
+
+
 class TestApexBoardTools:
     def test_board_present_uses_apexs_own_board_when_it_is_on(self, monkeypatch):
         """With BOARD_ENABLED the card must land on Apex's board, not be posted

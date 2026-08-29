@@ -114,9 +114,27 @@ const statusEl = document.getElementById("status");
 const hint = document.getElementById("hint");
 const hintBody = document.getElementById("hint-body");
 
-// The token is already in the URL that opened this page; reuse it rather than
-// asking again. Same scheme the main dashboard's live socket uses.
-const token = new URLSearchParams(location.search).get("token") || "";
+// Where the token comes from, in order:
+//   1. `?token=` in the URL, for a link you were handed.
+//   2. localStorage, written by the main dashboard when you logged in there.
+//
+// (2) is the one that matters. The first version had only (1), so opening
+// /board the obvious way — typing it in the bar — produced a page that
+// connected to nothing and sat on "reconnecting…" forever. The board is served
+// from the same origin as the dashboard, so it can simply read the credential
+// the dashboard already stored under the same key.
+const _TOKEN_KEY = "apex_token";
+function loadToken() {
+  const q = new URLSearchParams(location.search).get("token");
+  if (q) {
+    // A token that arrived by link is worth keeping, so the next visit needs no
+    // link — the same thing logging in to the dashboard does.
+    try { localStorage.setItem(_TOKEN_KEY, q); } catch (e) {}
+    return q;
+  }
+  try { return localStorage.getItem(_TOKEN_KEY) || ""; } catch (e) { return ""; }
+}
+const token = loadToken();
 
 const cards = new Map();   // id -> element
 const rings = [];          // one per hand, created lazily
@@ -320,7 +338,25 @@ function connect() {
   // Reconnect rather than dying. Apex restarts more often than this page does,
   // and a board that needs a manual refresh after every restart is a board
   // nobody leaves open.
-  ws.onclose = () => { say("reconnecting…"); setTimeout(connect, 1500); };
+  //
+  // With one exception, and it is the whole reason this branch exists: 1008 is
+  // the code the socket closes with when the token is wrong or missing. Retrying
+  // that forever renders as "reconnecting…", which is exactly what a stopped
+  // Apex looks like — so a credential problem would be indistinguishable from a
+  // dead process, and no amount of waiting would ever fix it. Say which one it
+  // is, and stop.
+  ws.onclose = (ev) => {
+    if (ev && ev.code === 1008) {
+      say("not authorized");
+      hintBody.textContent = token
+        ? "That token was refused. Log in on the dashboard at / and reopen this page."
+        : "No dashboard token found. Log in at / first, or open /board?token=YOUR_TOKEN.";
+      hint.classList.remove("hidden");
+      return;
+    }
+    say("reconnecting…");
+    setTimeout(connect, 1500);
+  };
   ws.onerror = () => ws.close();
 }
 

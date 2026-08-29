@@ -161,7 +161,16 @@ async def _auth(request: Request, call_next):
     # Allow the SPA shell + static assets so the login overlay can load.
     # PWA entry points (manifest + service worker) must also load pre-auth so the
     # app can install and the SW can control the origin before a token is entered.
+    #
+    # `/board` is on this list for the same reason `/` is: it is an empty shell.
+    # A browser navigating to a URL cannot send an `Authorization` header, so
+    # without this the board was unreachable from a browser at all — it answered
+    # 401 to the only client it has. Every byte of board data arrives over
+    # `/ws/board`, which checks the token itself, and the props route below is
+    # NOT exempt, so this must stay an exact match: `path.startswith("/board")`
+    # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
+            or path == "/board"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
     # Inbound webhooks can't present a bearer token, so they authenticate
