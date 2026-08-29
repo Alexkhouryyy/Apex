@@ -97,6 +97,11 @@ def spawn(role: str, task: str, use_thinking: bool = False) -> str:
         }
 
     def runner():
+        # This thread is created fresh here and never reused for anything
+        # else, so the role set on it now cannot leak onto a later, unrelated
+        # tool call the way it could on a pooled/recycled thread.
+        from agent import subagent_scope
+        subagent_scope.set_active(role)
         try:
             agent = _agent_factory()
             # Inject the role prompt as a leading user turn so AgentCore's
@@ -117,6 +122,8 @@ def spawn(role: str, task: str, use_thinking: bool = False) -> str:
                 _subagents[sub_id]["status"] = "error"
                 _subagents[sub_id]["error"] = str(e)
                 _subagents[sub_id]["ended"] = time.time()
+        finally:
+            subagent_scope.clear_active()
 
     t = threading.Thread(target=runner, daemon=True, name=f"SubAgent[{role}]")
     t.start()

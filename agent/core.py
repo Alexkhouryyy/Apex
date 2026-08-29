@@ -57,7 +57,10 @@ tasks (daily briefings, reminders, periodic checks). Tasks run even when you're 
 etc.). If these appear, use them for integrations with the user's real data.
 - **spawn_subagent / wait_for_subagents**: For complex multi-part tasks, spawn role-specialized \
 sub-agents (researcher, coder, browser, analyst, writer, planner) IN PARALLEL. Then wait for them. \
-This is MUCH faster than doing everything sequentially. Use for "research X and also build Y" style tasks.
+This is MUCH faster than doing everything sequentially. Use for "research X and also build Y" style tasks. \
+Each role is restricted to the tools its own job needs (see agent/subagent_scope.py) — a researcher \
+cannot run bash, a sub-agent cannot spawn another one. Plan tasks around that rather than assuming a \
+sub-agent has everything the parent does.
 - **python_exec / python_reset**: Persistent Python REPL. Variables survive across calls. \
 Use for data analysis, math, plots, anything stateful. Plots come back as images you can see.
 - **kb_search / kb_reindex**: Semantic search over the user's actual files (notes, docs, code, PDFs). \
@@ -1509,6 +1512,14 @@ def _execute_tool(name: str, inputs: dict) -> str:
 
 def _execute_tool_inner(name: str, inputs: dict) -> str:
     """Dispatch a tool call and return its result as a string."""
+    # A sub-agent's role restricts it before safety even sees the call — a
+    # researcher trying `bash` should read "you don't get that tool", not a
+    # safety-layer verdict on a command it should never have reached.
+    from agent import subagent_scope
+    _scope_denied = subagent_scope.check(name)
+    if _scope_denied:
+        return _scope_denied
+
     # Safety check before execution
     proceed, reason = safety.check(name, inputs)
     if not proceed:
