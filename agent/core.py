@@ -139,6 +139,13 @@ Keep responses CONCISE when speaking. You're a voice agent — no markdown, no b
 Speak naturally, like a sharp colleague, not a documentation page."""
 
 # Tool definitions for Claude
+# title (lowercased) -> Blender object name, for board_recolor to find what
+# board_create made. Blender's own object identity has nowhere to live on a
+# board Card (agent/board.py's Card is deliberately renderer-agnostic — a
+# recolor-lookup field would be the only Blender-specific thing on it), so it
+# lives here instead, beside the tool that populates it.
+_BLENDER_OBJECTS: dict[str, str] = {}
+
 TOOLS = [
     {
         "name": "screenshot",
@@ -253,6 +260,52 @@ TOOLS = [
                 "title": {"type": "string", "description": "What to call it. Optional.", "default": ""},
             },
             "required": ["src"],
+        },
+    },
+    {
+        "name": "board_create",
+        "description": (
+            "Create a real, measured 3D object with Blender and put it on Apex's "
+            "glass board — 'create a red cube, 50 millimetres wide'. Needs "
+            "Blender open with the Apex add-on's server started; if it isn't, "
+            "this says so rather than pretending to succeed. Shapes: cube, "
+            "sphere, cylinder, cone, plane, torus. Give every dimension the "
+            "shape needs in millimetres."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "shape": {"type": "string", "description": "cube | sphere | cylinder | cone | plane | torus"},
+                "dims_mm": {
+                    "type": "object",
+                    "description": (
+                        "Millimetres. cube/plane: width, depth, (+height for cube). "
+                        "sphere: diameter. cylinder/cone: diameter, height. "
+                        "torus: diameter, tube_diameter."
+                    ),
+                },
+                "color": {"type": "string", "description": "A name like 'metallic_blue', or '#rrggbb'. Optional.", "default": ""},
+                "title": {"type": "string", "description": "What to call it on the board. Optional — defaults to the shape name.", "default": ""},
+            },
+            "required": ["shape", "dims_mm"],
+        },
+    },
+    {
+        "name": "board_recolor",
+        "description": (
+            "Change the colour of an object Apex already created with "
+            "board_create and re-export it — 'make it metallic blue'. Refers "
+            "to it by the title it was given on the board. The previous export "
+            "is kept, not overwritten, so a bad recolor never loses the last "
+            "good version."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The board title given when it was created."},
+                "color": {"type": "string", "description": "A name like 'metallic_blue', or '#rrggbb'."},
+            },
+            "required": ["title", "color"],
         },
     },
     {
@@ -1605,6 +1658,81 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             card = get_board().add("model", inputs.get("title") or src.rsplit("/", 1)[-1],
                                    src=src)
             out = f"'{card.title}' is on the board — grab it with one hand, two to scale."
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name == "board_create":
+            from agent import blender_bridge as _bb
+            from agent import props as _props
+            from agent.board import get_board
+            shape = (inputs.get("shape") or "").strip().lower()
+            title = (inputs.get("title") or shape or "object").strip()
+            try:
+                result = _bb.create_object(
+                    shape, inputs.get("dims_mm") or {},
+                    color=inputs.get("color") or None, name=title)
+            except _bb.BlenderError as e:
+                return f"[Blender] {e}"
+
+            import os as _os
+            import shutil as _shutil
+            src_path = _os.path.join(result["export_dir"], result["filename"])
+            dest_root = _props.props_root() / "created"
+            dest_root.mkdir(parents=True, exist_ok=True)
+            dest_path = dest_root / result["filename"]
+            try:
+                _shutil.copy2(src_path, dest_path)
+            except OSError as e:
+                return (f"[Blender] created '{result['name']}' but could not copy "
+                        f"the export into the props folder: {e}")
+            rel = f"created/{result['filename']}"
+
+            # Remembered so board_recolor can find the Blender-side object again
+            # by the same title the user will say next — the board's own Card
+            # has nowhere to carry this, and adding a Blender-specific field to
+            # every card for one feature would be the wrong place to put it.
+            _BLENDER_OBJECTS[title.lower()] = result["name"]
+
+            card = get_board().add("model", title, src=rel)
+            out = (f"'{card.title}' created ({shape}) and on the board — "
+                  f"grab it with one hand, two to scale.")
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name == "board_recolor":
+            from agent import blender_bridge as _bb
+            from agent import props as _props
+            from agent.board import get_board
+            title = (inputs.get("title") or "").strip()
+            blender_name = _BLENDER_OBJECTS.get(title.lower())
+            if not blender_name:
+                return (f"'{title}' wasn't created with board_create in this "
+                        f"session, so there's no Blender object to recolor. "
+                        f"Run board_create first.")
+            try:
+                result = _bb.recolor_object(blender_name, inputs.get("color"))
+            except _bb.BlenderError as e:
+                return f"[Blender] {e}"
+
+            import shutil as _shutil
+            src_path = f"{result['export_dir']}/{result['filename']}"
+            dest_root = _props.props_root() / "created"
+            dest_root.mkdir(parents=True, exist_ok=True)
+            dest_path = dest_root / result["filename"]
+            try:
+                _shutil.copy2(src_path, dest_path)
+            except OSError as e:
+                return f"[Blender] recolored but could not copy the new export: {e}"
+            rel = f"created/{result['filename']}"
+
+            board = get_board()
+            updated = False
+            for c in board.cards():
+                if c["title"].lower() == title.lower() and c["kind"] == "model":
+                    updated = board.set_src(c["id"], rel) or updated
+            out = (f"'{title}' recolored — the previous version is kept at "
+                  f"{dest_root}, not overwritten." if updated else
+                  f"Recolored, but '{title}' is no longer on the board to update.")
             _broadcast_live_event("board", out)
             return out
 

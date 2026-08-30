@@ -129,6 +129,17 @@ class Board:
             self._pair_ref.clear()
         return n
 
+    def set_src(self, card_id: str, src: str) -> bool:
+        """Point an existing card at a different prop file — used when a
+        recolor produces a new export that must replace what the card shows,
+        without disturbing its position, scale or rotation."""
+        with self._lock:
+            for c in self._cards:
+                if c.id == card_id:
+                    c.src = src
+                    return True
+        return False
+
     def remove(self, card_id: str) -> bool:
         with self._lock:
             for i, c in enumerate(self._cards):

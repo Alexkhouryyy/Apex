@@ -452,3 +452,31 @@ BOARD_ENABLED = os.getenv("BOARD_ENABLED", "false").lower() in {"1", "true", "ye
 # Python because it holds the camera exclusively; 15 is smooth enough behind
 # cards and a third of the bandwidth of 45.
 BOARD_FPS = float(os.getenv("BOARD_FPS", "15"))
+
+# Voice-driven 3D creation — "Apex, create a red cube, 50 millimetres wide."
+# Blender itself is not something Apex can bundle or launch: it is a real,
+# separately-installed application, and bpy (Blender's Python API) is only safe
+# to call from Blender's own main thread. So the boundary here is a small
+# ADDON that runs INSIDE Blender (blender/apex_blender_addon.py — install it
+# once via Blender's Preferences > Add-ons > Install) and a thin client in
+# agent/blender_bridge.py that talks to it over a localhost socket. Nothing
+# about this is a second Apex service: there is no bridge process of Apex's
+# own, no separate repo, and no network hop beyond one loopback socket — the
+# same "aggregation, not a second Apex" posture as BAREHANDS_* and MCP servers.
+#
+# The addon deliberately does NOT expose arbitrary code execution. It accepts a
+# fixed, small command set (create a primitive with explicit dimensions, set a
+# colour, export a GLB) and refuses everything else — the doc that specified
+# this feature calls unrestricted Python-in-Blender an explicitly EXCLUDED
+# capability, and agent/blender_bridge.py enforces the same allowlist again on
+# the Apex side, so a compromised or buggy caller on either end is still capped
+# by the other.
+BLENDER_ENABLED = os.getenv("BLENDER_ENABLED", "false").lower() in {"1", "true", "yes"}
+BLENDER_HOST = os.getenv("BLENDER_HOST", "127.0.0.1")
+BLENDER_PORT = int(os.getenv("BLENDER_PORT", "8799"))
+BLENDER_TIMEOUT_SECONDS = float(os.getenv("BLENDER_TIMEOUT_SECONDS", "20"))
+# A created object this large or small is certainly a typo or a hallucinated
+# unit, not a real request — 4 metres is bigger than the workbench this is
+# named after, and anything under a millimetre is not millimetre-dimensioned.
+BLENDER_MIN_DIM_MM = float(os.getenv("BLENDER_MIN_DIM_MM", "1"))
+BLENDER_MAX_DIM_MM = float(os.getenv("BLENDER_MAX_DIM_MM", "4000"))
