@@ -1,30 +1,27 @@
 """Apex's own hand tracking — MediaPipe on the webcam, no browser involved.
 
-The other source of hands, `agent/barehands_watcher.py`, polls a `barehands`
-server whose MediaPipe runs inside a Chrome tab. That works, but it means hand
-tracking only exists while a browser tab is open **and in front**: browsers pause
-`requestAnimationFrame` on a backgrounded tab, the tracker freezes, and Apex goes
-blind. The entire staleness machinery over there — `BAREHANDS_STALE_SECONDS`, the
-byte-comparison, the "stage is frozen" state — exists only to detect that.
+An earlier version of Apex also polled a `barehands` server whose MediaPipe ran
+inside a Chrome tab. That worked, but it meant hand tracking only existed while
+a browser tab was open **and in front**: browsers pause `requestAnimationFrame`
+on a backgrounded tab, the tracker freezes, and Apex goes blind. It was removed
+— it never reliably tracked hands in practice, and owning the capture directly
+(this module) deletes that whole failure class along with the need for it: hand
+tracking works headless, in resident mode, with no browser running at all.
 
-Owning the capture deletes that whole failure class. This module reads the camera
-directly, so hand tracking works headless, in resident mode, with no browser
-running at all.
-
-Both sources feed the same `agent/gestures.GestureRecognizer`, which never knew
-where the numbers came from. Adding this cost the recognizer nothing.
+This feeds `agent/gestures.GestureRecognizer`, which is blind to where its input
+comes from — a design that outlived the second source it was built to support.
 
 ## Provenance, stated accurately
 
 MediaPipe is Apache 2.0 and its models are Google's, so that is an ordinary
-dependency. `barehands` is AGPL-3.0, and the honest account of what this module
-owes it is:
+dependency. The removed `barehands` integration was AGPL-3.0, and the honest
+account of what this module owes it, for the record:
 
-**No barehands code was copied.** Not a line, and none of `stage.html` is
-vendored anywhere in Apex.
+**No barehands code was ever copied.** Not a line, and none of its `stage.html`
+was ever vendored anywhere in Apex.
 
-**Its source was read first, and one choice matches theirs.** barehands computes
-its pinch from landmarks 4 and 8 against a span of 0 to 9, and its README states
+**Its source was read first, and one choice matches theirs.** barehands computed
+its pinch from landmarks 4 and 8 against a span of 0 to 9, and its README stated
 the principle — "the gates measure hand *shape* as ratios, not size, so they hold
 at any camera distance". `pinch_ratio` below uses the same four landmarks for the
 same reason. That convergence is not an accident of independent invention and
@@ -36,12 +33,8 @@ by whoever read it next.
 
 **What is Apex's own:** every threshold here (demonstrably, since they are
 untuned — see `scripts/calibrate_pinch.py`), the recognizer in `agent/gestures.py`
-and its architecture, the handedness ordering barehands' page cannot export, and
-the gesture set. barehands' actual gestures — clap, claw, throw, the exploded-view
-scrub — are deliberately not reimplemented.
-
-`agent/barehands_watcher.py` speaks their HTTP protocol to talk to their running
-program, which is interoperability and leaves Apex MIT.
+and its architecture, and the gesture set. barehands' own gestures — clap, claw,
+throw, the exploded-view scrub — were never reimplemented.
 
 ## Two things worth knowing before reading the code
 

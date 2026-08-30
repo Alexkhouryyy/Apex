@@ -1,16 +1,17 @@
-"""Gesture recognition — shared by every source of hand positions.
+"""Gesture recognition — deliberately blind to where the hand positions came from.
 
-Apex has two ways to see hands and this module is deliberately blind to which
-one is talking:
+`agent/handtrack.py` (Apex's own MediaPipe tracker, reading the webcam
+directly) hands this a list of `(x, y, pinched)` per hand, in window fractions.
+That is the entire contract this module needs — it never touches a camera, a
+socket, or a clock of its own, which is why it is pure and cheaply testable
+with recorded frame tables rather than a live hand.
 
-  * `agent/handtrack.py` — Apex's own MediaPipe tracker, reading the webcam
-    directly. No browser involved.
-  * `agent/barehands_watcher.py` — polls a running `barehands` server over
-    localhost, where MediaPipe runs inside a Chrome tab.
-
-Both hand it the same thing: a list of `(x, y, pinched)` per hand, in window
-fractions. That is the entire contract, and it is why adding the native tracker
-cost nothing here — the recognizer never knew where the numbers came from.
+An earlier version of Apex also polled a separate `barehands` server (MediaPipe
+running inside a Chrome tab) as a second source feeding the same contract —
+removed once the native tracker made it redundant, and because it never
+reliably tracked hands in practice. This module's contract-first design is
+what made that removal a deletion, not a rewrite: nothing here knew or cared
+which source was talking.
 
 ## What this has to get right, and why
 
@@ -103,7 +104,7 @@ class GestureRecognizer:
     def __init__(self, *, cooldown_seconds: Optional[float] = None) -> None:
         self.cooldown_seconds = (
             cooldown_seconds if cooldown_seconds is not None
-            else getattr(config, "BAREHANDS_GESTURE_COOLDOWN_SECONDS", 3.0)
+            else getattr(config, "HANDTRACK_GESTURE_COOLDOWN_SECONDS", 3.0)
         )
         self._tracks: list[_Track] = []
         self._hand_count = 0
@@ -299,13 +300,13 @@ class GestureRecognizer:
 
 
 def gesture_action(gesture: str) -> Optional[str]:
-    """What this gesture is allowed to do, per BAREHANDS_GESTURE_ACTIONS.
+    """What this gesture is allowed to do, per HANDTRACK_GESTURE_ACTIONS.
 
     Deny-by-default: an unmapped gesture returns None and does nothing. It is
     still logged — recognition and action are separate gates, so "I waved and
     nothing happened" stays diagnosable from the live feed.
     """
-    for entry in getattr(config, "BAREHANDS_GESTURE_ACTIONS", []) or []:
+    for entry in getattr(config, "HANDTRACK_GESTURE_ACTIONS", []) or []:
         name, _, action = str(entry).partition(":")
         if name.strip() == gesture and action.strip():
             return action.strip()

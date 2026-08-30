@@ -166,7 +166,7 @@ you to report them — not work quietly left undone.
 | 23 | Wake word | WORKS | `voice/wake.py` `matches_wake_phrase`; `tests/test_wake.py`. Was mislabelled UNPROVEN — `tests/test_resident.py` already covered mute/unmute. Proving the *matching* found a false-wake bug: a substring test meant any sentence containing "apex" woke it |
 | 23 | Streaming speech, interruption, speaker recognition | PARTIAL | Streaming STT present; no speaker recognition |
 | 24 | Vision / camera | PARTIAL | `tests/test_camera.py` (device), `tests/test_vision.py` (dispatch — notably that `click_on` never clicks on a miss). OCR and screen *understanding* need a real display and stay unproven |
-| 25, 26 | Hand tracking + gesture safety | PARTIAL | **Two sources, one recognizer.** `agent/handtrack.py` is Apex's own MediaPipe tracker reading the webcam directly (Apache 2.0, no browser); `agent/barehands_watcher.py` polls a barehands board over localhost. Shared core in `agent/gestures.py`. Tests: `tests/test_handtrack.py`, `tests/test_barehands_recognizer.py`, `tests/test_barehands_bridge.py`, smoke `hand_tracking_survives_a_dark_board`. **Not WORKS:** no camera on any machine that runs the suite, so real fingers → real landmarks stays unproven. Everything up to that boundary is exercised, including the bridge against a real barehands server driven with a synthetic hand |
+| 25, 26 | Hand tracking + gesture safety | PARTIAL | **One source, one recognizer** — `agent/handtrack.py` is Apex's own MediaPipe tracker reading the webcam directly (Apache 2.0, no browser). A second source polling a `barehands` server over localhost was built and removed: it never reliably tracked hands on real hardware, and once the native tracker existed it was redundant weight rather than a fallback worth keeping. Shared core in `agent/gestures.py`. Tests: `tests/test_handtrack.py`, smoke `hand_tracking_fails_loudly_with_no_camera`. **Not WORKS:** real-fingers-on-real-hardware testing reported hand tracking not working reliably; `HANDTRACK_PINCH_RATIO` was never set from `scripts/calibrate_pinch.py` against an actual hand, which is the most likely single cause and the first thing to try before assuming the tracker itself is broken |
 
 ## Hardware
 
@@ -230,6 +230,8 @@ The highest-value work available is not on that ladder:
    make §5 routing decisions empirical instead of hardcoded.
 
 3D printing is correctly last. Gesture control was too, on the premise that
-nothing existed to integrate — that premise expired when `barehands` turned out
-to be a working, externally-drivable tracker, so §25/§26 moved to PARTIAL
-without a line of it being copied into Apex.
+nothing existed to integrate — that premise expired once Apex built its own
+native tracker (`agent/handtrack.py`), so §25/§26 moved to PARTIAL. An earlier
+attempt to also integrate a separate `barehands` tracker over localhost was
+removed after real-world testing found it unreliable; nothing of it was ever
+copied into Apex, so its removal is a deletion, not a license concern.

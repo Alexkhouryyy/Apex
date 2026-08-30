@@ -30,7 +30,8 @@ that flag this refuses and says what to do instead.
 
 **Never pull onto changes you have not saved.** `git pull` onto a dirty tree
 either fails or merges over local edits. Both are reported as four distinct
-states rather than one boolean, the same way the barehands board is.
+states rather than one boolean, the same discipline the board's tracker states
+use.
 """
 from __future__ import annotations
 

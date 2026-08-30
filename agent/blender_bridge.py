@@ -6,8 +6,8 @@ it. So the boundary is a small ADDON that runs INSIDE Blender
 (`blender/apex_blender_addon.py` — installed once via Blender's Preferences)
 and this module, a thin client that talks to it over one loopback socket. There
 is no second Apex process here, no separate repo, no bridge service of Apex's
-own — the same aggregation posture as `agent/barehands_watcher.py` and the MCP
-client: Apex drives a separate program over localhost, and stays what it is.
+own — the same aggregation posture the MCP client already has: Apex drives a
+separate program over localhost, and stays what it is.
 
 ## The one rule this file exists to enforce
 
@@ -171,8 +171,7 @@ def _send(cmd: dict, timeout: Optional[float] = None) -> dict:
 
     A bare function, not a class, so tests can monkeypatch `blender_bridge._send`
     to a fake and exercise every validation path above with no Blender, no
-    socket, and no network — the same seam `agent/barehands_watcher.py` and
-    `agent/props.py`'s serving tests use.
+    socket, and no network — the same seam `agent/props.py`'s serving tests use.
     """
     timeout = timeout if timeout is not None else config.BLENDER_TIMEOUT_SECONDS
     try:

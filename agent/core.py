@@ -187,29 +187,21 @@ TOOLS = [
     {
         "name": "board_present",
         "description": (
-            "Put something on the barehands glass board — the hand-tracked "
-            "surface floating over the user's camera. Reach for this whenever "
-            "the user asks to SEE something ('show me', 'put it up', 'pull up "
-            "X') instead of answering with a wall of text. Requires the "
-            "barehands server to be running and its stage open in Chrome; the "
-            "result says plainly if it is not, so believe the result rather "
-            "than assuming the card appeared. Pass `src` to show an image or a "
-            "3D model instead of text — call board_props first to see which "
-            "ones exist, since only files inside the media airlock can stage."
+            "Put something on Apex's glass board — the hand-tracked surface "
+            "floating over the user's camera. Reach for this whenever the "
+            "user asks to SEE something ('show me', 'put it up', 'pull up X') "
+            "instead of answering with a wall of text. Pass `src` to show an "
+            "existing image or 3D model instead of text — call board_props "
+            "first to see which ones exist."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "Headline on the card"},
                 "body": {"type": "string", "description": "Card text. Optional.", "default": ""},
-                "spotlight": {
-                    "type": "boolean",
-                    "description": "True (default) lands it centre stage, enlarged, everything else dimmed. False stages it as one of the ensemble.",
-                    "default": True,
-                },
                 "src": {
                     "type": "string",
-                    "description": "Optional image or 3D model to show instead of a text card, as an airlock-relative path like 'models/engine.glb' or 'misc/diagram.png'. Call board_props first to see what exists — only files already inside barehands' media/ folder can ever be staged.",
+                    "description": "Optional image or 3D model to show instead of a text card, as a prop path like 'models/engine.glb' or 'misc/diagram.png'. Call board_props first to see what exists.",
                     "default": "",
                 },
             },
@@ -217,30 +209,12 @@ TOOLS = [
         },
     },
     {
-        "name": "board_hand",
-        "description": (
-            "Deliver a prop into the user's actual hand on the barehands board "
-            "— it flies to where their hand is and they can then throw, rotate "
-            "or scale it. Use when handing something over is the point: 'give "
-            "me the engine', 'let me hold it'. Takes an airlock-relative path "
-            "like 'models/engine.glb'. Call board_props first to see what "
-            "exists."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "src": {"type": "string", "description": "Airlock-relative path, e.g. models/engine.glb"},
-            },
-            "required": ["src"],
-        },
-    },
-    {
         "name": "board_props",
         "description": (
-            "List every image and 3D model the barehands board is allowed to "
-            "stage. Run this before board_present with a src, or board_hand — "
-            "only files already inside barehands' media/ folder can appear, so "
-            "guessing a filename fails."
+            "List every image and 3D model Apex's board is allowed to show. "
+            "Run this before board_present or board_model with a src — only "
+            "files already in the props folder can appear, so guessing a "
+            "filename fails."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
@@ -316,7 +290,7 @@ TOOLS = [
     {
         "name": "board_state",
         "description": (
-            "Look at the barehands board and report what is actually on it. "
+            "Look at Apex's glass board and report what is actually on it. "
             "The user moves things with their hands, so never answer from "
             "memory — run this before commenting on the board."
         ),
@@ -1603,45 +1577,26 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                                  getattr(config, "HANDTRACK_RELEASE_SECONDS", 300))))
 
         elif name == "board_present":
-            # Apex's own board first when it is running — it needs no second
-            # program and no Chrome tab in front. barehands stays the fallback
-            # so nothing that worked yesterday stops working today.
-            if getattr(config, "BOARD_ENABLED", False):
-                from agent.board import get_board
-                card = get_board().add("card", inputs["title"],
-                                       inputs.get("body", ""))
-                out = f"'{card.title}' is on the board ({get_board().count()} up)."
-                _broadcast_live_event("board", out)
-                return out
-            from tools import barehands as _board
+            from agent.board import get_board
             src = (inputs.get("src") or "").strip()
             if src:
-                # An image or model, not a card. `present` spotlights it;
-                # `add_img` stages it as one of the ensemble.
-                cmd = {"a": "present" if inputs.get("spotlight", True) else "add_img",
-                       "src": src, "title": inputs["title"]}
+                from agent import props as _props
+                if _props.resolve(src) is None:
+                    return (f"'{src}' is not a prop Apex can show. It must "
+                            f"already be inside {_props.props_root()} and end "
+                            f"in .glb, .gltf, .png, .jpg or .jpeg. Run "
+                            f"board_props to see what is there.")
+                kind = "model" if _props.is_model(src) else "image"
+                card = get_board().add(kind, inputs["title"], src=src)
             else:
-                cmd = {
-                    "a": "present" if inputs.get("spotlight", True) else "add_card",
-                    "title": inputs["title"],
-                    "body": inputs.get("body", ""),
-                }
-            out = _board.board_command(cmd)
-            _broadcast_live_event("board", out)
-            return out
-
-        elif name == "board_hand":
-            from tools import barehands as _board
-            out = _board.board_command({"a": "hand", "src": inputs["src"]})
+                card = get_board().add("card", inputs["title"], inputs.get("body", ""))
+            out = f"'{card.title}' is on the board ({get_board().count()} up)."
             _broadcast_live_event("board", out)
             return out
 
         elif name == "board_props":
-            if getattr(config, "BOARD_ENABLED", False):
-                from agent import props as _props
-                return _props.describe()
-            from tools import barehands as _board
-            return _board.describe_props()
+            from agent import props as _props
+            return _props.describe()
 
         elif name == "board_model":
             from agent import props as _props
@@ -1737,25 +1692,19 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return out
 
         elif name == "board_clear":
-            if getattr(config, "BOARD_ENABLED", False):
-                from agent.board import get_board
-                return f"Cleared {get_board().clear()} card(s) from the board."
-            from tools import barehands as _board
-            return _board.board_command({"a": "clear"})
+            from agent.board import get_board
+            return f"Cleared {get_board().clear()} card(s) from the board."
 
         elif name == "board_state":
-            if getattr(config, "BOARD_ENABLED", False):
-                from agent.board import get_board
-                cards = get_board().cards()
-                if not cards:
-                    return "The board is empty."
-                lines = [f"{len(cards)} card(s) on the board:"]
-                for c in cards:
-                    held = "  [in your hand]" if c["held"] else ""
-                    lines.append(f"  - {c['title']}{held}")
-                return "\n".join(lines)
-            from tools import barehands as _board
-            return _board.board_state()
+            from agent.board import get_board
+            cards = get_board().cards()
+            if not cards:
+                return "The board is empty."
+            lines = [f"{len(cards)} card(s) on the board:"]
+            for c in cards:
+                held = "  [in your hand]" if c["held"] else ""
+                lines.append(f"  - {c['title']}{held}")
+            return "\n".join(lines)
 
         elif name == "click":
             return computer.click(inputs["x"], inputs["y"], inputs.get("button", "left"), inputs.get("double", False))

@@ -9,8 +9,8 @@ barehands runs MediaPipe **in the browser**, because it has no backend to run it
 in. That forces three things on it: a ~26 MB WASM download on first load, the
 page competing with itself for the GPU, and — the one that actually hurts —
 tracking that stops dead the moment the tab is not in front, because browsers
-pause `requestAnimationFrame`. The whole staleness apparatus in
-`agent/barehands_watcher.py` exists to detect exactly that.
+pause `requestAnimationFrame` — the reason Apex no longer integrates with it at
+all; in practice it never reliably tracked hands either.
 
 Apex already tracks hands in Python (`agent/handtrack.py`). So here the browser
 is a **dumb renderer**: it draws what Python sends and decides nothing. Tracking

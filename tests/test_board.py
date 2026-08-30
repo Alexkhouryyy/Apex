@@ -368,19 +368,14 @@ class TestBoardPageCredentials:
 
 
 class TestApexBoardTools:
-    def test_board_present_uses_apexs_own_board_when_it_is_on(self, monkeypatch):
-        """With BOARD_ENABLED the card must land on Apex's board, not be posted
-        to a barehands server that may not be running."""
+    def test_board_present_lands_on_apexs_own_board(self, monkeypatch):
+        """board_present always uses Apex's own board — there is no second
+        program it could fall back to reaching."""
         import config
         from agent import core
         from agent.board import get_board
         monkeypatch.setattr(config, "BOARD_ENABLED", True, raising=False)
         get_board().clear()
-
-        def _no_network(*a, **k):
-            raise AssertionError("must not reach barehands")
-        monkeypatch.setattr("tools.barehands.board_command", _no_network)
-
         out = core._execute_tool("board_present", {"title": "HI", "body": "there"})
         assert "on the board" in out
         assert get_board().count() == 1
@@ -404,18 +399,6 @@ class TestApexBoardTools:
         get_board().add("card", "x"); get_board().add("card", "y")
         assert "2" in core._execute_tool("board_clear", {})
         assert get_board().count() == 0
-
-    def test_barehands_still_works_when_apexs_board_is_off(self, monkeypatch):
-        """Adding a board of our own must not break the one that already
-        worked."""
-        import config
-        from agent import core
-        monkeypatch.setattr(config, "BOARD_ENABLED", False, raising=False)
-        seen = []
-        monkeypatch.setattr("tools.barehands.board_command",
-                            lambda cmd: seen.append(cmd) or "[Barehands] ok")
-        core._execute_tool("board_present", {"title": "HI"})
-        assert seen and seen[0]["title"] == "HI"
 
 
 # ── 3D models, and the two-handed grab ───────────────────────────────────────

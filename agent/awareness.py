@@ -276,30 +276,13 @@ class AwarenessMonitor:
             from agent.iot_watcher import IoTWatcher
             self.iot = IoTWatcher(self.log)
 
-        # Hand tracking via barehands. Gated on the flag ALONE, deliberately:
-        # the IoT watcher above also requires a non-empty allowlist, so an empty
-        # list silently disables the whole subsystem while looking configured.
-        # Here an empty BAREHANDS_GESTURE_ACTIONS means look-but-don't-touch —
-        # gestures are still recognized and logged, they just cannot act.
-        self.barehands: Optional[threading.Thread] = None
-        if getattr(config, "BAREHANDS_ENABLED", False):
-            from agent.barehands_watcher import BarehandsWatcher
-            self.barehands = BarehandsWatcher(self.log)
-
-        # Apex's own MediaPipe tracker — no browser, so it keeps seeing hands
-        # when nothing is open. Independent of the barehands watcher above:
-        # running both would put two gesture streams into one log and double
-        # every wave, so the native tracker wins when both are enabled.
+        # Apex's own MediaPipe tracker — reads the webcam directly, no browser
+        # involved, so it keeps seeing hands when nothing is open.
         self.handtrack: Optional[threading.Thread] = None
         if getattr(config, "HANDTRACK_ENABLED", False):
             from agent import handtrack as _ht
             self.handtrack = _ht.HandTracker(self.log)
             _ht.set_active_tracker(self.handtrack)
-            if self.barehands is not None:
-                print("[HandTrack] Both HANDTRACK_ENABLED and BAREHANDS_ENABLED "
-                      "are set. Using the native tracker for gestures; barehands "
-                      "stays available for the board and the ring.")
-                self.barehands.gestures_enabled = False
 
     def start(self) -> None:
         self.window.start()
@@ -316,15 +299,6 @@ class AwarenessMonitor:
                 _cam.set_tracker_frame_source(self.handtrack.latest_frame)
             except Exception as e:
                 print(f"[HandTrack] could not share frames with camera_capture: {e}")
-        if self.barehands is not None:
-            self.barehands.start()
-            # Only the watcher polls often enough to tell a live stage from a
-            # frozen one, so it answers that question for tools/barehands.py.
-            try:
-                from tools import barehands as _bh_tools
-                _bh_tools.set_tracker_probe(lambda: self.barehands.recognizer.tracker)
-            except Exception as e:
-                print(f"[Barehands] could not register the tracker probe: {e}")
         self._reviewer = threading.Thread(target=self._review_loop, daemon=True, name="AwarenessReviewer")
         self._reviewer.start()
         print(f"[Awareness] Monitor started (review every {self.review_interval}s).")
@@ -336,8 +310,6 @@ class AwarenessMonitor:
         self.files.stop()
         if self.iot is not None:
             self.iot.stop()
-        if self.barehands is not None:
-            self.barehands.stop()
         if self.handtrack is not None:
             self.handtrack.stop()
 
@@ -451,27 +423,21 @@ class AwarenessMonitor:
 def report_hand_tracking(monitor) -> str:
     """Say, at boot, whether hand tracking is running — and if not, why not.
 
-    Silence is a terrible status report. A user with BAREHANDS_ENABLED=true and
-    no `[Barehands]` line in the console cannot tell apart: the flag did not
+    Silence is a terrible status report. A user with HANDTRACK_ENABLED=true and
+    no `[HandTrack]` line in the console cannot tell apart: the flag did not
     take, the code is not on this machine, or AWARENESS_ENABLED is off and took
     hand tracking down with it as a side effect. All three look identical, and
     working looks identical too until the watcher thread gets a slice.
-
-    That last case is the nasty one: two independent flags where the wrong one
-    silently wins. Returns the line it printed, for tests.
+    Returns the line it printed, for tests.
     """
-    native = getattr(config, "HANDTRACK_ENABLED", False)
-    board = getattr(config, "BAREHANDS_ENABLED", False)
-    if not (native or board):
+    if not getattr(config, "HANDTRACK_ENABLED", False):
         return ""
     if monitor is None:
         line = ("[HandTrack] Hand tracking is enabled but the awareness monitor "
                 "is not running, so it is OFF. Set AWARENESS_ENABLED=true.")
-    elif native and getattr(monitor, "handtrack", None) is not None:
+    elif getattr(monitor, "handtrack", None) is not None:
         line = ("[HandTrack] Hand tracking on — Apex's own camera tracker, "
                 "no browser needed.")
-    elif board and getattr(monitor, "barehands", None) is not None:
-        line = f"[Barehands] Hand tracking on, polling {config.BAREHANDS_URL}."
     else:
         line = ("[HandTrack] Hand tracking is enabled but no watcher was built — "
                 "this Apex is older than the hand-tracking code. Pull and restart.")

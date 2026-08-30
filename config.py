@@ -372,37 +372,8 @@ IOT_AWARENESS_ENTITIES = [e.strip() for e in os.getenv("IOT_AWARENESS_ENTITIES",
 IOT_TRIGGER_ALLOWED_ENTITIES = [e.strip() for e in os.getenv("IOT_TRIGGER_ALLOWED_ENTITIES", "").split(",") if e.strip()]
 
 
-# barehands — hand tracking + the glass board (opt-in, off by default).
-# barehands runs as its OWN process (python3 server.py on 127.0.0.1:8794) with a
-# Chrome tab owning the webcam; Apex only speaks HTTP to localhost and writes the
-# ring's state files. Nothing of barehands is vendored, so Apex stays MIT.
-BAREHANDS_ENABLED = os.getenv("BAREHANDS_ENABLED", "false").lower() in {"1", "true", "yes"}
-BAREHANDS_URL = os.getenv("BAREHANDS_URL", "http://127.0.0.1:8794")
-# Absolute path to the barehands checkout — needed only for the ring, whose
-# protocol is "write a word into <repo>/state/state".
-BAREHANDS_DIR = os.getenv("BAREHANDS_DIR", "")
-# 20 Hz, not 10: a natural wave runs 2-3 Hz, and at 10 Hz a 3 Hz wave aliases
-# away entirely (~3.3 samples/cycle). See agent/barehands_watcher.WAVE_MAX_HZ.
-BAREHANDS_POLL_HZ = float(os.getenv("BAREHANDS_POLL_HZ", "20"))
-# The server keeps no timestamp and requestAnimationFrame pauses on a
-# backgrounded tab, so a frozen hand and a held hand are byte-identical. Beyond
-# this many seconds of unchanged bytes WITH hands up, the tracker is gone.
-BAREHANDS_STALE_SECONDS = float(os.getenv("BAREHANDS_STALE_SECONDS", "2.0"))
-BAREHANDS_GESTURE_COOLDOWN_SECONDS = float(os.getenv("BAREHANDS_GESTURE_COOLDOWN_SECONDS", "3"))
-# Comma-separated gesture:action pairs — the ONLY place a gesture acquires
-# power. Deny-by-default: an unmapped gesture is still logged (so you can see it
-# was recognized) but does nothing. Leave blank for look-but-don't-touch.
-# Known gestures: wave, pinch_hold, swipe_left/right/up/down, hands_present, hands_gone.
-# Known actions: wake, listen, stop.
-BAREHANDS_GESTURE_ACTIONS = [e.strip() for e in os.getenv(
-    "BAREHANDS_GESTURE_ACTIONS", "wave:wake,pinch_hold:listen,swipe_down:stop").split(",") if e.strip()]
-
-
 # Hand tracking — Apex's OWN MediaPipe tracker, reading the webcam directly.
-# Distinct from BAREHANDS_*, which polls a barehands server whose MediaPipe runs
-# inside a Chrome tab. The native tracker needs no browser, so it keeps working
-# when nothing is open — the browser path goes blind whenever its tab is
-# backgrounded, which is what the BAREHANDS_STALE_SECONDS machinery detects.
+# No browser, no second process: it keeps working when nothing else is open.
 HANDTRACK_ENABLED = os.getenv("HANDTRACK_ENABLED", "false").lower() in {"1", "true", "yes"}
 HANDTRACK_POLL_HZ = float(os.getenv("HANDTRACK_POLL_HZ", "20"))
 # Selfie space. A raw webcam frame is NOT mirrored, so without this a hand moving
@@ -419,6 +390,14 @@ HANDTRACK_DEBUG = os.getenv("HANDTRACK_DEBUG", "false").lower() in {"1", "true",
 # is how long `release_camera` hands it back before tracking resumes on its own,
 # so forgetting to resume cannot silently end hand tracking.
 HANDTRACK_RELEASE_SECONDS = float(os.getenv("HANDTRACK_RELEASE_SECONDS", "300"))
+HANDTRACK_GESTURE_COOLDOWN_SECONDS = float(os.getenv("HANDTRACK_GESTURE_COOLDOWN_SECONDS", "3"))
+# Comma-separated gesture:action pairs — the ONLY place a gesture acquires
+# power. Deny-by-default: an unmapped gesture is still logged (so you can see it
+# was recognized) but does nothing. Leave blank for look-but-don't-touch.
+# Known gestures: wave, pinch_hold, swipe_left/right/up/down, hands_present, hands_gone.
+# Known actions: wake, listen, stop.
+HANDTRACK_GESTURE_ACTIONS = [e.strip() for e in os.getenv(
+    "HANDTRACK_GESTURE_ACTIONS", "wave:wake,pinch_hold:listen,swipe_down:stop").split(",") if e.strip()]
 
 # Which MediaPipe delegate the hand tracker runs on: auto | gpu | cpu.
 # "auto" tries GPU and falls back to CPU, reporting which it got — measured at
@@ -444,8 +423,7 @@ SUBSCRIPTION_CALL_SITES = [s.strip() for s in os.getenv(
     "SUBSCRIPTION_CALL_SITES", "agent.core/main").split(",") if s.strip()]
 
 # Apex's own glass board — cards you move with your hands, at /board on the
-# dashboard. Distinct from BAREHANDS_*: this one is Apex's, needs no second
-# program, and is rendered from the tracker Apex already runs in Python, so it
+# dashboard. Rendered from the tracker Apex already runs in Python, so it
 # keeps working when the tab is not in front. Needs HANDTRACK_ENABLED.
 BOARD_ENABLED = os.getenv("BOARD_ENABLED", "false").lower() in {"1", "true", "yes"}
 # Frames per second for the board's video backdrop. The picture has to come from
@@ -462,7 +440,7 @@ BOARD_FPS = float(os.getenv("BOARD_FPS", "15"))
 # agent/blender_bridge.py that talks to it over a localhost socket. Nothing
 # about this is a second Apex service: there is no bridge process of Apex's
 # own, no separate repo, and no network hop beyond one loopback socket — the
-# same "aggregation, not a second Apex" posture as BAREHANDS_* and MCP servers.
+# same "aggregation, not a second Apex" posture MCP servers already have.
 #
 # The addon deliberately does NOT expose arbitrary code execution. It accepts a
 # fixed, small command set (create a primitive with explicit dimensions, set a

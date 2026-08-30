@@ -434,20 +434,10 @@ def run_resident(model_override: Optional[str] = None) -> None:
         wake_listener = WakeWordListener(wake_phrases=config.WAKE_PHRASES)
         wake_listener.start(on_wake=_on_wake)
 
-    # --- barehands: the ring becomes Apex's face, and gestures can wake it ---
-    if getattr(config, "BAREHANDS_ENABLED", False):
-        try:
-            from tools import barehands as _bh
-            logging.info(_bh.attach_to_resident_state(state))
-        except Exception as e:
-            logging.error(f"barehands ring wiring failed: {e}")
-
-    # Gestures wake Apex from EITHER source — the native tracker or the
-    # barehands board. Gated on either flag, not just BAREHANDS_ENABLED, or
-    # turning on the native tracker would recognize gestures that could never
-    # do anything.
-    if getattr(config, "HANDTRACK_ENABLED", False) or \
-            getattr(config, "BAREHANDS_ENABLED", False):
+    # Gestures wake Apex from the native tracker. Gated on the same flag that
+    # decides whether it recognizes them at all — turning gestures on with no
+    # tracker running would recognize things that could never do anything.
+    if getattr(config, "HANDTRACK_ENABLED", False):
         try:
 
             def _on_gesture(gesture: str, action: str) -> None:
@@ -469,15 +459,12 @@ def run_resident(model_override: Optional[str] = None) -> None:
                 else:
                     logging.warning(
                         f"Gesture '{gesture}' is mapped to unknown action "
-                        f"'{action}' — check BAREHANDS_GESTURE_ACTIONS.")
+                        f"'{action}' — check HANDTRACK_GESTURE_ACTIONS.")
 
-            wired = False
-            for attr in ("handtrack", "barehands"):
-                src = getattr(awareness_monitor, attr, None) if awareness_monitor else None
-                if src is not None:
-                    src.on_gesture = _on_gesture
-                    wired = True
-            if not wired:
+            src = getattr(awareness_monitor, "handtrack", None) if awareness_monitor else None
+            if src is not None:
+                src.on_gesture = _on_gesture
+            else:
                 logging.warning(
                     "Hand tracking is enabled but no watcher is running — "
                     "gestures will not be seen (is AWARENESS_ENABLED off?).")

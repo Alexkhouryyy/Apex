@@ -227,14 +227,14 @@ def boot(say: str = "", script: list[dict] | None = None,
         "DASHBOARD_TOKEN": "smoke-token",
         "TELEGRAM_POLLING": "false",
         "PYTHONUNBUFFERED": "1",
-        # Hand tracking ON, pointed at a port with nothing behind it. Booting
-        # the ENABLED path is the point: the disabled path does nothing by
-        # definition, so exercising it proves nothing. This is how we learn that
-        # Apex still boots cleanly when barehands is configured but not running,
-        # which is the normal state of any machine that has not opened Chrome
-        # yet. no_silent_failures polices the "cleanly" half.
-        "BAREHANDS_ENABLED": "true",
-        "BAREHANDS_URL": f"http://127.0.0.1:{free_port()}",
+        # Hand tracking ON, on a machine with no camera (true of wherever this
+        # suite runs in CI). Booting the ENABLED path is the point: the disabled
+        # path does nothing by definition, so exercising it proves nothing. This
+        # is how we learn that Apex still boots cleanly when hand tracking is
+        # configured but has no camera to open — the normal state of a machine
+        # that has none, or has one in use by something else.
+        # no_silent_failures polices the "cleanly" half.
+        "HANDTRACK_ENABLED": "true",
     })
     env.update(extra_env or {})
 
@@ -606,27 +606,29 @@ def every_dashboard_tab_answers(r: BootResult) -> Finding:
 
 
 @check
-def hand_tracking_survives_a_dark_board(r: BootResult) -> Finding:
-    """barehands is enabled in the smoke env and aimed at a dead port.
+def hand_tracking_fails_loudly_with_no_camera(r: BootResult) -> Finding:
+    """HANDTRACK_ENABLED is on in the smoke env, on a machine with no camera —
+    true of wherever this suite runs, this container included.
 
-    Three things have to be true and only one of them is obvious. The watcher
-    must actually start (a subsystem gated behind a flag is exactly the shape
-    that gets built and never constructed); it must NAME the condition rather
-    than going quiet, because "the board is dark" and "hand tracking is broken"
-    are otherwise the same silence; and it must not trip a failure marker, which
-    no_silent_failures checks independently.
+    Two things have to be true and neither is obvious. The tracker must
+    actually attempt to open the camera (a subsystem gated behind a flag is
+    exactly the shape that gets built and never constructed); and when that
+    fails, it must NAME the condition rather than going quiet, because "no
+    camera" and "hand tracking is silently broken" are otherwise the same
+    silence. It must also not trip a failure marker, which no_silent_failures
+    checks independently.
     """
-    started = "[Barehands] Watching" in r.stdout
-    named = "the board is dark" in r.stdout
-    if started and named:
-        return Finding("hand_tracking_survives_a_dark_board", True,
-                       "watcher up, dark board reported")
+    attempted = "[HandTrack] Watching camera" in r.stdout
+    named = "would not open" in r.stdout or "Hand tracking is off" in r.stdout
+    if attempted and named:
+        return Finding("hand_tracking_fails_loudly_with_no_camera", True,
+                       "tracker started, absent camera reported")
     missing = []
-    if not started:
-        missing.append("the watcher never started")
+    if not attempted:
+        missing.append("the tracker never started")
     if not named:
-        missing.append("nothing said the board was dark")
-    return Finding("hand_tracking_survives_a_dark_board", False, "; ".join(missing))
+        missing.append("nothing said the camera was unavailable")
+    return Finding("hand_tracking_fails_loudly_with_no_camera", False, "; ".join(missing))
 
 
 def run(say: str = "remember that my name is Alex", verbose: bool = True) -> list[Finding]:
