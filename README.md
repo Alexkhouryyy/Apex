@@ -1,10 +1,49 @@
 # Apex
 
-A voice-and-text AI agent that talks, sees your screen, controls your computer,
-researches the web, and runs a persistent memory. It supports multiple model
-providers (Anthropic Claude, OpenAI GPT, Google Gemini), a multi-model
-**council** that debates a question to the best answer, a web dashboard, and
-phone reach via Telegram / Discord / SMS.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+![Tests](https://img.shields.io/badge/tests-1616%20passing-brightgreen)
+
+**A self-hosted, voice-first, always-on personal AI agent.** Runs on your own
+hardware. Model-agnostic — Claude, GPT, Gemini, or a local Ollama model, no
+lock-in. One persistent "brain" that every device and channel is a window
+into, not a chat log that forgets you between sessions.
+
+Full write-up, feature map and honest state: **[docs/APEX_OVERVIEW.md](docs/APEX_OVERVIEW.md)**.
+
+## What it does
+
+- **Talks, sees, and acts** — voice or text, reads your screen, controls your
+  computer (clicks, keystrokes, browser automation), runs shell commands and a
+  persistent Python REPL, behind a dangerous-command safety gate.
+- **Remembers everything, in one place** — a single SQLite brain (memory,
+  goals, skills, telemetry) that every device is a window into, with semantic
+  search and a knowledge graph over your own files.
+- **Acts on its own, with a governor** — a background loop reads goals and
+  context on a timer and proposes the next action; safe steps run
+  automatically, risky ones stage for your approval first. Nothing on your
+  computer happens without that gate.
+- **Reaches you everywhere** — Telegram, Discord, Slack, WhatsApp, Signal, and
+  phone/SMS via Twilio, plus an installable PWA dashboard with web push, all
+  driven by the same brain.
+- **A multi-model council** — Claude, GPT and Gemini debate a question to a
+  synthesized answer; a blind side-by-side comparison mode tracks which model
+  actually wins your preference over time.
+- **Sees your hands** — a native webcam hand tracker (no browser, no
+  third-party service) drives a 3D glass board on the dashboard: pinch to
+  drag, two hands to scale and rotate cards and real 3D models.
+- **Builds what you ask for** — "Apex, create a red cube, 50 millimetres
+  wide" creates a real, measured object in Blender and puts it on the board,
+  through a restricted command set with no arbitrary code execution.
+- **Operable from itself** — a Control tab edits settings, shows MCP server
+  health, switches themes, checks for and pulls updates, and restarts Apex —
+  no terminal needed after first setup.
+- **Runs on your subscription** — the conversation can route through your
+  existing Claude subscription instead of metered API credits, with an
+  automatic fallback and honest cost reporting.
+- **Self-improving** — writes its own tools on a capability gap, consolidates
+  what worked in a nightly reflection pass, and rolls back changes that
+  measurably hurt approval rates.
 
 ## Quickstart
 
@@ -28,6 +67,18 @@ live in `.env`, which is gitignored — see **Security** below.
 - At launch: `python main.py --text --model gpt-4o`
 - At runtime: type `/model gemini-2.5-flash` (or `/model` to list options)
 - Council debate: type `/council <your question>`
+
+### Optional features
+
+Off by default — each needs one `.env` flag and, for the hardware-facing
+ones, something running alongside Apex:
+
+| Feature | Flag | Needs |
+|---|---|---|
+| Hand tracking + 3D glass board | `HANDTRACK_ENABLED=true`, `BOARD_ENABLED=true` | A webcam. Open `/board` on the dashboard. |
+| Voice-driven 3D creation | `BLENDER_ENABLED=true` | Blender running with `blender/apex_blender_addon.py` installed — see [blender/README.md](blender/README.md). |
+| Run on your Claude subscription | `SUBSCRIPTION_ENABLED=true` | The `claude` CLI installed and logged in. |
+| MCP tool servers | — | `mcpServers` in `mcp_servers.json` or `~/.claude/settings.json`; check status on the dashboard's **Control** tab. |
 
 ## Remote Access (Tailscale)
 
