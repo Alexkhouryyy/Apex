@@ -1,8 +1,8 @@
 # Apex
 
+[![Tests](https://github.com/Alexkhouryyy/Apex/actions/workflows/tests.yml/badge.svg)](https://github.com/Alexkhouryyy/Apex/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1616%20passing-brightgreen)
 
 **A self-hosted, voice-first, always-on personal AI agent.** Runs on your own
 hardware. Model-agnostic — Claude, GPT, Gemini, or a local Ollama model, no

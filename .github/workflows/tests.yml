@@ -1,0 +1,48 @@
+name: Tests
+
+# Runs the same four checks this project runs by hand before every commit:
+# the test suite, the boot smoke test, and the two structural audits. Nothing
+# here is new logic — it's automating what was, until now, only ever run
+# manually and reported after the fact.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          # A placeholder, not a real key. Several tests import main.py
+          # directly, and main.py exits at import time if this is empty — no
+          # test in the suite makes a real Anthropic API call, so any
+          # non-empty string satisfies it.
+          ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci-tests-only
+        run: python -m pytest -q
+
+      - name: Boot smoke test
+        env:
+          ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci-tests-only
+        run: python -m tools.smoke
+
+      - name: Structural audits (informational — never fails the build)
+        env:
+          ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci-tests-only
+        run: |
+          python -m tools.wiring_audit
+          python -m tools.sql_audit
