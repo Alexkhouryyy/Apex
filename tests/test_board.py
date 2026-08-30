@@ -10,7 +10,17 @@ logic can be tested without a webcam and a browser.
 """
 import pytest
 
-from agent.board import Board, GRAB_RADIUS
+from agent.board import ARM_DWELL_SECONDS, Board, GRAB_RADIUS, HandState
+
+
+def _grab_now(b, cursors, t=0.0):
+    """Commit a grab immediately — two identical frames, arm then commit past
+    ARM_DWELL_SECONDS. A single-frame pinch only arms (see TestArmDwell for
+    that behaviour directly); tests that are not about the dwell itself use
+    this to get past it in one call, the same way a real hand's pinch simply
+    outlasts one frame."""
+    b.apply_hands(cursors, now=t)
+    b.apply_hands(cursors, now=t + ARM_DWELL_SECONDS + 0.01)
 
 
 class TestContent:
@@ -45,7 +55,7 @@ class TestGrabbing:
     def test_a_pinch_near_a_card_picks_it_up(self):
         b = Board()
         c = self._at(b, 0.5, 0.5)
-        b.apply_hands([(0.52, 0.52, True)])
+        _grab_now(b, [(0.52, 0.52, True)])
         assert c.held_by == [0]
 
     def test_an_open_hand_grabs_nothing(self):
@@ -57,7 +67,7 @@ class TestGrabbing:
     def test_a_pinch_out_of_reach_grabs_nothing(self):
         b = Board()
         c = self._at(b, 0.1, 0.1)
-        b.apply_hands([(0.9, 0.9, True)])
+        _grab_now(b, [(0.9, 0.9, True)])
         assert c.held_by == []
 
     def test_the_card_does_not_jump_into_your_hand(self):
@@ -66,7 +76,7 @@ class TestGrabbing:
         grab has to remember WHERE on the card you took hold of it."""
         b = Board()
         c = self._at(b, 0.50, 0.50)
-        b.apply_hands([(0.56, 0.50, True)])       # grabbed 0.06 to the right
+        _grab_now(b, [(0.56, 0.50, True)])        # grabbed 0.06 to the right
         assert c.x == pytest.approx(0.50, abs=1e-6), "it moved on the grab frame"
         b.apply_hands([(0.66, 0.50, True)])       # hand moves 0.10 further
         assert c.x == pytest.approx(0.60, abs=1e-6), "should track the delta"
@@ -74,7 +84,7 @@ class TestGrabbing:
     def test_releasing_lets_go(self):
         b = Board()
         c = self._at(b, 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, True)])
+        _grab_now(b, [(0.5, 0.5, True)])
         b.apply_hands([(0.5, 0.5, False)])
         assert c.held_by == []
 
@@ -84,7 +94,7 @@ class TestGrabbing:
         place it left."""
         b = Board()
         c = self._at(b, 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, True)])
+        _grab_now(b, [(0.5, 0.5, True)])
         assert c.held_by == [0]
         b.apply_hands([])
         assert c.held_by == []
@@ -95,27 +105,27 @@ class TestGrabbing:
         b = Board()
         under = self._at(b, 0.5, 0.5)
         over = self._at(b, 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, True)])
+        _grab_now(b, [(0.5, 0.5, True)])
         assert over.held_by == [0] and under.held_by == []
 
     def test_two_hands_hold_two_different_cards(self):
         b = Board()
         left = self._at(b, 0.2, 0.5)
         right = self._at(b, 0.8, 0.5)
-        b.apply_hands([(0.2, 0.5, True), (0.8, 0.5, True)])
+        _grab_now(b, [(0.2, 0.5, True), (0.8, 0.5, True)])
         assert {left.held_by[0], right.held_by[0]} == {0, 1}
 
     def test_two_hands_on_one_object_is_a_two_handed_grab(self):
         """Not a conflict — this is how scaling and rotating begin."""
         b = Board()
         c = self._at(b, 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, True), (0.51, 0.5, True)])
+        _grab_now(b, [(0.5, 0.5, True), (0.51, 0.5, True)])
         assert sorted(c.held_by) == [0, 1]
 
     def test_a_third_hand_cannot_join(self):
         b = Board()
         c = self._at(b, 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, True), (0.51, 0.5, True), (0.52, 0.5, True)])
+        _grab_now(b, [(0.5, 0.5, True), (0.51, 0.5, True), (0.52, 0.5, True)])
         assert len(c.held_by) == 2
 
     def test_a_card_cannot_be_dragged_off_the_glass(self):
@@ -123,7 +133,7 @@ class TestGrabbing:
         be retrieved."""
         b = Board()
         c = self._at(b, 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, True)])
+        _grab_now(b, [(0.5, 0.5, True)])
         b.apply_hands([(5.0, -3.0, True)])
         assert 0.0 <= c.x <= 1.0 and 0.0 <= c.y <= 1.0
 
@@ -141,6 +151,184 @@ class TestGrabbing:
         """Too tight a radius makes reaching for a card feel like the tracking
         is broken rather than like a miss."""
         assert 0.08 <= GRAB_RADIUS <= 0.25
+
+
+class TestArmDwell:
+    """A pinch must hold for ARM_DWELL_SECONDS before it commits to a grab.
+
+    Without this, one falsely-detected pinch frame — tracking is
+    probabilistic, this happens — grabs whatever is nearest immediately. This
+    is the difference between the board reading as occasionally glitchy and
+    reading as haunted.
+    """
+
+    def _at(self, b, x, y):
+        return b.add("card", "T", x=x, y=y)
+
+    def test_a_single_pinch_frame_only_arms_it(self):
+        b = Board()
+        c = self._at(b, 0.5, 0.5)
+        b.apply_hands([(0.5, 0.5, True)], now=0.0)
+        assert c.held_by == [], "one frame committed a grab the dwell should have held"
+        assert b.hand_state(0) == HandState.ARMED
+
+    def test_holding_the_pinch_past_the_dwell_commits_it(self):
+        b = Board()
+        c = self._at(b, 0.5, 0.5)
+        b.apply_hands([(0.5, 0.5, True)], now=0.0)
+        b.apply_hands([(0.5, 0.5, True)], now=ARM_DWELL_SECONDS + 0.01)
+        assert c.held_by == [0]
+        assert b.hand_state(0) == HandState.GRABBED
+
+    def test_two_calls_too_close_together_do_not_commit(self):
+        """Isolates the TIME half of the dwell, distinct from merely needing a
+        second call to exist at all: two invocations a hair apart must still
+        not commit, or the dwell is checking call count instead of duration."""
+        b = Board()
+        c = self._at(b, 0.5, 0.5)
+        b.apply_hands([(0.5, 0.5, True)], now=0.0)
+        b.apply_hands([(0.5, 0.5, True)], now=0.01)   # far under ARM_DWELL_SECONDS
+        assert c.held_by == [], "committed on a gap far shorter than the dwell"
+
+    def test_a_gap_in_the_pinch_resets_the_dwell(self):
+        """Letting go and re-pinching later must not commit on the FIRST
+        re-pinch call just because enough wall-clock time passed since the
+        original (broken) pinch — the elapsed time has to be measured from
+        the current, continuous hold, not from whenever arming last began."""
+        b = Board()
+        c = self._at(b, 0.5, 0.5)
+        b.apply_hands([(0.5, 0.5, True)], now=0.0)
+        b.apply_hands([(0.5, 0.5, False)], now=0.05)   # let go before the dwell
+        # Re-pinch well after the ORIGINAL arm-start plus the dwell — if the
+        # reset did not happen, this single call's elapsed-since-0.0 already
+        # exceeds ARM_DWELL_SECONDS and would commit immediately.
+        b.apply_hands([(0.5, 0.5, True)], now=0.30)
+        assert c.held_by == [], "a stale arm timestamp let a fresh pinch commit immediately"
+
+    def test_idle_before_any_pinch(self):
+        b = Board()
+        self._at(b, 0.5, 0.5)
+        assert b.hand_state(0) == HandState.IDLE
+
+    def test_being_out_of_reach_reports_idle_not_armed_forever(self):
+        """Dwell satisfied, nothing to grab: the hand is not mid-arming
+        anything, it is simply idle."""
+        b = Board()
+        self._at(b, 0.1, 0.1)
+        b.apply_hands([(0.9, 0.9, True)], now=0.0)
+        b.apply_hands([(0.9, 0.9, True)], now=ARM_DWELL_SECONDS + 0.01)
+        assert b.hand_state(0) == HandState.IDLE
+
+    def test_already_grabbed_hands_do_not_re_arm(self):
+        """Once committed, an already-held hand reports GRABBED continuously —
+        the dwell only ever gates the FIRST pinch, or a long hold would look
+        like it kept re-arming."""
+        b = Board()
+        self._at(b, 0.5, 0.5)
+        _grab_now(b, [(0.5, 0.5, True)])
+        for i in range(5):
+            b.apply_hands([(0.5, 0.5, True)])
+            assert b.hand_state(0) == HandState.GRABBED
+
+
+class TestOpenPalmCancel:
+    """The board's escape hatch. Always available, and reverts to before the
+    hold began — not wherever the drag currently sits, which is what an
+    ordinary release already does."""
+
+    def _at(self, b, x, y):
+        return b.add("card", "T", x=x, y=y)
+
+    def _model(self, b, x=0.5, y=0.5):
+        return b.add("model", "Engine", src="models/engine.glb", x=x, y=y)
+
+    def test_cancelling_a_drag_restores_the_pre_grab_position(self):
+        b = Board()
+        c = self._at(b, 0.30, 0.30)
+        _grab_now(b, [(0.30, 0.30, True, False)])
+        b.apply_hands([(0.60, 0.60, True, False)])   # dragged away
+        assert c.x == pytest.approx(0.60) and c.y == pytest.approx(0.60)
+        b.apply_hands([(0.60, 0.60, False, True)])    # open palm: cancel
+        assert (c.x, c.y) == pytest.approx((0.30, 0.30)), \
+            "cancel must undo the drag, not just stop it where it is"
+        assert c.held_by == []
+
+    def test_cancel_is_not_the_same_as_an_ordinary_release(self):
+        """The one behavioural difference that justifies a separate gesture at
+        all: releasing (un-pinching with a closed or neutral hand) keeps the
+        current position; only the deliberate open-palm gesture undoes it."""
+        b = Board()
+        c = self._at(b, 0.30, 0.30)
+        _grab_now(b, [(0.30, 0.30, True, False)])
+        b.apply_hands([(0.60, 0.60, True, False)])
+        b.apply_hands([(0.60, 0.60, False, False)])   # ordinary release
+        assert (c.x, c.y) == pytest.approx((0.60, 0.60)), \
+            "an ordinary release must not revert the position"
+
+    def test_cancelling_a_two_handed_scale_restores_the_original_size(self):
+        b = Board()
+        c = self._model(b)
+        _grab_now(b, [(0.45, 0.5, True, False), (0.55, 0.5, True, False)])
+        b.apply_hands([(0.40, 0.5, True, False), (0.60, 0.5, True, False)])
+        assert c.scale > 1.0, "the setup must have actually grown it"
+        b.apply_hands([(0.40, 0.5, False, True), (0.60, 0.5, True, False)])
+        assert c.scale == pytest.approx(1.0, abs=1e-6)
+        assert c.rot == pytest.approx(0.0, abs=1e-6)
+        assert c.held_by == [], "cancel must release BOTH hands, not just the one that opened"
+
+    def test_either_hand_opening_palm_cancels_a_shared_grab(self):
+        """'Always available' means either participant in a two-handed hold
+        can end it — not only the one that grabbed first."""
+        b = Board()
+        c = self._model(b)
+        _grab_now(b, [(0.45, 0.5, True, False), (0.55, 0.5, True, False)])
+        b.apply_hands([(0.45, 0.5, True, False), (0.55, 0.5, False, True)])
+        assert c.held_by == []
+        assert c.scale == pytest.approx(1.0, abs=1e-6)
+
+    def test_open_palm_on_a_hand_holding_nothing_does_nothing_odd(self):
+        """Cancel is defined in terms of undoing a hold. A hand that opens
+        while holding nothing has nothing to cancel — it simply stays idle."""
+        b = Board()
+        c = self._at(b, 0.5, 0.5)
+        b.apply_hands([(0.9, 0.9, False, True)])
+        assert c.held_by == [] and (c.x, c.y) == (0.5, 0.5)
+        assert b.hand_state(0) == HandState.IDLE
+
+    def test_open_palm_never_arms_a_grab(self):
+        """An open hand must not be mistaken for the start of a pinch — arming
+        on it would let a subsequent accidental pinch grab immediately, with
+        no dwell, the exact hole this whole mechanism exists to close."""
+        b = Board()
+        c = self._at(b, 0.5, 0.5)
+        b.apply_hands([(0.5, 0.5, False, True)], now=0.0)
+        b.apply_hands([(0.5, 0.5, True, False)], now=0.01)
+        assert c.held_by == [], "open palm must not have pre-armed the grab"
+
+    def test_cancel_reverts_to_before_the_grab_STARTED_not_before_the_second_hand_joined(self):
+        """The pre-grab snapshot must be captured once, when the FIRST hand
+        takes hold — not re-captured when a second hand joins later. A single
+        drag-then-two-hand-scale sequence is the only way this distinction is
+        observable: if the snapshot were retaken at the second hand's join,
+        cancel would only undo the scaling, leaving the drag in place."""
+        b = Board()
+        c = self._model(b, x=0.30, y=0.30)
+        _grab_now(b, [(0.30, 0.30, True, False)])       # one hand grabs
+        b.apply_hands([(0.60, 0.60, True, False)])       # ...and drags it away
+        assert (c.x, c.y) == pytest.approx((0.60, 0.60)), "setup: the drag must have moved it"
+        # A second hand joins near the NEW position — this is the moment a
+        # buggy re-capture would wrongly treat as "the start".
+        _grab_now(b, [(0.60, 0.60, True, False), (0.62, 0.60, True, False)])
+        # The first frame with both hands held only establishes the span
+        # reference (see test_it_does_not_jump_on_the_second_hand_landing) —
+        # a second, wider frame is what actually changes the scale.
+        b.apply_hands([(0.58, 0.60, True, False), (0.64, 0.60, True, False)])
+        b.apply_hands([(0.55, 0.60, True, False), (0.67, 0.60, True, False)])  # spread: scale up
+        assert c.scale > 1.0, "setup: the spread must have grown it"
+        b.apply_hands([(0.55, 0.60, False, True), (0.67, 0.60, True, False)])  # cancel
+        assert (c.x, c.y) == pytest.approx((0.30, 0.30)), \
+            "cancel undid only the scale, not the drag from before the second hand ever joined"
+        assert c.scale == pytest.approx(1.0, abs=1e-6)
 
 
 # ── The transport, against a real server ─────────────────────────────────────
@@ -424,15 +612,15 @@ class TestModels:
     def test_hands_spreading_apart_scale_it_up(self):
         b = Board()
         c = self._model(b)
-        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])   # span 0.10
-        b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])   # span 0.20
+        _grab_now(b, [(0.45, 0.5, True), (0.55, 0.5, True)])     # span 0.10
+        b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])    # span 0.20
         assert c.scale == pytest.approx(2.0, abs=0.01)
 
     def test_hands_coming_together_scale_it_down(self):
         b = Board()
         c = self._model(b)
-        b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])   # span 0.20
-        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])   # span 0.10
+        _grab_now(b, [(0.40, 0.5, True), (0.60, 0.5, True)])     # span 0.20
+        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])    # span 0.10
         assert c.scale == pytest.approx(0.5, abs=0.01)
 
     def test_it_does_not_jump_on_the_second_hand_landing(self):
@@ -441,15 +629,15 @@ class TestModels:
         instant the second hand arrives."""
         b = Board()
         c = self._model(b)
-        b.apply_hands([(0.30, 0.5, True), (0.70, 0.5, True)])
+        _grab_now(b, [(0.30, 0.5, True), (0.70, 0.5, True)])
         assert c.scale == pytest.approx(1.0, abs=1e-6), "it resized on grab"
 
     def test_turning_your_hands_rotates_it(self):
         import math
         b = Board()
         c = self._model(b)
-        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])   # flat
-        b.apply_hands([(0.5, 0.45, True), (0.5, 0.55, True)])   # quarter turn
+        _grab_now(b, [(0.45, 0.5, True), (0.55, 0.5, True)])     # flat
+        b.apply_hands([(0.5, 0.45, True), (0.5, 0.55, True)])    # quarter turn
         assert abs(c.rot) == pytest.approx(math.pi / 2, abs=0.05)
 
     def test_scale_is_clamped_at_both_ends(self):
@@ -458,19 +646,19 @@ class TestModels:
         from agent.board import MAX_SCALE, MIN_SCALE
         b = Board()
         c = self._model(b)
-        b.apply_hands([(0.499, 0.5, True), (0.501, 0.5, True)])
+        _grab_now(b, [(0.499, 0.5, True), (0.501, 0.5, True)])
         b.apply_hands([(0.0, 0.5, True), (1.0, 0.5, True)])
         assert c.scale <= MAX_SCALE
         b2 = Board()
         c2 = self._model(b2)
-        b2.apply_hands([(0.0, 0.5, True), (1.0, 0.5, True)])
+        _grab_now(b2, [(0.0, 0.5, True), (1.0, 0.5, True)])
         b2.apply_hands([(0.4999, 0.5, True), (0.5001, 0.5, True)])
         assert c2.scale >= MIN_SCALE
 
     def test_dropping_to_one_hand_goes_back_to_dragging(self):
         b = Board()
         c = self._model(b)
-        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])
+        _grab_now(b, [(0.45, 0.5, True), (0.55, 0.5, True)])
         b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])
         grown = c.scale
         b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, False)])  # right hand opens
@@ -484,9 +672,9 @@ class TestModels:
         reset to 1.0 — otherwise every regrab throws away your work."""
         b = Board()
         c = self._model(b)
-        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])
+        _grab_now(b, [(0.45, 0.5, True), (0.55, 0.5, True)])
         b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])
         assert c.scale == pytest.approx(2.0, abs=0.01)
         b.apply_hands([])                                        # let go
-        b.apply_hands([(0.45, 0.5, True), (0.55, 0.5, True)])    # grab again
+        _grab_now(b, [(0.45, 0.5, True), (0.55, 0.5, True)])     # grab again
         assert c.scale == pytest.approx(2.0, abs=0.01)

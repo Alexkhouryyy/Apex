@@ -69,6 +69,13 @@ WRIST = 0
 THUMB_TIP = 4
 INDEX_TIP = 8
 MIDDLE_MCP = 9          # base knuckle of the middle finger
+INDEX_PIP = 6
+MIDDLE_TIP = 12
+MIDDLE_PIP = 10
+RING_PIP = 14
+RING_TIP = 16
+PINKY_PIP = 18
+PINKY_TIP = 20
 
 # Pinch is the ratio of thumb-to-index distance against the hand's own span
 # (wrist to middle knuckle), NOT a pixel distance. A hand near the camera is
@@ -287,9 +294,57 @@ def pinch_ratio(lms) -> Optional[float]:
     return gap / span
 
 
+def is_open_palm(lms) -> Optional[bool]:
+    """A deliberate open hand — the escape gesture for the glass board.
+
+    A generic technique, not read from any other project: a finger counts as
+    extended when its tip sits farther from the wrist than that finger's own
+    PIP joint does — the ordinary geometric fact that a straightened finger
+    reaches further than a curled one, checked per-finger so a fully splayed
+    hand is unambiguous. Requires all four non-thumb fingers extended
+    simultaneously; a single extended finger (pointing) or two (a peace sign)
+    must not read as "open", or the board's cancel gesture would fire on
+    ordinary pointing.
+
+    Distance ratios, not raw distances, keep this working at any distance from
+    the camera the same way `pinch_ratio` does above.
+
+    Returns None on unusable landmarks — including a degenerate wrist span,
+    which would otherwise divide by zero — so a caller can tell "not open"
+    from "couldn't tell" rather than treating them alike.
+    """
+    try:
+        wrist = lms[WRIST]
+        pairs = ((INDEX_TIP, INDEX_PIP), (MIDDLE_TIP, MIDDLE_PIP),
+                 (RING_TIP, RING_PIP), (PINKY_TIP, PINKY_PIP))
+    except (IndexError, TypeError):
+        return None
+    try:
+        span = ((lms[WRIST].x - lms[MIDDLE_MCP].x) ** 2 +
+                (lms[WRIST].y - lms[MIDDLE_MCP].y) ** 2) ** 0.5
+    except (IndexError, AttributeError, TypeError):
+        return None
+    if span <= 1e-6:
+        return None
+    try:
+        for tip_idx, pip_idx in pairs:
+            tip, pip = lms[tip_idx], lms[pip_idx]
+            d_tip = ((wrist.x - tip.x) ** 2 + (wrist.y - tip.y) ** 2) ** 0.5
+            d_pip = ((wrist.x - pip.x) ** 2 + (wrist.y - pip.y) ** 2) ** 0.5
+            # A small margin (in units of hand span), not a bare ">" — a
+            # half-curled finger can have its tip trivially farther than its
+            # own PIP by noise alone, which would make "mostly open" register
+            # as fully open.
+            if (d_tip - d_pip) / span < 0.15:
+                return False
+    except (IndexError, AttributeError, TypeError):
+        return None
+    return True
+
+
 def landmarks_to_cursor(lms, *, mirror: bool = True,
                         threshold: Optional[float] = None):
-    """One hand's 21 landmarks -> `(x, y, pinched)` for the recognizer.
+    """One hand's 21 landmarks -> `(x, y, pinched, open_palm)` for the recognizer.
 
     The index fingertip is the cursor, because a pointing finger is where a
     person believes they are pointing.
@@ -298,6 +353,11 @@ def landmarks_to_cursor(lms, *, mirror: bool = True,
     without this a hand moving to the user's right travels *left* in the image
     and `swipe_right` fires for a leftward wave — an inverted axis that would be
     maddening to debug and trivially avoidable here.
+
+    `open_palm` defaults to False on unusable landmarks (`is_open_palm` returned
+    None) rather than propagating the ambiguity — a cursor is either present or
+    it is not, and "cancel" firing on a shrug of missing data would be worse
+    than "cancel" simply not firing that frame.
     """
     if threshold is None:
         threshold = getattr(config, "HANDTRACK_PINCH_RATIO", DEFAULT_PINCH_RATIO)
@@ -308,13 +368,14 @@ def landmarks_to_cursor(lms, *, mirror: bool = True,
         return None
     ratio = pinch_ratio(lms)
     pinched = ratio is not None and ratio < threshold
+    open_palm = bool(is_open_palm(lms))
     if mirror:
         x = 1.0 - x
     # MediaPipe normalizes to the frame, but a hand at the very edge can report
     # slightly outside it. Clamp so window fractions stay window fractions.
     x = min(1.0, max(0.0, x))
     y = min(1.0, max(0.0, y))
-    return (x, y, pinched)
+    return (x, y, pinched, open_palm)
 
 
 def order_by_handedness(cursors: list, labels: list) -> list:

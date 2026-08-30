@@ -1,10 +1,15 @@
 """Gesture recognition — deliberately blind to where the hand positions came from.
 
 `agent/handtrack.py` (Apex's own MediaPipe tracker, reading the webcam
-directly) hands this a list of `(x, y, pinched)` per hand, in window fractions.
-That is the entire contract this module needs — it never touches a camera, a
-socket, or a clock of its own, which is why it is pure and cheaply testable
-with recorded frame tables rather than a live hand.
+directly) hands this a list of `(x, y, pinched, ...)` per hand, in window
+fractions — this module reads only the first three positions and ignores
+anything after, which is deliberate: `agent/board.py` consumes a fourth
+element (`open_palm`, for its cancel gesture) from the exact same stream, and
+neither module should have to agree with the other about the tuple's full
+shape to use its own piece of it. That is the entire contract this module
+needs — it never touches a camera, a socket, or a clock of its own, which is
+why it is pure and cheaply testable with recorded frame tables rather than a
+live hand.
 
 An earlier version of Apex also polled a separate `barehands` server (MediaPipe
 running inside a Chrome tab) as a second source feeding the same contract —
@@ -154,7 +159,8 @@ class GestureRecognizer:
         if len(cursors) != self._hand_count:
             self._hand_count = len(cursors)
             self._tracks = [_Track() for _ in cursors]
-            for tr, (x, y, p) in zip(self._tracks, cursors):
+            for tr, cur in zip(self._tracks, cursors):
+                x, y, p = cur[0], cur[1], cur[2]
                 tr.samples.append((now, x, y))
                 if p:
                     tr.pinch_start, tr.pinch_anchor = now, (x, y)
@@ -169,7 +175,7 @@ class GestureRecognizer:
                 tr.samples.clear()
                 tr.pinch_start = tr.pinch_anchor = None
                 continue
-            x, y, pinched = cursors[cur_idx]
+            x, y, pinched = cursors[cur_idx][0], cursors[cur_idx][1], cursors[cur_idx][2]
             tr.samples.append((now, x, y))
             tr.trim(now, max(WAVE_WINDOW, SWIPE_WINDOW) + 0.5)
             if pinched:
@@ -215,7 +221,8 @@ class GestureRecognizer:
                 continue
             _, lx, ly = tr.samples[-1]
             best, best_d = None, MAX_STEP
-            for i, (x, y, _p) in enumerate(cursors):
+            for i, cur in enumerate(cursors):
+                x, y = cur[0], cur[1]
                 if i in taken:
                     continue
                 d = ((x - lx) ** 2 + (y - ly) ** 2) ** 0.5

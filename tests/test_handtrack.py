@@ -71,11 +71,94 @@ class TestPinchRatio:
         assert handtrack.pinch_ratio(bad) is None
 
 
+def _open_hand(*, openness=1.0, span=0.15):
+    """21 landmarks with every finger placed, so is_open_palm has real PIP/tip
+    pairs to compare rather than the four points `_hand` above bothers with.
+
+    `openness` interpolates each fingertip from folded-in-at-the-PIP (0.0) to
+    fully extended (1.0) — the thing is_open_palm actually measures, expressed
+    directly rather than as a pose a reader has to visualize. Scaled by `span`
+    itself (not a fixed constant) because `is_open_palm`'s margin is a fraction
+    of span too — a fixed pixel-ish range would make the mapping between
+    `openness` and the production margin arbitrary instead of proportional.
+    """
+    wrist_y = 0.5 + span
+    lms = [_lm(0.5, wrist_y) for _ in range(21)]
+    lms[handtrack.WRIST] = _lm(0.5, wrist_y)
+    lms[handtrack.MIDDLE_MCP] = _lm(0.5, 0.5)
+    pip_y = 0.45
+    tip_y = pip_y - openness * span
+    lms[handtrack.INDEX_PIP] = _lm(0.47, pip_y)
+    lms[handtrack.INDEX_TIP] = _lm(0.47, tip_y)
+    lms[handtrack.MIDDLE_PIP] = _lm(0.50, pip_y)
+    lms[handtrack.MIDDLE_TIP] = _lm(0.50, tip_y)
+    lms[handtrack.RING_PIP] = _lm(0.53, pip_y)
+    lms[handtrack.RING_TIP] = _lm(0.53, tip_y)
+    lms[handtrack.PINKY_PIP] = _lm(0.56, pip_y)
+    lms[handtrack.PINKY_TIP] = _lm(0.56, tip_y)
+    lms[handtrack.THUMB_TIP] = _lm(0.35, 0.5)
+    return lms
+
+
+class TestIsOpenPalm:
+    """The board's cancel gesture. Must fire on a deliberate flat hand and
+    nowhere else — a false positive here cancels a drag the user never meant
+    to abandon; a false negative leaves no escape hatch at all."""
+
+    def test_a_fully_open_hand_is_open(self):
+        assert handtrack.is_open_palm(_open_hand(openness=1.0)) is True
+
+    def test_a_closed_fist_is_not_open(self):
+        assert handtrack.is_open_palm(_open_hand(openness=0.0)) is False
+
+    def test_a_half_curled_hand_is_not_open(self):
+        """THE margin this function exists for. A tip merely past its own PIP
+        by tracking noise must not register as a deliberate open hand — that
+        would make ordinary hand wobble fire the cancel gesture at random."""
+        assert handtrack.is_open_palm(_open_hand(openness=0.1)) is False
+
+    @pytest.mark.parametrize("finger_tip", [
+        "index_tip", "middle_tip", "ring_tip", "pinky_tip",
+    ])
+    def test_one_curled_finger_is_enough_to_refuse(self, finger_tip):
+        """Pointing (one finger extended, the rest folded) must never read as
+        'open' — only a fully splayed hand may cancel a grab. Here it is the
+        OTHER three that are open and just one folded, the complementary case:
+        a single folded finger among four extended ones must still refuse."""
+        lms = _open_hand(openness=1.0)
+        tip_idx = getattr(handtrack, finger_tip.upper())
+        pip_idx = getattr(handtrack, finger_tip.upper().replace("TIP", "PIP"))
+        # Fold just this one finger back onto its own PIP; the other three
+        # stay fully extended from the openness=1.0 baseline.
+        lms[tip_idx] = _lm(lms[pip_idx].x, lms[pip_idx].y)
+        assert handtrack.is_open_palm(lms) is False
+
+    def test_a_degenerate_span_does_not_divide_by_zero(self):
+        h = _open_hand(openness=1.0)
+        h[handtrack.WRIST] = h[handtrack.MIDDLE_MCP]
+        assert handtrack.is_open_palm(h) is None
+
+    @pytest.mark.parametrize("bad", [[], None, "not landmarks", [_lm(0, 0)]])
+    def test_garbage_landmarks_return_none_not_raise(self, bad):
+        assert handtrack.is_open_palm(bad) is None
+
+    def test_none_is_distinct_from_false(self):
+        """A caller (landmarks_to_cursor) that collapsed None into False would
+        be making a claim — 'not open' — about a hand it could not actually
+        read. The two must stay different values here even though the caller
+        is free to coerce them."""
+        garbage_result = handtrack.is_open_palm(None)
+        closed_result = handtrack.is_open_palm(_open_hand(openness=0.0))
+        assert garbage_result is None
+        assert closed_result is False
+        assert garbage_result is not closed_result
+
+
 class TestLandmarksToCursor:
     def test_the_index_fingertip_is_the_cursor(self):
         lms = _hand(x=0.3, y=0.7)
         lms[handtrack.INDEX_TIP] = _lm(0.25, 0.75)
-        x, y, _p = handtrack.landmarks_to_cursor(lms, mirror=False)
+        x, y, _p, _op = handtrack.landmarks_to_cursor(lms, mirror=False)
         assert (x, y) == pytest.approx((0.25, 0.75))
 
     def test_mirroring_flips_x_and_only_x(self):
@@ -115,7 +198,7 @@ class TestLandmarksToCursor:
         downstream is measured against the wrong scale."""
         lms = _hand()
         lms[handtrack.INDEX_TIP] = _lm(1.4, -0.3)
-        x, y, _ = handtrack.landmarks_to_cursor(lms, mirror=False)
+        x, y, _, _op = handtrack.landmarks_to_cursor(lms, mirror=False)
         assert 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0
 
     def test_the_pinch_threshold_is_configurable(self, monkeypatch):
