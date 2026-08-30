@@ -429,6 +429,7 @@ class HandTracker(threading.Thread):
         self._latest_frame = None       # BGR ndarray, for tools/camera.py
         self._latest_ts = 0.0
         self._latest_cursors: list = []
+        self._jpeg_error_logged = False  # see latest_jpeg
         self._cap = None
         self._landmarker = None
         self._frame_no = 0
@@ -479,9 +480,33 @@ class HandTracker(threading.Thread):
                 frame = cv2.resize(frame, (max_width, int(h * max_width / w)))
             ok, buf = cv2.imencode(".jpg", frame,
                                    [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-            return bytes(buf) if ok else None
-        except Exception:
+            if not ok:
+                self._log_jpeg_failure("cv2.imencode reported failure "
+                                       "(returned ok=False) with no exception")
+                return None
+            return bytes(buf)
+        except Exception as e:
+            # A tracker that has hands and pinch working but no visible camera
+            # backdrop is exactly what this produces if left silent — cursors
+            # come from cv2.VideoCapture + MediaPipe, a path that does not run
+            # through here at all, so this can fail on its own, invisibly,
+            # while gestures keep working. That combination used to look
+            # identical to "no camera plugged in" from the board; it no longer
+            # does, because it is now printed at least once.
+            self._log_jpeg_failure(f"{type(e).__name__}: {e}")
             return None
+
+    def _log_jpeg_failure(self, detail: str) -> None:
+        if self._jpeg_error_logged:
+            return
+        self._jpeg_error_logged = True
+        clash = opencv_conflict()
+        hint = (f" Likely cause: {len(clash)} OpenCV packages installed "
+               f"({', '.join(clash)}) — {opencv_repair_command()}") if clash else ""
+        print(f"[HandTrack] The board's camera backdrop failed to encode: "
+              f"{detail}.{hint} Hand tracking itself is unaffected — this "
+              f"only means the /board page shows no video, not that gestures "
+              f"stopped working.")
 
     def latest_cursors(self):
         """This frame's hands, for anything that needs them outside the loop."""

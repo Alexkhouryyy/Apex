@@ -319,6 +319,91 @@ class TestBrokenOpenCVInstall:
         assert "do not just uninstall" in src.lower()
 
 
+class TestLatestJpeg:
+    """The board's video backdrop. Found live: hand tracking (cursors, pinch)
+    runs through cv2.VideoCapture + MediaPipe, a path that does not touch this
+    function at all — so this can fail on its own, invisibly, while gestures
+    keep working perfectly. Before this file, it did: any exception here was
+    swallowed and returned None forever, which is byte-for-byte what "camera
+    not delivering frames" looks like from the board. The two are not the same
+    problem and must not print the same way — one means hand tracking is
+    dead, the other means only the picture is.
+    """
+
+    def _tracker(self):
+        t = handtrack.HandTracker(log=None)
+        return t
+
+    def test_a_working_frame_encodes_to_real_jpeg_bytes(self):
+        import numpy as np
+        t = self._tracker()
+        frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        t._latest_frame = frame
+        t._latest_ts = __import__("time").time()
+        out = t.latest_jpeg()
+        assert out is not None and out[:2] == b"\xff\xd8", "not a real JPEG"
+
+    def test_no_frame_yet_returns_none_quietly(self):
+        """Nothing has been captured — not a failure, just not there yet."""
+        t = self._tracker()
+        assert t.latest_jpeg() is None
+
+    def test_an_encode_exception_is_reported_not_swallowed(self, monkeypatch, capsys):
+        import numpy as np
+        t = self._tracker()
+        t._latest_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        t._latest_ts = __import__("time").time()
+
+        def _raise(*a, **k):
+            raise RuntimeError("boom")
+        monkeypatch.setattr("cv2.imencode", _raise)
+
+        assert t.latest_jpeg() is None
+        out = capsys.readouterr().out
+        assert "boom" in out, "the actual exception must be visible, not hidden"
+        assert "gestures" in out.lower() or "hand tracking itself" in out.lower(), \
+            "must say this is NOT the same as hand tracking being broken"
+
+    def test_the_failure_is_reported_once_not_every_frame(self, monkeypatch, capsys):
+        """At ~15-20 Hz, printing on every frame would flood the console into
+        uselessness within seconds — worse than the silence it replaces."""
+        import numpy as np
+        t = self._tracker()
+        t._latest_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        t._latest_ts = __import__("time").time()
+        monkeypatch.setattr("cv2.imencode", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+
+        for _ in range(5):
+            assert t.latest_jpeg() is None
+        assert capsys.readouterr().out.count("[HandTrack]") == 1
+
+    def test_ok_false_with_no_exception_is_also_reported(self, monkeypatch, capsys):
+        """cv2.imencode signals failure by returning ok=False, not only by
+        raising — both must be caught, or this silently returns None only for
+        the exception case and stays a mystery for the other."""
+        import numpy as np
+        t = self._tracker()
+        t._latest_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        t._latest_ts = __import__("time").time()
+        monkeypatch.setattr("cv2.imencode", lambda *a, **k: (False, None))
+
+        assert t.latest_jpeg() is None
+        assert "[HandTrack]" in capsys.readouterr().out
+
+    def test_a_known_opencv_conflict_is_named_as_the_likely_cause(self, monkeypatch, capsys):
+        import numpy as np
+        t = self._tracker()
+        t._latest_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        t._latest_ts = __import__("time").time()
+        monkeypatch.setattr(handtrack, "opencv_conflict",
+                            lambda: ["opencv-python", "opencv-contrib-python"])
+        monkeypatch.setattr("cv2.imencode", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+
+        t.latest_jpeg()
+        out = capsys.readouterr().out
+        assert "opencv-python" in out and "uninstall" in out.lower()
+
+
 class TestCameraCoexistence:
     """The webcam is exclusive. While the tracker holds it, a second
     VideoCapture fails — including Apex's own camera_capture tool, which would
