@@ -25,14 +25,23 @@ _agent_run_fn: Optional[Callable] = None
 _speak_fn: Optional[Callable] = None
 
 
-def init(agent_run_fn: Callable, speak_fn: Callable) -> None:
-    """Wire up and start the scheduler. Call once at startup."""
-    global _scheduler, _agent_run_fn, _speak_fn
-    _agent_run_fn = agent_run_fn
-    _speak_fn = speak_fn
+def init_db() -> None:
+    """Create the scheduled_tasks table. Idempotent, and safe to call with no
+    scheduler running.
 
-    # Ensure the tasks table exists
-    import sqlite3
+    Every other module with its own table (agent/goals.py, agent/devices.py,
+    26 of them in total) exposes this same init_db() so main.py's boot
+    sequence and a test's fixture can create exactly the schema they need
+    without side effects. This one used to be inlined inside init() only —
+    the ONE module out of 27 not following the convention — which meant
+    nothing except a full init(agent_run_fn, speak_fn) call (starting a real
+    background scheduler) could bring the table into existence. A test that
+    reaches code touching scheduled_tasks without wanting a live
+    BackgroundScheduler running had no lighter way in, which is exactly the
+    gap that let tests/test_answers.py's websocket test pass locally (the
+    table already existed from unrelated prior use) and fail on a clean
+    checkout with nothing to fall back on.
+    """
     with longterm._conn() as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS scheduled_tasks (
@@ -46,6 +55,15 @@ def init(agent_run_fn: Callable, speak_fn: Callable) -> None:
                 run_count INTEGER DEFAULT 0
             )
         """)
+
+
+def init(agent_run_fn: Callable, speak_fn: Callable) -> None:
+    """Wire up and start the scheduler. Call once at startup."""
+    global _scheduler, _agent_run_fn, _speak_fn
+    _agent_run_fn = agent_run_fn
+    _speak_fn = speak_fn
+
+    init_db()
 
     _scheduler = BackgroundScheduler(
         timezone="UTC",

@@ -568,13 +568,22 @@ def test_frontend_handles_the_rewrite_event():
 
 # --- the live WebSocket must survive bookkeeping failures --------------------
 
-def test_websocket_survives_device_registration_failure(monkeypatch):
+def test_websocket_survives_device_registration_failure(monkeypatch, test_db):
     """Found by driving the real dashboard in a browser, not by any unit test.
 
     devices.touch() ran unguarded in the WS handler, so one DB error closed the
     socket before the first frame — silently killing the live feed, research
     streaming and council streaming, with nothing on screen to explain it.
+
+    `test_db` points longterm.DB_PATH at a fresh temp file but only creates
+    longterm's own tables; scheduled_tasks is agent/scheduler.py's, so its
+    init_db() runs here too. The handler this test exercises calls
+    sched.list_tasks() while building the snapshot, which needs that table to
+    query — devices.touch() is the ONE failure this test means to simulate,
+    and it is mocked separately below.
     """
+    from agent import scheduler as _sched_mod
+    _sched_mod.init_db()
     from fastapi.testclient import TestClient
     from dashboard import server
     from agent import devices

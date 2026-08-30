@@ -18,7 +18,17 @@ from agent import core, persona
 
 
 @pytest.fixture
-def agent(monkeypatch):
+def agent(monkeypatch, test_db):
+    """`test_db` (conftest.py) points longterm.DB_PATH at a fresh temp file,
+    but only initializes longterm's OWN tables — every other module (26 of
+    them) owns its own schema and its own init_db(). _effective_system_prompt()
+    pulls active goals via agent/goals.py, so that one has to be created here
+    too, or this depends on the real production DB already having a `goals`
+    table from unrelated prior use — which is exactly why this passed locally
+    and failed on a clean CI checkout with no such file at all.
+    """
+    from agent import goals as _goals_mod
+    _goals_mod.init_db()
     monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "sk-test", raising=False)
     return core.AgentCore()
 

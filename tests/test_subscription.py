@@ -46,6 +46,21 @@ def test_available_names_the_missing_sdk(monkeypatch):
 
 
 def test_available_names_the_missing_cli(monkeypatch):
+    """Isolated from whether claude-agent-sdk happens to be installed on
+    whatever machine runs this test.
+
+    Before this fix the test only patched shutil.which and assumed the SDK
+    import already succeeds — true on a dev machine that installed it by
+    hand, false on a clean checkout of requirements.txt (claude-agent-sdk
+    ships there now, but a bare `pip install` environment without it should
+    still report the CLI-specific message, not whichever one the SDK check
+    happens to hit first). A fake module in sys.modules makes the import
+    succeed regardless of what is really installed, so this test proves only
+    the CLI-missing branch, the one thing its name claims.
+    """
+    import sys
+    import types
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", types.ModuleType("claude_agent_sdk"))
     monkeypatch.setattr(sub.shutil, "which", lambda _: None)
     ok, why = sub.available()
     assert ok is False

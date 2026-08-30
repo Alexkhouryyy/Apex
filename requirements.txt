@@ -58,3 +58,9 @@ pytest>=8.0
 # ~7.5 MB model downloaded on first run. Only imported when the tracker starts,
 # so Apex boots fine without it.
 mediapipe
+
+# Running Apex's conversation on a Claude subscription instead of metered API
+# credits (optional, SUBSCRIPTION_ENABLED). Also needs the `claude` CLI itself
+# installed and logged in — this package alone is not sufficient, and
+# agent/subscription.available() reports whichever of the two is missing.
+claude-agent-sdk

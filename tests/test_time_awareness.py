@@ -27,7 +27,11 @@ from agent import core
 
 
 @pytest.fixture
-def agent(monkeypatch):
+def agent(monkeypatch, test_db):
+    """See tests/test_persona.py's `agent` fixture for why goals.init_db() is
+    needed here specifically — test_db only creates longterm's own tables."""
+    from agent import goals as _goals_mod
+    _goals_mod.init_db()
     monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "sk-test", raising=False)
     return core.AgentCore()
 
