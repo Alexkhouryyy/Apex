@@ -34,10 +34,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import handtrack  # noqa: E402
 
-# Below this many usable readings the hand was not really detected — bad light,
-# too far from the lens, out of frame. That is not a threshold problem and must
-# not be answered with a threshold.
+# The comfortable number of readings per pose. Below it the sample is thin and
+# the answer is caveated — but NOT discarded if the separation is unambiguous.
+# See recommend_threshold for why that ordering matters.
 MIN_SAMPLES = 20
+
+# Below this, percentiles are arithmetic performed on noise: a 5th percentile
+# of three readings is just the smallest of three. This is the floor at which
+# a refusal is genuinely the only honest answer, regardless of how far apart
+# the clouds look.
+FLOOR_SAMPLES = 6
 
 # A gap narrower than this separates the clouds but leaves no room for a hand
 # held differently tomorrow. Still returns a value, with a warning.
@@ -96,16 +102,19 @@ def recommend_threshold(open_samples, pinch_samples) -> tuple:
     """
     o, p = clean(open_samples), clean(pinch_samples)
 
-    if len(o) < MIN_SAMPLES or len(p) < MIN_SAMPLES:
+    # Below the floor there is nothing to compute a percentile from, and no
+    # amount of apparent separation rescues that.
+    if len(o) < FLOOR_SAMPLES or len(p) < FLOOR_SAMPLES:
         return None, (
-            f"Not enough readings ({len(o)} open, {len(p)} pinched; need "
-            f"{MIN_SAMPLES} of each). Your hand was not detected for most of "
-            f"the window — try better light, or move closer to the camera. "
-            f"This is not a threshold problem, so guessing one would not help."
+            f"Almost nothing was measured ({len(o)} open, {len(p)} pinched). "
+            f"Your hand was barely detected — try better light, move closer to "
+            f"the camera, and keep your palm facing it. There is no threshold "
+            f"to find in this."
         )
 
     pinch_hi = percentile(p, 95)     # the loosest pinch that still counts
     open_lo = percentile(o, 5)       # the tightest open hand
+    thin = len(o) < MIN_SAMPLES or len(p) < MIN_SAMPLES
 
     if pinch_hi >= open_lo:
         return None, (
@@ -128,6 +137,34 @@ def recommend_threshold(open_samples, pinch_samples) -> tuple:
         )
 
     value = round(pinch_hi + gap * GAP_BIAS, 2)
+
+    # A thin sample with a MARGINAL gap is genuinely unknown — refuse. A thin
+    # sample with an UNAMBIGUOUS gap is a usable answer that happens to have
+    # been cheap to get, and throwing it away helps nobody.
+    #
+    # The original ordering checked sample count first and returned before
+    # looking at separation at all. On a real run — 9 open and 37 pinched
+    # readings, separated by 0.23, which is not a close call — it refused, and
+    # told the user "this is not a threshold problem" when a threshold was
+    # exactly what the data had just determined. The count and the separation
+    # answer different questions; asking them in the wrong order discarded the
+    # answer.
+    if thin and gap < COMFORTABLE_GAP:
+        return None, (
+            f"Only {len(o)} open and {len(p)} pinched readings, and they are "
+            f"separated by just {gap:.2f}. Either alone might be workable; "
+            f"together they are not enough to fit a threshold to. Improve the "
+            f"light or move closer and run this again."
+        )
+    if thin:
+        return value, (
+            f"Cleanly separated by {gap:.2f} (pinched up to {pinch_hi:.2f}, "
+            f"open from {open_lo:.2f}), so {value} is a sound threshold — but "
+            f"it came from only {len(o)} open and {len(p)} pinched readings. "
+            f"Your hand was detected in a minority of frames, which is worth "
+            f"fixing on its own (light, distance, or HANDTRACK_MIN_CONFIDENCE) "
+            f"even though the threshold itself is clear."
+        )
     if gap < COMFORTABLE_GAP:
         return value, (
             f"Separated, but only by {gap:.2f}. {value} will work today and is "

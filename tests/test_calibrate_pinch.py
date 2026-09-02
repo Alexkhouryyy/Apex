@@ -91,12 +91,55 @@ class TestRecommendThreshold:
         value, reason = cal.recommend_threshold(_spread(1.2, width=0.2), wide_pinch)
         assert value is None, reason
 
-    def test_too_few_readings_refuse_and_say_it_is_not_a_threshold_problem(self):
-        value, reason = cal.recommend_threshold([1.8] * 5, [0.2] * 5)
+    def test_almost_no_readings_refuse_whatever_the_separation_looks_like(self):
+        """Below the floor, a percentile is arithmetic performed on noise — the
+        5th percentile of three readings is just the smallest of three. No
+        amount of apparent separation rescues that."""
+        value, reason = cal.recommend_threshold([1.8] * 3, [0.2] * 3)
         assert value is None
-        assert "not enough" in reason.lower()
+        assert "barely detected" in reason.lower()
         assert "light" in reason.lower() or "closer" in reason.lower(), \
             "must point at the real cause rather than the threshold"
+
+    def test_a_thin_sample_with_a_CLEAN_gap_still_answers(self):
+        """THE fix. A real run produced 9 open and 37 pinched readings
+        separated by 0.23 — not a close call — and the calibrator refused,
+        telling the user "this is not a threshold problem" when a threshold
+        was exactly what the data had just determined.
+
+        The count and the separation answer different questions. Asking them
+        in the wrong order threw away the answer.
+        """
+        open_thin = [0.83, 0.86, 0.88, 0.90, 0.92, 0.94, 0.97, 1.00, 1.02]
+        pinched = [0.25 + i * 0.01 for i in range(37)]      # 0.25–0.61
+        value, reason = cal.recommend_threshold(open_thin, pinched)
+        assert value is not None, reason
+        assert 0.6 < value < 0.85, f"{value} should sit inside the gap"
+        assert "only 9 open" in reason, "it must still say the sample was thin"
+        assert "detected in a minority" in reason, \
+            "the poor detection rate is a separate problem worth naming"
+
+    def test_a_thin_sample_with_a_MARGINAL_gap_refuses(self):
+        """Either alone might be workable. Together they are not enough to fit
+        a threshold to, and fitting one anyway is how 'I don't know' becomes a
+        confident setting."""
+        # Gap ~0.10: comfortably above MIN_USABLE_GAP, so it is NOT the
+        # noise refusal, and below COMFORTABLE_GAP, so the thinness is what
+        # decides it. Aiming at the wrong side of MIN_USABLE_GAP was my first
+        # attempt and it passed against a different branch entirely.
+        value, reason = cal.recommend_threshold(
+            [0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82],
+            [0.50, 0.52, 0.54, 0.56, 0.58, 0.59, 0.60])
+        assert value is None
+        assert "not enough to fit a threshold" in reason.lower()
+
+    def test_a_full_sample_with_a_clean_gap_carries_no_caveat(self):
+        """The caveat has to be earned, or it appears on every run and stops
+        being read."""
+        value, reason = cal.recommend_threshold(
+            _spread(0.92, width=0.1), _spread(0.36, width=0.1))
+        assert value is not None
+        assert "thin" not in reason.lower() and "minority" not in reason.lower()
 
     def test_a_noise_width_gap_refuses(self):
         """Ordered is not the same as separated.

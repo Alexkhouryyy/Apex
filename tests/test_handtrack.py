@@ -15,6 +15,7 @@ The landmark shape used below was read off the installed MediaPipe package
 recalled — an API assumed rather than checked is how the last several bugs got
 in.
 """
+import pathlib
 import types
 
 import pytest
@@ -611,16 +612,50 @@ class TestDelegateChoice:
 
 
 class TestDetectionConfidence:
-    def test_the_default_is_above_mediapipes_hallucinating_one(self):
-        """MediaPipe defaults to 0.5, which invents hands in a cluttered
-        background. On Apex a phantom hand does not just grab a card — it can
-        fire a gesture and wake you when nobody moved."""
-        assert handtrack.DEFAULT_MIN_CONFIDENCE > 0.5
-
-    def test_it_is_not_cranked_so_high_that_real_hands_are_missed(self):
-        assert handtrack.DEFAULT_MIN_CONFIDENCE <= 0.75
+    def test_it_stays_inside_the_band_where_mediapipe_is_usable(self):
+        """Below ~0.3 MediaPipe reports hand-shaped clutter as hands; above
+        ~0.75 it starts missing real ones. The number inside that band is a
+        measurement (see config.py), but the band itself is a property of the
+        model and a value outside it is a mistake, not a tuning choice."""
+        assert 0.3 <= handtrack.DEFAULT_MIN_CONFIDENCE <= 0.75
 
     def test_it_is_configurable(self):
         import inspect
         src = inspect.getsource(handtrack.build_landmarker)
         assert "HANDTRACK_MIN_CONFIDENCE" in src
+
+
+class TestTheFallbacksAgreeWithConfig:
+    """`handtrack` keeps module-level defaults for the two tuning numbers and
+    reads them via `getattr(config, ..., DEFAULT)`. That fallback never fires in
+    practice, because config always defines both — which is exactly why it can
+    drift for months without anyone noticing.
+
+    It has already happened once. `HANDTRACK_PINCH_RATIO` was raised from 0.45
+    to 0.70 and `HANDTRACK_MIN_CONFIDENCE` lowered from 0.7 to 0.5 after a real
+    calibration run, and both module constants kept the pre-measurement values —
+    two quiet second answers disagreeing with the first, one of them by a
+    quarter. These tests exist so the next change to either number cannot leave
+    a stale twin behind."""
+
+    @staticmethod
+    def _shipped_default(name: str) -> float:
+        """Read the literal out of config.py's source rather than
+        `getattr(config, name)`. The attribute is whatever the environment
+        overrode it to, so comparing against it would make these tests pass or
+        fail based on the developer's own `.env` — which is how an
+        environment-dependent test got into CI on this project once already.
+        The claim here is about the number Apex *ships*."""
+        import re
+        src = (pathlib.Path(config.__file__)).read_text(encoding="utf-8")
+        m = re.search(rf'{name} = float\(os\.getenv\("{name}", "([0-9.]+)"\)\)', src)
+        assert m, f"could not find the shipped default for {name} in config.py"
+        return float(m.group(1))
+
+    def test_the_pinch_fallback_matches_the_shipped_default(self):
+        assert handtrack.DEFAULT_PINCH_RATIO == self._shipped_default(
+            "HANDTRACK_PINCH_RATIO")
+
+    def test_the_confidence_fallback_matches_the_shipped_default(self):
+        assert handtrack.DEFAULT_MIN_CONFIDENCE == self._shipped_default(
+            "HANDTRACK_MIN_CONFIDENCE")

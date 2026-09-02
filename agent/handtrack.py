@@ -82,10 +82,12 @@ PINKY_TIP = 20
 # bigger in pixels but not more pinched, so any absolute threshold would make
 # pinch depend on how far away you sit.
 #
-# 0.45 is a starting point, not a measurement. It was chosen without a camera to
-# test against, so it is configurable and HANDTRACK_DEBUG logs the ratio it
-# actually sees — tune it against your hand rather than trusting this number.
-DEFAULT_PINCH_RATIO = 0.45
+# This is only the fallback for a config module that somehow lacks the setting;
+# config.HANDTRACK_PINCH_RATIO is what actually runs. It is kept in step with
+# that default deliberately — the earlier 0.45 here was a guess, and once
+# config was set from a real calibration run this constant would have been a
+# second, quieter answer disagreeing with the first by a quarter.
+DEFAULT_PINCH_RATIO = 0.70
 
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
              "hand_landmarker/float16/1/hand_landmarker.task")
@@ -205,13 +207,19 @@ def ensure_model(timeout: float = 120.0) -> Optional[Path]:
         return None
 
 
-# MediaPipe's own default detection confidence is 0.5, which hallucinates.
-# barehands' source carries a comment from live use: a busy background is full of
-# hand-shaped clutter, a ghost hand appeared with none in frame, and 0.65 was not
-# enough to kill it. On Apex a phantom hand does not merely grab a card — it can
-# fire a gesture and wake you when nobody moved. Their note also warns that past
-# 0.75 real tracking suffers, which is why this is not simply cranked higher.
-DEFAULT_MIN_CONFIDENCE = 0.7
+# The fallback for a config module lacking the setting; config.HANDTRACK_MIN_
+# CONFIDENCE is what actually runs, and this is kept in step with it so the two
+# cannot quietly disagree (tests/test_handtrack.py enforces that).
+#
+# This was 0.7, on the reasoning that MediaPipe's own 0.5 hallucinates hands in
+# a cluttered background and a phantom hand on Apex does not merely grab a card
+# — it can fire a gesture and wake you when nobody moved. That worry is real but
+# it was never weighed against the cost on the other side, because there was no
+# camera here to weigh it with. A calibration run on real hardware measured the
+# cost: a hand detected in 46 of 205 frames, and an OPEN hand detected less
+# often (11%) than a pinched one (31%), which is backwards — a splayed hand is
+# the easy case. The full reasoning lives beside the setting in config.py.
+DEFAULT_MIN_CONFIDENCE = 0.5
 
 
 def choose_delegate(preference: str, try_create):
@@ -651,9 +659,9 @@ class HandTracker(threading.Thread):
             cursors.append(cur)
             labels.append(_handedness_label(result, idx))
             if getattr(config, "HANDTRACK_DEBUG", False):
-                # The tuning surface. HANDTRACK_PINCH_RATIO was picked without a
-                # camera to test against, so print the ratio actually measured
-                # and let the number be chosen from data instead of from me.
+                # The tuning surface. The shipped HANDTRACK_PINCH_RATIO came
+                # from one hand on one camera; print the ratio actually
+                # measured so yours can disagree with it out loud.
                 r = pinch_ratio(lms)
                 shown = f"{r:.3f}" if r is not None else "n/a"
                 print(f"[HandTrack] hand={labels[-1] or '?'} x={cur[0]:.3f} "

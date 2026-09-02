@@ -381,10 +381,26 @@ HANDTRACK_POLL_HZ = float(os.getenv("HANDTRACK_POLL_HZ", "20"))
 # wave. Set false only if your camera already mirrors.
 HANDTRACK_MIRROR = os.getenv("HANDTRACK_MIRROR", "true").lower() in {"1", "true", "yes"}
 # Pinch = thumb-to-index distance as a fraction of the hand's own span, so it is
-# scale-invariant and does not change with how far away you sit. This default was
-# chosen WITHOUT a camera to test against — set HANDTRACK_DEBUG=true, watch the
-# measured ratios, and set this from data rather than trusting the number.
-HANDTRACK_PINCH_RATIO = float(os.getenv("HANDTRACK_PINCH_RATIO", "0.45"))
+# scale-invariant and does not change with how far away you sit.
+#
+# 0.70 comes from a real hand on a real webcam (scripts/calibrate_pinch.py):
+# pinched readings ran 0.25-0.62 (median 0.36) and an open hand 0.83-1.02
+# (median 0.92) — a clean 0.21 gap. The previous default, 0.45, was a guess
+# made with no camera to test against, and it sat BELOW the top of the real
+# pinch range: every pinch measuring 0.45-0.62 was silently classified as
+# not-a-pinch, which is why pinch appeared broken rather than mis-tuned.
+#
+# 0.70 sits just below the middle of that gap, and is deliberately a touch
+# lower than the 0.74 the calibrator recommends for the hand it measured. The
+# calibrator biases toward the open side so YOUR lazy pinch still registers,
+# which it has earned the right to do because it measured you. A shipped
+# default has measured nobody, and erring high is the worse failure on the
+# board: an open hand read as a pinch grabs and drags cards you never touched,
+# whereas a pinch that wants a little more commitment merely feels stiff.
+#
+# So: run scripts/calibrate_pinch.py for your own hand. It will tell you if
+# yours disagrees, and refuse rather than guess if the reading is ambiguous.
+HANDTRACK_PINCH_RATIO = float(os.getenv("HANDTRACK_PINCH_RATIO", "0.70"))
 HANDTRACK_DEBUG = os.getenv("HANDTRACK_DEBUG", "false").lower() in {"1", "true", "yes"}
 # The webcam is exclusive: while Apex holds it, no video call can open it. This
 # is how long `release_camera` hands it back before tracking resumes on its own,
@@ -405,10 +421,21 @@ HANDTRACK_GESTURE_ACTIONS = [e.strip() for e in os.getenv(
 # rather than silently degrading when a GPU context cannot be made, so the
 # fallback is safe; the delegate actually used is printed at startup either way.
 HANDTRACK_DELEGATE = os.getenv("HANDTRACK_DELEGATE", "auto").strip().lower()
-# MediaPipe's own default is 0.5 and hallucinates hands in a cluttered
-# background. A phantom hand can fire a gesture and wake Apex when nobody moved.
-# Above ~0.75 real tracking starts to suffer.
-HANDTRACK_MIN_CONFIDENCE = float(os.getenv("HANDTRACK_MIN_CONFIDENCE", "0.7"))
+# How sure MediaPipe must be before it reports a hand at all.
+#
+# Back to MediaPipe's own default of 0.5. The previous 0.7 was reasoning, not
+# measurement — the worry was that a low bar hallucinates hands in a cluttered
+# background and a phantom hand could fire a gesture when nobody moved. What a
+# real calibration run showed is the cost of the other side: the hand was
+# detected in only 46 of 205 frames (~22%), and an OPEN hand fared worse (11%)
+# than a pinched one (31%), which is backwards — a splayed hand is the easy
+# case. A tracker that sees your hand a fifth of the time reads as broken, and
+# the phantom-gesture risk it was buying protection against is separately
+# covered: gestures need dwell time, hysteresis and a cooldown before they fire
+# (agent/gestures.py, agent/board.py's ARM_DWELL_SECONDS).
+#
+# Raise it if you see gestures fire when your hands are nowhere near the camera.
+HANDTRACK_MIN_CONFIDENCE = float(os.getenv("HANDTRACK_MIN_CONFIDENCE", "0.5"))
 
 # Run Apex's conversation on a Claude subscription instead of metered API
 # credits. Off by default: it needs the `claude` CLI installed and logged in,
