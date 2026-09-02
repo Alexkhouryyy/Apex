@@ -146,6 +146,29 @@ Speak naturally, like a sharp colleague, not a documentation page."""
 # lives here instead, beside the tool that populates it.
 _BLENDER_OBJECTS: dict[str, str] = {}
 
+
+def _store_asset_version(assets_mod, slug: str, result: dict, command: dict,
+                         parent=None):
+    """Move a fresh Blender export into the asset's folder as a new version.
+
+    Returns the jail-relative path for a board card's `src`, or None if the
+    file could not be stored — in which case NO version is recorded, keeping
+    the rule that a failed export never becomes part of the history.
+    """
+    import shutil as _shutil
+    from pathlib import Path as _Path
+    src_path = _Path(result["export_dir"]) / result["filename"]
+    filename = assets_mod.next_filename(slug)
+    dest_root = assets_mod.asset_root(slug)
+    try:
+        dest_root.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(src_path, dest_root / filename)
+    except OSError as e:
+        print(f"[Board] could not store asset version for '{slug}': {e}")
+        return None
+    assets_mod.add_version(slug, filename, command=command, parent=parent)
+    return f"{assets_mod.CREATED_DIR}/{slug}/{filename}"
+
 TOOLS = [
     {
         "name": "screenshot",
@@ -280,6 +303,57 @@ TOOLS = [
                 "color": {"type": "string", "description": "A name like 'metallic_blue', or '#rrggbb'."},
             },
             "required": ["title", "color"],
+        },
+    },
+    {
+        "name": "board_undo",
+        "description": (
+            "Undo the last thing that changed on the board — a card added, "
+            "removed, moved, resized or recolored. Use it whenever the user "
+            "says 'undo that', 'go back', or 'no, put it back'. Says what it "
+            "reversed, or that there was nothing to undo."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "board_redo",
+        "description": (
+            "Re-apply the last thing board_undo reversed. Use for 'redo' or "
+            "'actually, put it back the way it was'."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "board_history",
+        "description": (
+            "Show the version history of a created 3D object — every version, "
+            "what command produced it, and which one is current. Use when the "
+            "user asks what changed, what it looked like before, or which "
+            "version is showing. Omit `title` to list every saved object."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The object's name. Omit to list everything saved.", "default": ""},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "board_restore",
+        "description": (
+            "Put a previously saved 3D object back on the board by name — "
+            "'bring back the phone stand'. Restores the current version by "
+            "default; pass `version` to bring back an earlier one, which does "
+            "NOT delete the newer ones."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The name it was saved under."},
+                "version": {"type": "integer", "description": "Optional specific version number. Defaults to the current one."},
+            },
+            "required": ["title"],
         },
     },
     {
@@ -1617,8 +1691,8 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return out
 
         elif name == "board_create":
+            from agent import assets as _assets
             from agent import blender_bridge as _bb
-            from agent import props as _props
             from agent.board import get_board
             shape = (inputs.get("shape") or "").strip().lower()
             title = (inputs.get("title") or shape or "object").strip()
@@ -1629,18 +1703,19 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             except _bb.BlenderError as e:
                 return f"[Blender] {e}"
 
-            import os as _os
-            import shutil as _shutil
-            src_path = _os.path.join(result["export_dir"], result["filename"])
-            dest_root = _props.props_root() / "created"
-            dest_root.mkdir(parents=True, exist_ok=True)
-            dest_path = dest_root / result["filename"]
-            try:
-                _shutil.copy2(src_path, dest_path)
-            except OSError as e:
-                return (f"[Blender] created '{result['name']}' but could not copy "
-                        f"the export into the props folder: {e}")
-            rel = f"created/{result['filename']}"
+            # The request that produced this, kept verbatim — the versioning
+            # rule is "record the initiating voice command or structured action
+            # and the tool result", and reconstructing it later from the mesh
+            # is impossible.
+            command = {"tool": "board_create", "shape": shape,
+                       "dims_mm": inputs.get("dims_mm") or {},
+                       "color": inputs.get("color") or None}
+            slug = result["slug"]
+            _assets.create(slug, title, command=command)
+            rel = _store_asset_version(_assets, slug, result, command, parent=None)
+            if rel is None:
+                return (f"[Blender] created '{result['name']}' but could not "
+                        f"save the export into the props folder.")
 
             # Remembered so board_recolor can find the Blender-side object again
             # by the same title the user will say next — the board's own Card
@@ -1655,8 +1730,8 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return out
 
         elif name == "board_recolor":
+            from agent import assets as _assets
             from agent import blender_bridge as _bb
-            from agent import props as _props
             from agent.board import get_board
             title = (inputs.get("title") or "").strip()
             blender_name = _BLENDER_OBJECTS.get(title.lower())
@@ -1669,25 +1744,88 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             except _bb.BlenderError as e:
                 return f"[Blender] {e}"
 
-            import shutil as _shutil
-            src_path = f"{result['export_dir']}/{result['filename']}"
-            dest_root = _props.props_root() / "created"
-            dest_root.mkdir(parents=True, exist_ok=True)
-            dest_path = dest_root / result["filename"]
-            try:
-                _shutil.copy2(src_path, dest_path)
-            except OSError as e:
-                return f"[Blender] recolored but could not copy the new export: {e}"
-            rel = f"created/{result['filename']}"
+            slug = result["slug"]
+            existing = _assets.load(slug)
+            parent = existing.get("current_version") if existing else None
+            command = {"tool": "board_recolor", "color": inputs.get("color")}
+            rel = _store_asset_version(_assets, slug, result, command, parent=parent)
+            if rel is None:
+                return "[Blender] recolored, but the new export could not be saved."
 
             board = get_board()
             updated = False
             for c in board.cards():
                 if c["title"].lower() == title.lower() and c["kind"] == "model":
                     updated = board.set_src(c["id"], rel) or updated
-            out = (f"'{title}' recolored — the previous version is kept at "
-                  f"{dest_root}, not overwritten." if updated else
-                  f"Recolored, but '{title}' is no longer on the board to update.")
+            data = _assets.load(slug) or {}
+            v = data.get("current_version")
+            out = (f"'{title}' recolored — saved as v{v}; "
+                  f"v{parent} is kept, not overwritten." if updated else
+                  f"Recolored as v{v}, but '{title}' is no longer on the board.")
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name == "board_undo":
+            from agent.board import get_board
+            what = get_board().undo()
+            if what is None:
+                return "There is nothing to undo — the board hasn't changed yet."
+            out = f"Undone: {what}."
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name == "board_redo":
+            from agent.board import get_board
+            what = get_board().redo()
+            if what is None:
+                return "There is nothing to redo."
+            out = f"Redone: {what}."
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name == "board_history":
+            from agent import assets as _assets
+            title = (inputs.get("title") or "").strip()
+            if not title:
+                saved = _assets.listing()
+                if not saved:
+                    return ("Nothing has been created yet. board_create makes "
+                            "an object; every version is kept from then on.")
+                lines = [f"{len(saved)} saved object(s):"]
+                for d in saved:
+                    lines.append(f"  {d.get('title')} — "
+                                 f"{len(d.get('versions', []))} version(s), "
+                                 f"currently v{d.get('current_version')}")
+                return "\n".join(lines)
+            data = _assets.find_by_title(title)
+            if data is None:
+                return (f"No saved object called '{title}'. Run board_history "
+                        f"with no title to see what exists.")
+            return _assets.describe(data)
+
+        elif name == "board_restore":
+            from agent import assets as _assets
+            from agent.board import get_board
+            title = (inputs.get("title") or "").strip()
+            data = _assets.find_by_title(title)
+            if data is None:
+                return (f"No saved object called '{title}'. Run board_history "
+                        f"with no title to see what exists.")
+            version = inputs.get("version")
+            if version is not None:
+                rel = _assets.version_file(data["id"], int(version))
+                if rel is None:
+                    return (f"'{title}' has no v{version} — it has "
+                            f"{len(data.get('versions', []))} version(s).")
+                label = f"v{version}"
+            else:
+                rel = _assets.current_file(data["id"])
+                label = f"v{data.get('current_version')}"
+                if rel is None:
+                    return f"'{title}' has no versions saved yet."
+            card = get_board().add("model", data.get("title") or title, src=rel)
+            out = (f"'{card.title}' ({label}) is back on the board — "
+                   f"grab it with one hand, two to scale.")
             _broadcast_live_event("board", out)
             return out
 

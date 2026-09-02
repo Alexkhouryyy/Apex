@@ -37,9 +37,10 @@ class _FakeBridge:
 
     def create_object(self, shape, dims_mm, color=None, name=""):
         self.calls.append(("create", shape, name))
-        filename = f"{name.lower().replace(' ', '-')}-abc123.glb"
+        slug = name.lower().replace(" ", "-")
+        filename = f"{slug}-abc123.glb"
         (self.export_dir_path() / filename).write_bytes(b"glTF-fake-bytes")
-        return {"name": name.lower().replace(" ", "-"), "slug": name,
+        return {"name": slug, "slug": slug,
                 "filename": filename, "export_dir": self.export_dir}
 
     def recolor_object(self, blender_name, color):
@@ -84,10 +85,19 @@ class TestBoardCreate:
             "title": "Test Object"})
 
         assert "created" in out and "board" in out
-        assert (jail / "created").is_dir()
-        files = list((jail / "created").glob("*.glb"))
-        assert len(files) == 1
-        assert files[0].read_bytes() == b"glTF-fake-bytes"
+        # The asset is a versioned FOLDER now, not a loose file — v1.glb plus
+        # a manifest recording what produced it.
+        folder = jail / "created" / "test-object"
+        assert folder.is_dir(), "the asset should have its own folder"
+        assert (folder / "v1.glb").read_bytes() == b"glTF-fake-bytes"
+        manifest = json.loads((folder / "asset.json").read_text())
+        assert manifest["title"] == "Test Object"
+        assert manifest["current_version"] == 1
+        v1 = manifest["versions"][0]
+        assert v1["command"]["tool"] == "board_create"
+        assert v1["command"]["shape"] == "cube"
+        assert v1["command"]["dims_mm"] == {"width": 50, "depth": 50, "height": 50}
+        assert v1["parent"] is None, "the first version has no ancestor"
 
         cards = get_board().cards()
         assert len(cards) == 1
@@ -131,17 +141,24 @@ class TestBoardRecolor:
         core._execute_tool("board_create", {
             "shape": "cube", "dims_mm": {"width": 50, "depth": 50, "height": 50},
             "title": "Cube One"})
-        before = list((jail / "created").glob("*.glb"))
-        assert len(before) == 1
+        folder = jail / "created" / "cube-one"
+        assert sorted(p.name for p in folder.glob("*.glb")) == ["v1.glb"]
         first_src = get_board().cards()[0]["id"]
 
         out = core._execute_tool("board_recolor",
                                  {"title": "Cube One", "color": "metallic_blue"})
         assert "recolored" in out
 
-        after = list((jail / "created").glob("*.glb"))
-        assert len(after) == 2, "the original export must still be on disk"
-        assert {p.read_bytes() for p in after} == {b"glTF-fake-bytes", b"glTF-recolored-bytes"}
+        assert sorted(p.name for p in folder.glob("*.glb")) == ["v1.glb", "v2.glb"], \
+            "the original version must still be on disk"
+        assert (folder / "v1.glb").read_bytes() == b"glTF-fake-bytes"
+        assert (folder / "v2.glb").read_bytes() == b"glTF-recolored-bytes"
+
+        manifest = json.loads((folder / "asset.json").read_text())
+        assert manifest["current_version"] == 2
+        v2 = manifest["versions"][1]
+        assert v2["command"] == {"tool": "board_recolor", "color": "metallic_blue"}
+        assert v2["parent"] == 1, "a recolor must record what it was derived from"
 
         card = [c for c in get_board().cards() if c["id"] == first_src][0]
-        assert card["src"].endswith("recolored.glb"), "the card must point at the NEW export"
+        assert card["src"].endswith("v2.glb"), "the card must point at the NEW version"

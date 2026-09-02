@@ -555,6 +555,152 @@ class TestBoardPageCredentials:
             "a close handler that ignores its close code cannot tell them apart"
 
 
+class TestUndoRedo:
+    """The design doc's History family, and the golden demonstration says the
+    words "Undo that" out loud — there was no undo at all until now."""
+
+    def _at(self, b, x=0.5, y=0.5, title="T"):
+        return b.add("card", title, x=x, y=y)
+
+    def test_nothing_to_undo_on_a_fresh_board(self):
+        assert Board().undo() is None
+
+    def test_undo_removes_a_card_that_was_added(self):
+        b = Board()
+        self._at(b, title="GONE")
+        assert b.undo() is not None
+        assert b.count() == 0
+
+    def test_redo_puts_it_back(self):
+        b = Board()
+        self._at(b, title="BACK")
+        b.undo()
+        assert b.redo() is not None
+        assert [c["title"] for c in b.cards()] == ["BACK"]
+
+    def test_a_restored_card_keeps_its_identity(self):
+        """A card that comes back with a NEW id breaks every reference to it —
+        board_recolor's title lookup, the renderer's element mapping, and any
+        undo entry still holding the old id."""
+        b = Board()
+        c = self._at(b, title="ID")
+        original = c.id
+        b.undo(); b.redo()
+        assert b.cards()[0]["id"] == original
+
+    def test_undo_reverses_a_drag_to_where_it_started(self):
+        b = Board()
+        c = self._at(b, 0.30, 0.30)
+        _grab_now(b, [(0.30, 0.30, True)])
+        b.apply_hands([(0.70, 0.70, True)])
+        b.apply_hands([(0.70, 0.70, False)])         # release commits the move
+        assert (c.x, c.y) == pytest.approx((0.70, 0.70))
+        b.undo()
+        assert (c.x, c.y) == pytest.approx((0.30, 0.30))
+
+    def test_redo_reapplies_the_drag(self):
+        b = Board()
+        c = self._at(b, 0.30, 0.30)
+        _grab_now(b, [(0.30, 0.30, True)])
+        b.apply_hands([(0.70, 0.70, True)])
+        b.apply_hands([(0.70, 0.70, False)])
+        b.undo(); b.redo()
+        assert (c.x, c.y) == pytest.approx((0.70, 0.70))
+
+    def test_a_cancelled_drag_leaves_nothing_to_undo(self):
+        """Cancel already put the card back, so there is nothing left to undo.
+
+        Worth being precise about WHY, because it is not the guard it looks
+        like: the cancel branch consumes the pre-grab snapshot when it reverts
+        the card, so by the time the release-commit code runs there is no
+        snapshot left to build an undo step from. Verified by reverting the
+        `before != after` guard and watching this still pass — the mechanism
+        is the consumed snapshot, not that comparison.
+        """
+        b = Board()
+        self._at(b, 0.30, 0.30)
+        depth = len(b._undo)
+        _grab_now(b, [(0.30, 0.30, True, False)])
+        b.apply_hands([(0.70, 0.70, True, False)])
+        b.apply_hands([(0.70, 0.70, False, True)])   # open palm: cancel
+        assert len(b._undo) == depth, "a cancel should add no undo step"
+
+    def test_grabbing_and_letting_go_without_moving_records_nothing(self):
+        """THE case the `before != after` guard actually covers: a pinch that
+        picks something up and puts it straight back down changed nothing, and
+        an undo step for it would make undo spend a press doing nothing
+        visible — which reads as undo being broken."""
+        b = Board()
+        self._at(b, 0.30, 0.30)
+        depth = len(b._undo)
+        _grab_now(b, [(0.30, 0.30, True)])           # grab, no movement
+        b.apply_hands([(0.30, 0.30, False)])         # let go where it started
+        assert len(b._undo) == depth, "a no-op grab recorded an undo step"
+
+    def test_undo_brings_back_a_cleared_board(self):
+        b = Board()
+        self._at(b, title="a"); self._at(b, title="b")
+        b.clear()
+        b.undo()
+        assert sorted(c["title"] for c in b.cards()) == ["a", "b"]
+
+    def test_undo_reverses_a_removal(self):
+        b = Board()
+        c = self._at(b, title="REMOVED")
+        b.remove(c.id)
+        b.undo()
+        assert [x["title"] for x in b.cards()] == ["REMOVED"]
+
+    def test_undo_reverses_a_recolor(self):
+        b = Board()
+        c = b.add("model", "Engine", src="created/engine/v1.glb")
+        b.set_src(c.id, "created/engine/v2.glb")
+        b.undo()
+        assert b.cards()[0]["src"] == "created/engine/v1.glb"
+
+    def test_a_new_action_discards_the_redo_branch(self):
+        """Standard undo semantics: once you change course, the future you
+        abandoned is gone. Keeping it would let redo resurrect a card into a
+        board that has moved on without it."""
+        b = Board()
+        self._at(b, title="first")
+        b.undo()
+        self._at(b, title="second")
+        assert b.redo() is None
+        assert [c["title"] for c in b.cards()] == ["second"]
+
+    def test_undo_walks_back_through_several_steps(self):
+        b = Board()
+        for name in ("one", "two", "three"):
+            self._at(b, title=name)
+        b.undo(); b.undo()
+        assert [c["title"] for c in b.cards()] == ["one"]
+
+    def test_the_stack_is_bounded(self):
+        """Unbounded, this is a slow memory leak on a board left running for
+        weeks — each entry holds full card snapshots."""
+        from agent.board import UNDO_DEPTH
+        b = Board(max_cards=200)
+        for i in range(UNDO_DEPTH + 20):
+            self._at(b, title=f"c{i}")
+        assert len(b._undo) == UNDO_DEPTH
+
+    def test_undo_survives_a_restart_as_a_position_not_a_stack(self, tmp_path, monkeypatch):
+        """The undo STACK is in-memory and deliberately does not persist — but
+        an undo that happened before a restart must not come back undone."""
+        from agent import board as board_mod
+        from agent import longterm
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "b.db"))
+        board_mod.init_db()
+        b = Board(); b.persist = True
+        c = b.add("card", "STAYS", x=0.3, y=0.3)
+        b.add("card", "UNDONE")
+        b.undo()                                     # the second card goes away
+
+        after = Board(); after.persist = True; after.restore()
+        assert [x["title"] for x in after.cards()] == ["STAYS"]
+
+
 class TestPersistence:
     """The board survives a restart.
 

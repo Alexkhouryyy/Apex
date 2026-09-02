@@ -104,6 +104,11 @@ MAX_SCALE = 4.0
 # never feels delayed — at BOARD_FPS's 15 Hz this is under two frames.
 ARM_DWELL_SECONDS = 0.12
 
+# How many operations "undo" can walk back through. Bounded because each entry
+# holds card snapshots, and a board left running for weeks would otherwise grow
+# one slowly forever.
+UNDO_DEPTH = 50
+
 
 class HandState:
     """Named states for one tracked hand slot, for introspection and tests.
@@ -206,6 +211,131 @@ class Board:
         # Off for a bare Board() so tests get pure in-memory behaviour without
         # touching the real database; get_board() turns it on for the live one.
         self.persist = False
+        # Reversible history. The design doc's History command family is
+        # "undo, redo, compare versions, name, save, restore", and the golden
+        # demonstration says the words "Undo that" out loud — there was no
+        # undo at all. Capped because an unbounded stack of card snapshots is
+        # a slow memory leak on a board that runs for weeks.
+        self._undo: list[dict] = []
+        self._redo: list[dict] = []
+
+    # -- history -----------------------------------------------------------
+    @staticmethod
+    def _snapshot(card: "Card") -> dict:
+        """Everything needed to rebuild a card exactly, id included — a
+        restored card with a new id would break every reference to it."""
+        return {"id": card.id, "kind": card.kind, "title": card.title,
+                "body": card.body, "src": card.src, "x": card.x, "y": card.y,
+                "scale": card.scale, "rot": card.rot, "created": card.created}
+
+    @staticmethod
+    def _from_snapshot(snap: dict) -> "Card":
+        c = Card(snap["kind"], snap["title"], snap["body"],
+                 snap["x"], snap["y"], snap["src"])
+        c.id, c.scale, c.rot, c.created = (
+            snap["id"], snap["scale"], snap["rot"], snap["created"])
+        return c
+
+    def _record(self, op: dict) -> None:
+        """Push a reversible operation. A new action discards the redo branch,
+        which is what every undo stack does and what a user expects: once you
+        change course, the future you abandoned is gone."""
+        self._undo.append(op)
+        del self._undo[:-UNDO_DEPTH]
+        self._redo.clear()
+
+    def _apply(self, op: dict, *, forward: bool) -> str:
+        """Run an operation in either direction. One function for both so undo
+        and redo cannot drift apart — the commonest way a redo quietly stops
+        being the exact inverse of its undo."""
+        kind = op["kind"]
+        with self._lock:
+            if kind == "add":
+                snap = op["card"]
+                if forward:
+                    self._cards.append(self._from_snapshot(snap))
+                else:
+                    self._cards = [c for c in self._cards if c.id != snap["id"]]
+                what = f"added '{snap['title']}'" if forward else f"removed '{snap['title']}'"
+            elif kind == "remove":
+                snap = op["card"]
+                if forward:
+                    self._cards = [c for c in self._cards if c.id != snap["id"]]
+                else:
+                    self._cards.append(self._from_snapshot(snap))
+                what = f"removed '{snap['title']}'" if forward else f"restored '{snap['title']}'"
+            elif kind == "clear":
+                snaps = op["cards"]
+                if forward:
+                    self._cards = []
+                else:
+                    self._cards = [self._from_snapshot(s) for s in snaps]
+                what = (f"cleared {len(snaps)} card(s)" if forward
+                        else f"put {len(snaps)} card(s) back")
+            elif kind == "transform":
+                target = next((c for c in self._cards if c.id == op["id"]), None)
+                state = op["after"] if forward else op["before"]
+                if target is not None:
+                    target.x, target.y, target.scale, target.rot = state
+                what = f"moved '{op.get('title', '')}'"
+            elif kind == "src":
+                target = next((c for c in self._cards if c.id == op["id"]), None)
+                if target is not None:
+                    target.src = op["after"] if forward else op["before"]
+                what = f"changed what '{op.get('title', '')}' shows"
+            else:
+                what = "did nothing"
+            # Snapshot what needs writing while still holding the lock; the
+            # writes themselves happen outside it.
+            live = {c.id: c for c in self._cards}
+        # Persist the result either way. An undo that survives in memory but
+        # not on disk would come back undone-then-redone after a restart.
+        if kind in ("add", "remove", "clear"):
+            self._persist_all()
+        else:
+            target = live.get(op.get("id"))
+            if target is not None:
+                self._write(target)
+        return what
+
+    def _persist_all(self) -> None:
+        """Rewrite storage to match memory exactly — used after operations that
+        add or delete cards, where a per-card write cannot express a removal."""
+        if not self.persist:
+            return
+        try:
+            from agent import longterm
+            with self._lock:
+                snaps = [self._snapshot(c) for c in self._cards]
+            with longterm._conn() as c:
+                c.execute("DELETE FROM board_cards")
+                for s in snaps:
+                    c.execute(
+                        """INSERT INTO board_cards
+                           (id, kind, title, body, src, x, y, scale, rot, created)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                        (s["id"], s["kind"], s["title"], s["body"], s["src"],
+                         s["x"], s["y"], s["scale"], s["rot"], s["created"]))
+        except Exception as e:
+            print(f"[Board] could not save the board: {e}")
+
+    def undo(self) -> Optional[str]:
+        """Reverse the last operation. None when there is nothing to undo."""
+        if not self._undo:
+            return None
+        op = self._undo.pop()
+        what = self._apply(op, forward=False)
+        self._redo.append(op)
+        return what
+
+    def redo(self) -> Optional[str]:
+        """Re-apply the last undone operation. None when there is none."""
+        if not self._redo:
+            return None
+        op = self._redo.pop()
+        what = self._apply(op, forward=True)
+        self._undo.append(op)
+        return what
 
     # -- persistence -------------------------------------------------------
     def _write(self, card: "Card") -> None:
@@ -282,12 +412,14 @@ class Board:
         # disk stall the tracker thread mid-frame.
         self._forget(evicted)
         self._write(card)
+        self._record({"kind": "add", "card": self._snapshot(card)})
         return card
 
     def clear(self) -> int:
         with self._lock:
             n = len(self._cards)
             ids = [c.id for c in self._cards]
+            snaps = [self._snapshot(c) for c in self._cards]
             self._cards.clear()
             self._grab_offset.clear()
             self._pair_ref.clear()
@@ -295,36 +427,42 @@ class Board:
             self._pre_grab.clear()
             self._hand_state.clear()
         self._forget(ids)
+        if snaps:
+            self._record({"kind": "clear", "cards": snaps})
         return n
 
     def set_src(self, card_id: str, src: str) -> bool:
         """Point an existing card at a different prop file — used when a
         recolor produces a new export that must replace what the card shows,
         without disturbing its position, scale or rotation."""
-        found = None
+        found, previous = None, None
         with self._lock:
             for c in self._cards:
                 if c.id == card_id:
+                    previous = c.src
                     c.src = src
                     found = c
                     break
         if found is None:
             return False
         self._write(found)
+        self._record({"kind": "src", "id": card_id, "title": found.title,
+                      "before": previous, "after": src})
         return True
 
     def remove(self, card_id: str) -> bool:
-        removed = False
+        removed = None
         with self._lock:
             for i, c in enumerate(self._cards):
                 if c.id == card_id:
-                    self._cards.pop(i)
+                    removed = self._snapshot(self._cards.pop(i))
                     self._pair_ref.pop(card_id, None)
-                    removed = True
                     break
-        if removed:
-            self._forget([card_id])
-        return removed
+        if removed is None:
+            return False
+        self._forget([card_id])
+        self._record({"kind": "remove", "card": removed})
+        return True
 
     def cards(self) -> list[dict]:
         with self._lock:
@@ -382,7 +520,8 @@ class Board:
             # reach back to exactly where it was. Not a cancel — the position
             # it was left at is kept, same as an ordinary release.
             with self._lock:
-                released = [c for c in self._cards if c.held_by]
+                released = [(c, self._pre_grab.get(c.id))
+                            for c in self._cards if c.held_by]
                 for c in self._cards:
                     c.held_by = []
                 self._grab_offset.clear()
@@ -393,8 +532,13 @@ class Board:
             # Hands leaving the frame ends a hold as surely as un-pinching does,
             # so it commits the same way — otherwise walking away from the
             # camera mid-drag would silently discard the move.
-            for c in released:
+            for c, pre in released:
                 self._write(c)
+                after = (c.x, c.y, c.scale, c.rot)
+                if pre is not None and tuple(pre) != after:
+                    self._record({"kind": "transform", "id": c.id,
+                                  "title": c.title, "before": tuple(pre),
+                                  "after": after})
             return
 
         with self._lock:
@@ -419,13 +563,13 @@ class Board:
                     # The pair changed, so the two-handed reference is stale.
                     self._pair_ref.pop(c.id, None)
                 if not kept:
-                    self._pre_grab.pop(c.id, None)
+                    pre = self._pre_grab.pop(c.id, None)
                     if c.held_by:
                         # Held a moment ago, held by nothing now: this is the
                         # commit point. A cancel lands here too — it reverted
                         # the card, and that revert is just as much the state
                         # worth keeping as a deliberate drop would be.
-                        released.append(c)
+                        released.append((c, pre))
                 c.held_by = kept
 
             for idx, (hx, hy, pinched, open_palm) in enumerate(hands):
@@ -482,8 +626,15 @@ class Board:
 
         # Outside the lock, and only for cards a hand just let go of — the
         # whole point of committing on release rather than per frame.
-        for c in released:
+        for c, pre in released:
             self._write(c)
+            after = (c.x, c.y, c.scale, c.rot)
+            # A cancel already put the card back, so before == after and there
+            # is nothing to undo. Recording it anyway would make "undo" spend
+            # a step doing nothing visible, which reads as undo being broken.
+            if pre is not None and tuple(pre) != after:
+                self._record({"kind": "transform", "id": c.id, "title": c.title,
+                              "before": tuple(pre), "after": after})
 
     def _two_handed(self, card: Card, hands) -> None:
         """Scale and rotate from the span and angle between two hands."""
