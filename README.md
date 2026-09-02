@@ -1,3 +1,5 @@
+![Apex](docs/assets/apex-banner.png)
+
 # Apex
 
 [![Tests](https://github.com/Alexkhouryyy/Apex/actions/workflows/tests.yml/badge.svg)](https://github.com/Alexkhouryyy/Apex/actions/workflows/tests.yml)
