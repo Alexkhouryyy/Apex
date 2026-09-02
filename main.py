@@ -106,6 +106,7 @@ def main():
     from agent import scheduler as _sched_init; _sched_init.init_db()
     from agent import board as _board_init; _board_init.init_db()
     from agent import observed as _obs_init; _obs_init.init_db()
+    from agent import council_stats as _cs_init; _cs_init.init_db()
     session_id = longterm.start_session()
     telemetry.set_session(session_id)
     print(f"[Memory] Session #{session_id} started. DB: {longterm.DB_PATH}")

@@ -208,6 +208,25 @@ TOOLS = [
         },
     },
     {
+        "name": "council_advice",
+        "description": (
+            "Before convening the council, ask whether it is likely to be "
+            "worth it for THIS kind of question, based on what past councils "
+            "actually did. Answers with evidence: how often the members "
+            "genuinely diverged on this task type, or that there isn't enough "
+            "history to say. Cheap and instant — no models are called. Use it "
+            "when tempted to convene a council for something routine. It "
+            "advises; it never refuses, and the decision stays yours."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "The question you are considering convening a council for. Omit for an overall summary by task type."},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "board_present",
         "description": (
             "Put something on Apex's glass board — the hand-tracked surface "
@@ -1657,6 +1676,16 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return tracker.release_for(
                 float(inputs.get("seconds",
                                  getattr(config, "HANDTRACK_RELEASE_SECONDS", 300))))
+
+        elif name == "council_advice":
+            from agent import council_stats as _cstats
+            question = (inputs.get("question") or "").strip()
+            if not question:
+                return _cstats.summary()
+            a = _cstats.advise(question)
+            verdict = {True: "worth convening", False: "probably not worth it",
+                       None: "no clear signal"}[a["convene"]]
+            return f"[{a['task_type']}] {verdict} — {a['reason']}"
 
         elif name == "board_present":
             from agent.board import get_board

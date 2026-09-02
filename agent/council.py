@@ -308,6 +308,15 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
         print(f"[Council] agreement measurement failed: {e}")
         measured = None
 
+    # Record what this run actually showed, so "is a council worth it for
+    # this kind of question" stops being a matter of opinion. Isolated: a
+    # bookkeeping failure must not cost the answer that was just produced.
+    try:
+        from agent import council_stats as _cstats
+        _cstats.record_run(question, member_labels, measured, confidence)
+    except Exception as e:
+        print(f"[Council] could not record the run: {e}")
+
     return CouncilResult(
         question=question,
         final_answer=clean,
