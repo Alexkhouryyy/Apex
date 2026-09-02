@@ -177,6 +177,10 @@ class BootResult:
     # Collected while the process is alive — see boot(). Checks run after it has
     # been terminated, so anything needing a live server must be captured here.
     dashboard_sweep: list = field(default_factory=list)
+    # How long the scripted turn took to land its first tool_events row. Not
+    # asserted against a threshold — reported, so a creeping slowdown shows up
+    # in the check detail instead of being absorbed by the deadline.
+    turn_seconds: float = 0.0
 
     def rows(self, table: str, where: str = "") -> list[tuple]:
         try:
@@ -189,7 +193,8 @@ class BootResult:
 
 def boot(say: str = "", script: list[dict] | None = None,
          timeout: float = 75.0, extra_env: dict | None = None,
-         args: tuple[str, ...] = ("--think",)) -> BootResult:
+         args: tuple[str, ...] = ("--think",),
+         turn_timeout: float = 45.0) -> BootResult:
     """Start main.py --text against the scripted model, say one thing, stop.
 
     `--think` by default, deliberately. Without it `use_thinking` is False and
@@ -245,6 +250,7 @@ def boot(say: str = "", script: list[dict] | None = None,
     )
     dashboard_status = None
     sweep: list = []
+    turn_seconds = 0.0
     try:
         if say:
             proc.stdin.write(say + "\n")
@@ -267,8 +273,39 @@ def boot(say: str = "", script: list[dict] | None = None,
                     break
                 time.sleep(0.5)
 
-        # Let the turn finish.
-        time.sleep(6)
+        # Wait for the turn to FINISH, rather than guessing how long a turn
+        # takes on this machine.
+        #
+        # This was `time.sleep(6)`. Six seconds is enough here and was not
+        # enough on a GitHub runner, so `tool_calls_take_effect` failed
+        # intermittently — five red runs in a row at one point — for a reason
+        # that had nothing to do with the code under test. A hard gate that
+        # fails on machine speed teaches everyone to stop reading it, which is
+        # worse than not having it.
+        #
+        # The scripted turn calls `remember`, so the turn is over when the row
+        # it writes appears. Polling for exactly what the check then asserts is
+        # deliberate and is not self-fulfilling: on timeout the row is still
+        # absent and the check still fails. What it removes is only the
+        # question "was six seconds enough", which was never the interesting
+        # one. `turn_seconds` is reported so a real slowdown stays visible
+        # instead of being absorbed by a generous deadline.
+        turn_start = time.time()
+        turn_deadline = turn_start + turn_timeout
+        while time.time() < turn_deadline:
+            if proc.poll() is not None:
+                break
+            with sqlite3.connect(str(work / "apex.db")) as c:
+                try:
+                    if c.execute("SELECT 1 FROM tool_events LIMIT 1").fetchone():
+                        break
+                except sqlite3.Error:
+                    pass         # table not created yet — boot is still going
+            time.sleep(0.25)
+        turn_seconds = time.time() - turn_start
+        # A beat for the writes the tool triggers downstream (embedding, the
+        # awareness log) to land after the row that signalled us.
+        time.sleep(1.0)
 
         # Sweep the dashboard while it is still serving. Doing this in a check
         # instead gave 61/61 "connection refused" — the checks run after the
@@ -288,6 +325,7 @@ def boot(say: str = "", script: list[dict] | None = None,
         stdout=out, db_path=work / "apex.db", home=work, dashboard_port=port,
         server=server, returncode=proc.returncode, log_bytes=len(out),
         dashboard_status=dashboard_status, dashboard_sweep=sweep,
+        turn_seconds=turn_seconds,
     )
 
 
@@ -422,7 +460,8 @@ def tool_calls_take_effect(r: BootResult) -> Finding:
     events = r.rows("tool_events")
     ok = bool(mem) and bool(events)
     return Finding("tool_calls_take_effect", ok,
-                   f"memories={len(mem)} tool_events={len(events)}")
+                   f"memories={len(mem)} tool_events={len(events)} "
+                   f"in {r.turn_seconds:.1f}s")
 
 
 @check

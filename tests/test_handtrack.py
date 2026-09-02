@@ -659,3 +659,101 @@ class TestTheFallbacksAgreeWithConfig:
     def test_the_confidence_fallback_matches_the_shipped_default(self):
         assert handtrack.DEFAULT_MIN_CONFIDENCE == self._shipped_default(
             "HANDTRACK_MIN_CONFIDENCE")
+
+
+class TestCameraOpenBackoff:
+    """`_open()` is called from `_tick()`, which runs at HANDTRACK_POLL_HZ.
+
+    Before the backoff, a machine with no camera — or one whose camera was busy
+    in a video call — rebuilt a `cv2.VideoCapture` every 50 ms for as long as
+    Apex ran. Each attempt is a full V4L2 + FFMPEG device enumeration, so it
+    burned real CPU at 20 Hz and wrote several lines of OpenCV C++ stderr per
+    attempt. `_say()` deduplicated the Python status line, which is exactly why
+    this stayed invisible from above while the log filled from below.
+
+    It also had a second cost that was harder to see: on a CI runner the
+    tracker's spin starved the turn it was booted alongside, and the smoke
+    check that watches a tool call take effect failed intermittently. A busy
+    loop does not only waste a machine, it changes the timing of everything
+    sharing it.
+    """
+
+    @staticmethod
+    def _tracker(monkeypatch, opens: list, *, succeed: bool = False):
+        t = handtrack.HandTracker(log=None)
+
+        class _Cap:
+            def isOpened(self):
+                opens.append(True)
+                return succeed
+            def read(self):
+                return False, None
+            def release(self):
+                pass
+
+        monkeypatch.setattr("cv2.VideoCapture", lambda *a, **k: _Cap())
+        return t
+
+    def test_a_refused_camera_is_not_retried_on_the_very_next_tick(self, monkeypatch):
+        opens = []
+        t = self._tracker(monkeypatch, opens)
+        assert t._open(now=100.0) is False
+        assert len(opens) == 1
+        # 50 ms later — the next tick at 20 Hz.
+        assert t._open(now=100.05) is False
+        assert len(opens) == 1, \
+            "a second device open inside the backoff window is the bug itself"
+
+    def test_it_does_retry_once_the_window_passes(self, monkeypatch):
+        """A backoff that becomes 'never' is a different bug: plug a camera in
+        and tracking would stay dead until restart."""
+        opens = []
+        t = self._tracker(monkeypatch, opens)
+        t._open(now=100.0)
+        assert t._open(now=100.0 + handtrack.CAMERA_RETRY_FIRST + 0.01) is False
+        assert len(opens) == 2
+
+    def test_the_wait_grows_and_then_stops_growing(self, monkeypatch):
+        opens = []
+        t = self._tracker(monkeypatch, opens)
+        now, seen = 100.0, []
+        for _ in range(12):
+            t._open(now=now)
+            seen.append(t._retry_delay)
+            now = t._retry_at + 0.001
+        assert seen[0] < seen[1] < seen[2], "the wait must grow after repeats"
+        assert max(seen) == handtrack.CAMERA_RETRY_MAX, \
+            "and must cap, or a long-running Apex would wait hours"
+
+    def test_a_camera_that_opens_clears_the_backoff(self, monkeypatch):
+        """A camera freed after a video call must not inherit the wait built up
+        while it was busy."""
+        opens = []
+        t = self._tracker(monkeypatch, opens)
+        t._open(now=100.0)
+        t._open(now=200.0)
+        assert t._retry_delay > handtrack.CAMERA_RETRY_FIRST
+
+        class _Open:
+            def isOpened(self): return True
+            def read(self): return False, None
+            def release(self): pass
+        monkeypatch.setattr("cv2.VideoCapture", lambda *a, **k: _Open())
+        monkeypatch.setattr(handtrack, "build_landmarker",
+                            lambda **k: (object(), "CPU", ""))
+        t._open(now=t._retry_at + 0.001)
+        assert t._retry_at == 0.0
+        assert t._retry_delay == handtrack.CAMERA_RETRY_FIRST
+
+    def test_resume_clears_the_backoff_too(self, monkeypatch):
+        """`release_camera` then `resume` is a person explicitly asking for the
+        camera back. Making them wait out a 30-second backoff would read as the
+        resume having failed."""
+        opens = []
+        t = self._tracker(monkeypatch, opens)
+        t._open(now=100.0)
+        t._open(now=200.0)
+        assert t._retry_at > 0.0
+        t.resume()
+        assert t._retry_at == 0.0
+        assert t._retry_delay == handtrack.CAMERA_RETRY_FIRST

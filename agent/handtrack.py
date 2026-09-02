@@ -221,6 +221,24 @@ def ensure_model(timeout: float = 120.0) -> Optional[Path]:
 # the easy case. The full reasoning lives beside the setting in config.py.
 DEFAULT_MIN_CONFIDENCE = 0.5
 
+# How long to wait before trying the camera again after it refuses to open.
+#
+# There was no wait at all: _open() is called from _tick(), so a machine with no
+# camera — or one whose camera is busy in a video call — rebuilt a
+# cv2.VideoCapture every 50 ms, forever. Each attempt is a full V4L2 + FFMPEG
+# device enumeration, so this burned real CPU at 20 Hz and wrote several lines
+# of OpenCV C++ stderr per attempt for as long as Apex ran. The status *message*
+# was deduplicated by _say(); the attempts underneath it never were, which is
+# why it looked quiet from the Python side while the log filled from below.
+#
+# Backs off to CAMERA_RETRY_MAX and stays there. The cap is a trade stated
+# plainly: plug a camera in and tracking resumes within half a minute rather
+# than instantly. resume() and a successful open both reset it, so the paths
+# where a person is actually waiting — handing the camera back after a call —
+# retry immediately.
+CAMERA_RETRY_FIRST = 1.0
+CAMERA_RETRY_MAX = 30.0
+
 
 def choose_delegate(preference: str, try_create):
     """Build a landmarker on the best delegate available. Returns (obj, used, note).
@@ -442,6 +460,8 @@ class HandTracker(threading.Thread):
         self._landmarker = None
         self._frame_no = 0
         self._reported = ""
+        self._retry_at = 0.0            # earliest next camera-open attempt
+        self._retry_delay = CAMERA_RETRY_FIRST
 
     # -- lifecycle ---------------------------------------------------------
     def stop(self) -> None:
@@ -463,6 +483,7 @@ class HandTracker(threading.Thread):
     def resume(self) -> str:
         with self._lock:
             self._paused_until = 0.0
+            self._reset_retry()
         return "[HandTrack] Camera reclaimed — hand tracking resumes."
 
     @property
@@ -580,16 +601,23 @@ class HandTracker(threading.Thread):
                 except Exception:
                     pass
 
-    def _open(self) -> bool:
+    def _open(self, now: Optional[float] = None) -> bool:
         import cv2
+        now = time.time() if now is None else now
         if self._cap is None:
+            if now < self._retry_at:
+                return False
             self._cap = cv2.VideoCapture(self.device_index)
             if not self._cap.isOpened():
                 self._cap = None
+                self._retry_at = now + self._retry_delay
                 self._say("camera_busy",
                           f"[HandTrack] Camera {self.device_index} would not "
-                          f"open — something else may be using it.")
+                          f"open — something else may be using it. Retrying "
+                          f"every {self._retry_delay:.0f}s.")
+                self._retry_delay = min(self._retry_delay * 2, CAMERA_RETRY_MAX)
                 return False
+            self._reset_retry()
             self._say("camera_open", "[HandTrack] Camera open.")
         if self._landmarker is None:
             import mediapipe as mp
@@ -603,6 +631,13 @@ class HandTracker(threading.Thread):
                   f"{getattr(config, 'HANDTRACK_MIN_CONFIDENCE', DEFAULT_MIN_CONFIDENCE)}.")
             self._mp = mp
         return True
+
+    def _reset_retry(self) -> None:
+        """Back to trying immediately. Called when the camera opens, and when a
+        person hands it back — waiting out a 30-second backoff after explicitly
+        saying "resume" would read as the resume having failed."""
+        self._retry_at = 0.0
+        self._retry_delay = CAMERA_RETRY_FIRST
 
     def _say(self, key: str, line: str) -> None:
         """Print a status line only when the status actually changed.
@@ -622,7 +657,7 @@ class HandTracker(threading.Thread):
             self.recognizer.feed_cursors(None, now)
             return
 
-        if not self._open():
+        if not self._open(now):
             self.recognizer.feed_cursors(None, now)
             return
 
