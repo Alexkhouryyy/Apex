@@ -1596,6 +1596,14 @@ def _execute_tool(name: str, inputs: dict) -> str:
         _outcome, _kind = _traj.classify(result)
     except Exception:
         _outcome, _kind = "ok", ""
+    # Outcomes Apex SAW, as opposed to outcomes it was told about. This is the
+    # only point that still holds the result text and the real inputs — the
+    # trajectory table above keeps neither, on purpose.
+    try:
+        from agent import observed as _observed
+        _observed.note_tool_result(name, _outcome, result, inputs)
+    except Exception:
+        pass
     _observe({
         "phase": "end", "name": name, "subject": tool_subject(inputs),
         "outcome": _outcome, "error_kind": _kind, "duration_ms": _elapsed_ms,

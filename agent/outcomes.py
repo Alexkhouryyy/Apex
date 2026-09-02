@@ -382,11 +382,33 @@ def coverage(days: int = 180) -> dict:
             ).fetchone()[0]
         except Exception:
             rated = 0
+    # The split matters more than the total. An accuracy figure built entirely
+    # from self-report and one built from observation are different claims, and
+    # a single blended number hides which one you actually have.
+    try:
+        from agent import observed as _observed
+        by_source = _observed.split(days)
+    except Exception:
+        by_source = {"observed": 0, "reported": outcomes, "observed_share": None}
+
+    obs = by_source.get("observed", 0)
+    if obs and obs == outcomes:
+        note = ("Every outcome here was observed by Apex — tool results, test "
+                "runs — rather than reported.")
+    elif obs:
+        note = (f"{obs} of {outcomes} outcomes were observed by Apex; the rest "
+                f"were reported. Self-reported outcomes are the weaker half.")
+    else:
+        note = ("Outcomes are recorded by you, not observed. This ratio is the "
+                "ceiling on what the accuracy figure is worth.")
+
     return {
         "days": days,
         "outcomes_recorded": outcomes,
         "turns_rated": rated,
         "ratio": round(outcomes / rated, 3) if rated else None,
-        "note": ("Outcomes are recorded by you, not observed. This ratio is the "
-                 "ceiling on what the accuracy figure is worth."),
+        "observed": obs,
+        "reported": by_source.get("reported", 0),
+        "observed_share": by_source.get("observed_share"),
+        "note": note,
     }
