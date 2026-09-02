@@ -555,6 +555,203 @@ class TestBoardPageCredentials:
             "a close handler that ignores its close code cannot tell them apart"
 
 
+class TestPersistence:
+    """The board survives a restart.
+
+    THE gap this closes. The design doc's own golden-loop rule is
+    "create → display → manipulate → voice-edit → persist → restart →
+    restore", and until now that loop failed at "persist": the board was an
+    in-memory singleton and every card died with the process. The restart in
+    these tests is real — a second Board built from nothing, reading only what
+    the first one wrote to the database.
+    """
+
+    def _fresh_board(self, tmp_path, monkeypatch):
+        """A persisting board pointed at a throwaway database."""
+        from agent import board as board_mod
+        from agent import longterm
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "board.db"))
+        board_mod.init_db()
+        b = Board()
+        b.persist = True
+        return b
+
+    def _restart(self, tmp_path, monkeypatch):
+        """What a restart actually is: a brand-new Board that has never seen
+        the old one, restoring from storage alone."""
+        from agent import longterm
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "board.db"))
+        b = Board()
+        b.persist = True
+        b.restore()
+        return b
+
+    def test_a_card_survives_a_restart(self, tmp_path, monkeypatch):
+        b = self._fresh_board(tmp_path, monkeypatch)
+        b.add("card", "REMEMBER ME", "body text", x=0.3, y=0.7)
+
+        after = self._restart(tmp_path, monkeypatch)
+        cards = after.cards()
+        assert [c["title"] for c in cards] == ["REMEMBER ME"]
+        assert cards[0]["body"] == "body text"
+        assert (cards[0]["x"], cards[0]["y"]) == pytest.approx((0.3, 0.7))
+
+    def test_a_model_keeps_its_prop_path_and_geometry(self, tmp_path, monkeypatch):
+        """A restored model pointing at nothing would render as an empty board
+        that claims to have something on it."""
+        b = self._fresh_board(tmp_path, monkeypatch)
+        c = b.add("model", "Engine", src="models/engine.glb")
+        c.scale, c.rot = 2.5, 1.25
+        b._write(c)
+
+        restored = self._restart(tmp_path, monkeypatch).cards()[0]
+        assert restored["kind"] == "model"
+        assert restored["src"] == "models/engine.glb"
+        assert restored["scale"] == pytest.approx(2.5)
+        assert restored["rot"] == pytest.approx(1.25)
+
+    def test_a_drag_is_committed_when_the_hand_lets_go(self, tmp_path, monkeypatch):
+        """The commit point. Position must be saved on RELEASE."""
+        b = self._fresh_board(tmp_path, monkeypatch)
+        b.add("card", "DRAGGED", x=0.30, y=0.30)
+        _grab_now(b, [(0.30, 0.30, True)])
+        b.apply_hands([(0.70, 0.70, True)])          # drag
+        b.apply_hands([(0.70, 0.70, False)])         # let go — commits
+
+        restored = self._restart(tmp_path, monkeypatch).cards()[0]
+        assert (restored["x"], restored["y"]) == pytest.approx((0.70, 0.70))
+
+    def test_hands_leaving_the_frame_also_commits(self, tmp_path, monkeypatch):
+        """Walking away from the camera mid-drag ends the hold as surely as
+        un-pinching does — it must not silently discard the move."""
+        b = self._fresh_board(tmp_path, monkeypatch)
+        b.add("card", "DRAGGED", x=0.30, y=0.30)
+        _grab_now(b, [(0.30, 0.30, True)])
+        b.apply_hands([(0.70, 0.70, True)])
+        b.apply_hands([])                            # hands gone
+
+        restored = self._restart(tmp_path, monkeypatch).cards()[0]
+        assert (restored["x"], restored["y"]) == pytest.approx((0.70, 0.70))
+
+    def test_motion_mid_drag_is_NOT_written_every_frame(self, tmp_path, monkeypatch):
+        """THE rule from the design doc: 'transient gesture motion is not
+        persisted continuously; commit on release'. At ~15 Hz, writing every
+        frame would be 15 rows a second of positions nobody chose to keep —
+        and would record the middle of a drag as though it were a decision."""
+        b = self._fresh_board(tmp_path, monkeypatch)
+        b.add("card", "DRAGGED", x=0.30, y=0.30)
+        writes = []
+        monkeypatch.setattr(b, "_write", lambda c: writes.append((c.x, c.y)))
+
+        _grab_now(b, [(0.30, 0.30, True)])
+        for step in (0.4, 0.5, 0.6, 0.7):            # four frames of dragging
+            b.apply_hands([(step, step, True)])
+        assert writes == [], "a mid-drag frame was persisted"
+
+        b.apply_hands([(0.70, 0.70, False)])         # release
+        assert len(writes) == 1, "release must commit exactly once"
+
+    def test_a_cancelled_drag_persists_the_REVERTED_position(self, tmp_path, monkeypatch):
+        """Cancel reverts the card, and that revert is the state worth keeping
+        — otherwise a restart would resurrect the drag the user just undid."""
+        b = self._fresh_board(tmp_path, monkeypatch)
+        b.add("card", "CANCELLED", x=0.30, y=0.30)
+        _grab_now(b, [(0.30, 0.30, True, False)])
+        b.apply_hands([(0.70, 0.70, True, False)])   # drag away
+        b.apply_hands([(0.70, 0.70, False, True)])   # open palm: cancel
+
+        restored = self._restart(tmp_path, monkeypatch).cards()[0]
+        assert (restored["x"], restored["y"]) == pytest.approx((0.30, 0.30))
+
+    def test_clearing_the_board_clears_storage_too(self, tmp_path, monkeypatch):
+        """Otherwise every cleared card comes back from the dead on restart."""
+        b = self._fresh_board(tmp_path, monkeypatch)
+        b.add("card", "a"); b.add("card", "b")
+        b.clear()
+        assert self._restart(tmp_path, monkeypatch).count() == 0
+
+    def test_removing_one_card_removes_only_that_one(self, tmp_path, monkeypatch):
+        b = self._fresh_board(tmp_path, monkeypatch)
+        keep = b.add("card", "KEEP")
+        drop = b.add("card", "DROP")
+        b.remove(drop.id)
+        titles = [c["title"] for c in self._restart(tmp_path, monkeypatch).cards()]
+        assert titles == ["KEEP"]
+
+    def test_eviction_past_the_cap_also_forgets_the_evicted(self, tmp_path, monkeypatch):
+        """The board caps at MAX_CARDS in memory. Storage has to cap with it,
+        or every card the cap threw away is still sitting in the database.
+
+        Restored into a LARGER board on purpose: restore() re-applies its own
+        cap, so a same-size board would trim the leftovers on the way back in
+        and show the right answer whether or not storage was ever cleaned —
+        which is exactly what the first version of this test did, and it
+        passed with the eviction-forget removed.
+        """
+        from agent import board as board_mod
+        from agent import longterm
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "board.db"))
+        board_mod.init_db()
+        b = Board(max_cards=3)
+        b.persist = True
+        for i in range(5):
+            b.add("card", f"card {i}")
+
+        roomy = Board(max_cards=50)
+        roomy.persist = True
+        roomy.restore()
+        assert [c["title"] for c in roomy.cards()] == ["card 2", "card 3", "card 4"], \
+            "evicted cards were left behind in storage"
+
+    def test_a_recolor_persists_the_new_prop_path(self, tmp_path, monkeypatch):
+        b = self._fresh_board(tmp_path, monkeypatch)
+        c = b.add("model", "Engine", src="created/old.glb")
+        b.set_src(c.id, "created/new.glb")
+        assert self._restart(tmp_path, monkeypatch).cards()[0]["src"] == "created/new.glb"
+
+    def test_nothing_comes_back_held(self, tmp_path, monkeypatch):
+        """A card restored as 'held' by a hand index from a dead session could
+        never be released — no such hand exists to let go of it."""
+        b = self._fresh_board(tmp_path, monkeypatch)
+        b.add("card", "WAS HELD", x=0.5, y=0.5)
+        _grab_now(b, [(0.5, 0.5, True)])
+        b.apply_hands([(0.6, 0.6, True)])            # still held, never released
+
+        restored = self._restart(tmp_path, monkeypatch).cards()[0]
+        assert restored["held"] is False and restored["hands"] == 0
+
+    def test_an_in_memory_board_touches_no_database(self, tmp_path, monkeypatch):
+        """A bare Board() must stay pure — every other test in this file builds
+        one, and they must not write to the real production database.
+
+        Counts calls rather than raising from the fake: _write and _forget
+        deliberately swallow every exception (a storage failure must not kill
+        the tracker thread), so an AssertionError thrown from inside them is
+        caught by the very code under test and proves nothing. The first
+        version of this test did exactly that and passed with persistence
+        force-enabled.
+        """
+        from agent import longterm
+        calls = []
+        monkeypatch.setattr(longterm, "_conn", lambda: calls.append(1))
+        b = Board()
+        b.add("card", "NO DB PLEASE")
+        b.set_src(b.cards()[0]["id"], "x.glb")
+        b.clear()
+        assert calls == [], "an in-memory board reached for the database"
+
+    def test_a_storage_failure_does_not_take_the_board_down(self, tmp_path, monkeypatch):
+        """This runs on the tracker thread. A raise here would kill hand
+        tracking to protect a feature whose whole job is to be a view."""
+        b = self._fresh_board(tmp_path, monkeypatch)
+        from agent import longterm
+        monkeypatch.setattr(longterm, "_conn",
+                            lambda: (_ for _ in ()).throw(RuntimeError("disk on fire")))
+        card = b.add("card", "STILL WORKS")          # must not raise
+        assert card.title == "STILL WORKS"
+        assert b.count() == 1, "the in-memory board must survive a storage failure"
+
+
 class TestApexBoardTools:
     def test_board_present_lands_on_apexs_own_board(self, monkeypatch):
         """board_present always uses Apex's own board — there is no second

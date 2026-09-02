@@ -45,9 +45,31 @@ is the point: a grab you did not mean to make, or a transform that went
 somewhere you did not intend, has one unambiguous way out that works
 regardless of what state the interaction is in.
 
-Everything here is pure state — no sockets, no rendering, no camera. The board
-is a list of objects and the rules for moving them, and that is testable without
-a browser, which is the half that would otherwise never be exercised.
+## Persistence, and when it is allowed to write
+
+The board survives a restart. It did not until now, and that was the single
+largest gap between this codebase and its own design document, whose rule is:
+*"create → display → manipulate → voice-edit → persist → restart → restore"* —
+a loop that failed at the fifth step because the board was an in-memory
+singleton and every card died with the process.
+
+**Transient gesture motion is deliberately NOT written continuously.** Hands
+move the board at ~15 Hz; persisting every frame would be 15 writes a second
+of positions nobody asked to keep, and would record the middle of a drag as
+though it were a decision. The rule (the design doc's own) is *commit on
+release*: content changes (add, remove, clear, re-src) write immediately
+because they are explicit acts, and a card's position/scale/rotation is
+written when the last hand lets go of it.
+
+That has a consequence worth stating plainly rather than discovering later: if
+Apex is killed mid-drag, that card reverts to where it was before the drag
+began. That is the correct trade — the alternative is treating an interrupted
+gesture as an intention.
+
+Everything else here is pure state — no sockets, no rendering, no camera. The
+board is a list of objects and the rules for moving them, and that stays
+testable without a browser, which is the half that would otherwise never be
+exercised.
 """
 from __future__ import annotations
 
@@ -94,6 +116,31 @@ class HandState:
     ARMED = "armed"          # pinched, dwell timer running, not yet committed
     GRABBED = "grabbed"      # one hand, holding
     TRANSFORMING = "transforming"   # two hands, scaling/rotating
+
+
+def init_db() -> None:
+    """Create the board_cards table. Idempotent, like every other module's.
+
+    Called from main.py's boot sequence alongside the other 27 — see
+    agent/scheduler.py's init_db for what happens to the one module that does
+    not follow this convention.
+    """
+    from agent import longterm
+    with longterm._conn() as c:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS board_cards (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                src TEXT NOT NULL DEFAULT '',
+                x REAL NOT NULL,
+                y REAL NOT NULL,
+                scale REAL NOT NULL DEFAULT 1.0,
+                rot REAL NOT NULL DEFAULT 0.0,
+                created REAL NOT NULL
+            )
+        """)
 
 
 class Card:
@@ -156,6 +203,68 @@ class Board:
         self._pre_grab: dict[str, tuple] = {}
         # Reported by hand_state() for tests and any future UI — see HandState.
         self._hand_state: dict[int, str] = {}
+        # Off for a bare Board() so tests get pure in-memory behaviour without
+        # touching the real database; get_board() turns it on for the live one.
+        self.persist = False
+
+    # -- persistence -------------------------------------------------------
+    def _write(self, card: "Card") -> None:
+        """Upsert one card. Never raises: the board is a view, and losing its
+        durability must not take down the tracker thread that drives it."""
+        if not self.persist:
+            return
+        try:
+            from agent import longterm
+            with longterm._conn() as c:
+                c.execute(
+                    """INSERT INTO board_cards
+                       (id, kind, title, body, src, x, y, scale, rot, created)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(id) DO UPDATE SET
+                         kind=excluded.kind, title=excluded.title,
+                         body=excluded.body, src=excluded.src, x=excluded.x,
+                         y=excluded.y, scale=excluded.scale, rot=excluded.rot""",
+                    (card.id, card.kind, card.title, card.body, card.src,
+                     card.x, card.y, card.scale, card.rot, card.created))
+        except Exception as e:
+            print(f"[Board] could not save '{card.title}': {e}")
+
+    def _forget(self, card_ids) -> None:
+        if not self.persist:
+            return
+        try:
+            from agent import longterm
+            with longterm._conn() as c:
+                for cid in card_ids:
+                    c.execute("DELETE FROM board_cards WHERE id = ?", (cid,))
+        except Exception as e:
+            print(f"[Board] could not remove card(s) from storage: {e}")
+
+    def restore(self) -> int:
+        """Load saved cards back onto the board. Returns how many came back.
+
+        Held state is deliberately not restored — no hand is holding anything
+        at boot, and a card that came back already "held" by a hand index from
+        a previous session could never be released.
+        """
+        try:
+            from agent import longterm
+            with longterm._conn() as c:
+                rows = c.execute(
+                    """SELECT id, kind, title, body, src, x, y, scale, rot, created
+                       FROM board_cards ORDER BY created ASC""").fetchall()
+        except Exception as e:
+            print(f"[Board] could not restore saved cards: {e}")
+            return 0
+        with self._lock:
+            self._cards = []
+            for r in rows:
+                card = Card(r[1], r[2], r[3], r[5], r[6], r[4])
+                card.id, card.scale, card.rot, card.created = r[0], r[7], r[8], r[9]
+                self._cards.append(card)
+            while len(self._cards) > self._max:
+                self._cards.pop(0)
+            return len(self._cards)
 
     # -- content ----------------------------------------------------------
     def add(self, kind: str, title: str, body: str = "",
@@ -165,40 +274,57 @@ class Board:
             self._cards.append(card)
             # Oldest out first. A board that grows without limit becomes
             # unusable long before it becomes slow.
+            evicted = []
             while len(self._cards) > self._max:
-                self._cards.pop(0)
+                evicted.append(self._cards.pop(0).id)
+        # Outside the lock: _write and _forget open their own connection, and
+        # holding the board's lock across a database call would let a slow
+        # disk stall the tracker thread mid-frame.
+        self._forget(evicted)
+        self._write(card)
         return card
 
     def clear(self) -> int:
         with self._lock:
             n = len(self._cards)
+            ids = [c.id for c in self._cards]
             self._cards.clear()
             self._grab_offset.clear()
             self._pair_ref.clear()
             self._armed_since.clear()
             self._pre_grab.clear()
             self._hand_state.clear()
+        self._forget(ids)
         return n
 
     def set_src(self, card_id: str, src: str) -> bool:
         """Point an existing card at a different prop file — used when a
         recolor produces a new export that must replace what the card shows,
         without disturbing its position, scale or rotation."""
+        found = None
         with self._lock:
             for c in self._cards:
                 if c.id == card_id:
                     c.src = src
-                    return True
-        return False
+                    found = c
+                    break
+        if found is None:
+            return False
+        self._write(found)
+        return True
 
     def remove(self, card_id: str) -> bool:
+        removed = False
         with self._lock:
             for i, c in enumerate(self._cards):
                 if c.id == card_id:
                     self._cards.pop(i)
                     self._pair_ref.pop(card_id, None)
-                    return True
-        return False
+                    removed = True
+                    break
+        if removed:
+            self._forget([card_id])
+        return removed
 
     def cards(self) -> list[dict]:
         with self._lock:
@@ -256,6 +382,7 @@ class Board:
             # reach back to exactly where it was. Not a cancel — the position
             # it was left at is kept, same as an ordinary release.
             with self._lock:
+                released = [c for c in self._cards if c.held_by]
                 for c in self._cards:
                     c.held_by = []
                 self._grab_offset.clear()
@@ -263,6 +390,11 @@ class Board:
                 self._armed_since.clear()
                 self._pre_grab.clear()
                 self._hand_state.clear()
+            # Hands leaving the frame ends a hold as surely as un-pinching does,
+            # so it commits the same way — otherwise walking away from the
+            # camera mid-drag would silently discard the move.
+            for c in released:
+                self._write(c)
             return
 
         with self._lock:
@@ -272,6 +404,7 @@ class Board:
             # opened — because "always available as escape" means the escape
             # has to work regardless of which hand a two-handed grab's other
             # participant is doing.
+            released = []
             for c in self._cards:
                 cancelled = any(
                     i < len(hands) and hands[i][3] for i in c.held_by)
@@ -287,6 +420,12 @@ class Board:
                     self._pair_ref.pop(c.id, None)
                 if not kept:
                     self._pre_grab.pop(c.id, None)
+                    if c.held_by:
+                        # Held a moment ago, held by nothing now: this is the
+                        # commit point. A cancel lands here too — it reverted
+                        # the card, and that revert is just as much the state
+                        # worth keeping as a deliberate drop would be.
+                        released.append(c)
                 c.held_by = kept
 
             for idx, (hx, hy, pinched, open_palm) in enumerate(hands):
@@ -341,6 +480,11 @@ class Board:
                 elif len(c.held_by) == 2:
                     self._two_handed(c, hands)
 
+        # Outside the lock, and only for cards a hand just let go of — the
+        # whole point of committing on release rather than per frame.
+        for c in released:
+            self._write(c)
+
     def _two_handed(self, card: Card, hands) -> None:
         """Scale and rotate from the span and angle between two hands."""
         ax, ay = hands[card.held_by[0]][0], hands[card.held_by[0]][1]
@@ -388,8 +532,22 @@ _board_lock = threading.Lock()
 
 
 def get_board() -> Board:
+    """The live board — durable, and restored from the last session on first use.
+
+    A bare `Board()` stays in-memory (see `Board.persist`), which is what tests
+    want. This one is the real thing, so it saves and comes back.
+    """
     global _board
     with _board_lock:
         if _board is None:
-            _board = Board()
+            b = Board()
+            b.persist = True
+            try:
+                n = b.restore()
+                if n:
+                    print(f"[Board] Restored {n} card(s) from the last session.")
+            except Exception as e:
+                # A board that cannot restore is still a usable empty board.
+                print(f"[Board] could not restore: {e}")
+            _board = b
         return _board
