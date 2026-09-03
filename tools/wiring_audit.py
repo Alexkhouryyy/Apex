@@ -80,11 +80,25 @@ def _schema_list() -> set[str]:
         return set()
 
 
+# Not part of Apex's process. relay/ is a standalone single-file program with
+# its own entry point, deployed by copying it to another machine; Apex's boot
+# sequence must NOT call its init_db, so asking "does something else in this
+# repo call it" is the wrong question and the answer is a false finding.
+#
+# Narrow on purpose. An exclusion is how a real finding gets hidden, so this
+# names one directory rather than a pattern, and the property it stops checking
+# — that the relay creates its tables before serving — is checked directly by
+# tests/test_relay_server.py, which boots a real server and reads real rows.
+_NOT_APEXS_PROCESS = ("relay/",)
+
+
 def orphan_init_db() -> list[str]:
     srcs = _py_sources()
     initialised = _schema_list()
     findings = []
     for path, src in srcs.items():
+        if path.relative_to(ROOT).as_posix().startswith(_NOT_APEXS_PROCESS):
+            continue
         if not re.search(r"^def init_db", src, re.M):
             continue
         mod = path.stem
