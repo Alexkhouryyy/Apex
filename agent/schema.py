@@ -32,7 +32,8 @@ from __future__ import annotations
 INIT_MODULES: tuple[str, ...] = (
     "longterm",
     "access_tokens", "approvals", "board", "briefing", "budget", "compare",
-    "conversations", "cortex", "council_stats", "deepresearch", "devices",
+    "capabilities", "conversations", "cortex", "council_stats", "deepresearch",
+    "devices",
     "documents", "feedback", "goals", "initiative", "iot", "knowledge",
     "lessons", "mcp_policy", "observed", "outcomes", "perception",
     "relay", "reranker",

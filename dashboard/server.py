@@ -1972,6 +1972,20 @@ def control_restart(request: Request):
                         status_code=200 if ok else 409)
 
 
+@app.get("/api/control/capabilities")
+def control_capabilities(request: Request):
+    """What each node can do, and when that was last actually checked.
+
+    `verified_at` and `stale` are in the response on purpose: a capability list
+    with no age on it invites reading a six-month-old probe as a fact.
+    """
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import capabilities as caps
+    return {"this_node": caps.this_node(), "nodes": caps.summary(),
+            "max_age_seconds": caps.MAX_AGE_SECONDS}
+
+
 @app.get("/api/control/relay")
 def control_relay(request: Request):
     """What the relay is doing — including "nothing, because it is off".
