@@ -300,3 +300,177 @@ class TestAskingWhenNobodyCanAnswer:
             raise RuntimeError("the console went away")
         monkeypatch.setattr(p, "_confirm_fn", boom)
         assert p.enforce("mcp__gmail__send_message", {"to": "a@b.c"}) is not None
+
+
+class TestTheDashboardSwitch:
+    """A server can be turned off from the dashboard without editing .env and
+    without a restart — the same shape as agent/iot.py's kill switch, for the
+    same reason: a safety control you have to restart the process to use is one
+    nobody uses in the moment they need it.
+
+    The load-bearing rule is that the switch can only ever NARROW.
+    """
+
+    @pytest.fixture
+    def db(self, tmp_path, monkeypatch, policy):
+        from agent import longterm
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "sw.db"))
+        monkeypatch.setattr(p, "_switch_cache", None)
+        monkeypatch.setattr(p, "_switch_at", 0.0)
+        p.init_db()
+
+    def test_a_server_is_on_until_someone_turns_it_off(self, db):
+        """A server appearing in a config file is somebody adding it; it should
+        work without also being switched on here."""
+        assert p.server_enabled("slack") is True
+        assert p.decide("mcp__slack__list_channels")["action"] == p.ALLOW
+
+    def test_turning_it_off_refuses_even_a_read(self, db):
+        p.set_server_enabled("slack", False)
+        v = p.decide("mcp__slack__list_channels")
+        assert v["action"] == p.DENY and "switched off" in v["reason"]
+
+    def test_turning_it_back_on_restores_it(self, db):
+        p.set_server_enabled("slack", False)
+        p.set_server_enabled("slack", True)
+        assert p.decide("mcp__slack__list_channels")["action"] == p.ALLOW
+
+    def test_it_survives_a_restart(self, db):
+        """Stored in SQLite rather than in memory — a kill switch that forgets
+        on restart is one you have to remember to re-flip after every crash."""
+        p.set_server_enabled("slack", False)
+        p._switch_cache, p._switch_at = {}, 0.0     # a fresh process
+        assert p.server_enabled("slack") is False
+
+    def test_it_takes_effect_without_a_restart(self, db):
+        """The cache is WARMED first, deliberately.
+
+        The earlier version of this test did not discriminate: with the cache
+        starting empty, the first decide() reloaded from SQLite anyway, so
+        removing the invalidation entirely still passed. Warming it is what
+        makes the assertion about invalidation rather than about a cache that
+        was never populated.
+        """
+        p.set_server_enabled("gmail", True)          # populate the cache
+        assert p.decide("mcp__slack__list_channels")["action"] == p.ALLOW
+        assert p._switch_cache is not None, "the cache did not warm"
+
+        p.set_server_enabled("slack", False)
+        assert p.decide("mcp__slack__list_channels")["action"] == p.DENY, \
+            "the cache must be invalidated by the write, not by waiting for it " \
+            "to expire — a toggle that takes seconds is one you press twice"
+
+    def test_the_cache_engages_when_nothing_is_switched_off(self, db, monkeypatch):
+        """`{}` for "loaded, nothing off" and `{}` for "not loaded" were the same
+        value, and since it is falsy the cache never engaged in the common case:
+        every turn hit SQLite for an answer that is almost always empty.
+
+        Counts database reads rather than inspecting `_switch_cache`. The first
+        version asserted the cache HELD `{}`, which was true whether or not it
+        was ever READ — the buggy code still wrote the value, it just never used
+        it, so the test passed with the bug reinstated.
+        """
+        from agent import longterm
+        assert p.servers_off() == []               # warm
+
+        reads = []
+        real_conn = longterm._conn
+
+        def counting(*a, **k):
+            reads.append(1)
+            return real_conn(*a, **k)
+        monkeypatch.setattr(longterm, "_conn", counting)
+
+        assert p.servers_off() == []
+        assert reads == [], (
+            "the second read hit the database — an empty result must still "
+            "count as loaded, or the cache is dead code exactly when there is "
+            "nothing to look up")
+
+    def test_only_the_named_server_is_affected(self, db):
+        p.set_server_enabled("slack", False)
+        assert p.decide("mcp__gmail__search_threads")["action"] == p.ALLOW
+
+    def test_the_switch_cannot_override_env_deny(self, db, monkeypatch):
+        """A control panel that could re-enable something the config file
+        forbids would make the config file advisory, and anyone who set
+        MCP_DENY meant it."""
+        monkeypatch.setattr(config, "MCP_DENY", ["gmail:*"], raising=False)
+        out = p.set_server_enabled("gmail", True)
+        assert out["enabled"] is True
+        assert out["effective"] is False
+        assert "MCP_DENY" in out["note"]
+        assert p.decide("mcp__gmail__search_threads")["action"] == p.DENY
+
+    def test_it_reports_what_took_effect_not_what_was_asked(self, db, monkeypatch):
+        """A toggle that flips in the UI while changing nothing in reality is
+        worse than no toggle."""
+        monkeypatch.setattr(config, "MCP_DENY", [], raising=False)
+        assert p.set_server_enabled("gmail", True)["effective"] is True
+
+    def test_a_missing_table_does_not_disable_everything(self, tmp_path, monkeypatch, policy):
+        """Failing open here is deliberate: this switch's job is to let you turn
+        things OFF, and a database problem is not you turning something off."""
+        from agent import longterm
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "empty.db"))
+        monkeypatch.setattr(p, "_switch_cache", None)
+        monkeypatch.setattr(p, "_switch_at", 0.0)
+        assert p.server_enabled("slack") is True
+
+    def test_an_empty_server_name_is_refused(self, db):
+        with pytest.raises(ValueError):
+            p.set_server_enabled("   ", False)
+
+    def test_servers_off_lists_only_the_off_ones(self, db):
+        p.set_server_enabled("slack", False)
+        p.set_server_enabled("gmail", True)
+        assert p.servers_off() == ["slack"]
+
+
+class TestDisabledToolsAreNotOffered:
+    """A tool that always refuses still burns context on every turn and invites
+    the model to keep trying it, which reads as Apex being broken rather than as
+    a setting doing its job.
+
+    This is a convenience, never the protection — a filtered list is trivially
+    bypassed by a model that remembers a tool name from earlier in the
+    conversation, so `mcp_client.call` gates every call regardless.
+    """
+
+    @pytest.fixture
+    def core(self, tmp_path, monkeypatch, policy):
+        from agent import longterm
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "off.db"))
+        monkeypatch.setattr(p, "_switch_cache", None)
+        monkeypatch.setattr(p, "_switch_at", 0.0)
+        p.init_db()
+        from agent.core import AgentCore
+        c = AgentCore.__new__(AgentCore)
+        c._mcp_tools = [
+            {"name": "mcp__slack__send_message"},
+            {"name": "mcp__slack__list_channels"},
+            {"name": "mcp__gmail__search_threads"},
+        ]
+        return c
+
+    def test_all_are_offered_when_nothing_is_off(self, core):
+        assert len(core._offered_mcp_tools()) == 3
+
+    def test_a_disabled_servers_tools_are_withheld(self, core):
+        p.set_server_enabled("slack", False)
+        names = [t["name"] for t in core._offered_mcp_tools()]
+        assert names == ["mcp__gmail__search_threads"]
+
+    def test_the_call_gate_still_applies_to_a_withheld_tool(self, core):
+        """The half that actually protects. A model that remembers the name
+        from earlier in the conversation can still ask for it."""
+        p.set_server_enabled("slack", False)
+        v = p.decide("mcp__slack__list_channels")
+        assert v["action"] == p.DENY
+
+    def test_a_failure_does_not_empty_the_toolbox(self, core, monkeypatch):
+        """Withholding everything on an error would look exactly like an MCP
+        setup that stopped working."""
+        monkeypatch.setattr(p, "servers_off",
+                            lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        assert len(core._offered_mcp_tools()) == 3

@@ -4538,22 +4538,91 @@ document.getElementById('ctl-restart')?.addEventListener('click', async () => {
   } catch (e) { note.textContent = `Could not restart: ${e.message}`; }
 });
 
+const MCP_POLICY_MEANS = {
+  off: 'nothing runs — every call is refused and recorded',
+  read_only: 'reads run; writes are refused',
+  ask: 'reads run; writes ask you first',
+  all: 'everything runs unasked (still audited)',
+};
+
 async function _loadControlMcp() {
   const stateEl = document.getElementById('ctl-mcp-state');
   const listEl = document.getElementById('ctl-mcp-list');
+  const polEl = document.getElementById('ctl-mcp-policy');
+  const audEl = document.getElementById('ctl-mcp-audit');
   try {
     const d = await api('/api/control/mcp');
     stateEl.textContent = d.detail || d.state;
-    listEl.innerHTML = (d.servers || []).map(sv => `
+
+    // The permission model, spelled out. It existed for a day before it was
+    // drawn anywhere, which made a gate that was running look like no gate.
+    const p = d.policy || {};
+    const bits = [`<b>${escapeHTML(p.mode || 'ask')}</b> — ${
+      escapeHTML(MCP_POLICY_MEANS[p.mode] || '')}`];
+    if ((p.allow || []).length) bits.push(`always allowed: ${escapeHTML(p.allow.join(', '))}`);
+    if ((p.deny || []).length) bits.push(`never allowed: ${escapeHTML(p.deny.join(', '))}`);
+    polEl.innerHTML = bits.join(' · ');
+
+    listEl.innerHTML = (d.servers || []).map(sv => {
+      const on = sv.enabled !== false;
+      return `
       <div class="mcp-row">
         <span class="dot ${sv.state === 'connected' ? 'ok' : 'bad'}"></span>
         <span style="flex:0 0 160px">${escapeHTML(sv.server)}</span>
         <span class="v" style="flex:1 1 auto">${
           sv.state === 'connected'
             ? `${sv.tools} tool${sv.tools === 1 ? '' : 's'}`
-            : escapeHTML(sv.error || 'failed')}</span>
-      </div>`).join('') || '<div class="muted">No servers configured.</div>';
+            : escapeHTML(sv.error || 'failed')}${
+          on ? '' : ' · <b>switched off</b>'}</span>
+        <button class="ghost-btn mcp-toggle" data-server="${escapeHTML(sv.server)}"
+                data-enable="${on ? '0' : '1'}">${on ? 'Turn off' : 'Turn on'}</button>
+      </div>`;
+    }).join('') || '<div class="muted">No servers configured.</div>';
+
+    // Refusals matter more than successes here: "nothing has been refused" and
+    // "nothing has been recorded" are different answers and must not both
+    // render as an empty box.
+    const a = d.audit || {};
+    const counts = (a.summary || {}).by_decision || {};
+    const total = (a.summary || {}).total || 0;
+    const rows = (a.recent || []).slice(0, 10).map(r => `
+      <div class="mcp-row">
+        <span class="dot ${r.decision === 'completed' || r.decision === 'allowed' ? 'ok' : 'bad'}"></span>
+        <span style="flex:0 0 160px">${escapeHTML(r.server)}:${escapeHTML(r.tool)}</span>
+        <span class="v" style="flex:1 1 auto">${escapeHTML(r.tier)} · ${
+          escapeHTML(r.decision)}${r.error ? ' · ' + escapeHTML(r.error) : ''}</span>
+      </div>`).join('');
+    audEl.innerHTML = total
+      ? `<div class="muted" style="margin-bottom:6px">Last ${
+          (a.summary || {}).days || 30} days: ${
+          escapeHTML(Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', '))
+        } — arguments are recorded as key names and a hash, never values.</div>${rows}`
+      : '<div class="muted">No MCP calls recorded yet.</div>';
   } catch (e) { _controlDenied(stateEl, e); listEl.innerHTML = ''; }
 }
+
+document.getElementById('ctl-mcp-list')?.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('.mcp-toggle');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    // api() stringifies `body` itself — passing JSON.stringify here would send
+    // a quoted string and the route would reject it as having no server.
+    const r = await api('/api/control/mcp/server', {
+      method: 'POST',
+      body: { server: btn.dataset.server, enabled: btn.dataset.enable === '1' },
+    });
+    // Report what took EFFECT, not what was asked for. MCP_DENY in .env
+    // outranks this switch, and a toggle that flips in the UI while changing
+    // nothing in reality is worse than no toggle.
+    if (r && r.note) showNotifyToast({ title: 'MCP', body: r.note, kind: 'info' });
+  } catch (e) {
+    showNotifyToast({ title: 'MCP', body: 'Could not change that server: ' + e,
+                      kind: 'info', priority: 'high' });
+  } finally {
+    btn.disabled = false;
+    _loadControlMcp();
+  }
+});
 
 document.getElementById('ctl-mcp-refresh')?.addEventListener('click', _loadControlMcp);

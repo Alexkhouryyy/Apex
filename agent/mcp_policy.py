@@ -191,6 +191,91 @@ def classify(tool_name: str, annotations=None) -> tuple[str, str]:
     return WRITE, own_why
 
 
+# ── the runtime switch ───────────────────────────────────────────────────────
+#
+# A server can be turned off from the dashboard without editing .env and without
+# a restart, stored in SQLite so the choice survives one. This is the same shape
+# as agent/iot.py's kill switch, for the same reason: a safety control you have
+# to restart the process to use is a safety control nobody uses in the moment
+# they need it.
+#
+# **The switch can only ever narrow.** MCP_DENY from .env outranks it in both
+# directions: a server denied there stays denied however the toggle is set. A
+# control panel that could re-enable something the config file forbids would
+# make the config file advisory, and anyone who set MCP_DENY meant it.
+#
+# Cached briefly so the tool-offering path — which runs on every turn — does not
+# hit SQLite per tool. The TTL is short enough that a flip takes effect within a
+# few seconds, which is what "without a restart" has to mean in practice.
+_SWITCH_TTL = 3.0
+# None means "not loaded", which is NOT the same as {} meaning "loaded, nothing
+# is switched off". The first version used {} for both, and since {} is falsy
+# the cache never engaged at all until somebody toggled something — so the
+# common case (no server ever switched off) hit SQLite on every turn, and the
+# revert test for cache invalidation passed whether the invalidation was there
+# or not, because there was never a cache to invalidate.
+_switch_cache: dict | None = None
+_switch_at: float = 0.0
+_switch_lock = __import__("threading").Lock()
+
+
+def _switch_state() -> dict:
+    """{server: enabled} for servers that have been explicitly toggled."""
+    global _switch_cache, _switch_at
+    with _switch_lock:
+        if _switch_cache is not None and (time.time() - _switch_at) < _SWITCH_TTL:
+            return dict(_switch_cache)
+    try:
+        with longterm._conn() as c:
+            rows = c.execute("SELECT server, enabled FROM mcp_servers").fetchall()
+        state = {r[0]: bool(r[1]) for r in rows}
+    except Exception:
+        # A missing table must not disable every server. Failing open here is
+        # correct and deliberate: this switch's job is to let you turn things
+        # OFF, and a database problem is not you turning something off.
+        return {}
+    with _switch_lock:
+        _switch_cache, _switch_at = state, time.time()
+    return dict(state)
+
+
+def set_server_enabled(server: str, enabled: bool) -> dict:
+    """Turn one server on or off. Returns what actually took effect.
+
+    Says so when .env still forbids it, rather than reporting success for a
+    switch that changes nothing — a toggle that flips in the UI and does not
+    flip in reality is worse than no toggle.
+    """
+    server = str(server or "").strip()
+    if not server:
+        raise ValueError("set_server_enabled needs a server name")
+    with longterm._conn() as c:
+        c.execute("INSERT INTO mcp_servers (server, enabled, changed_at)"
+                  " VALUES (?, ?, ?) ON CONFLICT(server) DO UPDATE SET"
+                  " enabled=excluded.enabled, changed_at=excluded.changed_at",
+                  (server, 1 if enabled else 0, time.time()))
+        c.commit()
+    global _switch_cache
+    with _switch_lock:
+        _switch_cache, _switch_at = None, 0.0     # next read reloads
+    still_denied = _matches(_rules(getattr(config, "MCP_DENY", [])), server, "*")
+    return {"server": server, "enabled": bool(enabled),
+            "effective": bool(enabled) and not still_denied,
+            "note": (f"'{still_denied}' in MCP_DENY still blocks this server — "
+                     f"the switch cannot override .env")
+                    if (enabled and still_denied) else ""}
+
+
+def server_enabled(server: str) -> bool:
+    """Default on. A server appearing in a config file is somebody adding it;
+    it should work without also being switched on here."""
+    return _switch_state().get(str(server or "").strip(), True)
+
+
+def servers_off() -> list[str]:
+    return sorted(s for s, on in _switch_state().items() if not on)
+
+
 # ── policy ───────────────────────────────────────────────────────────────────
 
 ALLOW = "allow"
@@ -239,6 +324,8 @@ def decide(full_tool_name: str, annotations=None) -> dict:
     # can outrank it.
     if deny_hit:
         return out(DENY, f"'{deny_hit}' is on MCP_DENY")
+    if server and not server_enabled(server):
+        return out(DENY, f"the '{server}' server is switched off in the dashboard")
     if policy == "off":
         return out(DENY, "MCP_POLICY=off — no MCP tool runs")
     if allow_hit:
@@ -273,6 +360,13 @@ def init_db() -> None:
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_mcp_audit_ts ON mcp_audit(ts DESC)")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS mcp_servers (
+                server     TEXT PRIMARY KEY,
+                enabled    INTEGER NOT NULL DEFAULT 1,
+                changed_at REAL NOT NULL DEFAULT 0
+            )
+        """)
 
 
 def fingerprint(inputs: dict) -> tuple[str, str]:

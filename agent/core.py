@@ -2591,7 +2591,31 @@ class AgentCore:
         # Cache all static tools at the last entry; dynamic tools come after the checkpoint.
         cached = list(TOOLS)
         cached[-1] = {**cached[-1], "cache_control": {"type": "ephemeral"}}
-        return cached + self._mcp_tools + self_mod.get_dynamic_tools()
+        return cached + self._offered_mcp_tools() + self_mod.get_dynamic_tools()
+
+    def _offered_mcp_tools(self) -> list[dict]:
+        """MCP tools from servers that are switched on.
+
+        A server turned off in the dashboard has its tools withheld rather than
+        merely refused at call time. Offering a tool that always says no burns
+        context on every turn and invites the model to keep trying it, which
+        reads as Apex being broken rather than as a setting doing its job.
+
+        This is a convenience, not the protection. `mcp_client.call` gates every
+        call regardless — a filtered list is trivially bypassed by a model that
+        remembers a tool name from earlier in the conversation, and by anything
+        that reaches the client another way.
+        """
+        try:
+            from agent import mcp_policy
+            off = set(mcp_policy.servers_off())
+            if not off:
+                return self._mcp_tools
+            return [t for t in self._mcp_tools
+                    if mcp_policy.split_name(t.get("name", ""))[0] not in off]
+        except Exception:
+            # A failure here must not silently empty the toolbox.
+            return self._mcp_tools
 
     def _effective_system_prompt(self) -> list[dict]:
         blocks: list[dict] = []

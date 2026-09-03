@@ -2039,7 +2039,35 @@ def control_mcp(request: Request):
         "deny": list(getattr(_cfg, "MCP_DENY", [])),
     }
     out["audit"] = {"summary": mcp_policy.summary(), "recent": mcp_policy.recent(25)}
+    # Which servers are switched off, so the panel can draw the toggles in the
+    # state they are actually in rather than defaulting them all to on.
+    off = set(mcp_policy.servers_off())
+    for sv in out.get("servers", []):
+        sv["enabled"] = sv["server"] not in off
+    out["servers_off"] = sorted(off)
     return out
+
+
+@app.post("/api/control/mcp/server")
+async def control_mcp_server(request: Request):
+    """Turn one MCP server on or off, without a restart.
+
+    Master token only, like every other control write. The response reports what
+    took EFFECT rather than what was asked for: MCP_DENY in .env still outranks
+    this switch, and a toggle that flips in the UI while changing nothing in
+    reality is worse than no toggle.
+    """
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import mcp_policy
+    body = await request.json()
+    server = str(body.get("server") or "").strip()
+    if not server:
+        return JSONResponse({"error": "server is required"}, status_code=400)
+    try:
+        return mcp_policy.set_server_enabled(server, bool(body.get("enabled")))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 
 # --- WebSocket live stream ---
