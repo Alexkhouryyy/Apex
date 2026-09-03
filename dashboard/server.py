@@ -1972,6 +1972,21 @@ def control_restart(request: Request):
                         status_code=200 if ok else 409)
 
 
+@app.get("/api/control/relay")
+def control_relay(request: Request):
+    """What the relay is doing — including "nothing, because it is off".
+
+    Reachable before anything schedules a push, deliberately. A module that is
+    built, imported and never called is this codebase's signature failure, and
+    the only difference between that and a working relay is a state nobody can
+    see. Now it is a line on a page.
+    """
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import relay
+    return relay.status()
+
+
 @app.get("/api/control/mcp")
 def control_mcp(request: Request):
     """What MCP is doing. A failed server is otherwise completely silent."""

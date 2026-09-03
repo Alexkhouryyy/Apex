@@ -359,6 +359,29 @@ CALDAV_URL = os.getenv("CALDAV_URL", "")
 CALDAV_USERNAME = os.getenv("CALDAV_USERNAME", "")
 CALDAV_PASSWORD = os.getenv("CALDAV_PASSWORD", "")
 
+# === Relay — the always-on box that holds Apex's mail while the laptop sleeps ===
+#
+# The laptop is Apex and stays the sole AUTHOR of memory. The relay is an
+# always-on machine (a rented box, or a Pi on your Tailnet) that holds two
+# things while the laptop is off: work that arrived, and the last snapshot of
+# memory so the phone still has something to read. It never reasons, and it
+# cannot read the snapshot.
+#
+# Off until deliberately configured, like everything that touches a network.
+RELAY_ENABLED = os.getenv("RELAY_ENABLED", "false").lower() in {"1", "true", "yes"}
+RELAY_URL = os.getenv("RELAY_URL", "")            # https://apex-relay.example.com
+RELAY_TOKEN = os.getenv("RELAY_TOKEN", "")        # authenticates THIS laptop to it
+# The sealing key. Never sent to the relay, never committed. Generate with
+# `python -m agent.relay --new-key` — it is 32 random bytes, not a password, and
+# agent/relay.py refuses a passphrase rather than stretching one, because a weak
+# key and a strong one look identical from everywhere except the moment of use.
+# A snapshot sealed with a lost key is lost.
+RELAY_KEY = os.getenv("RELAY_KEY", "")
+# RELAY_SNAPSHOT_MINUTES arrives with the thing that schedules a push
+# (step 2 of docs/PHASE_6_7_PLAN.md). A setting nothing reads is worse
+# than no setting — somebody sets it and nothing happens — and
+# tools/wiring_audit.dead_config_flags exists to catch exactly that.
+
 # === MCP — what third-party MCP servers are allowed to do ===
 #
 # MCP servers are loaded from config files Apex does not own (~/.claude/
