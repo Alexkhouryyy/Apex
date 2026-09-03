@@ -29,7 +29,12 @@ _SIM_HI = 0.85
 _CANDIDATE_CAP = 300  # bound the O(n^2) pair scan to the most important memories
 
 
-_ready = False
+# WHICH database was initialised, not merely THAT one was. A bare boolean here
+# records that some database has the tables and then skips the check for every
+# other, so a DB_PATH change at runtime silently disarms the guard whose whole
+# job is to make a missing table impossible. Found via agent/budget.py, which
+# had the identical latch; see tests/test_schema.py::TestLazyGuardsArePerDatabase.
+_ready_for: str | None = None
 
 
 def _ensure_db() -> None:
@@ -40,12 +45,12 @@ def _ensure_db() -> None:
     a missing table. Same shape as the restraint bug: nothing crashed loudly, it
     simply never worked.
     """
-    global _ready
-    if _ready:
+    global _ready_for
+    if _ready_for == str(longterm.DB_PATH):
         return
     try:
         init_db()
-        _ready = True
+        _ready_for = str(longterm.DB_PATH)
     except Exception:
         pass
 

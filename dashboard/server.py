@@ -1977,8 +1977,20 @@ def control_mcp(request: Request):
     """What MCP is doing. A failed server is otherwise completely silent."""
     if (deny := _control_guard(request)) is not None:
         return deny
-    from agent import mcp_client
-    return mcp_client.status()
+    from agent import mcp_client, mcp_policy
+    import config as _cfg
+    out = mcp_client.status()
+    # The permission side, beside the connection side. Kept in the same
+    # response because "which servers are up" and "what were they allowed to
+    # do" are the same question when something did not happen, and two
+    # endpoints would mean reading one and not the other.
+    out["policy"] = {
+        "mode": getattr(_cfg, "MCP_POLICY", "ask"),
+        "allow": list(getattr(_cfg, "MCP_ALLOW", [])),
+        "deny": list(getattr(_cfg, "MCP_DENY", [])),
+    }
+    out["audit"] = {"summary": mcp_policy.summary(), "recent": mcp_policy.recent(25)}
+    return out
 
 
 # --- WebSocket live stream ---

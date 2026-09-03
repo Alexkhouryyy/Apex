@@ -18,6 +18,13 @@ _loop_thread: Optional[threading.Thread] = None
 _sessions: dict = {}       # server_name -> (session, tools)
 _tool_registry: dict = {}  # full_tool_name -> (server_name, original_tool_name)
 
+# full_tool_name -> the server's own ToolAnnotations (readOnlyHint /
+# destructiveHint / ...), kept so agent/mcp_policy.py can take them into
+# account. Stored separately from _tool_registry rather than widening its
+# tuple: everything that already unpacks that tuple keeps working, and a
+# missing annotation stays distinguishable from a missing tool.
+_annotations: dict = {}
+
 # What happened to each server, kept after discovery rather than only printed.
 #
 # A server that fails to start printed one line at boot and then vanished: the
@@ -105,6 +112,7 @@ async def _connect_server(name: str, config: dict) -> list[dict]:
                         "input_schema": t.inputSchema or {"type": "object", "properties": {}, "required": []},
                         "_server": name,
                         "_original": t.name,
+                        "_annotations": getattr(t, "annotations", None),
                     }
                     for t in (tools_result.tools or [])
                 ]
@@ -158,6 +166,7 @@ def discover() -> list[dict]:
     """Connect to all configured MCP servers, return their tool definitions for Claude."""
     global _mcp_configs, _tool_registry, _discovered_at, _ran
     _status.clear()
+    _annotations.clear()
     _ran = True
     _discovered_at = time.time()
     _mcp_configs = _load_mcp_configs()
@@ -171,25 +180,49 @@ def discover() -> list[dict]:
         tools = _run(_connect_server(name, config))
         for t in tools:
             _tool_registry[t["name"]] = (name, t["_original"])
+            _annotations[t["name"]] = t.get("_annotations")
         # Strip internal keys before passing to Claude
         for t in tools:
             t.pop("_server", None)
             t.pop("_original", None)
+            t.pop("_annotations", None)
         all_tools.extend(tools)
 
     return all_tools
 
 
 def call(full_tool_name: str, inputs: dict) -> str:
-    """Call an MCP tool by its full prefixed name."""
+    """Call an MCP tool by its full prefixed name, subject to the policy gate.
+
+    The gate lives HERE rather than in `agent/core.py`'s `mcp__*` branch, even
+    though that is the only caller today. This function is the choke point: a
+    dashboard route, a skill or a future dispatcher that reaches an MCP server
+    has to come through it, and a gate that only covers one of several doors is
+    the same shape as no gate at all.
+    """
     if full_tool_name not in _tool_registry:
         return f"Unknown MCP tool: {full_tool_name}"
     server_name, original_name = _tool_registry[full_tool_name]
+
+    from agent import mcp_policy
+    blocked = mcp_policy.enforce(full_tool_name, inputs,
+                                 _annotations.get(full_tool_name))
+    if blocked:
+        return blocked
+
     config = _mcp_configs.get(server_name, {})
+    started = time.time()
+    verdict = mcp_policy.decide(full_tool_name, _annotations.get(full_tool_name))
     try:
-        return _run(_call_tool(server_name, original_name, inputs, config))
+        out = _run(_call_tool(server_name, original_name, inputs, config))
     except Exception as e:
+        mcp_policy.record(verdict, inputs, decision="failed",
+                          duration_ms=int((time.time() - started) * 1000),
+                          ok=False, error=f"{type(e).__name__}: {e}")
         return f"MCP call error ({full_tool_name}): {e}"
+    mcp_policy.record(verdict, inputs, decision="completed",
+                      duration_ms=int((time.time() - started) * 1000), ok=True)
+    return out
 
 
 def get_registered_names() -> list[str]:

@@ -55,7 +55,12 @@ QUIET_RATE = 0.25
 MAX_HOLD_S = 6 * 3600
 
 
-_ready = False
+# WHICH database was initialised, not merely THAT one was. A bare boolean here
+# records that some database has the tables and then skips the check for every
+# other, so a DB_PATH change at runtime silently disarms the guard whose whole
+# job is to make a missing table impossible. Found via agent/budget.py, which
+# had the identical latch; see tests/test_schema.py::TestLazyGuardsArePerDatabase.
+_ready_for: str | None = None
 
 
 def _ensure_db() -> None:
@@ -67,12 +72,12 @@ def _ensure_db() -> None:
     main.py's init block, and because every query fails open, the result was a
     feature that held nothing forever while appearing to work perfectly.
     """
-    global _ready
-    if _ready:
+    global _ready_for
+    if _ready_for == str(longterm.DB_PATH):
         return
     try:
         init_db()
-        _ready = True
+        _ready_for = str(longterm.DB_PATH)
     except Exception:
         pass                      # fail open: unreadable DB must not block a ping
 

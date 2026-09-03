@@ -14,11 +14,24 @@ _DEFAULTS = {
 }
 
 
-_initialized = False
+# WHICH database was initialised, not merely THAT one was.
+#
+# This was a bare `_initialized = False` boolean, and the difference is not
+# academic: `_ensure_init()` skips creating the table whenever the flag is set,
+# so once anything had called `init_db()` against one database, the lazy guard
+# stopped guarding for every other. A test that pointed longterm.DB_PATH at a
+# temp file was enough to leave `budget_config` permanently uncreated in the
+# real one — observed, as a failure in a completely unrelated test file that
+# ran afterwards.
+#
+# The same shape would bite outside tests: restoring from a backup, or any
+# runtime DB_PATH change, would silently disarm a guard whose whole job is to
+# make missing tables impossible.
+_initialized_for: str | None = None
 
 
 def init_db() -> None:
-    global _initialized
+    global _initialized_for
     with longterm._conn() as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS budget_config (
@@ -32,13 +45,13 @@ def init_db() -> None:
                 (k, v),
             )
         c.commit()
-    _initialized = True
+    _initialized_for = str(longterm.DB_PATH)
 
 
 def _ensure_init() -> None:
     """Lazily create the table so callers (tests, partial boots) never hit a
     missing-table error if init_db() wasn't run during startup."""
-    if not _initialized:
+    if _initialized_for != str(longterm.DB_PATH):
         init_db()
 
 

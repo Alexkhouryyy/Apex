@@ -58,8 +58,31 @@ def _calls_init_db(src: str, mod: str) -> bool:
                for n in names)
 
 
+def _schema_list() -> set[str]:
+    """The modules agent/schema.py initialises, read from the real list.
+
+    Both entry points call `schema.init_all()`, which dispatches through
+    `importlib` — so the literal `<mod>.init_db()` this check greps for does
+    not appear anywhere for 22 of them, and without this every one of them
+    would be reported as unwired.
+
+    This imports the module and reads INIT_MODULES rather than grepping
+    schema.py for the name. The distinction is the whole point: a name merely
+    MENTIONED in that file (in the docstring, say — twelve of them are) would
+    satisfy a regex while initialising nothing. `tests/test_schema.py` is what
+    guarantees the list is complete; this only has to trust it accurately.
+    """
+    try:
+        from agent import schema
+        return set(schema.INIT_MODULES) | {m for m, _ in schema.EXTRA}
+    except Exception as e:
+        print(f"[wiring] could not read agent/schema.INIT_MODULES: {e}")
+        return set()
+
+
 def orphan_init_db() -> list[str]:
     srcs = _py_sources()
+    initialised = _schema_list()
     findings = []
     for path, src in srcs.items():
         if not re.search(r"^def init_db", src, re.M):
@@ -71,7 +94,7 @@ def orphan_init_db() -> list[str]:
         # merely ENDS in _ensure_db() exempt a whole module from the check.
         if re.search(r"(?<![\w])_ensure_db\s*\(", src):
             continue
-        called = any(
+        called = mod in initialised or any(
             _calls_init_db(other, mod)
             for other_path, other in srcs.items() if other_path != path
         )

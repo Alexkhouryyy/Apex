@@ -164,11 +164,14 @@ def run_resident(model_override: Optional[str] = None) -> None:
     # --- Boot the agent (mostly the same as main.py, but quieter) ---
     from agent.core import AgentCore
     from agent import longterm, telemetry, scheduler as sched, self_mod
-    from agent import knowledge, goals, feedback as fb_mod
     from agent import reflection
     from voice.tts import speak as _voice_speak
 
-    longterm.init_db()
+    # Every table, from the one list main.py also uses. This sits BEFORE
+    # AgentCore() and before MCP discovery starts, because both reach
+    # subsystems whose tables used to be created thirty lines further down.
+    from agent import schema as _schema
+    _schema.init_all(log=logging.warning)
     session_id = longterm.start_session()
     telemetry.set_session(session_id)
     logging.info(f"Memory session #{session_id} started.")
@@ -198,22 +201,6 @@ def run_resident(model_override: Optional[str] = None) -> None:
             logging.info(f"Installed {_n_bundled} bundled procedural skill(s).")
     except Exception as e:
         logging.warning(f"Bundled skill install skipped: {e}")
-    knowledge.init_db()
-    goals.init_db()
-    fb_mod.init_db()
-    from agent import budget as _budget_mod; _budget_mod.init_db()
-    # Autonomy DBs — required before the cortex/world-model/forge/approvals run.
-    from agent import world_model as _wm_mod; _wm_mod.init_db()
-    from agent import perception as _perc_mod; _perc_mod.init_db()
-    from agent import cortex as _cortex_mod; _cortex_mod.init_db()
-    from agent import skill_forge as _forge_mod; _forge_mod.init_db()
-    from agent import approvals as _appr_mod; _appr_mod.init_db()
-    from agent import compare as _compare_mod; _compare_mod.init_db()
-    from agent import access_tokens as _at_mod; _at_mod.init_db()
-    from agent import trajectory as _traj_mod; _traj_mod.init_db()
-    from agent import verification as _verif_mod; _verif_mod.init_db()
-    from agent import reranker as _rr_mod; _rr_mod.init_db()
-    from agent import documents as _docs_mod; _docs_mod.init_db()
 
     # Scheduler — pass a thin speak that goes through the state machine
     state = ResidentState()

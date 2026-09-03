@@ -71,7 +71,12 @@ MIN_QUOTE_CHARS = 25
 NOTES_PER_SECTION = 60          # notes shown to the writer for one section
 GAP_MIN_NOTES = 4               # a sub-question with fewer is under-researched
 
-_ready = False
+# WHICH database was initialised, not merely THAT one was. A bare boolean here
+# records that some database has the tables and then skips the check for every
+# other, so a DB_PATH change at runtime silently disarms the guard whose whole
+# job is to make a missing table impossible. Found via agent/budget.py, which
+# had the identical latch; see tests/test_schema.py::TestLazyGuardsArePerDatabase.
+_ready_for: str | None = None
 _lock = threading.Lock()
 
 
@@ -134,13 +139,13 @@ def init_db() -> None:
 
 
 def _ensure_db() -> None:
-    global _ready
-    if _ready:
+    global _ready_for
+    if _ready_for == str(longterm.DB_PATH):
         return
     with _lock:
         try:
             init_db()
-            _ready = True
+            _ready_for = str(longterm.DB_PATH)
         except Exception:
             pass
 

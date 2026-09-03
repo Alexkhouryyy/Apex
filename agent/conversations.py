@@ -27,18 +27,23 @@ from agent import longterm
 _TITLE_CHARS = 60
 _DEFAULT_TITLE = "New conversation"
 
-_ready = False
+# WHICH database was initialised, not merely THAT one was. A bare boolean here
+# records that some database has the tables and then skips the check for every
+# other, so a DB_PATH change at runtime silently disarms the guard whose whole
+# job is to make a missing table impossible. Found via agent/budget.py, which
+# had the identical latch; see tests/test_schema.py::TestLazyGuardsArePerDatabase.
+_ready_for: str | None = None
 
 
 def _ensure_db() -> None:
     """Create tables on first use — the lesson from restraint, which shipped
     absent from main.py's init block and silently did nothing."""
-    global _ready
-    if _ready:
+    global _ready_for
+    if _ready_for == str(longterm.DB_PATH):
         return
     try:
         init_db()
-        _ready = True
+        _ready_for = str(longterm.DB_PATH)
     except Exception:
         pass
 

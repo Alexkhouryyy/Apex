@@ -82,31 +82,11 @@ def main():
     # Initialize agent + long-term memory
     from agent.core import AgentCore
     from agent import longterm, telemetry
-    longterm.init_db()
-    from agent import budget as _budget_mod; _budget_mod.init_db()
-    from agent import notify as _notify_mod; _notify_mod.init_push_table()
-    from agent import devices as _devices_mod; _devices_mod.init_db()
-    from agent import world_model as _wm_mod; _wm_mod.init_db()
-    from agent import perception as _perc_mod; _perc_mod.init_db()
-    from agent import cortex as _cortex_mod; _cortex_mod.init_db()
-    from agent import skill_forge as _forge_mod; _forge_mod.init_db()
-    from agent import approvals as _appr_init; _appr_init.init_db()
-    from agent import compare as _compare_init; _compare_init.init_db()
-    from agent import access_tokens as _at_init; _at_init.init_db()
-    from agent import trajectory as _traj_init; _traj_init.init_db()
-    from agent import verification as _verif_init; _verif_init.init_db()
-    from agent import reranker as _rr_init; _rr_init.init_db()
-    from agent import documents as _docs_init; _docs_init.init_db()
-    from agent import restraint as _restraint_init; _restraint_init.init_db()
-    from agent import conversations as _conv_init; _conv_init.init_db()
-    from agent import lessons as _lessons_init; _lessons_init.init_db()
-    from agent import initiative as _init_init; _init_init.init_db()
-    from agent import deepresearch as _dr_init; _dr_init.init_db()
-    from agent import outcomes as _out_init; _out_init.init_db()
-    from agent import scheduler as _sched_init; _sched_init.init_db()
-    from agent import board as _board_init; _board_init.init_db()
-    from agent import observed as _obs_init; _obs_init.init_db()
-    from agent import council_stats as _cs_init; _cs_init.init_db()
+    # Every table, from the one list app/resident.py also uses. Kept in
+    # agent/schema.py rather than here because these two boot sequences
+    # were hand-maintained copies and had drifted by twelve modules.
+    from agent import schema as _schema
+    _schema.init_all()
     session_id = longterm.start_session()
     telemetry.set_session(session_id)
     print(f"[Memory] Session #{session_id} started. DB: {longterm.DB_PATH}")
@@ -202,17 +182,14 @@ def main():
     from agent import constellation as _constellation_mod
     print(f"[Constellation] {_constellation_mod.init()}")
 
-    # Knowledge base — ensure schema, optionally trigger background indexing
+    # Knowledge base — optionally trigger background indexing.
+    # Its tables come from schema.init_all() above, like everything else.
     from agent import knowledge
-    knowledge.init_db()
 
-    # Goals — init tables + auto-schedule weekly self-eval (once per fresh DB)
+    # Goals — auto-schedule the weekly self-eval (once per fresh DB)
     from agent import goals
-    goals.init_db()
 
-    # Feedback — init turn_feedback table for 👍/👎 capture
-    from agent import feedback
-    feedback.init_db()
+    from agent import feedback  # noqa: F401  (turn_feedback, for 👍/👎 capture)
     weekly_eval_exists = any(
         "Weekly self-evaluation" in t.get("description", "") for t in sched.list_tasks()
     )
@@ -243,7 +220,6 @@ def main():
 
     # Morning briefing — daily spoken digest (weather, news, follow-ups)
     from agent import briefing as _briefing
-    _briefing.init_db()
     _briefing_result = _briefing.install_briefing_task()
     if "scheduled" in _briefing_result:
         print(f"[Briefing] {_briefing_result}")

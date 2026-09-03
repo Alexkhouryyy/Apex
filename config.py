@@ -359,6 +359,33 @@ CALDAV_URL = os.getenv("CALDAV_URL", "")
 CALDAV_USERNAME = os.getenv("CALDAV_USERNAME", "")
 CALDAV_PASSWORD = os.getenv("CALDAV_PASSWORD", "")
 
+# === MCP — what third-party MCP servers are allowed to do ===
+#
+# MCP servers are loaded from config files Apex does not own (~/.claude/
+# settings.json, mcp_servers.json, the Claude Desktop config), so the tool
+# surface can change without a line of Apex changing — and those tools reach
+# real mail, calendars, documents and deploys. This is the gate.
+#
+#   off        nothing runs. The tools are still offered to the model, and
+#              every call is refused and recorded.
+#   read_only  reads run; writes are refused with an explanation.
+#   ask        reads run; writes ask you first. Where nobody can be asked —
+#              resident mode, a background thread — a write is refused and you
+#              get a notification, which is the same answer agent/safety.py
+#              already gives. This is the default.
+#   all        everything runs unasked. Still fully audited.
+#
+# Read versus write is Apex's own reading of the tool name, made stricter (never
+# looser) by the server's own MCP annotations, and an unrecognised verb counts
+# as a write. See agent/mcp_policy.py for why the asymmetry matters.
+MCP_POLICY = os.getenv("MCP_POLICY", "ask").strip().lower()
+# Always allowed, whatever the tier: "server:tool", "server:*", or "*".
+# This is how a write you make constantly stops asking.
+MCP_ALLOW = [e.strip() for e in os.getenv("MCP_ALLOW", "").split(",") if e.strip()]
+# Never allowed. Outranks MCP_ALLOW and MCP_POLICY=all both — a list of things
+# that must never happen is worthless if another setting can overrule it.
+MCP_DENY = [e.strip() for e in os.getenv("MCP_DENY", "").split(",") if e.strip()]
+
 # IoT — Home Assistant integration (opt-in, off by default)
 IOT_ENABLED = os.getenv("IOT_ENABLED", "false").lower() in {"1", "true", "yes"}
 IOT_HA_URL = os.getenv("IOT_HA_URL", "")          # e.g. http://homeassistant.local:8123
