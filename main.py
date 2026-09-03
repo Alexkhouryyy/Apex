@@ -87,6 +87,12 @@ def main():
     # were hand-maintained copies and had drifted by twelve modules.
     from agent import schema as _schema
     _schema.init_all()
+    # Pick up notes edited in Obsidian since last run. Off the critical
+    # path on purpose: freshness costs a read of every note, and doing
+    # that at query time would put the whole vault back on the retrieval
+    # path, which is the one thing vault search must not do.
+    from agent import vault_index as _vault_index
+    _vault_index.start_background_reindex()
     session_id = longterm.start_session()
     telemetry.set_session(session_id)
     print(f"[Memory] Session #{session_id} started. DB: {longterm.DB_PATH}")

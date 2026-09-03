@@ -74,6 +74,23 @@ def _note_path(title: str, folder: str) -> Path:
     return VAULT_DIR / folder / f"{_safe(title)}.md"
 
 
+def _after_write(path: Path) -> None:
+    """Index a note the moment Apex writes it, so its own writing is findable
+    immediately rather than at the next full pass.
+
+    Imported here rather than at module scope because agent/vault_index.py
+    imports this module — and swallowed deliberately: a note that saved but did
+    not index leaves a stale index, which `vault_index.status()` reports and
+    `reindex()` repairs. A note that failed to SAVE because indexing raised is
+    lost writing. Those are not the same size of mistake.
+    """
+    try:
+        from agent import vault_index
+        vault_index.index_note(path)
+    except Exception as e:
+        print(f"[Vault] Note saved but not indexed: {e}")
+
+
 def write_note(
     title: str,
     content: str,
@@ -112,9 +129,11 @@ def write_note(
             path.write_text(new_fm + link_section + content.strip() + "\n")
         else:
             path.write_text(_build_frontmatter(title, tags, extra_fm) + link_section + content.strip() + "\n")
+        _after_write(path)
         return f"Updated note: {path.relative_to(VAULT_DIR)}"
 
     path.write_text(_build_frontmatter(title, tags, extra_fm) + link_section + content.strip() + "\n")
+    _after_write(path)
     return f"Created note: {path.relative_to(VAULT_DIR)}"
 
 
@@ -125,6 +144,7 @@ def append_note(title: str, text: str, folder: str = "Notes") -> str:
     if not path.exists():
         return write_note(title, text, folder)
     path.write_text(path.read_text().rstrip() + "\n\n" + text.strip() + "\n")
+    _after_write(path)
     return f"Appended to: {path.relative_to(VAULT_DIR)}"
 
 
@@ -146,6 +166,7 @@ def append_daily(text: str) -> str:
     path = daily_note_path()
     ts = time.strftime("%H:%M")
     path.write_text(path.read_text().rstrip() + f"\n\n**{ts}** — {text.strip()}\n")
+    _after_write(path)
     return f"Daily note updated ({path.name})."
 
 

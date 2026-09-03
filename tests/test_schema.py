@@ -74,6 +74,23 @@ class TestBothEntryPointsUseIt:
             f"start drifting again.")
 
 
+class TestBothEntryPointsIndexTheVault:
+    """Same drift guard as the tables above, for the same reason.
+
+    The vault index is kept fresh by one call at boot. One entry point having
+    it and the other not is precisely the shape that left twelve modules
+    uninitialised in resident mode — and it would be even quieter here, because
+    a stale index does not error, it just answers with yesterday's notes.
+    """
+
+    @pytest.mark.parametrize("entry", ["main.py", "app/resident.py"])
+    def test_it_starts_the_reindex(self, entry):
+        src = (ROOT / entry).read_text(encoding="utf-8")
+        assert "start_background_reindex(" in src, (
+            f"{entry} never refreshes the vault index, so notes edited in "
+            f"Obsidian stay invisible to search in that mode")
+
+
 class TestItActuallyCreatesTables:
     def test_a_fresh_database_gets_the_tables(self, tmp_path, monkeypatch):
         """Not a tautology over the module list: it asserts specific tables that

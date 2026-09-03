@@ -3,7 +3,7 @@
 Status of the 14-phase roadmap in `APEX_FINAL_Master_Blueprint_V2.docx`
 (Table 7), checked against the code on 2026-09-02.
 
-**Basis:** 1763 tests, 14 smoke checks, 3 static audits, CI on every push.
+**Basis:** 1793 tests, 14 smoke checks, 3 static audits, CI on every push.
 
 ## How a phase is judged
 
@@ -20,7 +20,7 @@ rather than a percentage.
 |---|---|---|---|
 | 0 | Backup + baseline | Apex can be restored and regressions detected | **MET** — 1679 tests, 14 smoke checks, `tools/wiring_audit.py`, `tools/sql_audit.py`, `tools/autonomy_audit.py`, CI on every push. Decision records in `docs/DECISIONS-*.md` |
 | 1 | Fix persistence | Restart and retrieve prior validated memories | **MET — and the premise was wrong.** The blueprint's §20 states memory resets between sessions. It does not, and did not: `agent/longterm.py` has always been durable SQLite. Verified by restart, not by reading the code |
-| 2 | Markdown vault | Retrieve the correct project page *without loading the full vault* | **NOT MET.** `agent/vault.py` writes Obsidian-compatible Markdown with frontmatter and wikilinks, and reads back by title. There is no retrieval by content — `list_notes()` and `read_note(title)` both require you to already know which page you want, which is the thing the check says you should not need to know. The embedding index that would answer it covers `memories`; the vault is not in it |
+| 2 | Markdown vault | Retrieve the correct project page *without loading the full vault* | **MET 2026-09-03.** `agent/vault_index.py` embeds every note into a `vault_index` table and `apex_note` grew a `search` action over it. Both halves of the check are held by tests: it finds a note whose title you do not know, and `TestSearchNeverOpensANote` makes `Path.read_text` raise during a query, so a search that fell back to scanning the vault fails loudly. Indexing reads notes; querying does not. Freshness is a content hash, not mtime+size; deleted notes are swept; a never-indexed vault says so rather than returning an empty list. **Degraded here, not broken:** `sentence-transformers` is not installed in the build container, so this machine only exercises the keyword fallback — which is why every result carries `matched: semantic|keyword` instead of leaving the mode to be inferred from answer quality |
 | 3 | Outcome loop | A corrected task changes future behaviour traceably | **MET, and past it.** `outcomes.py`, `feedback.py`, `reflection.py`, `lessons.py`, plus `observed.py` — outcomes Apex *sees* at the call site (tool results, test verdicts), not only ones it reports about itself |
 | 4 | Adaptive Council | Council invoked only when it improves expected outcome | **MET.** `council.py` runs it, `consensus.py` measures divergence across *opening* answers (deliberately separate from the chair's self-reported confidence), `council_stats.advise()` answers "is it worth convening" from recorded runs rather than from belief |
 | 5 | MCP foundation | Discover and use a tool **end-to-end safely** | **MET 2026-09-02.** `agent/mcp_policy.py` classifies every MCP tool read or write, gates it against `MCP_POLICY` / `MCP_ALLOW` / `MCP_DENY`, and records every decision — refusals included — in `mcp_audit`, with argument key names and a hash rather than values. The gate sits inside `mcp_client.call()`, the single door, and `tests/test_mcp_client.py::TestTheGateIsAtTheChokePoint` asserts a refused write never reaches the transport rather than merely that a refusal string came back. A server's own annotation may tighten the classification and never loosen it. **One thing still unproven:** the transport is stubbed in tests, so no real server's annotations have been parsed in anger — handled defensively (both the snake_case and camelCase spellings) but not yet observed |
@@ -61,9 +61,7 @@ those on top of no permission model bakes it in.
 ## Recommended order
 
 1. ~~**Phase 5's safety half**~~ — done 2026-09-02. See the row above.
-2. **Phase 2's retrieval half** — put the vault in the embedding index so the
-   success check can be met. Small, self-contained, and it makes the vault
-   actually load-bearing instead of a write-only mirror.
+2. ~~**Phase 2's retrieval half**~~ — done 2026-09-03. See the row above.
 3. **Phase 8's proof** — one person, one camera, one card that grabs. Cheap,
    and it unblocks the honest labelling of 8 and 9.
 4. Then 6 and 7, which are the real architectural work.

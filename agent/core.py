@@ -86,7 +86,9 @@ Build the graph as you talk — it's how you remember structurally.
 - **apex_note**: Obsidian vault (~/Documents/Apex) — the human-readable second brain. \
 Use 'write' to create a permanent note about anything worth capturing (research, decisions, summaries). \
 Use 'daily' to log observations to today's dated note. Use 'entity' to mirror a knowledge-graph node \
-as a browsable note. The vault can be opened in Obsidian to see everything as a linked graph.
+as a browsable note. **Use 'search' to find a note when you do not already know its title** — \
+it matches meaning, not filenames, and is the only vault action that does not require you to \
+know the answer first. The vault can be opened in Obsidian to see everything as a linked graph.
 - **reflect_now / list_reflections / apply_reflection**: Closed-loop learning. \
 You consolidate the day's events nightly via a cron — but if the user asks "what did you learn?" \
 or "review the week", run reflect_now and present the pending reflections. \
@@ -1324,6 +1326,9 @@ TOOLS = [
             "Use 'write' to create/overwrite a note (supports wikilinks and tags). "
             "Use 'append' to add a paragraph to an existing note. "
             "Use 'daily' to append an observation to today's daily note. "
+            "Use 'search' to FIND the right note by meaning when you do not know its "
+            "title — this is the one to reach for first, because 'list' and reading "
+            "notes by name both require already knowing which page you want. "
             "Use 'list' to see what notes exist in a folder. "
             "Use 'entity' to mirror a knowledge-graph entity as a navigable note. "
             "The vault lives at ~/Documents/Apex and can be opened directly in Obsidian."
@@ -1333,9 +1338,20 @@ TOOLS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["write", "append", "daily", "list", "entity"],
+                    "enum": ["write", "append", "daily", "list", "entity", "search"],
                 },
                 "title": {"type": "string", "description": "Note title (filename without .md)"},
+                "query": {
+                    "type": "string",
+                    "description": ("For action='search': what you are looking for, in "
+                                    "your own words. Matched against note meaning, not "
+                                    "exact wording."),
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "For action='search': how many notes to return (default 5).",
+                    "default": 5,
+                },
                 "content": {"type": "string", "description": "Markdown body text"},
                 "folder": {
                     "type": "string",
@@ -2249,6 +2265,16 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                 )
             elif action == "daily":
                 return _vault.append_daily(inputs.get("content", ""))
+            elif action == "search":
+                from agent import vault_index as _vi
+                out = _vi.search(inputs.get("query", ""),
+                                 limit=int(inputs.get("limit") or 5),
+                                 folder=inputs.get("folder") or None)
+                # `note` travels with the results deliberately. An empty list
+                # means three different things here — never indexed, no
+                # embedding model, genuinely nothing matched — and each needs a
+                # different response from the model.
+                return json.dumps(out, indent=2)
             elif action == "list":
                 return json.dumps(_vault.list_notes(inputs.get("folder")), indent=2)
             elif action == "entity":
