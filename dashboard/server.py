@@ -1972,6 +1972,26 @@ def control_restart(request: Request):
                         status_code=200 if ok else 409)
 
 
+@app.get("/api/control/tasks")
+def control_tasks(request: Request):
+    """Delegated work in flight, with a sentence per task rather than a status
+    word.
+
+    "Queued for a sleeping laptop" and "queued for a machine that can never do
+    it" are the same status and different problems, so each row carries what
+    `describe()` would say. Reading this also sweeps expired leases — the sweep
+    is lazy on purpose, since one that only runs on a timer is one that has not
+    run when you look.
+    """
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import node_tasks
+    rows = node_tasks.pending()
+    for r in rows:
+        r["detail"] = node_tasks.describe(r["id"])
+    return {"pending": rows}
+
+
 @app.get("/api/control/capabilities")
 def control_capabilities(request: Request):
     """What each node can do, and when that was last actually checked.
