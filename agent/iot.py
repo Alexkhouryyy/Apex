@@ -7,7 +7,6 @@ restarts and can be toggled without restarting the agent.
 import hashlib
 import hmac
 import json
-import sqlite3
 import threading
 import time
 import urllib.error
@@ -16,13 +15,11 @@ from contextlib import contextmanager
 from typing import Optional
 
 import config
+from agent import longterm
 
 # ---------------------------------------------------------------------------
-# DB helpers (reuses the same SQLite DB as longterm.py)
+# DB helpers
 # ---------------------------------------------------------------------------
-import os
-_DB_PATH = os.path.expanduser(os.getenv("DB_PATH", "~/.voice_agent_memory.db"))
-
 _cache_lock = threading.Lock()
 _cache_value: Optional[bool] = None
 _cache_ts: float = 0.0
@@ -31,16 +28,26 @@ _CACHE_TTL = 5.0  # seconds
 
 @contextmanager
 def _db():
-    # timeout + busy_timeout: this writer shares the DB file with the main loop
-    # and background threads; wait for the lock instead of raising immediately.
-    conn = sqlite3.connect(_DB_PATH, check_same_thread=False, timeout=5.0)
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute("PRAGMA journal_mode=WAL")
-    try:
+    """One connection path, shared with every other subsystem.
+
+    This used to open its own `sqlite3.connect(_DB_PATH)` against a path
+    resolved from the environment at IMPORT time. 42 modules go through
+    `longterm._conn()`, which reads `longterm.DB_PATH` at CALL time; this one
+    did not follow it. Two consequences, both silent:
+
+      * A test pointing `longterm.DB_PATH` at a temp file left IoT writing to
+        the real database — a live pollution bug, not a hypothetical one.
+      * Anything that relocates or snapshots the brain would miss IoT state
+        entirely. The subsystem would keep working locally and quietly diverge,
+        which is the failure shape this codebase keeps producing.
+
+    `check_same_thread=False` is not carried over: the connection never escapes
+    this context manager, so it is never touched from a second thread. The
+    busy_timeout and WAL settings that made this writer safe alongside the
+    background threads live in `longterm._conn()` already.
+    """
+    with longterm._conn() as conn:
         yield conn
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def init_db() -> None:

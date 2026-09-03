@@ -4,6 +4,8 @@ import importlib
 from unittest.mock import MagicMock, patch
 import pytest
 
+from agent import longterm
+
 
 # ---------------------------------------------------------------------------
 # Kill switch — agent/iot.py
@@ -19,7 +21,7 @@ class TestKillSwitch:
     def test_enabled_when_env_flag_on_and_db_defaults_on(self, tmp_path, monkeypatch):
         monkeypatch.setattr("config.IOT_ENABLED", True)
         import agent.iot as iot
-        monkeypatch.setattr(iot, "_DB_PATH", str(tmp_path / "test.db"))
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "test.db"))
         monkeypatch.setattr(iot, "_cache_value", None)
         monkeypatch.setattr(iot, "_cache_ts", 0.0)
         iot.init_db()
@@ -28,7 +30,7 @@ class TestKillSwitch:
     def test_set_enabled_false_blocks(self, tmp_path, monkeypatch):
         monkeypatch.setattr("config.IOT_ENABLED", True)
         import agent.iot as iot
-        monkeypatch.setattr(iot, "_DB_PATH", str(tmp_path / "test.db"))
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "test.db"))
         monkeypatch.setattr(iot, "_cache_value", None)
         monkeypatch.setattr(iot, "_cache_ts", 0.0)
         iot.init_db()
@@ -40,7 +42,7 @@ class TestKillSwitch:
     def test_set_enabled_true_unblocks(self, tmp_path, monkeypatch):
         monkeypatch.setattr("config.IOT_ENABLED", True)
         import agent.iot as iot
-        monkeypatch.setattr(iot, "_DB_PATH", str(tmp_path / "test.db"))
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "test.db"))
         monkeypatch.setattr(iot, "_cache_value", None)
         monkeypatch.setattr(iot, "_cache_ts", 0.0)
         iot.init_db()
@@ -202,3 +204,65 @@ class TestIotConfig:
         import os
         if os.getenv("IOT_ENABLED", "").lower() not in {"1", "true", "yes"}:
             assert config.IOT_ENABLED is False
+
+
+class TestIotSharesTheOneConnectionPath:
+    """`agent/iot.py` used to open its own `sqlite3.connect(_DB_PATH)`, against
+    a path resolved from the environment at IMPORT time.
+
+    42 modules go through `longterm._conn()`, which reads `longterm.DB_PATH` at
+    CALL time. This one did not follow it, and the divergence was invisible
+    because the two paths are normally the same string. Two consequences:
+
+      * The tests above had to monkeypatch `iot._DB_PATH` separately. Any test
+        that patched only `longterm.DB_PATH` — the convention everywhere else —
+        left IoT writing to the real database.
+      * Anything that relocates or snapshots the brain would miss IoT state.
+        The subsystem would keep working locally and quietly diverge, which is
+        the shape this codebase keeps producing.
+
+    This test is what stops it coming back. It asserts behaviour, not the
+    absence of a symbol: re-adding a private path global would not fail here,
+    but re-adding one that IoT actually *used* would.
+    """
+
+    def test_iot_writes_follow_longterm_db_path(self, tmp_path, monkeypatch):
+        import sqlite3
+        import agent.iot as iot
+        monkeypatch.setattr("config.IOT_ENABLED", True)
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "follow.db"))
+        monkeypatch.setattr(iot, "_cache_value", None)
+        monkeypatch.setattr(iot, "_cache_ts", 0.0)
+
+        iot.init_db()
+        with patch("dashboard.server.ws_manager.broadcast_threadsafe"):
+            iot.set_enabled(False, source="test")
+
+        with sqlite3.connect(tmp_path / "follow.db") as c:
+            rows = c.execute("SELECT key, value FROM iot_settings").fetchall()
+        assert rows, (
+            "IoT wrote nothing to the database longterm.DB_PATH points at — it "
+            "is using a connection path of its own again")
+
+    def test_pointing_somewhere_new_does_not_carry_state_across(
+            self, tmp_path, monkeypatch):
+        """The half that proves the path is read per call, not cached. A module
+        that resolved the path once at import would pass the test above and
+        still write every subsequent call to the first database it saw."""
+        import agent.iot as iot
+        monkeypatch.setattr("config.IOT_ENABLED", True)
+        monkeypatch.setattr(iot, "_cache_value", None)
+        monkeypatch.setattr(iot, "_cache_ts", 0.0)
+
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "first.db"))
+        iot.init_db()
+        with patch("dashboard.server.ws_manager.broadcast_threadsafe"):
+            iot.set_enabled(False, source="test")
+
+        monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "second.db"))
+        monkeypatch.setattr(iot, "_cache_value", None)
+        monkeypatch.setattr(iot, "_cache_ts", 0.0)
+        iot.init_db()
+        assert iot.is_enabled() is True, (
+            "the second database has no 'disabled' row, so IoT should read as "
+            "enabled — reading False means the write went to the first one")
