@@ -4592,12 +4592,16 @@ async function _loadControlMcp() {
         <span class="v" style="flex:1 1 auto">${escapeHTML(r.tier)} · ${
           escapeHTML(r.decision)}${r.error ? ' · ' + escapeHTML(r.error) : ''}</span>
       </div>`).join('');
+    // A heading, because without one the audit rows sit flush against the
+    // server rows and read as three more servers. Only visible by looking at
+    // the rendered page, which is why it is worth rendering it.
+    const audHead = '<h4 style="margin:0 0 6px;font-size:13px">Recent decisions</h4>';
     audEl.innerHTML = total
-      ? `<div class="muted" style="margin-bottom:6px">Last ${
+      ? `${audHead}<div class="muted" style="margin-bottom:6px">Last ${
           (a.summary || {}).days || 30} days: ${
           escapeHTML(Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', '))
         } — arguments are recorded as key names and a hash, never values.</div>${rows}`
-      : '<div class="muted">No MCP calls recorded yet.</div>';
+      : `${audHead}<div class="muted">No MCP calls recorded yet.</div>`;
   } catch (e) { _controlDenied(stateEl, e); listEl.innerHTML = ''; }
 }
 
