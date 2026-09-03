@@ -109,11 +109,81 @@ Option B's process, running on a Pi or an old machine on your Tailnet. Same
 code. No third party, no monthly cost, no ciphertext leaving the house — at the
 cost of being dark when your home internet is.
 
-**Recommendation: build B, deploy as C where possible.** They are the same
-program; the difference is one hostname. Designing for that from the start costs
-nothing and keeps the ownership question reversible.
+**Chosen: B, deployed to a rented box for now, with C available later.** They
+are the same program; the difference is one hostname, so moving to a Pi when
+there is one is a config change rather than a rewrite.
+
+The one amendment §3a makes to Option B: the relay is not purely blind. It gets
+a scoped, readable slice so it can answer while the laptop sleeps — with the
+full snapshot still encrypted, and its powers strictly narrower than the
+laptop's.
 
 ---
+
+## 3a. The choice made — "both", and what it actually costs
+
+Asked whether the laptop or the cloud should be Apex, the answer was **both**,
+and cloud-hosted rather than a Pi for now.
+
+"Both" is achievable and it is not the two-brains failure, provided one word is
+split from the other. Apex has two roles that are usually assumed to travel
+together:
+
+| Role | Who holds it |
+|---|---|
+| **Author of memory** — the thing that decides what is true and records it | The laptop, alone, always |
+| **Answerer** — the thing that reasons and replies when you ask | Either, whichever is awake |
+
+Keeping the first singular is what makes "one Apex identity" true rather than
+aspirational. Letting the second float is what makes Apex answer you on a train
+with the lid shut. Everything the cloud does becomes an entry in the outbox that
+the laptop files when it wakes, so the record still has exactly one author.
+
+### The price, stated plainly
+
+For the cloud to answer, it must be able to **read** some memory and hold a
+model API key. That gives up the property recommended in §3 — a relay that
+cannot read what it stores. If that server is compromised, someone gets a
+readable slice of memory and a key. There is no version of "Apex answers while
+the laptop is off" that avoids this; a box that cannot read cannot reason.
+
+So the question is not whether the server sees anything. It is **how much**.
+
+### The line, and why this one
+
+The cloud gets the **working context Apex already builds for itself at every
+boot** — `longterm.top_memories(limit=15)` through `format_for_context()`, plus
+the current conversation, open goals, and today's schedule.
+
+That line is not invented for this document. It is the line Apex already draws
+when it decides what is worth putting in front of a model, which makes it both
+defensible and self-maintaining: improve what Apex considers relevant and the
+cloud's view improves with it, with no second definition to keep in step.
+
+Explicitly **not** sent: full memory history, the Obsidian vault, documents,
+tool credentials, `.env`, the audit tables.
+
+The full snapshot from §4 still goes up **encrypted and unreadable**, for
+restore and for phone-side search. Two artefacts, two forms, two purposes:
+
+| Artefact | Form on the server | Purpose |
+|---|---|---|
+| Working context | Readable | So the cloud can answer |
+| Full snapshot | Ciphertext | So the phone can search, and so nothing is lost |
+
+### The cloud's permission tier
+
+Strictly narrower than the laptop's, and enforced the same way MCP is:
+
+- **May**: answer questions, summarise, draft, notify you.
+- **May not**: touch your accounts, files, shell, IoT, or camera.
+
+Anything in the second row becomes a task **queued for the laptop**, which runs
+it through `safety.check`, `mcp_policy.enforce` and `subagent_scope.check` at
+execution time. The cloud can want something to happen; it cannot be the thing
+that approves it. That is the Phase 7 rule from §5 applied to Apex's own cloud
+half, and it is why the cloud being compromised is a disclosure problem rather
+than a control problem.
 
 ## 4. Phase 6 design
 
@@ -242,9 +312,11 @@ small commit, before either phase.
 | 4 | Capability probing on `devices.py` | A node without Blender never reports `blender` |
 | 5 | Task queue with leases, expiry, attempts, `dead` | An expired lease requeues; a task for an offline node reads as waiting, never as done |
 | 6 | Delegated execution through the local gates | A delegated shell command still hits `safety.check` — reverting that check must fail a test |
-| 7 | Deploy and use it | Lid shut, phone works, lid open, work lands |
+| 7 | Scoped working-context push, and the cloud's narrower permission tier | The pushed context contains no credentials, vault or full history — asserted against a real database, not a fixture |
+| 8 | Cloud answers a question; the reply lands in the outbox | The laptop files it exactly once, and an account-touching request is queued rather than performed |
+| 9 | Deploy and use it | Lid shut, phone answers, lid open, work lands |
 
-Steps 0–6 are buildable and testable here. Step 7 is yours.
+Steps 0–8 are buildable and testable here. Step 9 is yours.
 
 **Rough size:** steps 0–3 are comparable to the MCP permission work. Steps 4–6
 are a similar size again. This is the largest remaining item in the blueprint,
@@ -257,10 +329,10 @@ cost, more than the code.
 
 - **Port the database to Postgres.** 565 KB and 1,216 rows do not need it, and
   it would trade a working storage layer for a migration.
-- **Let the cloud reason.** A relay that called models would need the API keys,
-  the memory in plaintext, and its own permission model — three of the four
-  reasons not to do Option A.
-- **Move identity off the laptop.** Rule 6 of the blueprint asks for this and
-  this plan declines it, on the grounds stated in §1. If that trade is wanted
-  anyway, it is Option A and should be chosen with its cost visible, not arrived
-  at by increments.
+- **Let the cloud reason over *everything*.** It reasons over the working
+  context only (§3a). The distinction matters: a relay holding the whole brain
+  in plaintext is most of Option A's cost without its benefits.
+- **Move authorship off the laptop.** Rule 6 of the blueprint asks for this and
+  this plan declines it. The cloud may answer; it may not be the record. If that
+  trade is wanted anyway, it is Option A and should be chosen with its cost
+  visible, not arrived at by increments.
