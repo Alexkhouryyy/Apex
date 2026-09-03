@@ -34,7 +34,8 @@ INIT_MODULES: tuple[str, ...] = (
     "access_tokens", "approvals", "board", "briefing", "budget", "compare",
     "conversations", "cortex", "council_stats", "deepresearch", "devices",
     "documents", "feedback", "goals", "initiative", "iot", "knowledge",
-    "lessons", "mcp_policy", "observed", "outcomes", "perception", "reranker",
+    "lessons", "mcp_policy", "observed", "outcomes", "perception",
+    "relay", "reranker",
     "restraint", "scheduler", "skill_forge", "threads", "trajectory",
     "vault_index", "verification", "world_model",
 )

@@ -87,6 +87,8 @@ def main():
     # were hand-maintained copies and had drifted by twelve modules.
     from agent import schema as _schema
     _schema.init_all()
+    from agent import relay as _relay
+    print(_relay.start_background())
     # Pick up notes edited in Obsidian since last run. Off the critical
     # path on purpose: freshness costs a read of every note, and doing
     # that at query time would put the whole vault back on the retrieval

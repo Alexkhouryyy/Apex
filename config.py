@@ -377,10 +377,11 @@ RELAY_TOKEN = os.getenv("RELAY_TOKEN", "")        # authenticates THIS laptop to
 # key and a strong one look identical from everywhere except the moment of use.
 # A snapshot sealed with a lost key is lost.
 RELAY_KEY = os.getenv("RELAY_KEY", "")
-# RELAY_SNAPSHOT_MINUTES arrives with the thing that schedules a push
-# (step 2 of docs/PHASE_6_7_PLAN.md). A setting nothing reads is worse
-# than no setting — somebody sets it and nothing happens — and
-# tools/wiring_audit.dead_config_flags exists to catch exactly that.
+# How often the laptop drains the outbox and pushes a fresh snapshot. Read by
+# agent/relay.start_background(); held back from an earlier commit until
+# something actually read it, because a setting nobody reads is worse than no
+# setting — somebody sets it and nothing happens.
+RELAY_SNAPSHOT_MINUTES = int(os.getenv("RELAY_SNAPSHOT_MINUTES", "30"))
 
 # === MCP — what third-party MCP servers are allowed to do ===
 #

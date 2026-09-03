@@ -172,6 +172,8 @@ def run_resident(model_override: Optional[str] = None) -> None:
     # subsystems whose tables used to be created thirty lines further down.
     from agent import schema as _schema
     _schema.init_all(log=logging.warning)
+    from agent import relay as _relay
+    logging.info(_relay.start_background())
     from agent import vault_index as _vault_index
     _vault_index.start_background_reindex(log=logging.info)
     session_id = longterm.start_session()

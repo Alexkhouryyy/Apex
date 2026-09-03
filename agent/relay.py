@@ -174,6 +174,9 @@ def _http(method: str, path: str, body: Optional[bytes] = None,
 
 _last: dict = {"pushed_at": 0.0, "bytes": 0, "error": "", "attempted_at": 0.0}
 
+import threading as _threading
+_stop = _threading.Event()
+
 
 def enabled() -> bool:
     return bool(getattr(config, "RELAY_ENABLED", False))
@@ -230,6 +233,268 @@ def status() -> dict:
             "pushed_at": _last["pushed_at"], "bytes": _last["bytes"],
             "attempted_at": _last["attempted_at"], "error": _last["error"],
             "url": str(getattr(config, "RELAY_URL", "") or "")}
+
+
+# ── the outbox: work that arrived while the laptop was off ───────────────────
+#
+# The success check is "a message queued while offline is applied exactly once
+# when the laptop returns", and the honest version of that sentence needs two
+# qualifications written down rather than discovered.
+#
+# **Dedupe is on the item's own id, not the relay's row id.** The sender mints a
+# uuid inside the sealed payload. A relay operator cannot forge an item — they
+# have no key — but they can replay one they are already storing, and a replay
+# under a fresh row id would otherwise be a second, legitimate-looking delivery.
+# The id that decides "have I seen this" therefore has to be one they cannot
+# choose.
+#
+# **Exactly-once is not achievable across two systems that do not share a
+# transaction.** The claim is written here, the effect happens here, the
+# acknowledgement happens over there, and a crash can land between any two of
+# them. What this does is claim, apply, then acknowledge — and a row left
+# `in_progress` by a crash is RETRIED on the next drain rather than abandoned,
+# because a duplicated note is visible and harmless while a silently dropped one
+# is neither. `attempts` is recorded so a retry loop cannot hide.
+
+APPLY_MAX_ATTEMPTS = 3
+
+
+def init_db() -> None:
+    with longterm._conn() as c:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS relay_applied (
+                item_id    TEXT PRIMARY KEY,
+                relay_id   INTEGER NOT NULL DEFAULT 0,
+                kind       TEXT NOT NULL DEFAULT '',
+                status     TEXT NOT NULL DEFAULT 'in_progress',
+                attempts   INTEGER NOT NULL DEFAULT 0,
+                first_seen REAL NOT NULL,
+                applied_at REAL NOT NULL DEFAULT 0,
+                error      TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_relay_applied_status "
+                  "ON relay_applied(status)")
+
+
+def new_item(kind: str, **payload) -> dict:
+    """One outbox item, with the id that dedupe will key on."""
+    import uuid
+    return {"id": uuid.uuid4().hex, "kind": str(kind), "ts": time.time(),
+            "payload": payload}
+
+
+def queue(kind: str, **payload) -> dict:
+    """Seal an item and leave it on the relay for the laptop to pick up."""
+    if not enabled():
+        return {"ok": False, "skipped": "RELAY_ENABLED is false"}
+    item = new_item(kind, **payload)
+    try:
+        blob = seal(json.dumps(item).encode())
+        _http("POST", "/outbox", blob)
+    except RelayError as e:
+        print(f"[Relay] Could not queue a {kind}: {e}")
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "id": item["id"]}
+
+
+def pending() -> list[dict]:
+    """Unsealed outbox items, oldest first.
+
+    An item that will not decrypt is REPORTED rather than dropped. It means the
+    key changed or the relay returned something other than what was stored, and
+    both are worth knowing; skipping quietly would turn either into "you have no
+    messages".
+    """
+    import base64
+    raw = json.loads(_http("GET", "/outbox").decode() or "{}")
+    out = []
+    for row in raw.get("items", []):
+        try:
+            item = json.loads(unseal(base64.b64decode(row["ciphertext_b64"])))
+        except Exception as e:
+            print(f"[Relay] Outbox item {row.get('id')} would not open: {e}")
+            out.append({"relay_id": row.get("id"), "unreadable": str(e)})
+            continue
+        item["relay_id"] = row.get("id")
+        out.append(item)
+    return out
+
+
+def _apply_note(payload: dict) -> str:
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise RelayError("a note with no text")
+    return longterm.remember(text, kind=str(payload.get("kind") or "note"),
+                             importance=int(payload.get("importance") or 5))
+
+
+# Deny-by-default, for the same reason ROLE_TOOLS and MCP_ALLOW are. Items are
+# sealed and therefore unforgeable, but an older laptop meeting a kind a newer
+# phone invented must refuse it rather than improvise — and "we had not thought
+# of that kind yet" has never been a reason to run something.
+APPLY: dict = {"note": _apply_note}
+
+
+def drain() -> dict:
+    """Pull, apply, acknowledge. Returns a summary; never raises upward."""
+    if not enabled():
+        return {"ok": False, "skipped": "RELAY_ENABLED is false"}
+    try:
+        items = pending()
+    except RelayError as e:
+        _last["error"] = str(e)
+        print(f"[Relay] Could not read the outbox: {e}")
+        return {"ok": False, "error": str(e)}
+
+    applied = skipped = failed = 0
+    for item in items:
+        if item.get("unreadable"):
+            failed += 1
+            continue
+        item_id, kind = str(item.get("id") or ""), str(item.get("kind") or "")
+        relay_id = item.get("relay_id")
+        if not item_id:
+            failed += 1
+            print("[Relay] An outbox item had no id; refusing to apply it "
+                  "because there would be no way to avoid applying it again.")
+            continue
+
+        if not _claim(item_id, relay_id, kind):
+            skipped += 1
+            _ack(relay_id)          # already applied; the ack simply never landed
+            continue
+
+        handler = APPLY.get(kind)
+        if handler is None:
+            _finish(item_id, "unsupported",
+                    error=f"no handler for kind '{kind}'")
+            failed += 1
+            print(f"[Relay] Outbox item {item_id[:8]} has kind '{kind}', which "
+                  f"this version does not know how to apply. Left unapplied "
+                  f"rather than guessed at.")
+            continue
+        try:
+            handler(item.get("payload") or {})
+        except Exception as e:
+            _finish(item_id, "failed", error=f"{type(e).__name__}: {e}")
+            failed += 1
+            print(f"[Relay] Outbox item {item_id[:8]} failed: {e}")
+            continue
+        _finish(item_id, "applied")
+        _ack(relay_id)
+        applied += 1
+
+    return {"ok": True, "applied": applied, "skipped": skipped, "failed": failed,
+            "seen": len(items)}
+
+
+def _claim(item_id: str, relay_id, kind: str) -> bool:
+    """True if this process should apply the item now.
+
+    The INSERT is the lock: a PRIMARY KEY collision is how a second drain — or
+    a second Apex — finds out someone else already has it, with no read-then-
+    write race in between.
+
+    A row left `in_progress` by a crash is re-claimed, up to APPLY_MAX_ATTEMPTS.
+    That trades a possible duplicate for a guaranteed delivery, which is the
+    right way round when the effect is "remember this": a duplicate note is
+    visible and harmless, a dropped one is neither.
+    """
+    now = time.time()
+    with longterm._conn() as c:
+        cur = c.execute(
+            "INSERT OR IGNORE INTO relay_applied "
+            "(item_id, relay_id, kind, status, attempts, first_seen) "
+            "VALUES (?, ?, ?, 'in_progress', 1, ?)",
+            (item_id, int(relay_id or 0), kind, now))
+        if cur.rowcount:
+            c.commit()
+            return True
+        row = c.execute("SELECT status, attempts FROM relay_applied "
+                        "WHERE item_id = ?", (item_id,)).fetchone()
+        if not row or row[0] != "in_progress" or row[1] >= APPLY_MAX_ATTEMPTS:
+            return False
+        c.execute("UPDATE relay_applied SET attempts = attempts + 1 "
+                  "WHERE item_id = ?", (item_id,))
+        c.commit()
+        print(f"[Relay] Retrying outbox item {item_id[:8]} — a previous attempt "
+              f"claimed it and did not finish (attempt {row[1] + 1}).")
+        return True
+
+
+def _finish(item_id: str, status: str, error: str = "") -> None:
+    with longterm._conn() as c:
+        c.execute("UPDATE relay_applied SET status = ?, applied_at = ?, error = ? "
+                  "WHERE item_id = ?", (status, time.time(), error[:500], item_id))
+        c.commit()
+
+
+def _ack(relay_id) -> None:
+    """Tell the relay it can stop offering the item. Best effort: a failure here
+    leaves it pending, and the next drain skips it on the dedupe table and acks
+    again."""
+    if not relay_id:
+        return
+    try:
+        _http("POST", f"/outbox/{int(relay_id)}/done", b"")
+    except RelayError as e:
+        print(f"[Relay] Applied item {relay_id} but could not acknowledge it: {e}")
+
+
+# ── running it ───────────────────────────────────────────────────────────────
+
+_thread = None
+
+
+def start_background() -> str:
+    """Drain and snapshot on a timer. Returns the line to print at boot.
+
+    Always says what it decided, including when it decided to do nothing. A
+    subsystem that is configured, constructed and silently never runs is
+    indistinguishable from one that is working, and this codebase has produced
+    that shape often enough that "off" has to be as loud as "on".
+    """
+    global _thread
+    if not enabled():
+        return "[Relay] Off — nothing is sent anywhere (RELAY_ENABLED=false)."
+    if not getattr(config, "RELAY_URL", ""):
+        return "[Relay] Enabled but RELAY_URL is empty, so nothing will be sent."
+    if _thread is not None and _thread.is_alive():
+        return "[Relay] Already running."
+    try:
+        _fernet()                       # fail at boot, not at the first push
+    except RelayError as e:
+        return f"[Relay] NOT started: {e}"
+
+    import threading
+    minutes = max(1, int(getattr(config, "RELAY_SNAPSHOT_MINUTES", 30)))
+
+    def loop():
+        # Drain first, and before the first sleep. Work that arrived while the
+        # laptop was off is the thing someone is actually waiting on; making
+        # them wait another half hour for it would miss the point of the phase.
+        while True:
+            try:
+                drain()
+            except Exception as e:
+                print(f"[Relay] drain error: {e}")
+            try:
+                push_snapshot()
+            except Exception as e:
+                print(f"[Relay] snapshot error: {e}")
+            if _stop.wait(timeout=minutes * 60):
+                return
+
+    _stop.clear()
+    _thread = threading.Thread(target=loop, daemon=True, name="Relay")
+    _thread.start()
+    return (f"[Relay] Watching {config.RELAY_URL} — draining and snapshotting "
+            f"every {minutes}m.")
+
+
+def stop_background() -> None:
+    _stop.set()
 
 
 def _ago(ts: float) -> str:
