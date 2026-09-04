@@ -313,7 +313,7 @@ small commit, before either phase.
 | 5 | Task queue with leases, expiry, attempts, `dead` | An expired lease requeues; a task for an offline node reads as waiting, never as done |
 | 6 | ~~Delegated execution through the local gates~~ **done** | `agent/node_worker.py` routes delegated work through `core._execute_tool`, the same door a local call uses. A delegated `rm -rf /` is blocked by `safety.check` on the machine that would have run it; reverting that path fails three tests |
 | 7 | ~~Scoped working-context push, and the cloud's narrower permission tier~~ **done** | `agent/working_context.py` builds from an allowlist of four named sources, redacted and bounded. A marker planted in the vault, in documents, in the MCP audit and in `.env` reaches none of it, asserted against a real database; sixty history notes do not become sixty notes on a rented box. The tier travels with the push |
-| 8 | Cloud answers a question; the reply lands in the outbox | The laptop files it exactly once, and an account-touching request is queued rather than performed |
+| 8 | ~~Cloud answers a question; the reply lands in the outbox~~ **done** | `relay/answer.py` is a separate optional process — the mailbox still holds no model key. Replies are filed exactly once as content, and `requests` become queued tasks that meet the local gates. A forged reply saying `rm -rf /` gets a task you can see, not a command |
 | 9 | Deploy and use it | Lid shut, phone answers, lid open, work lands |
 
 Steps 0–8 are buildable and testable here. Step 9 is yours.

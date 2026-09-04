@@ -110,6 +110,48 @@ which is the schema making the promise rather than this file doing it.
 | `POST` | `/outbox` | Add a sealed item (`X-Apex-Kind` optional) |
 | `GET` | `/outbox` | Pending items, oldest first |
 | `POST` | `/outbox/{id}/done` | Mark drained. Reports `changed: 0` if it already was |
+| `PUT` | `/context` | The readable working slice the answerer reasons over |
+| `GET` | `/context` | Read it back. `404` when none sent yet |
+| `POST` | `/reply` | An answer from `answer.py`. Empty answers refused |
+| `GET` | `/replies` | Replies the laptop has not filed yet |
+| `POST` | `/replies/{id}/done` | Mark filed |
+
+## Optional: letting it answer while the laptop is off
+
+`server.py` alone is a mailbox. It holds no model key and does no reasoning, and
+if you only run that, it never will.
+
+`answer.py` is the half that answers. Separate file, separate process, separate
+decision — answering is opt-in at the level of *which processes you start*, not
+a flag inside one that a config you did not write could flip.
+
+```bash
+export ANTHROPIC_API_KEY=...      # ONLY this file needs one
+export RELAY_SERVER_TOKEN=...     # the same token
+python3 answer.py "what did I say about the Berlin trip?"
+```
+
+It reads the working context your laptop pushed, asks a model, and POSTs the
+answer back. It touches no account, runs no command, opens no file. When
+answering properly would need one of those, it records a **request** instead —
+and your laptop turns that into a queued task that goes through `safety.check`,
+`mcp_policy.enforce` and `subagent_scope.check` before anything happens.
+
+**The cloud can want something to happen. It cannot be the thing that approves
+it.**
+
+### What the laptop does with a reply
+
+A reply is **data, never an instruction.** It was written on this box, by a
+model, from a context this box could read. Apex files the answer as a note and
+turns `requests` into queued tasks — it never executes anything a reply
+contains. So if this box is compromised, the worst a forged reply achieves is a
+wrong answer and a task sitting visibly in your queue.
+
+Replies are stored in plaintext, in their own table. Outbox items come from your
+devices and are sealed with a key this box does not have; a reply is written
+here by something that had to read the context to produce it, so sealing it
+would be theatre. Two origins, two trust levels, two tables.
 
 ## If the box is compromised
 

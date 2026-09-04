@@ -103,6 +103,23 @@ def init_db(path: str | None = None) -> None:
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_outbox_pending "
                   "ON outbox(done_at, id)")
+        # Replies written by the optional answerer (relay/answer.py). Plaintext,
+        # and separate from `outbox` on purpose: outbox items come from YOUR
+        # devices and are sealed, replies are written on this box by something
+        # that had to read the context to produce them, so sealing them would be
+        # theatre. Two origins, two trust levels, two tables.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS replies (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at REAL NOT NULL,
+                question   TEXT NOT NULL DEFAULT '',
+                answer     TEXT NOT NULL DEFAULT '',
+                requests   TEXT NOT NULL DEFAULT '[]',
+                done_at    REAL NOT NULL DEFAULT 0
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_replies_pending "
+                  "ON replies(done_at, id)")
         c.commit()
 
 
@@ -188,6 +205,14 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 return self._json(404, {"error": "no context stored yet"})
             return self._send(200, row[0].encode(), "application/json")
+        if self.path == "/replies":
+            with self._conn() as c:
+                rows = c.execute(
+                    "SELECT id, created_at, question, answer, requests"
+                    " FROM replies WHERE done_at = 0 ORDER BY id").fetchall()
+            return self._json(200, {"items": [
+                {"id": r[0], "created_at": r[1], "question": r[2],
+                 "answer": r[3], "requests": r[4]} for r in rows]})
         if self.path == "/outbox":
             with self._conn() as c:
                 rows = c.execute(
@@ -249,6 +274,37 @@ class Handler(BaseHTTPRequestHandler):
                     "VALUES (?, ?, ?)", (time.time(), kind, body))
                 c.commit()
             return self._json(200, {"ok": True, "id": cur.lastrowid})
+        if self.path == "/reply":
+            body = self._body()
+            if body is None:
+                return
+            try:
+                payload = json.loads(body or b"{}")
+            except Exception as e:
+                return self._json(400, {"error": f"reply is not JSON: {e}"})
+            answer = str(payload.get("answer") or "").strip()
+            if not answer:
+                return self._json(400, {"error": "empty answer refused"})
+            with self._conn() as c:
+                cur = c.execute(
+                    "INSERT INTO replies (created_at, question, answer, requests)"
+                    " VALUES (?, ?, ?, ?)",
+                    (time.time(), str(payload.get("question") or "")[:4000],
+                     answer[:20000],
+                     json.dumps(payload.get("requests") or [])[:8000]))
+                c.commit()
+            return self._json(200, {"ok": True, "id": cur.lastrowid})
+        if self.path.startswith("/replies/") and self.path.endswith("/done"):
+            try:
+                item = int(self.path.split("/")[2])
+            except (IndexError, ValueError):
+                return self._json(400, {"error": "bad reply id"})
+            with self._conn() as c:
+                cur = c.execute(
+                    "UPDATE replies SET done_at = ? WHERE id = ? AND done_at = 0",
+                    (time.time(), item))
+                c.commit()
+            return self._json(200, {"ok": True, "changed": cur.rowcount})
         if self.path.startswith("/outbox/") and self.path.endswith("/done"):
             try:
                 item = int(self.path.split("/")[2])

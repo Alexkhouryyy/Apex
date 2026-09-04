@@ -438,6 +438,113 @@ def drain() -> dict:
             "seen": len(items)}
 
 
+# ── replies the cloud wrote while the laptop was off ─────────────────────────
+#
+# A reply is DATA, never an instruction. It was written on a machine you may not
+# own, by a model, from a context that machine could read. If the relay were
+# compromised an attacker could put "run rm -rf /" in one — so replies are filed
+# as content and their `requests` become QUEUED TASKS, which then go through
+# safety.check, mcp_policy.enforce and subagent_scope.check on the laptop like
+# anything else.
+#
+# The worst a hostile relay achieves is a wrong answer and a task sitting
+# visibly in the queue.
+
+REPLY_MAX_REQUESTS = 5
+
+
+def pull_replies() -> list[dict]:
+    raw = json.loads(_http("GET", "/replies").decode() or "{}")
+    return raw.get("items", []) or []
+
+
+def drain_replies() -> dict:
+    """File what the cloud answered. Exactly once, as content, never as commands."""
+    if not enabled():
+        return {"ok": False, "skipped": "RELAY_ENABLED is false"}
+    try:
+        items = pull_replies()
+    except RelayError as e:
+        print(f"[Relay] Could not read replies: {e}")
+        return {"ok": False, "error": str(e)}
+
+    filed = queued = skipped = 0
+    for item in items:
+        relay_id = item.get("id")
+        # Dedupe on the relay's row id here, unlike the outbox. These are not
+        # sealed and not replayable by a third party: the only writer is the
+        # answerer on the same box, and its ids come from one AUTOINCREMENT.
+        # The threat the outbox's inner id defends against — a stored item put
+        # back under a fresh id — is the same actor either way here, and it
+        # gains nothing it could not do by writing a new reply.
+        item_id = f"reply:{relay_id}"
+        if not _claim(item_id, relay_id, "reply"):
+            skipped += 1
+            _ack_reply(relay_id)
+            continue
+
+        answer = str(item.get("answer") or "").strip()
+        question = str(item.get("question") or "").strip()
+        if answer:
+            try:
+                longterm.remember(
+                    f"[Answered from the relay while the laptop was off]\n"
+                    f"Q: {question}\nA: {answer}"[:4000],
+                    kind="note", importance=4)
+                filed += 1
+            except Exception as e:
+                _finish(item_id, "failed", error=f"{type(e).__name__}: {e}")
+                continue
+
+        queued += _queue_requests(item.get("requests"))
+        _finish(item_id, "applied")
+        _ack_reply(relay_id)
+
+    return {"ok": True, "filed": filed, "queued": queued, "skipped": skipped,
+            "seen": len(items)}
+
+
+def _queue_requests(requests) -> int:
+    """Turn what the cloud ASKED FOR into tasks the laptop decides about.
+
+    Never executed here. `node_tasks.submit` records a request, and
+    `agent/node_worker.py` runs it through the local gates — or refuses it,
+    which is a normal outcome.
+    """
+    if isinstance(requests, str):
+        try:
+            requests = json.loads(requests)
+        except Exception:
+            return 0
+    if not isinstance(requests, list):
+        return 0
+    from agent import node_tasks
+    n = 0
+    for req in requests[:REPLY_MAX_REQUESTS]:
+        if not isinstance(req, dict):
+            continue
+        tool = str(req.get("tool") or "").strip()
+        if not tool:
+            continue
+        try:
+            node_tasks.submit("tool", payload={
+                "name": tool, "inputs": req.get("inputs") or {},
+                "asked_by": "relay", "why": str(req.get("why") or "")[:500]})
+            n += 1
+        except Exception as e:
+            print(f"[Relay] Could not queue '{tool}' from a reply: {e}")
+    return n
+
+
+def _ack_reply(relay_id) -> None:
+    if not relay_id:
+        return
+    try:
+        _http("POST", f"/replies/{int(relay_id)}/done", b"")
+    except RelayError as e:
+        print(f"[Relay] Filed reply {relay_id} but could not acknowledge it: {e}")
+
+
 def _claim(item_id: str, relay_id, kind: str) -> bool:
     """True if this process should apply the item now.
 
@@ -536,6 +643,10 @@ def start_background() -> str:
                 push_context()
             except Exception as e:
                 print(f"[Relay] context error: {e}")
+            try:
+                drain_replies()
+            except Exception as e:
+                print(f"[Relay] reply error: {e}")
             if _stop.wait(timeout=minutes * 60):
                 return
 
