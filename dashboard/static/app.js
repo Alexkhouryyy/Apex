@@ -4430,7 +4430,8 @@ function _controlDenied(el, e) {
 
 async function loadControl() {
   _renderThemePicker();
-  await Promise.all([_loadControlSettings(), _loadControlUpdate(), _loadControlMcp()]);
+  await Promise.all([_loadControlSettings(), _loadControlUpdate(),
+                     _loadControlMcp(), _loadMcpCatalog()]);
 }
 
 let _ctlSettings = [];
@@ -4605,6 +4606,76 @@ async function _loadControlMcp() {
   } catch (e) { _controlDenied(stateEl, e); listEl.innerHTML = ''; }
 }
 
+async function _loadMcpCatalog() {
+  const el = document.getElementById('ctl-mcp-catalog');
+  if (!el) return;
+  try {
+    const d = await api('/api/control/mcp/catalog');
+    el.innerHTML = (d.catalog || []).map(e => {
+      // Credentials are typed here and go to .env, never to the config file —
+      // mcp_servers.json is tracked in git.
+      const fields = (e.missing || []).map(v => `
+        <input class="mcp-secret" data-id="${escapeHTML(e.id)}"
+               data-var="${escapeHTML(v)}" type="password" placeholder="${
+                 escapeHTML(v)}" style="max-width:230px;margin-right:6px">`).join('');
+      const btn = e.installed
+        ? `<button class="ghost-btn mcp-uninstall" data-id="${escapeHTML(e.id)}">Remove</button>`
+        : `<button class="ghost-btn mcp-install" data-id="${escapeHTML(e.id)}">Add</button>`;
+      return `
+      <div class="mcp-row" style="align-items:flex-start;flex-wrap:wrap">
+        <span style="flex:0 0 160px"><b>${escapeHTML(e.name)}</b></span>
+        <span class="v" style="flex:1 1 320px">
+          ${escapeHTML(e.blurb)}
+          ${e.note ? `<br><span class="muted">${escapeHTML(e.note)}</span>` : ''}
+          ${fields ? `<br>${fields}` : ''}
+          ${(!e.installed && e.needs.length && !e.missing.length)
+              ? '<br><span class="muted">Credentials already in .env.</span>' : ''}
+        </span>
+        ${btn}
+      </div>`;
+    }).join('') || '<div class="muted">Catalogue unavailable.</div>';
+  } catch (e) { el.textContent = 'Could not load the catalogue: ' + e; }
+}
+
+function _mcpSay(body, high) {
+  showNotifyToast({ title: 'MCP', body, kind: 'info',
+                    priority: high ? 'high' : 'normal' });
+}
+
+document.getElementById('ctl-mcp-catalog')?.addEventListener('click', async (ev) => {
+  const add = ev.target.closest('.mcp-install');
+  const rm = ev.target.closest('.mcp-uninstall');
+  if (!add && !rm) return;
+  const btn = add || rm;
+  const id = btn.dataset.id;
+  btn.disabled = true;
+  const was = btn.textContent;
+  // Installing launches the server and waits for a handshake, which can take a
+  // while the first time npx downloads the package. Saying so beats a button
+  // that looks stuck.
+  btn.textContent = add ? 'Starting…' : 'Removing…';
+  try {
+    if (add) {
+      const secrets = {};
+      document.querySelectorAll(`.mcp-secret[data-id="${CSS.escape(id)}"]`)
+        .forEach(i => { if (i.value.trim()) secrets[i.dataset.var] = i.value.trim(); });
+      const r = await api('/api/control/mcp/install', {
+        method: 'POST', body: { id, secrets } });
+      _mcpSay(r.note || `${r.name} added.`);
+    } else {
+      const r = await api('/api/control/mcp/uninstall', { method: 'POST', body: { id } });
+      _mcpSay(r.note || r.error || 'Removed.', !r.ok);
+    }
+  } catch (e) {
+    _mcpSay(String(e), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = was;
+    _loadMcpCatalog();
+    _loadControlMcp();
+  }
+});
+
 document.getElementById('ctl-mcp-list')?.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('.mcp-toggle');
   if (!btn) return;
@@ -4629,4 +4700,6 @@ document.getElementById('ctl-mcp-list')?.addEventListener('click', async (ev) =>
   }
 });
 
-document.getElementById('ctl-mcp-refresh')?.addEventListener('click', _loadControlMcp);
+document.getElementById('ctl-mcp-refresh')?.addEventListener('click', () => {
+  _loadControlMcp(); _loadMcpCatalog();
+});

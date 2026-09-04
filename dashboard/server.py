@@ -2048,6 +2048,50 @@ def control_mcp(request: Request):
     return out
 
 
+@app.get("/api/control/mcp/catalog")
+def control_mcp_catalog(request: Request):
+    """Servers you can add without editing JSON, and what each still needs."""
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import mcp_catalog
+    return {"catalog": mcp_catalog.listing(),
+            "installed": mcp_catalog.installed(),
+            "config_file": str(mcp_catalog.config_path())}
+
+
+@app.post("/api/control/mcp/install")
+async def control_mcp_install(request: Request):
+    """Add a catalogue server. Credentials go to .env, never to the config file.
+
+    The install launches the server and waits for a handshake before writing
+    anything, so a moved package name fails here with its error rather than
+    becoming an entry that looks configured and never connects.
+    """
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import mcp_catalog
+    body = await request.json()
+    server_id = str(body.get("id") or "").strip()
+    if not server_id:
+        return JSONResponse({"error": "id is required"}, status_code=400)
+    try:
+        return mcp_catalog.install(server_id, body.get("secrets") or {})
+    except mcp_catalog.InstallRefused as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/control/mcp/uninstall")
+async def control_mcp_uninstall(request: Request):
+    if (deny := _control_guard(request)) is not None:
+        return deny
+    from agent import mcp_catalog
+    body = await request.json()
+    server_id = str(body.get("id") or "").strip()
+    if not server_id:
+        return JSONResponse({"error": "id is required"}, status_code=400)
+    return mcp_catalog.uninstall(server_id)
+
+
 @app.post("/api/control/mcp/server")
 async def control_mcp_server(request: Request):
     """Turn one MCP server on or off, without a restart.

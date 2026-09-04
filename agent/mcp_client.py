@@ -89,17 +89,81 @@ def _load_mcp_configs() -> dict:
     return servers
 
 
+_ENV_REF = __import__("re").compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env(value):
+    """Replace ${VAR} with the environment's value, in strings and lists.
+
+    Server configs live in `mcp_servers.json`, which is TRACKED IN GIT, so no
+    credential may be written there. Entries reference secrets instead, and the
+    real values sit in `.env`. This is where the two meet.
+
+    An unset variable expands to empty rather than raising: the server then
+    fails to start with its own error about a missing token, which is a better
+    message than a KeyError from Apex's config loader — and
+    `agent/mcp_catalog.listing()` already reports which variables are missing
+    before you get here.
+    """
+    if isinstance(value, str):
+        return _ENV_REF.sub(lambda m: os.environ.get(m.group(1), ""), value)
+    if isinstance(value, list):
+        return [_expand_env(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _expand_env(v) for k, v in value.items()}
+    return value
+
+
+def _params(config: dict):
+    """Build StdioServerParameters from one server config, secrets resolved."""
+    from mcp.client.stdio import StdioServerParameters
+    return StdioServerParameters(
+        command=_expand_env(config.get("command", "")),
+        args=_expand_env(config.get("args", [])),
+        env={**os.environ, **_expand_env(config.get("env", {}))},
+    )
+
+
+def probe(config: dict, timeout: float = 180.0) -> tuple:
+    """Start a server, handshake, stop. Returns (ok, detail).
+
+    Used by the catalogue before it writes an entry: a package name that has
+    moved should fail at the moment you click Install, with the error, rather
+    than becoming a config entry that looks right and never connects.
+    """
+    async def _go():
+        from mcp import ClientSession
+        from mcp.client.stdio import stdio_client
+        async with stdio_client(_params(config)) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+                return len(tools.tools or [])
+    try:
+        n = asyncio.run_coroutine_threadsafe(_go(), _ensure_loop()).result(timeout=timeout)
+    except TimeoutError:
+        # concurrent.futures.TimeoutError arrives with an EMPTY message, so the
+        # bare exception renders as "TimeoutError:" and tells nobody anything.
+        # Observed on a real first install here: `npx -y <pkg>` downloads the
+        # package before it runs, which took longer than the old 60s budget —
+        # and the second attempt, with npm's cache warm, took 2.2 seconds.
+        return False, (
+            f"it did not answer within {timeout:.0f}s. The usual cause is the "
+            f"first run of `npx -y <package>`, which downloads before it starts. "
+            f"Trying again is often enough. If it keeps timing out, run the "
+            f"command by hand to see what it says.")
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+    return True, f"connected, {n} tool(s)"
+
+
 async def _connect_server(name: str, config: dict) -> list[dict]:
     """Connect to an MCP server, return its tool definitions."""
     from mcp import ClientSession
     from mcp.client.stdio import stdio_client, StdioServerParameters
 
     cmd = config.get("command", "")
-    args = config.get("args", [])
-    env_extra = config.get("env", {})
-    env = {**os.environ, **env_extra}
-
-    params = StdioServerParameters(command=cmd, args=args, env=env)
+    params = _params(config)
     try:
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
@@ -139,12 +203,7 @@ async def _call_tool(server_name: str, tool_name: str, inputs: dict, config: dic
     from mcp import ClientSession
     from mcp.client.stdio import stdio_client, StdioServerParameters
 
-    cmd = config.get("command", "")
-    args = config.get("args", [])
-    env_extra = config.get("env", {})
-    env = {**os.environ, **env_extra}
-
-    params = StdioServerParameters(command=cmd, args=args, env=env)
+    params = _params(config)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
