@@ -172,7 +172,20 @@ def _http(method: str, path: str, body: Optional[bytes] = None,
 
 # ── state, so a failing relay is never silent ────────────────────────────────
 
-_last: dict = {"pushed_at": 0.0, "bytes": 0, "error": "", "attempted_at": 0.0}
+def _fresh_last() -> dict:
+    """One definition of the shape of `_last`.
+
+    It was a dict literal here and a second literal in every test fixture that
+    reset it. Adding two keys for the context push broke five tests with
+    KeyError — not because the behaviour changed, but because the shape was
+    written down in six places. Tests now call this, so the next field costs
+    nothing.
+    """
+    return {"pushed_at": 0.0, "bytes": 0, "error": "", "attempted_at": 0.0,
+            "context_at": 0.0, "context_chars": 0, "context_error": ""}
+
+
+_last: dict = _fresh_last()
 
 import threading as _threading
 _stop = _threading.Event()
@@ -205,6 +218,36 @@ def push_snapshot() -> dict:
     return {"ok": True, "bytes": len(blob)}
 
 
+def push_context() -> dict:
+    """Send the scoped, readable slice the cloud reasons over.
+
+    Distinct from the snapshot in every way that matters. The snapshot is the
+    whole brain, sealed, and the relay cannot open it. This is a page of text
+    the relay CAN read, because a box that cannot read cannot answer — which is
+    the cost §3a of the plan accepted, out loud, and this is where it is paid.
+
+    Built from an allowlist of sources in agent/working_context.py, redacted,
+    and bounded.
+    """
+    if not enabled():
+        return {"ok": False, "skipped": "RELAY_ENABLED is false"}
+    from agent import working_context
+    try:
+        ctx = working_context.build()
+        body = json.dumps({"context": ctx,
+                           "tier": working_context.cloud_tier()}).encode()
+        _http("PUT", "/context", body)
+    except RelayError as e:
+        _last["context_error"] = str(e)
+        print(f"[Relay] Context NOT sent: {e}")
+        return {"ok": False, "error": str(e)}
+    _last["context_at"] = time.time()
+    _last["context_chars"] = ctx["chars"]
+    _last["context_error"] = ""
+    return {"ok": True, "chars": ctx["chars"], "sources": ctx["sources"],
+            "errors": ctx["errors"]}
+
+
 def pull_snapshot() -> bytes:
     """Fetch and open the last snapshot. Raises if it will not decrypt."""
     return unseal(_http("GET", "/snapshot"))
@@ -220,18 +263,24 @@ def status() -> dict:
                                 "reach directly.")
     elif not getattr(config, "RELAY_URL", ""):
         state, detail = "unconfigured", "RELAY_ENABLED is true but RELAY_URL is empty."
-    elif _last["error"]:
+    elif _last.get("error"):
         state, detail = "failing", (
-            f"The last attempt failed: {_last['error']} Whatever the phone reads "
-            f"is from {_ago(_last['pushed_at'])}.")
-    elif not _last["pushed_at"]:
+            f"The last attempt failed: {_last.get('error', '')} Whatever the phone reads "
+            f"is from {_ago(_last.get('pushed_at', 0.0))}.")
+    elif not _last.get("pushed_at", 0.0):
         state, detail = "never_pushed", (
             "Configured, but no snapshot has been sent in this process yet.")
     else:
-        state, detail = "ok", f"Last snapshot {_ago(_last['pushed_at'])}."
+        state, detail = "ok", f"Last snapshot {_ago(_last.get('pushed_at', 0.0))}."
     return {"state": state, "detail": detail,
-            "pushed_at": _last["pushed_at"], "bytes": _last["bytes"],
-            "attempted_at": _last["attempted_at"], "error": _last["error"],
+            "pushed_at": _last.get("pushed_at", 0.0), "bytes": _last.get("bytes", 0),
+            "attempted_at": _last.get("attempted_at", 0.0), "error": _last.get("error", ""),
+            "context_at": _last.get("context_at", 0.0),
+            "context_chars": _last.get("context_chars", 0),
+            "context_error": _last.get("context_error", ""),
+            "context_note": ("The snapshot is sealed and the relay cannot read "
+                             "it. The context is readable there — that is what "
+                             "lets it answer while the laptop is off."),
             "url": str(getattr(config, "RELAY_URL", "") or "")}
 
 
@@ -483,6 +532,10 @@ def start_background() -> str:
                 push_snapshot()
             except Exception as e:
                 print(f"[Relay] snapshot error: {e}")
+            try:
+                push_context()
+            except Exception as e:
+                print(f"[Relay] context error: {e}")
             if _stop.wait(timeout=minutes * 60):
                 return
 

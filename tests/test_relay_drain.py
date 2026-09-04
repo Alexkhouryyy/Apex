@@ -336,3 +336,103 @@ class TestStartingUpSaysWhatItDecided:
         assert ran[:2] == ["drain", "push"], (
             "the loop must drain before it sleeps — otherwise work that arrived "
             "while the laptop was off waits another full interval")
+
+
+class TestTheContextPush:
+    """Step 7 end to end: what actually lands on a rented box.
+
+    The snapshot goes up sealed and the relay cannot open it. The context goes
+    up READABLE, because a box that cannot read cannot answer — that is the cost
+    §3a accepted out loud. These tests check what is on the far side, in the
+    relay's own database, rather than what the builder returned.
+    """
+
+    def test_the_context_arrives_readable(self, live):
+        import json
+        from agent import longterm, relay
+        longterm.remember("Alex prefers dark roast coffee", kind="preference",
+                          importance=9)
+        out = relay.push_context()
+        assert out["ok"] is True and out["chars"] > 0
+
+        got = json.loads(relay._http("GET", "/context").decode())
+        assert "dark roast" in got["context"]["text"], \
+            "the relay must be able to read this one — otherwise it cannot answer"
+
+    def test_the_snapshot_beside_it_is_still_unreadable(self, live):
+        """The two artefacts, two forms, two purposes — proven on the same
+        relay in the same test, because the distinction is the design."""
+        from agent import longterm, relay
+        longterm.remember("Alex prefers dark roast coffee", kind="preference",
+                          importance=9)
+        relay.push_snapshot()
+        blob = relay._http("GET", "/snapshot")
+        assert b"dark roast" not in blob
+        assert b"dark roast" in relay.unseal(blob)
+
+    def test_the_tier_travels_with_it(self, live):
+        """The relay stores what it is allowed to do rather than being trusted
+        to remember."""
+        import json
+        from agent import relay
+        relay.push_context()
+        got = json.loads(relay._http("GET", "/context").decode())
+        assert "answer" in got["tier"]["may"]
+        assert "shell" in got["tier"]["may_not"]
+
+    def test_a_credential_in_a_memory_does_not_reach_the_box(self, live):
+        """The mitigation, checked where it matters: on the far side."""
+        import json
+        from agent import longterm, relay
+        longterm.remember("my slack token is xoxb-1234567890abcdef1234",
+                          kind="fact", importance=10)
+        relay.push_context()
+        raw = relay._http("GET", "/context").decode()
+        assert "xoxb-1234567890abcdef1234" not in raw
+        assert "[redacted]" in raw
+
+    def test_replacing_it_keeps_only_one_row(self, live, tmp_path):
+        import sqlite3
+        from agent import relay
+        for _ in range(3):
+            relay.push_context()
+        with sqlite3.connect(tmp_path / "relay.db") as c:
+            assert c.execute("SELECT COUNT(*) FROM context").fetchone()[0] == 1
+
+    def test_no_context_yet_is_404_not_an_empty_200(self, live):
+        """An empty 200 would read as "you have no memory" rather than "nothing
+        has been sent yet"."""
+        from agent import relay
+        try:
+            relay._http("GET", "/context")
+            assert False, "expected a refusal"
+        except relay.RelayError as e:
+            assert "404" in str(e)
+
+    def test_pushing_while_disabled_sends_nothing(self, live, monkeypatch):
+        import config
+        from agent import relay
+        monkeypatch.setattr(config, "RELAY_ENABLED", False, raising=False)
+        assert relay.push_context()["ok"] is False
+
+    def test_status_reports_the_context_separately_from_the_snapshot(self, live):
+        """Two things that can fail independently must be able to say so
+        independently."""
+        from agent import longterm, relay
+        longterm.remember("Alex prefers dark roast", kind="preference",
+                          importance=9)
+        relay.push_context()
+        s = relay.status()
+        assert s["context_at"] > 0 and s["context_chars"] > 0
+        assert "cannot read it" in s["context_note"]
+
+    def test_an_empty_context_is_visible_as_empty(self, live):
+        """A fresh install has nothing to say, and that is worth SEEING rather
+        than inferring from silence: context_at set with context_chars zero
+        means "we sent one and there was nothing in it", which is a different
+        problem from "we never sent one"."""
+        from agent import relay
+        out = relay.push_context()
+        assert out["ok"] is True and out["chars"] == 0
+        s = relay.status()
+        assert s["context_at"] > 0 and s["context_chars"] == 0

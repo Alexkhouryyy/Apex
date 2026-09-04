@@ -81,6 +81,17 @@ def init_db(path: str | None = None) -> None:
                 ciphertext BLOB NOT NULL
             )
         """)
+        # The one table here that holds READABLE text. It exists because a box
+        # that cannot read cannot answer; everything else is ciphertext. Kept
+        # separate from `snapshot` so the distinction is in the schema rather
+        # than in a comment somebody has to find.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS context (
+                id         INTEGER PRIMARY KEY CHECK (id = 1),
+                updated_at REAL NOT NULL,
+                body       TEXT NOT NULL
+            )
+        """)
         c.execute("""
             CREATE TABLE IF NOT EXISTS outbox (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,6 +181,13 @@ class Handler(BaseHTTPRequestHandler):
                                 "WHERE id = 1").fetchone()
             return self._json(200, {"updated_at": row[0], "byte_len": row[1]}
                               if row else {"updated_at": 0, "byte_len": 0})
+        if self.path == "/context":
+            with self._conn() as c:
+                row = c.execute("SELECT body, updated_at FROM context "
+                                "WHERE id = 1").fetchone()
+            if not row:
+                return self._json(404, {"error": "no context stored yet"})
+            return self._send(200, row[0].encode(), "application/json")
         if self.path == "/outbox":
             with self._conn() as c:
                 rows = c.execute(
@@ -185,6 +203,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         if not self._gate():
             return
+        if self.path == "/context":
+            body = self._body()
+            if body is None:
+                return
+            if not body:
+                return self._json(400, {"error": "empty context refused"})
+            with self._conn() as c:
+                c.execute(
+                    "INSERT INTO context (id, updated_at, body) VALUES (1, ?, ?)"
+                    " ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,"
+                    " body=excluded.body", (time.time(), body.decode("utf-8", "replace")))
+                c.commit()
+            return self._json(200, {"ok": True, "chars": len(body)})
         if self.path != "/snapshot":
             return self._json(404, {"error": "no such path"})
         body = self._body()

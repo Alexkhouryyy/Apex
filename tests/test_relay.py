@@ -33,8 +33,7 @@ def relay_off(monkeypatch):
     monkeypatch.setattr(config, "RELAY_TOKEN", "", raising=False)
     monkeypatch.setattr(config, "RELAY_KEY", "", raising=False)
     monkeypatch.setattr(relay, "_last",
-                        {"pushed_at": 0.0, "bytes": 0, "error": "",
-                         "attempted_at": 0.0})
+                        relay._fresh_last())
 
 
 class TestNothingLeavesWithoutAKey:
@@ -175,8 +174,7 @@ class TestPushing:
         monkeypatch.setattr(config, "RELAY_TOKEN", "tok", raising=False)
         monkeypatch.setattr(config, "RELAY_KEY", key, raising=False)
         monkeypatch.setattr(relay, "_last",
-                            {"pushed_at": 0.0, "bytes": 0, "error": "",
-                             "attempted_at": 0.0})
+                            relay._fresh_last())
         return key
 
     def test_what_reaches_the_wire_is_sealed(self, on, monkeypatch):
@@ -260,8 +258,7 @@ class TestStatusTellsFourStatesApart:
         monkeypatch.setattr(config, "RELAY_ENABLED", True, raising=False)
         monkeypatch.setattr(config, "RELAY_URL", "https://relay.example", raising=False)
         monkeypatch.setattr(relay, "_last",
-                            {"pushed_at": 0.0, "bytes": 0,
-                             "error": "could not reach the relay",
+                            {**relay._fresh_last(), "error": "could not reach the relay",
                              "attempted_at": 1.0})
         s = relay.status()
         assert s["state"] == "failing" and "never" in s["detail"]
