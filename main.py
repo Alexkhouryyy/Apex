@@ -91,6 +91,8 @@ def main():
     print(_caps.refresh_this_node())
     from agent import relay as _relay
     print(_relay.start_background())
+    from agent import node_worker as _nodew
+    print(_nodew.start_background())
     # Pick up notes edited in Obsidian since last run. Off the critical
     # path on purpose: freshness costs a read of every note, and doing
     # that at query time would put the whole vault back on the retrieval

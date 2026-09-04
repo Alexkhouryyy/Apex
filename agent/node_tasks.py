@@ -156,13 +156,21 @@ def sweep(now: Optional[float] = None) -> dict:
 
 
 def claim(node_id: str, *, lease_seconds: int = DEFAULT_LEASE_SECONDS,
-          now: Optional[float] = None) -> Optional[dict]:
+          now: Optional[float] = None,
+          exclude: Optional[set] = None) -> Optional[dict]:
     """Take the oldest task this node is actually able to run, or None.
 
     Eligibility is checked against `agent/capabilities` here rather than at
     submission, because a node's abilities are a fact about the node at the
     moment it asks — not about the moment someone typed the request.
+
+    `exclude` skips task ids the caller has already handled this pass. Without
+    it a task that fails and returns to the queue is claimed again immediately
+    by the same loop, and each claim SPENDS AN ATTEMPT — so a transient failure
+    would exhaust its retry budget in microseconds, on retries that had no time
+    to become different.
     """
+    exclude = exclude or set()
     if not node_id:
         raise ValueError("claim() needs a node id")
     now = time.time() if now is None else now
@@ -174,6 +182,8 @@ def claim(node_id: str, *, lease_seconds: int = DEFAULT_LEASE_SECONDS,
             " FROM node_tasks WHERE status = ? AND (node = '' OR node = ?)"
             " ORDER BY id", (QUEUED, node_id)).fetchall()
         for task_id, kind, payload, cap, attempts, max_attempts in rows:
+            if task_id in exclude:
+                continue
             if cap and not capabilities.can(node_id, cap, now=now):
                 continue
             # The UPDATE is the lock. Checking then writing would let two nodes
@@ -237,6 +247,26 @@ def fail(task_id: int, node_id: str, error: str, now: Optional[float] = None) ->
                       " WHERE id = ?", (QUEUED, str(error)[:2000], int(task_id)))
         c.commit()
     return True
+
+
+def abandon(task_id: int, node_id: str, error: str,
+            now: Optional[float] = None) -> bool:
+    """Retire a task immediately, without spending its remaining attempts.
+
+    For failures that cannot come out differently: a tool that is not on this
+    node's allowlist, a kind nothing knows how to run, a malformed payload, an
+    action safety refused. Retrying those changes nothing, and worse, it spends
+    max_attempts in seconds and the task ends up recorded as "out of attempts"
+    when the truth was "not allowed".
+    """
+    now = time.time() if now is None else now
+    with longterm._conn() as c:
+        changed = c.execute(
+            "UPDATE node_tasks SET status = ?, error = ?, finished_at = ?,"
+            " lease_expires_at = 0 WHERE id = ? AND status = ? AND claimed_by = ?",
+            (DEAD, str(error)[:2000], now, int(task_id), CLAIMED, node_id)).rowcount
+        c.commit()
+    return bool(changed)
 
 
 # ── looking at it ────────────────────────────────────────────────────────────

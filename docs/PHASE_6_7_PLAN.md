@@ -311,7 +311,7 @@ small commit, before either phase.
 | 3 | Outbox drain on the laptop, pending state on the phone | A message queued while "offline" is applied exactly once when the laptop returns |
 | 4 | Capability probing on `devices.py` | A node without Blender never reports `blender` |
 | 5 | Task queue with leases, expiry, attempts, `dead` | An expired lease requeues; a task for an offline node reads as waiting, never as done |
-| 6 | Delegated execution through the local gates | A delegated shell command still hits `safety.check` — reverting that check must fail a test |
+| 6 | ~~Delegated execution through the local gates~~ **done** | `agent/node_worker.py` routes delegated work through `core._execute_tool`, the same door a local call uses. A delegated `rm -rf /` is blocked by `safety.check` on the machine that would have run it; reverting that path fails three tests |
 | 7 | Scoped working-context push, and the cloud's narrower permission tier | The pushed context contains no credentials, vault or full history — asserted against a real database, not a fixture |
 | 8 | Cloud answers a question; the reply lands in the outbox | The laptop files it exactly once, and an account-touching request is queued rather than performed |
 | 9 | Deploy and use it | Lid shut, phone answers, lid open, work lands |

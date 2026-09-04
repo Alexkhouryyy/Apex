@@ -383,6 +383,20 @@ RELAY_KEY = os.getenv("RELAY_KEY", "")
 # setting — somebody sets it and nothing happens.
 RELAY_SNAPSHOT_MINUTES = int(os.getenv("RELAY_SNAPSHOT_MINUTES", "30"))
 
+# === Delegated work — what the Core may make THIS machine do ===
+#
+# Off by default. When on, this node claims tasks from the queue and runs them
+# through agent/core._execute_tool — the same door a locally-decided tool call
+# uses, so subagent_scope and safety.check apply exactly as they always do. The
+# queue carries a request; it never carries permission.
+NODE_WORKER_ENABLED = os.getenv("NODE_WORKER_ENABLED", "false").lower() in {"1", "true", "yes"}
+# Which tools may be triggered REMOTELY. Deny-by-default and empty by default,
+# which is a separate question from whether a tool is dangerous: `read_file` is
+# never risky enough for safety.check to stop, and may still be something you do
+# not want a network queue able to trigger. Comma-separated tool names.
+NODE_TASK_TOOLS = [t.strip() for t in os.getenv("NODE_TASK_TOOLS", "").split(",") if t.strip()]
+NODE_WORKER_POLL_SECONDS = int(os.getenv("NODE_WORKER_POLL_SECONDS", "10"))
+
 # === MCP — what third-party MCP servers are allowed to do ===
 #
 # MCP servers are loaded from config files Apex does not own (~/.claude/

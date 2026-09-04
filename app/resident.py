@@ -176,6 +176,8 @@ def run_resident(model_override: Optional[str] = None) -> None:
     logging.info(_caps.refresh_this_node())
     from agent import relay as _relay
     logging.info(_relay.start_background())
+    from agent import node_worker as _nodew
+    logging.info(_nodew.start_background())
     from agent import vault_index as _vault_index
     _vault_index.start_background_reindex(log=logging.info)
     session_id = longterm.start_session()
