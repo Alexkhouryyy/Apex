@@ -284,3 +284,53 @@ class TestAPermanentRefusalIsNotRetried:
         node_tasks.submit("tool", payload={"name": "current_time", "inputs": {}})
         out = node_worker.drain_once("test-node")     # must return, not hang
         assert out["failed"] == 1
+
+
+class TestCapabilitiesAreKeptFresh:
+    """Probed once at boot is not enough, for two reasons seen on a real laptop.
+
+    The boot probe runs BEFORE hand tracking opens the camera, so a machine with
+    a working webcam reported camera(unknown) and the very next log lines were
+    "Camera open" and "Hands tracking live". And records go stale after
+    MAX_AGE_SECONDS — deliberately unusable — so with nothing re-probing, a node
+    up six hours could claim nothing and the queue would look stuck for no
+    visible reason.
+    """
+
+    def test_an_empty_record_is_probed_before_claiming(self, node):
+        from agent import capabilities as caps
+        caps.init_db()
+        assert caps.of("test-node") == {}
+        node_worker.drain_once("test-node")
+        assert caps.of("test-node"), "the worker claimed without ever probing"
+
+    def test_a_stale_record_is_refreshed(self, node, monkeypatch):
+        import time
+        from agent import capabilities as caps
+        caps.init_db()
+        with longterm._conn() as c:
+            c.execute("INSERT INTO device_capabilities (device_id, name, state,"
+                      " detail, verified_at) VALUES ('test-node','camera','no',"
+                      "'stale', ?)", (time.time() - caps.MAX_AGE_SECONDS - 60,))
+            c.commit()
+        assert caps.of("test-node")["camera"]["stale"] is True
+        node_worker.drain_once("test-node")
+        assert caps.of("test-node")["camera"]["stale"] is False
+
+    def test_a_fresh_record_is_left_alone(self, node, monkeypatch):
+        """Re-probing on every drain would launch a Blender ping and an Ollama
+        request every ten seconds."""
+        from agent import capabilities as caps
+        caps.init_db()
+        caps.refresh("test-node")
+        probed = []
+        monkeypatch.setattr(caps, "refresh", lambda n: probed.append(n))
+        node_worker.drain_once("test-node")
+        assert probed == []
+
+    def test_a_probe_failure_does_not_stop_the_drain(self, node, monkeypatch):
+        from agent import capabilities as caps
+        caps.init_db()
+        monkeypatch.setattr(caps, "refresh",
+                            lambda n: (_ for _ in ()).throw(RuntimeError("boom")))
+        assert node_worker.drain_once("test-node")["completed"] == 0

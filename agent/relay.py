@@ -52,7 +52,13 @@ from pathlib import Path
 from typing import Optional
 
 import config
-from agent import longterm
+
+# `longterm` is imported lazily, inside the functions that need it, and NOT at
+# module level. It pulls in numpy, and `python -m agent.relay --new-key`
+# generates 32 random bytes: it has no business requiring the memory subsystem
+# to be installed. Observed on a real laptop, where the key generator died with
+# ModuleNotFoundError before printing anything — a setup step failing on a
+# dependency it does not use is a setup step people give up on.
 
 
 class RelayError(RuntimeError):
@@ -122,6 +128,7 @@ def snapshot_bytes(db_path: Optional[str] = None) -> bytes:
     is a promise, not a copy — and this one is going to a machine that cannot
     tell us it is broken.
     """
+    from agent import longterm
     src = Path(db_path or longterm.DB_PATH)
     if not src.exists():
         raise RelayError(f"no database at {src}")
@@ -309,6 +316,7 @@ APPLY_MAX_ATTEMPTS = 3
 
 
 def init_db() -> None:
+    from agent import longterm
     with longterm._conn() as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS relay_applied (
@@ -371,6 +379,7 @@ def pending() -> list[dict]:
 
 
 def _apply_note(payload: dict) -> str:
+    from agent import longterm
     text = str(payload.get("text") or "").strip()
     if not text:
         raise RelayError("a note with no text")
@@ -487,6 +496,7 @@ def drain_replies() -> dict:
         question = str(item.get("question") or "").strip()
         if answer:
             try:
+                from agent import longterm
                 longterm.remember(
                     f"[Answered from the relay while the laptop was off]\n"
                     f"Q: {question}\nA: {answer}"[:4000],
@@ -557,6 +567,7 @@ def _claim(item_id: str, relay_id, kind: str) -> bool:
     right way round when the effect is "remember this": a duplicate note is
     visible and harmless, a dropped one is neither.
     """
+    from agent import longterm
     now = time.time()
     with longterm._conn() as c:
         cur = c.execute(
@@ -580,6 +591,7 @@ def _claim(item_id: str, relay_id, kind: str) -> bool:
 
 
 def _finish(item_id: str, status: str, error: str = "") -> None:
+    from agent import longterm
     with longterm._conn() as c:
         c.execute("UPDATE relay_applied SET status = ?, applied_at = ?, error = ? "
                   "WHERE item_id = ?", (status, time.time(), error[:500], item_id))

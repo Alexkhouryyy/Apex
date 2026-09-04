@@ -277,3 +277,76 @@ class TestTheTransportRefusesToBeAnonymous:
         with pytest.raises(relay.RelayError) as e:
             relay._http("GET", "/snapshot")
         assert "RELAY_TOKEN" in str(e.value)
+
+
+class TestSetupWorksOnABareMachine:
+    """`python -m agent.relay --new-key` generates 32 random bytes.
+
+    It died on a real laptop with ModuleNotFoundError: numpy, because
+    agent/relay.py imported `longterm` at module level and longterm imports
+    numpy. A setup step that fails on a dependency it does not use is a setup
+    step people give up on — and this one is the first command in the relay
+    instructions.
+    """
+
+    def test_no_module_level_import_of_longterm(self):
+        """Asserted structurally: the import must be inside the functions that
+        use it, so generating a key never touches the memory subsystem."""
+        import ast
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "agent" / "relay.py")
+        tree = ast.parse(src.read_text(encoding="utf-8"))
+        for node in tree.body:            # module level only
+            if isinstance(node, ast.ImportFrom) and node.module == "agent":
+                names = {a.name for a in node.names}
+                assert "longterm" not in names, (
+                    "agent/relay.py imports longterm at module level again. "
+                    "--new-key then needs numpy installed to print random bytes.")
+
+    def test_every_function_that_uses_longterm_imports_it(self):
+        """The other half. Making the import lazy is only correct if every
+        caller got one — otherwise the failure moves from setup to runtime,
+        which is worse."""
+        import ast
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "agent" / "relay.py")
+        tree = ast.parse(src.read_text(encoding="utf-8"))
+        missing = []
+        for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+            uses = any(isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+                       and n.value.id == "longterm" for n in ast.walk(fn))
+            if not uses:
+                continue
+            has = any(isinstance(n, ast.ImportFrom) and n.module == "agent"
+                      and any(a.name == "longterm" for a in n.names)
+                      for n in ast.walk(fn))
+            if not has:
+                missing.append(fn.name)
+        assert not missing, f"these use longterm with no local import: {missing}"
+
+    def test_generating_a_key_works_with_numpy_missing(self, tmp_path):
+        """The behavioural half, run in a subprocess with numpy blocked — the
+        condition the laptop was actually in."""
+        import subprocess
+        import sys
+        import textwrap
+        from pathlib import Path
+        script = textwrap.dedent('''
+            import sys
+            class Blocker:
+                def find_module(self, name, path=None):
+                    if name == "numpy":
+                        return self
+                def load_module(self, name):
+                    raise ImportError("No module named 'numpy'")
+            sys.meta_path.insert(0, Blocker())
+            sys.argv = ["agent.relay", "--new-key"]
+            import runpy
+            runpy.run_module("agent.relay", run_name="__main__")
+        ''')
+        root = Path(__file__).resolve().parent.parent
+        r = subprocess.run([sys.executable, "-c", script], capture_output=True,
+                           text=True, cwd=str(root), timeout=120)
+        assert r.returncode == 0, f"--new-key failed without numpy: {r.stderr[-400:]}"
+        assert len(r.stdout.split("\n")[0].strip()) == 44, \
+            "expected a Fernet key on the first line"

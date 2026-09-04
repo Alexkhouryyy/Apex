@@ -146,6 +146,30 @@ def run_one(task: dict) -> tuple:
 def drain_once(node_id: Optional[str] = None, *, lease_seconds: int = 300) -> dict:
     """Claim and run whatever this node can, until the queue has nothing for it."""
     node_id = node_id or capabilities.this_node()
+
+    # Re-probe when the record has aged out. Capabilities are probed once at
+    # boot, and two things follow that a single probe cannot handle:
+    #
+    #   * The boot probe runs BEFORE hand tracking opens the camera, so a
+    #     laptop with a working webcam reports camera(unknown) — observed on a
+    #     real machine, where the very next log lines were "Camera open" and
+    #     "Hands tracking live".
+    #   * They go stale after capabilities.MAX_AGE_SECONDS, and a stale record
+    #     is deliberately not usable. With nothing re-probing, a node that had
+    #     been up six hours could claim nothing at all and the queue would look
+    #     mysteriously stuck.
+    #
+    # Here rather than on a timer of its own: this is the only thing that needs
+    # capabilities, so refreshing where they are consumed keeps the cost at zero
+    # when the worker is off.
+    try:
+        if any(not c["usable"] and c["stale"]
+               for c in capabilities.of(node_id).values()) \
+                or not capabilities.of(node_id):
+            capabilities.refresh(node_id)
+    except Exception as e:
+        print(f"[Node] Could not refresh capabilities: {e}")
+
     done = failed = 0
     # A task failed here goes back to `queued`, and the loop would claim it
     # again immediately — and every claim spends an attempt, so a transient
