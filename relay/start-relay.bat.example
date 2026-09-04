@@ -1,0 +1,36 @@
+@echo off
+REM  Apex Relay — copy this to start-relay.bat and paste your token below.
+REM  start-relay.bat is git-ignored; this .example file is not, so the real
+REM  token never reaches the repository.
+REM
+REM  Running this ON YOUR LAPTOP is a rehearsal, not a deployment: the relay is
+REM  off at exactly the moment you need it. It proves the loop works before you
+REM  rent anything.
+
+setlocal
+
+REM  Generate one with:  python -c "import secrets;print(secrets.token_urlsafe(32))"
+REM  The SAME value must be RELAY_TOKEN in .env.
+set RELAY_SERVER_TOKEN=PASTE_YOUR_TOKEN_HERE
+
+REM  Where the relay keeps its mailbox. Not Apex's brain — a separate file.
+set RELAY_SERVER_DB=%~dp0relay.db
+
+REM  Loopback only. Do not widen this without something terminating TLS in
+REM  front (Caddy, nginx, or `tailscale serve`).
+set RELAY_SERVER_HOST=127.0.0.1
+set RELAY_SERVER_PORT=8799
+
+if "%RELAY_SERVER_TOKEN%"=="PASTE_YOUR_TOKEN_HERE" (
+  echo.
+  echo   Edit this file first: RELAY_SERVER_TOKEN is still the placeholder.
+  echo   The relay refuses to start without a real one, which is deliberate --
+  echo   an unauthenticated relay hands your sealed memory to anyone who finds
+  echo   the URL.
+  echo.
+  pause
+  exit /b 2
+)
+
+python "%~dp0server.py"
+pause

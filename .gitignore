@@ -30,3 +30,8 @@ secrets/
 # Apex's full source. It gets cloned next to Apex, not inside it — this line
 # exists because cloning it inside is an easy accident.
 barehands/
+
+# The relay launcher carries a token; the .example beside it does not.
+relay/start-relay.bat
+relay/relay.db
+relay/relay.db-*
