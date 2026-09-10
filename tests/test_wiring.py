@@ -187,5 +187,5 @@ def test_threads_works_without_an_explicit_init_db(test_db):
     never existed. Asserts the feature FUNCTIONS on a fresh DB — checking only
     that nothing raises would have passed the whole time it was broken."""
     from agent import threads
-    threads._ready = False
+    threads._ready_for = None
     assert threads._already_surfaced() == set()      # queries a real table

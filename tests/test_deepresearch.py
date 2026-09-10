@@ -180,7 +180,7 @@ def db(tmp_path, monkeypatch):
     from agent import longterm
     monkeypatch.setattr(longterm, "DB_PATH", str(tmp_path / "r.db"))
     longterm.init_db()
-    dr._ready = False
+    dr._ready_for = None
     dr.init_db()
     return tmp_path
 

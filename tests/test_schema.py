@@ -214,3 +214,28 @@ class TestLazyGuardsArePerDatabase:
         assert calls == [], (
             f"agent/{mod_name}.{guard}() re-initialises on every call — the "
             f"latch is not latching")
+
+
+class TestNoTestResetsAnAttributeThatIsGone:
+    """The lazy latches were renamed `_ready` -> `_ready_for` when they learned
+    which database they had initialised. Four tests kept setting `_ready = False`
+    afterwards, which silently creates a dead attribute and resets nothing.
+
+    They still passed — they also called init_db() directly — so nothing broke.
+    That is precisely why it is worth a test: a reset that resets nothing looks
+    exactly like a reset that works, and the next person to rely on it gets a
+    fixture bleeding state between tests.
+    """
+
+    def test_no_test_sets_a_bare_ready_flag(self):
+        import re
+        from pathlib import Path
+        tests = Path(__file__).resolve().parent
+        offenders = []
+        for f in sorted(tests.glob("test_*.py")):
+            for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                if re.search(r"\b\w+\._ready\s*=", line) and "_ready_for" not in line:
+                    offenders.append(f"{f.name}:{i}")
+        assert not offenders, (
+            f"these reset `_ready`, which no module has any more — the latch is "
+            f"`_ready_for` and tracks WHICH database: {offenders}")

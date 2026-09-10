@@ -241,11 +241,11 @@ def test_it_works_without_an_explicit_init_db():
     """
     ts = _at_hour()
     b = restraint.bucket(ts)
-    restraint._ready = False
+    restraint._ready_for = None
     with longterm._conn() as c:            # no init_db() anywhere in this test
         c.execute("DROP TABLE IF EXISTS interruptions")
         c.execute("DROP TABLE IF EXISTS held_notifications")
-    restraint._ready = False
+    restraint._ready_for = None
     for i in range(12):
         restraint.record("test", "normal", ts=ts - i * 86400)
     with longterm._conn() as c:
