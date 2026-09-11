@@ -11,6 +11,8 @@ hardware. Model-agnostic — Claude, GPT, Gemini, or a local Ollama model, no
 lock-in. One persistent "brain" that every device and channel is a window
 into, not a chat log that forgets you between sessions.
 
+**Something not working?** `python -m tools.doctor` — it checks what is actually running on your machine and every failure says what to run next.
+
 Full write-up, feature map and honest state: **[docs/APEX_OVERVIEW.md](docs/APEX_OVERVIEW.md)**.
 Where it stands against its own roadmap, judged by success checks rather than
 by whether code exists: **[docs/APEX_BLUEPRINT_STATUS.md](docs/APEX_BLUEPRINT_STATUS.md)**.
