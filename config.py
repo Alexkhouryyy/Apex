@@ -244,6 +244,11 @@ MODEL_PRICING = {
     "gemini-2.5-pro":            {"input": 1.25,  "output": 10.0,  "cache_read": 0.31, "cache_create": 0.0},
     "gemini-2.5-flash":          {"input": 0.30,  "output": 2.50,  "cache_read": 0.075,"cache_create": 0.0},
     "gemini-2.0-flash":          {"input": 0.10,  "output": 0.40,  "cache_read": 0.025,"cache_create": 0.0},
+    # DeepSeek. Published rates at the time of writing; they change, and an
+    # unpriced model bills as $0, which silently understates spend. If these go
+    # stale, MODEL_PRICING_JSON overrides them without editing code.
+    "deepseek-chat":     {"input": 0.28, "output": 0.42, "cache_read": 0.028, "cache_create": 0.28},
+    "deepseek-reasoner": {"input": 0.55, "output": 2.19, "cache_read": 0.14,  "cache_create": 0.55},
     # Ollama local models: any ollama/* model not listed here defaults to $0 (see telemetry._pricing).
 }
 
@@ -299,6 +304,16 @@ SIGNAL_WEBHOOK_SECRET = os.getenv("SIGNAL_WEBHOOK_SECRET", "")
 # Ollama local models — point at a local or remote ollama instance.
 # Use model names like ollama/llama3.2, ollama/mistral, ollama/qwen2.5, etc.
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+
+# DeepSeek — an OpenAI-compatible API, so it costs one config line and a branch
+# in provider.get_client(). Models are addressed by their bare names
+# (deepseek-chat, deepseek-reasoner); `ollama/deepseek-r1` is something else
+# entirely — a local model — and still routes to your own daemon.
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+# Overridable so Apex can be pointed at a compatible gateway, a proxy, or — in
+# tools/smoke.py — a local fake, which is how the OpenAI-adapter path gets
+# tested at all without a paid key.
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "")
 # To add a local model to the council, set this to e.g. ollama/llama3.1
 OLLAMA_COUNCIL_MODEL = os.getenv("OLLAMA_COUNCIL_MODEL", "")
 

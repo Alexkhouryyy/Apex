@@ -24,9 +24,15 @@ from agent.provider import KNOWN_MODELS, provider_for
 
 @pytest.fixture
 def core(monkeypatch):
-    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "sk-test", raising=False)
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-openai-test", raising=False)
-    monkeypatch.setattr(config, "GEMINI_API_KEY", "sk-gemini-test", raising=False)
+    # Derived from provider.PROVIDER_KEY_NAMES rather than listed by hand.
+    # The hand-written version silently stopped covering every provider the
+    # moment DeepSeek was added, and this test — which iterates KNOWN_MODELS —
+    # failed with the OpenAI SDK's "set OPENAI_API_KEY" for a DeepSeek model.
+    from agent.provider import PROVIDER_KEY_NAMES
+    for name in PROVIDER_KEY_NAMES.values():
+        if name:
+            monkeypatch.setattr(config, name, f"sk-test-{name.lower()}",
+                                raising=False)
     from agent.core import AgentCore
     return AgentCore()
 

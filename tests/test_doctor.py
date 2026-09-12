@@ -165,3 +165,51 @@ class TestItNeverCrashes:
         monkeypatch.setattr(doctor, "CHECKS",
                             [(1, "a", lambda: (doctor.BAD, "broken -> fix it"))])
         assert doctor.main() == 1
+
+
+class TestItAsksTheRightQuestionPerProvider:
+    """"Your credit balance is too low" is an Anthropic answer. A laptop set to
+    deepseek-chat with no DEEPSEEK_API_KEY has a completely different problem,
+    and reporting the Anthropic one would send someone to the wrong billing
+    page."""
+
+    def test_a_non_anthropic_default_checks_its_own_key(self, monkeypatch):
+        monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", False, raising=False)
+        monkeypatch.setattr(config, "AGENT_MODEL", "deepseek-chat", raising=False)
+        monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "", raising=False)
+        state, detail = doctor._model()
+        assert state == doctor.BAD
+        assert "DEEPSEEK_API_KEY" in detail and "ANTHROPIC" not in detail
+
+    def test_it_does_not_spend_a_token_on_a_paid_provider_unasked(self, monkeypatch):
+        """A diagnostic that quietly bills you for running it is a diagnostic
+        people stop running."""
+        monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", False, raising=False)
+        monkeypatch.setattr(config, "AGENT_MODEL", "deepseek-chat", raising=False)
+        monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "sk-x", raising=False)
+        import openai
+
+        def _must_not_run(*a, **k):
+            raise AssertionError("the doctor called a paid API it was not asked to")
+        monkeypatch.setattr(openai, "OpenAI", _must_not_run)
+        state, detail = doctor._model()
+        assert state == doctor.OK and "deepseek-chat" in detail
+
+    def test_anthropic_still_gets_the_real_call(self, monkeypatch):
+        """The provider Apex defaults to is the one worth spending a token on:
+        it is where the credit-balance failure actually happens."""
+        monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", False, raising=False)
+        monkeypatch.setattr(config, "AGENT_MODEL", "claude-opus-5", raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+        called = []
+        import anthropic
+
+        class Fake:
+            def __init__(self, api_key=None): pass
+            class messages:
+                @staticmethod
+                def create(**kw):
+                    called.append(kw)
+        monkeypatch.setattr(anthropic, "Anthropic", lambda api_key=None: Fake())
+        doctor._model()
+        assert called, "the Anthropic path stopped making a real call"

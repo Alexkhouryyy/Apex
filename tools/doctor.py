@@ -69,6 +69,21 @@ def _model():
         except Exception as e:
             return WARN, f"could not check the subscription path: {e}"
 
+    model = getattr(config, "AGENT_MODEL", "claude-opus-5")
+    from agent import provider
+    p = provider.provider_for(model)
+    if p != "anthropic":
+        # A non-Anthropic default means the credit balance check below is the
+        # wrong question entirely.
+        key_name = provider.PROVIDER_KEY_NAMES.get(p, "")
+        if key_name and not getattr(config, key_name, ""):
+            return BAD, (f"AGENT_MODEL is {model} ({p}), but {key_name} is not "
+                         f"set.\n"
+                         f"      -> python scripts/set_env_key.py {key_name} <your key>")
+        return OK, (f"configured for {model} via {p}. Ask Apex something to "
+                    f"confirm it answers — this check does not spend a token on "
+                    f"a paid provider it has not been told to test.")
+
     key = os.getenv("ANTHROPIC_API_KEY", "")
     if not key:
         return BAD, ("ANTHROPIC_API_KEY is not set.\n"

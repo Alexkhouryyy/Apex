@@ -11,16 +11,37 @@ from typing import Any
 
 # Google's OpenAI-compatible endpoint — lets the OpenAI SDK talk to Gemini.
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# DeepSeek's, likewise. Adding a provider is this small precisely because
+# OpenAIAdapter already exists: base_url, a key, and a name prefix.
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 
 
 def provider_for(model: str) -> str:
-    """Return 'anthropic', 'openai', 'gemini', or 'ollama' based on model name."""
+    """Return 'anthropic', 'openai', 'gemini', 'deepseek' or 'ollama'.
+
+    `ollama/deepseek-r1` is a LOCAL model that happens to be named after
+    DeepSeek, and it must keep routing to the daemon on your own machine rather
+    than to DeepSeek's API — for anyone running local models precisely to keep
+    data local, getting that wrong is a silent leak.
+
+    What makes it safe is the `ollama/` PREFIX, not the order of these checks:
+    "ollama/deepseek-r1" does not start with "deepseek", so it cannot match the
+    branch below wherever that branch sits. An earlier version of this docstring
+    claimed the ordering was load-bearing; reverting the order to prove it
+    showed the test still passed, which is how the claim was found to be wrong.
+
+    The test stays, because the PROPERTY is worth pinning even though this
+    particular mechanism makes it hard to break. A future prefix that does
+    overlap would have ordering that matters.
+    """
     if model.startswith("claude"):
         return "anthropic"
     if model.startswith("gemini"):
         return "gemini"
     if model.startswith("ollama/"):
         return "ollama"
+    if model.startswith("deepseek"):
+        return "deepseek"
     return "openai"
 
 
@@ -43,6 +64,8 @@ KNOWN_MODELS = {
     "gemini-3-pro", "gemini-3-flash",
     "gemini-2.5-pro", "gemini-2.5-flash",
     "gemini-2.0-flash",
+    # DeepSeek — OpenAI-compatible API, addressed by its bare name.
+    "deepseek-chat", "deepseek-reasoner",
     # Ollama local — any model pulled with `ollama pull <name>`; use ollama/ prefix.
     # These are the most common; any other pulled model works the same way.
     "ollama/llama3.2", "ollama/llama3.1", "ollama/llama3",
@@ -456,15 +479,47 @@ class OpenAIAdapter:
         self.messages = _Messages(self._oai, strip_prefix=strip_prefix)
 
 
+# Which config key each provider needs. One mapping so that adding a provider
+# updates get_client's error message, the discovery path, and the test fixture
+# at once — a hand-maintained list in each of those is how `main.py` and
+# `resident.py` drifted by twelve modules.
+PROVIDER_KEY_NAMES = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "ollama": "",                 # local daemon, no key
+}
+
+
+class MissingProviderKey(RuntimeError):
+    """Raised instead of letting the SDK name the wrong environment variable."""
+
+
 def get_client(model: str):
     """Return a provider client (Anthropic SDK or OpenAIAdapter) for a model."""
     import config
     p = provider_for(model)
+
+    # Check the key BEFORE constructing anything. The OpenAI SDK raises
+    # "Missing credentials ... set the OPENAI_API_KEY environment variable",
+    # which for a DeepSeek or Gemini model names a variable that would not help
+    # — an error that sends someone to set the wrong thing is worse than one
+    # that says nothing.
+    key_name = PROVIDER_KEY_NAMES.get(p, "")
+    if key_name and not getattr(config, key_name, ""):
+        raise MissingProviderKey(
+            f"{model} needs {key_name}, which is not set.\n"
+            f"  -> python scripts/set_env_key.py {key_name} <your key>")
     if p == "anthropic":
         import anthropic
         return anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=config.API_MAX_RETRIES)
     if p == "gemini":
         return OpenAIAdapter(config.GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
+    if p == "deepseek":
+        return OpenAIAdapter(config.DEEPSEEK_API_KEY,
+                             base_url=getattr(config, "DEEPSEEK_BASE_URL", "")
+                                      or DEEPSEEK_BASE_URL)
     if p == "ollama":
         # Ollama exposes an OpenAI-compatible API; no real key needed.
         # strip_prefix removes "ollama/" so the model name reaches Ollama correctly.
@@ -513,14 +568,16 @@ def discover(provider_name: str, force: bool = False) -> set[str]:
             # Re-prefix: Apex addresses local models as ollama/<name>, and the
             # daemon reports the bare name.
             found = {f"ollama/{m.id}" for m in oai.models.list().data}
-        elif provider_name in ("openai", "gemini"):
-            key = (config.OPENAI_API_KEY if provider_name == "openai"
-                   else config.GEMINI_API_KEY)
+        elif provider_name in ("openai", "gemini", "deepseek"):
+            key = {"openai": config.OPENAI_API_KEY,
+                   "gemini": config.GEMINI_API_KEY,
+                   "deepseek": config.DEEPSEEK_API_KEY}[provider_name]
             if not key:
                 return set()
+            base = {"openai": None, "gemini": GEMINI_BASE_URL,
+                    "deepseek": DEEPSEEK_BASE_URL}[provider_name]
             from openai import OpenAI
-            oai = OpenAI(api_key=key,
-                         base_url=None if provider_name == "openai" else GEMINI_BASE_URL)
+            oai = OpenAI(api_key=key, base_url=base)
             found = {m.id for m in oai.models.list().data}
         else:
             return set()
@@ -535,7 +592,8 @@ def discover(provider_name: str, force: bool = False) -> set[str]:
 
 
 def discover_all(force: bool = False) -> dict[str, set[str]]:
-    return {p: discover(p, force) for p in ("anthropic", "openai", "gemini", "ollama")}
+    return {p: discover(p, force)
+            for p in ("anthropic", "openai", "gemini", "deepseek", "ollama")}
 
 
 def is_usable(model: str) -> bool:
