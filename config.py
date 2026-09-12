@@ -565,3 +565,24 @@ BLENDER_TIMEOUT_SECONDS = float(os.getenv("BLENDER_TIMEOUT_SECONDS", "20"))
 # named after, and anything under a millimetre is not millimetre-dimensioned.
 BLENDER_MIN_DIM_MM = float(os.getenv("BLENDER_MIN_DIM_MM", "1"))
 BLENDER_MAX_DIM_MM = float(os.getenv("BLENDER_MAX_DIM_MM", "4000"))
+
+# --- Forge: the machine on the other end -----------------------------------
+# agent/forge.py checks a mesh against a real machine, and these are that
+# machine. They are settings rather than constants because "is this
+# manufacturable" has no answer in the abstract — a 0.3mm wall is impossible on
+# a 0.4mm nozzle and routine on a 0.1mm one, and the same part either fits the
+# plate or does not. Defaults describe a common desktop FFF printer.
+FORGE_NOZZLE_MM = float(os.getenv("FORGE_NOZZLE_MM", "0.4"))
+# Blank means "two nozzle widths", the thinnest wall that prints with any
+# strength. Set it explicitly for a machine or material that differs.
+FORGE_MIN_WALL_MM = float(os.getenv("FORGE_MIN_WALL_MM") or 0.0) or None
+# Measured from vertical: 0 is a wall, 90 is a ceiling. Past this a surface
+# needs support. A warning, never a refusal — supports exist.
+FORGE_OVERHANG_DEG = float(os.getenv("FORGE_OVERHANG_DEG", "45"))
+FORGE_BUILD_X_MM = float(os.getenv("FORGE_BUILD_X_MM", "256"))
+FORGE_BUILD_Y_MM = float(os.getenv("FORGE_BUILD_Y_MM", "256"))
+FORGE_BUILD_Z_MM = float(os.getenv("FORGE_BUILD_Z_MM", "256"))
+# 3MF by default: it is the only format in this chain that states its own unit,
+# which is the failure this module exists to stop. STL is offered because every
+# machine eats it, not because it is good.
+FORGE_DEFAULT_FORMAT = os.getenv("FORGE_DEFAULT_FORMAT", "3mf").strip().lower()

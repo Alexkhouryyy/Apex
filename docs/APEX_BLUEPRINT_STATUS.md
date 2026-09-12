@@ -30,7 +30,7 @@ rather than a percentage.
 | 9 | Spatial + Apex | Create, manipulate, close, reopen, continue | **MOSTLY.** Voice-to-scene via `board_create`/`board_recolor` into Blender; versioned assets with provenance (`agent/assets.py`); the board survives a restart, proven by test. The *manipulate* leg inherits Phase 8's unproven reliability |
 | 10 | Mobile/Web continuity | Start on one interface, continue on another | **MOSTLY.** PWA (`manifest.webmanifest`, `sw.js`, `mobile.css`, `voice-mobile.js`), device registry, one shared SQLite brain. Worth being precise: handoff works because there is one database, not because handoff was designed. No explicit task-handoff affordance exists |
 | 11 | Apex Drive / CarPlay | Driving-safe recall through an approved interface | **NOT STARTED.** Gated on Apple requirements, not on us |
-| 12 | Forge | A designed object reaches a **validated manufacturable** representation | **PARTIAL, and the gap is the adjective.** `agent/blender_bridge.py` does parameterized creation, colour and controlled export — to `.glb`, which is a visualisation format. Nothing exports STL/STEP/3MF, checks wall thickness, or validates printability |
+| 12 | Forge | A designed object reaches a **validated manufacturable** representation | **MET 2026-09-12.** `agent/forge.py` writes STL and 3MF — 3MF because it is the only format in the chain that states its own unit, which is the failure the phase is really about — and refuses to write either until the mesh passes. The checks are watertightness (every edge in exactly two faces, traversed in opposite directions, so a closed mesh wound inside out is caught too), enclosed volume and its sign, wall thickness measured by casting rays inward from each face against the nozzle, overhang angle from vertical excluding the face the part rests on, build volume, and scale. `primitive()` builds every shape `blender_bridge` knows, in millimetres, with no Blender — so the whole chain is exercised by tests rather than asserted — and `read_glb()` ingests what `board_create` actually produces, converting glTF's metres and Y-up axes and saying on the report which conversions it assumed. **The third state is the point:** a check that cannot run reports `unknown`, a report with any `unknown` is `unverified`, and `unverified` does not export. 130 tests; every guard confirmed by reverting it individually, and the readers cross-checked against files written by an unrelated library |
 | 13 | Concept Genesis | Testable novel hypotheses with evidence and critique | **NOT STARTED** |
 
 ## The finding worth acting on: Phase 5
@@ -64,9 +64,12 @@ those on top of no permission model bakes it in.
 2. ~~**Phase 2's retrieval half**~~ — done 2026-09-03. See the row above.
 3. ~~**Phases 6 and 7**~~ — built 2026-09-05..09. Steps 0–8 of
    `docs/PHASE_6_7_PLAN.md`. Step 9 is deployment and is not mine to do.
-4. **Phase 12 (Forge)** — the next phase whose success check can be *proven
-   here*, on this machine, with no camera, no second box and no API key.
-   Everything else outstanding needs hardware I do not have.
+4. ~~**Phase 12 (Forge)**~~ — done 2026-09-12. See the row above. It was
+   chosen because its success check could be demonstrated here, with no
+   camera, no second box and no API key; everything else outstanding needs
+   hardware this machine does not have.
+5. **Phase 13 (Concept Genesis)** — the only phase left that is buildable
+   without hardware. 11 is gated on Apple.
 
 ### The two things blocking an honest label, both yours
 
@@ -97,5 +100,24 @@ Both entry points now initialise from one list (`agent/schema.py`), and
 `tests/test_schema.py` asserts every module defining `init_db` is in it —
 because twelve added lines would have fixed the date and drifted again.
 
-Phase 11 is gated on Apple's requirements rather than on us. Phase 13 is
-further out. Neither blocks anything above.
+Phase 11 is gated on Apple's requirements rather than on us. Neither it nor
+Phase 13 blocks anything above.
+
+## What Phase 12 deliberately does not do
+
+Worth writing down, because "validated manufacturable" is a phrase that can be
+stretched a long way:
+
+* **No STEP, and no solid model.** Everything here is a triangle mesh. STEP is
+  a boundary representation with real curves and a schema to match, and a
+  half-implemented STEP writer that emits files a CAD package opens wrong would
+  be worse than not having one.
+* **No slicing, and no time or material estimate.** The volume is exact; what a
+  machine does with it is the slicer's business.
+* **Thickness is measured perpendicular to each face, by sampling.** That can
+  over-report the true minimum, never under-report it, so a `fail` is
+  trustworthy and an `ok` means "nothing thin was found". The report says
+  `thinnest measured` for that reason.
+* **Subtractive and injection processes are not modelled.** No draft angles, no
+  tool access, no undercuts. The checks describe a fused-filament machine,
+  which is the machine the defaults describe.

@@ -16,6 +16,8 @@ into, not a chat log that forgets you between sessions.
 Full write-up, feature map and honest state: **[docs/APEX_OVERVIEW.md](docs/APEX_OVERVIEW.md)**.
 Where it stands against its own roadmap, judged by success checks rather than
 by whether code exists: **[docs/APEX_BLUEPRINT_STATUS.md](docs/APEX_BLUEPRINT_STATUS.md)**.
+Designing physical objects and checking they can actually be made:
+**[docs/FORGE.md](docs/FORGE.md)**.
 
 ## What it does
 

@@ -171,6 +171,151 @@ def _store_asset_version(assets_mod, slug: str, result: dict, command: dict,
     assets_mod.add_version(slug, filename, command=command, parent=parent)
     return f"{assets_mod.CREATED_DIR}/{slug}/{filename}"
 
+def _forge_settings() -> dict:
+    """The machine, read from config at call time rather than at import.
+
+    "Is this manufacturable" has no answer without a machine, and the machine
+    is a setting: the same 0.3mm wall is impossible on a 0.4mm nozzle and
+    routine on a 0.1mm one. Reading these here means changing .env changes the
+    verdict without a restart.
+    """
+    import config as _cfg
+    return {
+        "nozzle_mm": float(getattr(_cfg, "FORGE_NOZZLE_MM", 0.4)),
+        "min_wall_mm": getattr(_cfg, "FORGE_MIN_WALL_MM", None),
+        "overhang_deg": float(getattr(_cfg, "FORGE_OVERHANG_DEG", 45.0)),
+        "build_mm": (float(getattr(_cfg, "FORGE_BUILD_X_MM", 256.0)),
+                     float(getattr(_cfg, "FORGE_BUILD_Y_MM", 256.0)),
+                     float(getattr(_cfg, "FORGE_BUILD_Z_MM", 256.0))),
+    }
+
+
+def _forge_resolve(inputs: dict):
+    """(mesh, asset-or-None, label) for the thing the caller means, or a string
+    to hand back to the model as a refusal."""
+    from agent import assets as _assets
+    from agent import forge as _forge
+    from agent import props as _props
+
+    title = (inputs.get("title") or "").strip()
+    rel = (inputs.get("path") or "").strip()
+    asset = None
+    if title:
+        asset = _assets.find_by_title(title)
+        if asset is None:
+            return None, None, (
+                f"There is no object called '{title}'. board_history lists what "
+                f"Apex has made.")
+        rel = _assets.current_file(asset["id"]) or ""
+        if not rel:
+            return None, None, f"'{title}' has no saved file to check yet."
+    if not rel:
+        return None, None, "Give apex_forge a title or a path to look at."
+
+    # The serving jail's own containment, with the manufacturing extensions
+    # added — NOT merged into what the board serves. A browser has no parser
+    # for an .stl and no business being handed one.
+    target = _props.resolve(
+        rel, exts=_props.ALLOWED_EXTS + _props.FABRICATION_EXTS)
+    if target is None:
+        return None, None, (
+            f"'{rel}' is not a readable model inside the props folder.")
+    try:
+        return _forge.read_any(target), asset, (title or rel)
+    except _forge.ForgeError as e:
+        return None, None, f"[Forge] {e}"
+
+
+def _forge_tool(inputs: dict) -> str:
+    """apex_forge — check, make, export.
+
+    Phase 12's success check is "a designed object reaches a VALIDATED
+    manufacturable representation", so validation is not a separate tool the
+    model may forget to call: every path that writes a file goes through
+    `forge.export`, which refuses first and writes second.
+    """
+    from agent import assets as _assets
+    from agent import forge as _forge
+    import config as _cfg
+
+    action = (inputs.get("action") or "").strip().lower()
+    settings = _forge_settings()
+    fmt = (inputs.get("format") or getattr(_cfg, "FORGE_DEFAULT_FORMAT", "3mf")
+           or "3mf").strip().lower().lstrip(".")
+    # Checked here, before a filename is built from it. `forge.export` refuses
+    # an unknown format too, but by then the refusal arrives down the same path
+    # as a geometry failure and gets reported as "fix the geometry" — which is
+    # wrong, and sends whoever reads it to look at the wrong thing.
+    if fmt not in _forge.FORMATS:
+        return (f"[Forge] '{fmt}' is not a format Apex writes. "
+                f"Choose {' or '.join(_forge.FORMATS)}.")
+
+    if action == "check":
+        mesh, _asset, label = _forge_resolve(inputs)
+        if mesh is None:
+            return label
+        return f"{label}:\n" + _forge.validate(mesh, **settings).describe()
+
+    if action in ("make", "export"):
+        if action == "make":
+            shape = (inputs.get("shape") or "").strip().lower()
+            try:
+                mesh = _forge.primitive(shape, inputs.get("dims_mm") or {})
+            except _forge.ForgeError as e:
+                return f"[Forge] {e}"
+            title = (inputs.get("title") or shape or "part").strip()
+            # blender_bridge.slugify, not a second one: this becomes a folder
+            # name AND a filename, and this codebase has already found the bug
+            # where user- or model-supplied text reaches a path unslugified.
+            # One containment function, one place to fix it.
+            from agent.blender_bridge import slugify as _slugify
+            slug = _slugify(title, fallback_prefix="part")
+            command = {"tool": "apex_forge", "action": "make", "shape": shape,
+                       "dims_mm": inputs.get("dims_mm") or {}, "format": fmt}
+            # Deliberately NOT created yet. A refused make must leave nothing
+            # behind at all — an asset folder with zero versions still shows up
+            # in board_history as a thing Apex made, which is the shape of
+            # "reported success, produced nothing" this whole module is against.
+            asset = {}
+        else:
+            mesh, asset, title = _forge_resolve(inputs)
+            if mesh is None:
+                return title
+            if asset is None:
+                return ("apex_forge export needs a title, so the exported file "
+                        "can be saved as a version of that object.")
+            slug = asset["id"]
+            command = {"tool": "apex_forge", "action": "export", "format": fmt,
+                       "from_version": asset.get("current_version")}
+
+        report = _forge.validate(mesh, **settings)
+        filename = _assets.next_filename(slug, ext=fmt)
+        dest = _assets.asset_root(slug) / filename
+        try:
+            _forge.export(mesh, dest, fmt=fmt, title=title, report=report,
+                          force=bool(inputs.get("force")))
+        except _forge.ForgeError as e:
+            # No file, and no version recorded — the asset's history keeps
+            # pointing at the last good one, which is the rule agent/assets.py
+            # was built around.
+            return (f"[Forge] {e}\n\n" + report.describe()
+                    + "\n\nNothing was written. Fix the geometry, or say so "
+                      "explicitly to export it anyway.")
+        if action == "make":
+            _assets.create(slug, title, command=command)
+        _assets.add_version(
+            slug, filename, command=command,
+            parent=asset.get("current_version") if action == "export" else None)
+        where = f"{_assets.CREATED_DIR}/{slug}/{filename}"
+        note = "" if report.ok else "\n(exported on request despite the above)"
+        return (f"Wrote {where} — {fmt.upper()}.\n"
+                + report.describe() + note)
+
+    return ("apex_forge actions are: check (is it printable), make (build a "
+            "measured solid and export it), export (write an existing object "
+            "as a manufacturing file).")
+
+
 TOOLS = [
     {
         "name": "screenshot",
@@ -306,6 +451,37 @@ TOOLS = [
                 "title": {"type": "string", "description": "What to call it on the board. Optional — defaults to the shape name.", "default": ""},
             },
             "required": ["shape", "dims_mm"],
+        },
+    },
+    {
+        "name": "apex_forge",
+        "description": (
+            "Turn a design into something a machine can actually make, and say "
+            "plainly when it cannot. Three actions:\n"
+            "  check  — is this printable? Give `title` (an object on the board) "
+            "or `path` (a file in the props folder). Reports watertightness, "
+            "wall thickness against the nozzle, overhangs, size and scale.\n"
+            "  make   — build a measured solid in millimetres WITHOUT Blender "
+            "and export it. Needs `shape` and `dims_mm`, same as board_create.\n"
+            "  export — write an existing object as a manufacturing file. "
+            "Needs `title`.\n"
+            "Export refuses a mesh that cannot be made. That is deliberate — ask "
+            "the user before setting `force`, and tell them what the objection "
+            "was. Default format is 3MF because it states its own unit; STL does "
+            "not and never has, which is how parts arrive 25.4x wrong."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "check | make | export"},
+                "title": {"type": "string", "description": "The board title of an existing object. For check and export.", "default": ""},
+                "path": {"type": "string", "description": "A props-folder path instead of a title, e.g. created/phone-stand/v1.glb. For check.", "default": ""},
+                "shape": {"type": "string", "description": "For make: cube | sphere | cylinder | cone | plane | torus"},
+                "dims_mm": {"type": "object", "description": "For make. Millimetres, same keys as board_create."},
+                "format": {"type": "string", "description": "3mf (default, carries its unit) or stl", "default": ""},
+                "force": {"type": "boolean", "description": "Export even though it failed validation. Ask the user first.", "default": False},
+            },
+            "required": ["action"],
         },
     },
     {
@@ -1781,6 +1957,9 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                   f"grab it with one hand, two to scale.")
             _broadcast_live_event("board", out)
             return out
+
+        elif name == "apex_forge":
+            return _forge_tool(inputs or {})
 
         elif name == "board_recolor":
             from agent import assets as _assets

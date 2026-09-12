@@ -25,6 +25,14 @@ MODEL_EXTS = (".glb", ".gltf")
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 ALLOWED_EXTS = MODEL_EXTS + IMAGE_EXTS
 
+# What a MACHINE can consume — see agent/forge.py. Deliberately NOT part of
+# ALLOWED_EXTS: these are never served to a browser, which has no parser for
+# them and no business being handed one. They live inside the same jail because
+# they sit next to the .glb they were derived from, and they get the same
+# containment; they just answer a different question, so `resolve` is told
+# which list applies rather than having both merged into one.
+FABRICATION_EXTS = (".stl", ".3mf")
+
 MIME = {
     ".glb": "model/gltf-binary",
     ".gltf": "model/gltf+json",
@@ -46,12 +54,19 @@ def props_root() -> Path:
     return root
 
 
-def resolve(rel: str, root: Optional[Path] = None) -> Optional[Path]:
+def resolve(rel: str, root: Optional[Path] = None,
+            exts: Optional[tuple] = None) -> Optional[Path]:
     """Turn a caller-supplied path into a real file inside the jail, or None.
 
     Refuses, in order: nothing, an absolute path, a Windows drive or UNC path, a
     symlink escape, a walk outside the root, an extension not on the list, and
     anything that is not a regular file.
+
+    `exts` defaults to ALLOWED_EXTS — what the board may serve. A caller that
+    handles a different class of file (Forge, with .stl and .3mf) passes its
+    own list. The containment rules below are deliberately written once: a
+    second copy of them elsewhere is how one of the two copies eventually
+    stops matching the other.
 
     `Path.resolve()` before the containment check, not after — `root/../../etc`
     only looks like an escape once it is normalized, and comparing the unresolved
@@ -77,7 +92,7 @@ def resolve(rel: str, root: Optional[Path] = None) -> Optional[Path]:
 
     if base != target and base not in target.parents:
         return None
-    if target.suffix.lower() not in ALLOWED_EXTS:
+    if target.suffix.lower() not in (exts if exts is not None else ALLOWED_EXTS):
         return None
     if not target.is_file():
         return None

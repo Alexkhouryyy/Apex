@@ -161,15 +161,21 @@ def version_file(slug: str, version: int,
     return None
 
 
-def next_filename(slug: str, props_root: Optional[Path] = None) -> str:
+def next_filename(slug: str, props_root: Optional[Path] = None,
+                  ext: str = "glb") -> str:
     """`v3.glb` — named by position, so the file itself states its version.
 
     Reads the manifest rather than counting files on disk: a stray file
     dropped in the folder by hand must not silently renumber the history.
+
+    `ext` exists because a Forge export (`v4.3mf`) is a version of the same
+    asset as the `.glb` it came from — the same object, converted, not a
+    separate thing with its own history. Defaulting to glb keeps every existing
+    caller unchanged.
     """
     data = load(slug, props_root)
     n = (len(data["versions"]) + 1) if data else 1
-    return f"v{n}.glb"
+    return f"v{n}.{str(ext).lstrip('.')}"
 
 
 def listing(props_root: Optional[Path] = None) -> list[dict]:
