@@ -1,9 +1,9 @@
 # Apex — Blueprint Status
 
 Status of the 14-phase roadmap in `APEX_FINAL_Master_Blueprint_V2.docx`
-(Table 7), checked against the code on 2026-09-02.
+(Table 7), checked against the code on 2026-09-12.
 
-**Basis:** 1793 tests, 14 smoke checks, 3 static audits, CI on every push.
+**Basis:** 2099 tests, 14 smoke checks, 3 static audits, CI on every push.
 
 ## How a phase is judged
 
@@ -20,12 +20,12 @@ rather than a percentage.
 |---|---|---|---|
 | 0 | Backup + baseline | Apex can be restored and regressions detected | **MET** — 1679 tests, 14 smoke checks, `tools/wiring_audit.py`, `tools/sql_audit.py`, `tools/autonomy_audit.py`, CI on every push. Decision records in `docs/DECISIONS-*.md` |
 | 1 | Fix persistence | Restart and retrieve prior validated memories | **MET — and the premise was wrong.** The blueprint's §20 states memory resets between sessions. It does not, and did not: `agent/longterm.py` has always been durable SQLite. Verified by restart, not by reading the code |
-| 2 | Markdown vault | Retrieve the correct project page *without loading the full vault* | **MET 2026-09-03.** `agent/vault_index.py` embeds every note into a `vault_index` table and `apex_note` grew a `search` action over it. Both halves of the check are held by tests: it finds a note whose title you do not know, and `TestSearchNeverOpensANote` makes `Path.read_text` raise during a query, so a search that fell back to scanning the vault fails loudly. Indexing reads notes; querying does not. Freshness is a content hash, not mtime+size; deleted notes are swept; a never-indexed vault says so rather than returning an empty list. **Degraded here, not broken:** `sentence-transformers` is not installed in the build container, so this machine only exercises the keyword fallback — which is why every result carries `matched: semantic|keyword` instead of leaving the mode to be inferred from answer quality |
+| 2 | Markdown vault | Retrieve the correct project page *without loading the full vault* | **MET 2026-09-03.** `agent/vault_index.py` embeds every note into a `vault_index` table and `apex_note` grew a `search` action over it. Both halves of the check are held by tests: it finds a note whose title you do not know, and `TestSearchNeverOpensANote` makes `Path.read_text` raise during a query, so a search that fell back to scanning the vault fails loudly. Indexing reads notes; querying does not. Freshness is a content hash, not mtime+size; deleted notes are swept; a never-indexed vault says so rather than returning an empty list. **Degraded here, not broken:** `sentence-transformers` is not installed in the build container, so this machine only exercises the keyword fallback — which is why every result carries `matched: semantic` or `matched: keyword` instead of leaving the mode to be inferred from answer quality |
 | 3 | Outcome loop | A corrected task changes future behaviour traceably | **MET, and past it.** `outcomes.py`, `feedback.py`, `reflection.py`, `lessons.py`, plus `observed.py` — outcomes Apex *sees* at the call site (tool results, test verdicts), not only ones it reports about itself |
 | 4 | Adaptive Council | Council invoked only when it improves expected outcome | **MET.** `council.py` runs it, `consensus.py` measures divergence across *opening* answers (deliberately separate from the chair's self-reported confidence), `council_stats.advise()` answers "is it worth convening" from recorded runs rather than from belief |
 | 5 | MCP foundation | Discover and use a tool **end-to-end safely** | **MET 2026-09-02.** `agent/mcp_policy.py` classifies every MCP tool read or write, gates it against `MCP_POLICY` / `MCP_ALLOW` / `MCP_DENY`, and records every decision — refusals included — in `mcp_audit`, with argument key names and a hash rather than values. The gate sits inside `mcp_client.call()`, the single door, and `tests/test_mcp_client.py::TestTheGateIsAtTheChokePoint` asserts a refused write never reaches the transport rather than merely that a refusal string came back. A server's own annotation may tighten the classification and never loosen it. **One thing still unproven:** the transport is stubbed in tests, so no real server's annotations have been parsed in anger — handled defensively (both the snake_case and camelCase spellings) but not yet observed |
-| 6 | Cloud Core | Laptop offline, phone still reaches Apex memory | **NOT STARTED** |
-| 7 | Local node | Cloud Core delegates a local task | **NOT STARTED.** `agent/devices.py` is an 88-line heartbeat registry — it knows what is connected, it cannot delegate to it |
+| 6 | Cloud Core | Laptop offline, phone still reaches Apex memory | **BUILT, NOT DEPLOYED.** `agent/relay.py` seals every artefact before it leaves the laptop (`seal()` raises rather than falling back to plaintext) and snapshots through SQLite's online backup API so a WAL-mode database is copied consistently. `relay/server.py` is a stdlib-only mailbox that imports nothing from Apex, binds `127.0.0.1`, and serves nothing at all when no token is configured. `agent/working_context.py` sends a redacted, allowlisted page rather than the archive. `relay/answer.py` lets the cloud answer without the mailbox ever holding a model key. **What is not done is step 9:** no always-on box is running this, so the success check — lid shut, phone still answers — has never been observed. Proven on localhost, not in the world |
+| 7 | Local node | Cloud Core delegates a local task | **BUILT, GATED ON 6.** `agent/capabilities.py` probes rather than declares — three states, `yes`/`no`/`unknown`, and the camera probe never opens the device. `agent/node_tasks.py` holds the queue: claims are leases with an expiry, an expired lease requeues and counts an attempt, `max_attempts` ends in `dead` with the last error kept, and a task for an offline node reads as waiting rather than as done. `agent/node_worker.py` routes delegated work through `core._execute_tool` — the same door a local call uses — so `safety.check`, `mcp_policy.enforce` and `subagent_scope.check` all run on the machine that would execute it. The queue carries a request, never a permission. Same gate as Phase 6: two processes on one host is not two machines |
 | 8 | Spatial MVP | Pinch, move, rotate, scale work **reliably** | **BUILT, RELIABILITY UNPROVEN.** All four transforms exist with dwell-before-grab, open-palm cancel with revert, and undo/redo (`agent/board.py`). `HANDTRACK_PINCH_RATIO` is now measured rather than guessed. Nobody has yet pinched a card and had it grab |
 | 9 | Spatial + Apex | Create, manipulate, close, reopen, continue | **MOSTLY.** Voice-to-scene via `board_create`/`board_recolor` into Blender; versioned assets with provenance (`agent/assets.py`); the board survives a restart, proven by test. The *manipulate* leg inherits Phase 8's unproven reliability |
 | 10 | Mobile/Web continuity | Start on one interface, continue on another | **MOSTLY.** PWA (`manifest.webmanifest`, `sw.js`, `mobile.css`, `voice-mobile.js`), device registry, one shared SQLite brain. Worth being precise: handoff works because there is one database, not because handoff was designed. No explicit task-handoff affordance exists |
@@ -62,9 +62,25 @@ those on top of no permission model bakes it in.
 
 1. ~~**Phase 5's safety half**~~ — done 2026-09-02. See the row above.
 2. ~~**Phase 2's retrieval half**~~ — done 2026-09-03. See the row above.
-3. **Phase 8's proof** — one person, one camera, one card that grabs. Cheap,
-   and it unblocks the honest labelling of 8 and 9.
-4. Then 6 and 7, which are the real architectural work.
+3. ~~**Phases 6 and 7**~~ — built 2026-09-05..09. Steps 0–8 of
+   `docs/PHASE_6_7_PLAN.md`. Step 9 is deployment and is not mine to do.
+4. **Phase 12 (Forge)** — the next phase whose success check can be *proven
+   here*, on this machine, with no camera, no second box and no API key.
+   Everything else outstanding needs hardware I do not have.
+
+### The two things blocking an honest label, both yours
+
+Neither is work. Both are minutes.
+
+| Gate | What it settles | What it takes |
+|---|---|---|
+| Pinch one card on `/board` | Phase 8 **and** Phase 9's manipulate leg, which inherits it | One camera, one pinch, one sentence back: did it grab |
+| Run the relay on any always-on box | Phase 6 from BUILT to MET, and Phase 7 with it | `relay/README.md`, step 9 |
+
+I cannot move either. Phase 8's check is a human hand in front of a real
+camera, and Phase 6's is a machine that stays awake when your laptop does not.
+No test I write here substitutes for either, and a test that claimed to would
+be the exact failure this document exists to catch.
 
 ## A note on Phase 1, added after the fact
 
@@ -81,4 +97,5 @@ Both entry points now initialise from one list (`agent/schema.py`), and
 `tests/test_schema.py` asserts every module defining `init_db` is in it —
 because twelve added lines would have fixed the date and drifted again.
 
-Phases 11, 12 and 13 are further out and none of them blocks anything above.
+Phase 11 is gated on Apple's requirements rather than on us. Phase 13 is
+further out. Neither blocks anything above.
