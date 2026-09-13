@@ -745,6 +745,37 @@ class TestCameraOpenBackoff:
         assert t._retry_at == 0.0
         assert t._retry_delay == handtrack.CAMERA_RETRY_FIRST
 
+    def test_no_camera_is_reported_without_downloading_a_model(self, monkeypatch, capsys):
+        opens = []
+        t = self._tracker(monkeypatch, opens)
+        monkeypatch.setattr(handtrack, "available", lambda: (True, ""))
+        monkeypatch.setattr(handtrack, "opencv_conflict", lambda: [])
+        def forbidden(*args, **kwargs):
+            raise AssertionError("A missing camera must not need a model download")
+        monkeypatch.setattr(handtrack, "ensure_model", forbidden)
+        def one_tick(now):
+            t._open(now)
+            t._stop.set()
+        monkeypatch.setattr(t, "_tick", one_tick)
+        t.run()
+        output = capsys.readouterr().out
+        assert opens and "Watching camera" in output and "would not open" in output
+
+    def test_model_failure_releases_camera_and_backs_off(self, monkeypatch):
+        opens = []
+        t = self._tracker(monkeypatch, opens)
+        released = []
+        class Camera:
+            def isOpened(self): return True
+            def release(self): released.append(True)
+        monkeypatch.setattr("cv2.VideoCapture", lambda *args: Camera())
+        def broken(**kwargs):
+            raise RuntimeError("download unavailable")
+        monkeypatch.setattr(handtrack, "build_landmarker", broken)
+        assert t._open(now=100) is False
+        assert released and t._cap is None
+        assert t._retry_at == pytest.approx(100 + handtrack.CAMERA_RETRY_MAX, abs=.1)
+
     def test_resume_clears_the_backoff_too(self, monkeypatch):
         """`release_camera` then `resume` is a person explicitly asking for the
         camera back. Making them wait out a 30-second backoff would read as the
