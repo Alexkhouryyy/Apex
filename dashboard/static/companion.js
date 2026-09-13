@@ -4,6 +4,16 @@
   const els = Object.fromEntries([...document.querySelectorAll('[id]')].map(el => [el.id, el]));
   const $ = id => els[id];
   const root = $('companion');
+  const drive = location.pathname === '/drive';
+  const workspace = new URLSearchParams(location.search).get('workspace') === 'board' ? 'board' : null;
+  let pendingRemote = null;
+  try { pendingRemote = drive ? JSON.parse(localStorage.getItem('apex_remote_pending')) : null; } catch (_) {}
+  const savePending = value => {
+    pendingRemote = value;
+    if (value) localStorage.setItem('apex_remote_pending', JSON.stringify(value));
+    else localStorage.removeItem('apex_remote_pending');
+    $('recover').hidden = !value;
+  };
   let threadId = Number(localStorage.getItem('apex_companion_thread')) || null;
   let active = null, shareStream = null, recorder = null, micStream = null;
   let speechEpoch = 0, audio = null, audioUrl = null, speechRequest = null;
@@ -13,13 +23,15 @@
   function error(text = '') { $('error').textContent = text; $('error').hidden = !text; }
   function state(name, text) { root.className = name; $('status').textContent = text; }
   function controls() {
-    const busy = Boolean(active) || Boolean(recorder);
+    const busy = Boolean(active) || Boolean(recorder) || Boolean(pendingRemote);
     $('send').disabled = busy;
     $('new').disabled = busy;
     $('mode').disabled = busy;
-    $('mic').disabled = Boolean(active);
+    $('mic').disabled = Boolean(active) || Boolean(pendingRemote);
     $('review').disabled = busy || !shareStream;
     $('stop').disabled = !(busy || audio || root.classList.contains('speaking'));
+    $('recover').disabled = Boolean(active);
+    $('jobs').disabled = Boolean(active) || Boolean(pendingRemote);
   }
   async function request(path, opts = {}) {
     const response = await fetch(path, {...opts, headers: {...headers(), ...opts.headers}});
@@ -113,19 +125,45 @@
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/jpeg', .72);
   }
-  async function send(text, automatic = false) {
-    if (active || recorder || !text.trim()) return;
+  async function refreshJobs() {
+    const data = await (await request('/api/companion/jobs')).json();
+    $('jobs').replaceChildren(new Option('Choose a task…', ''));
+    for (const job of data.jobs) $('jobs').append(new Option(`${job.status} · ${job.message.slice(0, 70)}`, job.id));
+  }
+  async function remoteEvents(turn, body, event) {
+    let job = body.existing
+      ? await (await request(`/api/companion/jobs/${turn.id}`)).json()
+      : await (await request('/api/companion/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})).json();
+    event({type: 'start', thread_id: job.thread_id});
+    savePending({turn_id: turn.id, existing: true, message: body.message || 'Reconnected task'});
+    let seen = 0;
+    while (true) {
+      job = await (await request(`/api/companion/jobs/${turn.id}`)).json();
+      for (const evidence of (job.evidence || []).slice(seen)) event(evidence);
+      seen = (job.evidence || []).length;
+      event({type: 'progress', text: job.text || 'Working on your Apex host…'});
+      if (job.status !== 'running') {
+        event({type: 'done', text: [job.text, job.error].filter(Boolean).join('\n\n') || 'Task ended without a reply.', interrupted: job.status !== 'done'});
+        savePending(null); refreshJobs().catch(() => {}); return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1200));
+    }
+  }
+  async function send(text, automatic = false, recovery = null) {
+    if (active || recorder || (pendingRemote && !recovery) || !text.trim()) return;
     stopSpeech(); error();
     let image;
     try { image = snapshot(); } catch (exc) { error(exc.message); return; }
-    const turn = {id: crypto.randomUUID(), stopped: false, done: false, text: ''};
+    const turn = {id: recovery?.turn_id || crypto.randomUUID(), stopped: false, done: false, text: ''};
     active = turn; controls(); state('thinking', automatic ? 'Checking in on your screen…' : 'Thinking with you…');
-    if (!automatic) { bubble('user', text); $('message').value = ''; }
+    if (!automatic && !recovery) { bubble('user', text); $('message').value = ''; }
     const output = bubble('agent', automatic ? 'Checking your shared screen…' : 'Thinking…');
     function event(item) {
       if (item.type === 'start') {
         threadId = item.thread_id; localStorage.setItem('apex_companion_thread', String(threadId));
         if (turn.stopped) request(`/api/companion/cancel/${turn.id}`, {method: 'POST'}).catch(exc => error(exc.message));
+      } else if (item.type === 'progress') {
+        turn.text = item.text; output.content.textContent = item.text;
       } else if (item.type === 'token' && !turn.stopped) {
         turn.text += item.text; if (!automatic) output.content.textContent = turn.text;
       } else if (item.type === 'tool') {
@@ -143,9 +181,14 @@
       scroll();
     }
     try {
+      if (drive) {
+        const body = recovery || {message: text, thread_id: threadId, turn_id: turn.id, mode: $('mode').value};
+        savePending(body);
+        await remoteEvents(turn, body, event);
+      } else {
       const response = await request('/api/companion/chat', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({message: text, thread_id: threadId, turn_id: turn.id,
-          screen_image: image, mode: automatic ? 'discuss' : $('mode').value})});
+          screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace})});
       const reader = response.body.getReader(), decoder = new TextDecoder(); let pending = '';
       try {
         while (true) {
@@ -159,14 +202,15 @@
           if (done) break;
         }
       } finally { await reader.cancel(); reader.releaseLock(); }
+      }
       if (!turn.done) throw new Error('Connection ended before Apex finished. Completed actions may still have taken effect.');
     } catch (exc) {
       output.content.textContent = (turn.text ? `${turn.text}\n\n` : '') + exc.message;
-      error(exc.message); turn.stopped = true;
+      error(drive ? `${exc.message} Reconnect to retrieve the task; do not submit it again as a new task.` : exc.message); turn.stopped = true;
       // Do not silently lose a message on a failed request.
       if (!automatic && !$('message').value) $('message').value = text;
     } finally {
-      active = null; state('', turn.stopped ? 'Stopped. Ready for your next instruction.' : 'Ready when you are.'); controls();
+      active = null; state('', pendingRemote ? 'Connection interrupted · task outcome not confirmed.' : turn.stopped ? 'Stopped. Ready for your next instruction.' : 'Ready when you are.'); controls();
     }
     if (!turn.stopped && turn.text.trim() !== 'NOTHING_TO_ADD') await speak(turn.text);
   }
@@ -177,6 +221,11 @@
       active.stopped = true; state('thinking', 'Stopping · an active tool may need to finish');
       try { await request(`/api/companion/cancel/${active.id}`, {method: 'POST'}); }
       catch (exc) { error(`Could not confirm the stop: ${exc.message}`); }
+    } else if (pendingRemote) {
+      try {
+        const result = await (await request(`/api/companion/cancel/${pendingRemote.turn_id}`, {method: 'POST'})).json();
+        error(result.cancel_requested ? 'Stop requested. Reconnect to retrieve the final result.' : 'No running task found. Reconnect to check whether it finished.');
+      } catch (exc) { error(exc.message); }
     }
   }
   $('stop').onclick = stop;
@@ -190,7 +239,7 @@
     : 'Discuss: look, research, and reason together. Action tools are disabled.'; };
   $('mic').onclick = async () => {
     if (recorder) { if (recorder.state === 'recording') recorder.stop(); return; }
-    if (active) return;
+    if (active || pendingRemote) return;
     stopSpeech(); error();
     const epoch = ++recordingEpoch;
     recorder = {state: 'requesting'}; controls();
@@ -253,6 +302,10 @@
       if (!data.messages?.length) { threadId = null; localStorage.removeItem('apex_companion_thread'); $('messages').append($('welcome')); }
     }
     state('', status.agent_ready === false ? 'Apex agent is not connected yet. Start Apex, then try a message.' : 'Ready when you are.'); controls();
+    if (drive) {
+      await refreshJobs();
+      if (pendingRemote) send(pendingRemote.message || 'Reconnected task', false, pendingRemote);
+    }
   }
   $('login-form').onsubmit = async event => {
     event.preventDefault(); localStorage.setItem('apex_token', $('token').value.trim());
@@ -261,5 +314,26 @@
   };
   $('login').addEventListener('cancel', event => event.preventDefault());
   window.addEventListener('pagehide', () => { stopShare(); stopSpeech(); recordingEpoch++; micStream?.getTracks().forEach(track => track.stop()); });
+  $('recover').onclick = () => { if (pendingRemote) send(pendingRemote.message || 'Reconnected task', false, pendingRemote); };
+  $('refresh-jobs').onclick = () => refreshJobs().catch(exc => error(exc.message));
+  $('jobs').onchange = () => {
+    if ($('jobs').value) send('Reconnected task', false, {turn_id: $('jobs').value, existing: true});
+  };
+  if (drive) {
+    document.body.classList.add('drive'); document.title = 'Apex · Car companion';
+    $('remote-panel').hidden = false;
+    root.querySelector('h1').textContent = 'Your Apex, along for the ride.';
+    root.querySelector('.eyebrow').textContent = 'CONNECTED TO YOUR COMPUTER';
+    for (const id of ['share', 'review', 'float', 'check-in', 'screen-status']) $(id).hidden = true;
+    $('check-in').parentElement.hidden = true;
+    $('capabilities').textContent = `Microphone: ${navigator.mediaDevices?.getUserMedia && window.MediaRecorder ? 'available to request' : 'unavailable — use text or your phone'} · Device speech: ${window.speechSynthesis ? 'available' : 'unavailable'}`;
+    $('welcome').querySelector('h2').textContent = 'What should we work on?';
+    $('welcome').querySelector('p').textContent = 'Talk through a decision, or switch to Work and ask Apex to run a task on your computer.';
+    root.querySelector('footer').firstChild.textContent = 'Tasks run on your Apex host. ';
+  }
+  if (workspace) {
+    root.querySelector('h1').textContent = 'Let’s shape it together.';
+    $('screen-status').textContent = 'Your selected board object is attached to each message.';
+  }
   boot().catch(exc => { state('', 'Apex is not connected yet.'); error(exc.message); });
 })();

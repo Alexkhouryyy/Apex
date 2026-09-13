@@ -32,6 +32,38 @@ def run(**inputs) -> str:
     return core._execute_tool("apex_forge", inputs)
 
 
+def test_export_selected_older_version_preserves_geometry_and_parent(jail):
+    run(action="make", shape="cube", dims_mm={"width": 50, "depth": 40, "height": 30}, title="Selected Block")
+    original = assets.find_by_title("Selected Block")
+    source = assets.current_file(original["id"])
+    run(action="make", shape="cube", dims_mm={"width": 60, "depth": 40, "height": 30}, title="Selected Block")
+    result = run(action="export", path=source, format="stl")
+    assert "Wrote" in result
+    current = assets.find_by_title("Selected Block")
+    assert current["versions"][-1]["parent"] == 1
+    assert current["versions"][-1]["command"]["from_version"] == 1
+    mesh = forge.read_any(jail / assets.current_file(current["id"]))
+    assert mesh.volume_mm3() == pytest.approx(60000.)
+    assert "different objects" in run(action="export", path=source, title="Other title")
+
+
+def test_board_restore_after_export_uses_visual_version(jail, monkeypatch):
+    from agent import board
+    local = board.Board()
+    monkeypatch.setattr(board, "get_board", lambda: local)
+    assets.create("visual", "Visual", command={})
+    (assets.asset_root("visual") / "v1.glb").write_bytes(b"visual")
+    assets.add_version("visual", "v1.glb", command={})
+    (assets.asset_root("visual") / "v2.stl").write_bytes(b"export")
+    assets.add_version("visual", "v2.stl", command={}, parent=1)
+    result = core._execute_tool("board_restore", {"title": "Visual"})
+    assert "v1" in result
+    assert local.cards()[0]["src"].endswith("v1.glb")
+    result = core._execute_tool("board_restore", {"title": "Visual", "version": 2})
+    assert "manufacturing export" in result
+    assert local.count() == 1
+
+
 class TestTheToolIsActuallyWired:
 
     def test_it_is_offered_to_the_model(self):

@@ -4,6 +4,9 @@ The companion brings conversation, a shared screen, evidence from tools, and
 task execution into one compact view. It connects to the existing Apex agent;
 it does not create a separate brain or replace the dashboard.
 
+The integrated [car browser and spatial workspace](CAR_AND_SPATIAL.md) add
+reconnectable host tasks, gesture-selected voice context and export downloads.
+
 ## Start on your laptop
 
 1. Start Apex using your normal launcher and configuration.

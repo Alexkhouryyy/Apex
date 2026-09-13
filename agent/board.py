@@ -218,6 +218,7 @@ class Board:
         # a slow memory leak on a board that runs for weeks.
         self._undo: list[dict] = []
         self._redo: list[dict] = []
+        self._selected: str | None = None
 
     # -- history -----------------------------------------------------------
     @staticmethod
@@ -472,6 +473,47 @@ class Board:
         with self._lock:
             return len(self._cards)
 
+    def selection(self) -> dict | None:
+        """Keep the last grabbed object selected after the hand releases it."""
+        with self._lock:
+            return next((c.as_dict() for c in self._cards if c.id == self._selected), None)
+
+    def select(self, card_id: str | None) -> dict | None:
+        with self._lock:
+            card = next((c for c in self._cards if c.id == card_id), None)
+            if card_id is not None and card is None:
+                raise ValueError("That object is no longer on the board.")
+            self._selected = card_id
+            return card.as_dict() if card else None
+
+    def transform(self, card_id: str, **changes) -> dict:
+        """Undoable view transform. Does not change manufacturing dimensions."""
+        limits = {"x": (0., 1.), "y": (0., 1.), "scale": (.25, 4.),
+                  "rot": (-100., 100.)}
+        import math
+        if not changes or any(k not in limits for k in changes):
+            raise ValueError("Supply x, y, scale or rot.")
+        for key, value in changes.items():
+            if (type(value) not in (float, int) or not math.isfinite(value)
+                    or not limits[key][0] <= value <= limits[key][1]):
+                raise ValueError(f"{key} must be between {limits[key][0]} and {limits[key][1]}.")
+        with self._lock:
+            card = next((c for c in self._cards if c.id == card_id), None)
+            if card is None:
+                raise ValueError("That object is no longer on the board.")
+            if card.held_by:
+                raise ValueError("Release the object before changing its view by voice or touch.")
+            before = (card.x, card.y, card.scale, card.rot)
+            for key, value in changes.items():
+                setattr(card, key, float(value))
+            after = (card.x, card.y, card.scale, card.rot)
+            self._selected = card.id
+            self._record({"kind": "transform", "id": card.id, "title": card.title,
+                          "before": before, "after": after})
+            result = card.as_dict()
+        self._write(card)
+        return result
+
     # -- hands ------------------------------------------------------------
     @staticmethod
     def read_cursors(cursors) -> list:
@@ -604,6 +646,7 @@ class Board:
                 if len(target.held_by) < 2:
                     was_unheld = not target.held_by
                     target.held_by.append(idx)
+                    self._selected = target.id
                     self._grab_offset[idx] = (target.x - hx, target.y - hy)
                     if was_unheld:
                         self._pre_grab[target.id] = (

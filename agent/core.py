@@ -291,7 +291,7 @@ def _forge_resolve(inputs: dict):
     title = (inputs.get("title") or "").strip()
     rel = (inputs.get("path") or "").strip()
     asset = None
-    if title:
+    if title and not rel:
         asset = _assets.find_by_title(title)
         if asset is None:
             return None, None, (
@@ -311,6 +311,19 @@ def _forge_resolve(inputs: dict):
     if target is None:
         return None, None, (
             f"'{rel}' is not a readable model inside the props folder.")
+    if inputs.get("path"):
+        # A selected board card may show an older immutable version. Preserve
+        # that source instead of silently exporting the title's latest version.
+        parts = target.relative_to(_props.props_root().resolve()).parts
+        if len(parts) == 3 and parts[0] == _assets.CREATED_DIR:
+            candidate = _assets.load(parts[1])
+            version = next((v for v in (candidate or {}).get("versions", [])
+                            if v["file"] == parts[2]), None)
+            if candidate and version:
+                if title and candidate.get("title", "").lower() != title.lower():
+                    return None, None, "The supplied title and source path refer to different objects."
+                asset = {**candidate, "_source_version": version["version"]}
+                title = candidate.get("title") or title
     try:
         return _forge.read_any(target), asset, (title or rel)
     except _forge.ForgeError as e:
@@ -377,7 +390,7 @@ def _forge_tool(inputs: dict) -> str:
                         "can be saved as a version of that object.")
             slug = asset["id"]
             command = {"tool": "apex_forge", "action": "export", "format": fmt,
-                       "from_version": asset.get("current_version")}
+                       "from_version": asset.get("_source_version", asset.get("current_version"))}
 
         report = _forge.validate(mesh, **settings)
         filename = _assets.next_filename(slug, ext=fmt)
@@ -396,7 +409,7 @@ def _forge_tool(inputs: dict) -> str:
             _assets.create(slug, title, command=command)
         _assets.add_version(
             slug, filename, command=command,
-            parent=asset.get("current_version") if action == "export" else None)
+            parent=asset.get("_source_version", asset.get("current_version")) if action == "export" else None)
         where = f"{_assets.CREATED_DIR}/{slug}/{filename}"
         note = "" if report.ok else "\n(exported on request despite the above)"
         return (f"Wrote {where} — {fmt.upper()}.\n"
@@ -594,7 +607,8 @@ TOOLS = [
             "  make   — build a measured solid in millimetres WITHOUT Blender "
             "and export it. Needs `shape` and `dims_mm`, same as board_create.\n"
             "  export — write an existing object as a manufacturing file. "
-            "Needs `title`.\n"
+            "Needs `title`, or the exact `path` of a saved asset version. When "
+            "the user selected a board object, use its src path to preserve that version.\n"
             "Export refuses a mesh that cannot be made. That is deliberate — ask "
             "the user before setting `force`, and tell them what the objection "
             "was. Default format is 3MF because it states its own unit; STL does "
@@ -687,6 +701,17 @@ TOOLS = [
         "name": "board_clear",
         "description": "Sweep everything off the glass board. Use when the user asks to clear it, start fresh, or when the board is cluttered enough to be in the way.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "board_transform",
+        "description": "Change a board object's view by its exact ID from board_state or the current message selection. Undoable. scale changes display size only, never physical dimensions. Release a held object first.",
+        "input_schema": {"type": "object", "properties": {
+            "id": {"type": "string"},
+            "x": {"type": "number", "minimum": 0, "maximum": 1},
+            "y": {"type": "number", "minimum": 0, "maximum": 1},
+            "scale": {"type": "number", "minimum": .25, "maximum": 4},
+            "rot": {"type": "number", "description": "Y rotation in radians", "minimum": -100, "maximum": 100},
+        }, "required": ["id"]},
     },
     {
         "name": "board_state",
@@ -2170,6 +2195,7 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
 
         elif name == "board_restore":
             from agent import assets as _assets
+            from agent import props as _props
             from agent.board import get_board
             title = (inputs.get("title") or "").strip()
             data = _assets.find_by_title(title)
@@ -2186,8 +2212,17 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             else:
                 rel = _assets.current_file(data["id"])
                 label = f"v{data.get('current_version')}"
+                if rel and not rel.lower().endswith(_props.MODEL_EXTS):
+                    visual = next((v for v in reversed(data.get("versions", []))
+                                   if v["file"].lower().endswith(_props.MODEL_EXTS)), None)
+                    if visual:
+                        rel = _assets.version_file(data["id"], visual["version"])
+                        label = f"v{visual['version']}"
                 if rel is None:
                     return f"'{title}' has no versions saved yet."
+            if not rel.lower().endswith(_props.MODEL_EXTS):
+                return (f"'{title}' ({label}) is a manufacturing export, not a board model. "
+                        "Download it from Manufacturing exports on /board for your slicer.")
             card = get_board().add("model", data.get("title") or title, src=rel)
             out = (f"'{card.title}' ({label}) is back on the board — "
                    f"grab it with one hand, two to scale.")
@@ -2198,16 +2233,20 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             from agent.board import get_board
             return f"Cleared {get_board().clear()} card(s) from the board."
 
+        elif name == "board_transform":
+            from agent.board import get_board
+            try:
+                changed = get_board().transform(inputs.get("id"), **{
+                    k: inputs[k] for k in ("x", "y", "scale", "rot") if k in inputs})
+                return json.dumps({"object": changed, "physical_dimensions_changed": False})
+            except ValueError as exc:
+                return f"[Board] {exc}"
+
         elif name == "board_state":
             from agent.board import get_board
-            cards = get_board().cards()
-            if not cards:
-                return "The board is empty."
-            lines = [f"{len(cards)} card(s) on the board:"]
-            for c in cards:
-                held = "  [in your hand]" if c["held"] else ""
-                lines.append(f"  - {c['title']}{held}")
-            return "\n".join(lines)
+            board = get_board()
+            return json.dumps({"cards": board.cards(), "selection": board.selection(),
+                               "note": "Scale is a view transform, not a manufacturing dimension."})
 
         elif name == "click":
             return computer.click(inputs["x"], inputs["y"], inputs.get("button", "left"), inputs.get("double", False))

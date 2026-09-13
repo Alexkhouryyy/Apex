@@ -40,6 +40,18 @@ jobs:
           ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci-tests-only
         run: python -m tools.smoke
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Companion, car and spatial DOM checks
+        run: |
+          npm install --prefix "$RUNNER_TEMP/apex-ui-check" --no-audit --no-fund jsdom@30.0.1
+          export NODE_PATH="$RUNNER_TEMP/apex-ui-check/node_modules"
+          node --check dashboard/static/companion.js
+          node scripts/check_companion_ui.cjs
+          node scripts/check_drive_spatial_ui.cjs
+
       - name: Structural audits (informational — never fails the build)
         env:
           ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci-tests-only

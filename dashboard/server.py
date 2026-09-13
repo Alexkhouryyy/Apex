@@ -173,7 +173,7 @@ async def _auth(request: Request, call_next):
     # NOT exempt, so this must stay an exact match: `path.startswith("/board")`
     # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
-            or path == "/board" or path == "/companion"
+            or path == "/board" or path == "/companion" or path == "/drive"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
     # Inbound webhooks can't present a bearer token, so they authenticate
@@ -2180,6 +2180,7 @@ async def ws_board(ws: WebSocket):
             tracker = _ht.active_tracker()
             payload = {
                 "cards": board.cards(),
+                "selection": board.selection(),
                 "cursors": [],
                 "frame": None,
                 # Said explicitly rather than inferred from empty cursors: a

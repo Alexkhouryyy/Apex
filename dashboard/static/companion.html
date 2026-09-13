@@ -9,7 +9,7 @@
 </head>
 <body>
 <main id="companion">
-  <header class="pywebview-drag-region"><a href="/" aria-label="Open Apex dashboard" class="brand">APEX<span>COMPANION</span></a><button id="float" title="Keep the companion above your other windows">Float ↗</button></header>
+  <header class="pywebview-drag-region"><a href="/" aria-label="Open Apex dashboard" class="brand">APEX<span>COMPANION</span></a><nav><a href="/board">Workspace</a> · <a href="/drive">Car</a> · <button id="float" title="Keep the companion above your other windows">Float ↗</button></nav></header>
   <section class="presence" aria-label="Companion status">
     <div class="orb" aria-hidden="true"><div></div></div>
     <div><p class="eyebrow">LET’S THINK IT THROUGH</p><h1>Right here with you.</h1><p id="status" role="status">Connecting to Apex…</p></div>
@@ -27,6 +27,11 @@
     <label class="toggle"><input id="check-in" type="checkbox"> Check in every minute</label>
   </div>
   <p class="hint" id="mode-hint">Discuss: look, research, and reason together. Action tools are disabled.</p>
+  <section id="remote-panel" hidden>
+    <p class="hint">Connected to your Apex host. Accepted tasks continue if this screen disconnects. Use the screen while parked.</p>
+    <p id="capabilities" role="status"></p>
+    <div class="toolbar"><label>Recent tasks <select id="jobs"><option value="">Choose a task…</option></select></label><button id="refresh-jobs">Refresh</button><button id="recover" hidden>Reconnect to task</button></div>
+  </section>
   <section id="messages" role="log" aria-label="Conversation" aria-live="polite">
     <div id="welcome"><h2>What are we working on?</h2><p>Share a window, talk through an idea, or ask for a second opinion.</p><div class="suggestions"><button data-prompt="Help me think through an idea. Ask me what I want to achieve.">Think with me</button><button data-prompt="Challenge my approach. Ask me to explain it first.">Challenge my approach</button></div></div>
   </section>
