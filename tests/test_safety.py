@@ -3,6 +3,17 @@ import pytest
 from agent import safety
 
 
+@pytest.fixture(autouse=True)
+def deterministic_reviewer(monkeypatch):
+    # These tests exercise pattern rules and confirmation routing. Semantic
+    # review and its refusal behavior have their own test_command_review suite.
+    from agent import provider, command_review
+    command_review._CACHE.clear()
+    monkeypatch.setattr(provider, 'complete', lambda *args, **kwargs: 'SAFE: test fixture')
+    yield
+    command_review._CACHE.clear()
+
+
 def allow(_prompt):
     return True
 
