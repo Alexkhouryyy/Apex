@@ -66,6 +66,20 @@ python main.py --text         # text mode (no mic/speakers needed)
 `python main.py` alone runs full voice mode. The web dashboard starts
 automatically — watch the console for `[Dashboard] http://127.0.0.1:7860`.
 
+### Screen companion
+
+Open **Screen companion** in the dashboard sidebar (or `/companion`). Share a
+window, talk or type, and use **Float** to keep Apex above your work in a browser
+that supports Document Picture-in-Picture. **Discuss** investigates and gives
+advice; **Work** enables Apex's existing action tools for your requested task.
+Tool results appear beside the reply, and **Stop** interrupts further steps.
+
+This first version sends screen snapshots with messages, uses tap-to-record
+voice, and offers optional minute-by-minute check-ins. It does not provide
+continuous video reasoning or hands-free, full-duplex voice. See
+[docs/SCREEN_COMPANION.md](docs/SCREEN_COMPANION.md) for setup, costs, limitations,
+and the live acceptance checklist.
+
 ### Keys
 
 Only `ANTHROPIC_API_KEY` is required. Add `OPENAI_API_KEY` and/or

@@ -3082,7 +3082,7 @@ class AgentCore:
                  if cost else "."))
         return text
 
-    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None) -> str:
+    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None) -> str:
         """Run a full agent turn. Returns the final text response.
 
         If `streamer` is provided (a StreamingSpeaker), text deltas are fed to it
@@ -3093,9 +3093,21 @@ class AgentCore:
         on the same channel are serialized by a per-channel threading.Lock.
         Pass channel_id=None (default) for the main voice/text conversation.
         """
+        from agent import companion
+        if companion_mode is not None and companion_mode not in {"discuss", "work"}:
+            raise ValueError("Companion mode must be discuss or work.")
+        screen_b64 = companion.validate_screen_image(screen_image)
         memory, lock = self._get_channel(channel_id)
         with lock:
+            if cancel_event is not None and cancel_event.is_set():
+                return "[turn interrupted]"
             memory.maybe_summarize(self.anthropic)
+
+            def turn_system():
+                blocks = self._effective_system_prompt()
+                if companion_mode:
+                    blocks = blocks + [{"type": "text", "text": companion.prompt(companion_mode, bool(screen_b64))}]
+                return blocks
 
             # Build user message content
             user_content: list = []
@@ -3103,7 +3115,12 @@ class AgentCore:
             if memory.context_prefix():
                 user_content.append({"type": "text", "text": memory.context_prefix()})
 
-            if include_screenshot:
+            if screen_b64:
+                user_content.extend([
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": screen_b64}},
+                    {"type": "text", "text": "[Browser-shared screen snapshot, captured for this turn; not the Apex host screen.]"},
+                ])
+            if include_screenshot and not companion_mode and not screen_b64:
                 try:
                     b64, size = computer.screenshot()
                     user_content.append({
@@ -3174,7 +3191,9 @@ class AgentCore:
                 # into the middle of this one. Any failure falls through to the
                 # API below with the conversation untouched, which is the point:
                 # an exhausted five-hour window must not stop Apex working.
-                _sub_text = self._try_subscription(
+                # The CLI subscription adapter only accepts text and owns its
+                # own tools. It cannot preserve screen data or Discuss limits.
+                _sub_text = None if (companion_mode or screen_b64) else self._try_subscription(
                     user_text, memory, streamer=streamer)
                 if _sub_text is not None:
                     return _sub_text
@@ -3184,8 +3203,9 @@ class AgentCore:
                 kwargs = dict(
                     model=_routed_model,
                     max_tokens=16000,
-                    system=self._effective_system_prompt(),
-                    tools=self._all_tools(),
+                    system=turn_system(),
+                    tools=[t for t in self._all_tools()
+                           if companion_mode != "discuss" or t["name"] in companion.DISCUSS_TOOLS],
                     messages=memory.get_messages(),
                 )
 
@@ -3222,7 +3242,7 @@ class AgentCore:
                         try:
                             print(f"[Resilience] Attempting fallback provider ({config.FALLBACK_MODEL})...")
                             system_text = "\n\n".join(
-                                b.get("text", "") for b in self._effective_system_prompt()
+                                b.get("text", "") for b in turn_system()
                                 if isinstance(b, dict) and b.get("type") == "text"
                             )
                             fallback_text = resilience.fallback_create(
@@ -3271,7 +3291,17 @@ class AgentCore:
                     print(f"[TOOL] {block.name}({json.dumps(block.input, ensure_ascii=False)[:120]})")
                     turn_tool_names.append(block.name)
                     _broadcast_live_event("tool", f"{block.name}({json.dumps(block.input, ensure_ascii=False)[:80]})")
-                    result_str = _execute_tool(block.name, block.input)
+                    if cancel_event is not None and cancel_event.is_set():
+                        result_str = "Tool not executed: the user interrupted this turn."
+                    elif companion_mode == "discuss" and block.name not in companion.DISCUSS_TOOLS:
+                        result_str = "Tool not executed: Discuss mode does not permit this action."
+                    else:
+                        if callable(getattr(streamer, "tool", None)):
+                            streamer.tool({"phase": "start", "name": block.name})
+                        result_str = _execute_tool(block.name, block.input)
+                        if callable(getattr(streamer, "tool", None)):
+                            streamer.tool({"phase": "result", "name": block.name,
+                                           "result": result_str[:2000]})
                     tool_results.append(_make_tool_result_content(block.name, block.id, result_str))
                     try:
                         telemetry.log_turn("tool_result", {"tool": block.name, "preview": result_str[:400]})
@@ -3281,7 +3311,8 @@ class AgentCore:
                 memory.add_user(tool_results)
 
             # Self-improving skills: off-thread, propose a skill for complex turns.
-            self._maybe_autocreate_skill(turn_tool_names, user_text)
+            if companion_mode != "discuss":
+                self._maybe_autocreate_skill(turn_tool_names, user_text)
 
             if cancel_event is not None and cancel_event.is_set():
                 return final_text or "[turn interrupted]"

@@ -125,15 +125,24 @@ def list_threads(limit: int = 30) -> list[dict]:
             for r in rows if r[3] > 0]
 
 
-def messages(thread_id: int, limit: int = 500) -> list[dict]:
+def exists(thread_id: int) -> bool:
+    _ensure_db()
+    with longterm._conn() as c:
+        return c.execute("SELECT 1 FROM chat_threads WHERE id=?", (thread_id,)).fetchone() is not None
+
+
+def messages(thread_id: int, limit: int = 500, *, newest: bool = False) -> list[dict]:
     _ensure_db()
     try:
         with longterm._conn() as c:
             rows = c.execute(
                 "SELECT role, text, ts FROM chat_messages WHERE thread_id = ? "
-                "ORDER BY ts ASC, id ASC LIMIT ?", (int(thread_id), limit)).fetchall()
+                + ("ORDER BY ts DESC, id DESC LIMIT ?" if newest else "ORDER BY ts ASC, id ASC LIMIT ?"),
+                (int(thread_id), limit)).fetchall()
     except Exception:
         return []
+    if newest:
+        rows = rows[::-1]
     return [{"role": r[0], "text": r[1], "ts": r[2]} for r in rows]
 
 
