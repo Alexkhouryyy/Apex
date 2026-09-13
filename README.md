@@ -18,6 +18,8 @@ Where it stands against its own roadmap, judged by success checks rather than
 by whether code exists: **[docs/APEX_BLUEPRINT_STATUS.md](docs/APEX_BLUEPRINT_STATUS.md)**.
 Designing physical objects and checking they can actually be made:
 **[docs/FORGE.md](docs/FORGE.md)**.
+Generating hypotheses that could be wrong, and recording what happened:
+**[docs/GENESIS.md](docs/GENESIS.md)**.
 
 ## What it does
 

@@ -31,7 +31,7 @@ rather than a percentage.
 | 10 | Mobile/Web continuity | Start on one interface, continue on another | **MOSTLY.** PWA (`manifest.webmanifest`, `sw.js`, `mobile.css`, `voice-mobile.js`), device registry, one shared SQLite brain. Worth being precise: handoff works because there is one database, not because handoff was designed. No explicit task-handoff affordance exists |
 | 11 | Apex Drive / CarPlay | Driving-safe recall through an approved interface | **NOT STARTED.** Gated on Apple requirements, not on us |
 | 12 | Forge | A designed object reaches a **validated manufacturable** representation | **MET 2026-09-12.** `agent/forge.py` writes STL and 3MF — 3MF because it is the only format in the chain that states its own unit, which is the failure the phase is really about — and refuses to write either until the mesh passes. The checks are watertightness (every edge in exactly two faces, traversed in opposite directions, so a closed mesh wound inside out is caught too), enclosed volume and its sign, wall thickness measured by casting rays inward from each face against the nozzle, overhang angle from vertical excluding the face the part rests on, build volume, and scale. `primitive()` builds every shape `blender_bridge` knows, in millimetres, with no Blender — so the whole chain is exercised by tests rather than asserted — and `read_glb()` ingests what `board_create` actually produces, converting glTF's metres and Y-up axes and saying on the report which conversions it assumed. **The third state is the point:** a check that cannot run reports `unknown`, a report with any `unknown` is `unverified`, and `unverified` does not export. 130 tests; every guard confirmed by reverting it individually, and the readers cross-checked against files written by an unrelated library |
-| 13 | Concept Genesis | Testable novel hypotheses with evidence and critique | **NOT STARTED** |
+| 13 | Concept Genesis | Testable novel hypotheses with evidence and critique | **MET 2026-09-13.** `agent/genesis.py` is a gate, not a generator — the proportion is the point, since asking a model for novel testable hypotheses always succeeds and tells you nothing. Four checks that never consult the model's opinion of itself: **structure** (a hedged claim is compatible with every observation; a refutation that restates falsity or negates the claim names nothing to go and look at), **evidence** (every citation must resolve — a fabricated one reads exactly like a real one — and somebody must have looked for disconfirming evidence), **novelty** against the source passages, memories, vault and prior claims, and **critique** by a model that is not the proposer. A `fatal` objection kills it. **The asymmetry is the design:** word overlap proves a duplicate and its absence proves nothing, so without embeddings the novelty check may return `not novel` and may never return `novel` — it returns `unknown`, and any `unknown` makes the hypothesis `unverified` rather than `standing`. `observe()` closes the loop on Popper's rules: a supported claim can be refuted later by one contrary observation, a refuted one is never restored by a confirming one, and `refuted` is reported as the system working. 129 tests, every guard confirmed by reverting it individually |
 
 ## The finding worth acting on: Phase 5
 
@@ -68,8 +68,11 @@ those on top of no permission model bakes it in.
    chosen because its success check could be demonstrated here, with no
    camera, no second box and no API key; everything else outstanding needs
    hardware this machine does not have.
-5. **Phase 13 (Concept Genesis)** — the only phase left that is buildable
-   without hardware. 11 is gated on Apple.
+5. ~~**Phase 13 (Concept Genesis)**~~ — done 2026-09-13. See the row above.
+
+Every phase that can be built without hardware is now built. What remains is
+Phase 11, which is gated on Apple's requirements rather than on us, and the two
+gates below, which are gated on you.
 
 ### The two things blocking an honest label, both yours
 
@@ -100,8 +103,7 @@ Both entry points now initialise from one list (`agent/schema.py`), and
 `tests/test_schema.py` asserts every module defining `init_db` is in it —
 because twelve added lines would have fixed the date and drifted again.
 
-Phase 11 is gated on Apple's requirements rather than on us. Neither it nor
-Phase 13 blocks anything above.
+Phase 11 is gated on Apple's requirements rather than on us.
 
 ## What Phase 12 deliberately does not do
 

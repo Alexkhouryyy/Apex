@@ -171,6 +171,97 @@ def _store_asset_version(assets_mod, slug: str, result: dict, command: dict,
     assets_mod.add_version(slug, filename, command=command, parent=parent)
     return f"{assets_mod.CREATED_DIR}/{slug}/{filename}"
 
+def _genesis_tool(inputs: dict) -> str:
+    """apex_hypothesis — propose, judge, and later resolve.
+
+    `propose` runs the whole pipeline in one call — generate, critique, review —
+    rather than leaving three separate tool calls for a model to remember. A
+    half-run pipeline is the failure to avoid here: hypotheses that were
+    generated and never attacked would sit in the table looking exactly like
+    ones that had survived something.
+    """
+    from agent import genesis as _g
+    import config as _cfg
+
+    action = (inputs.get("action") or "").strip().lower()
+
+    if action == "due":
+        rows = _g.due(limit=int(inputs.get("count") or 10))
+        if not rows:
+            return ("Nothing is waiting on an observation. Propose something, or "
+                    "look at what has already been resolved with list.")
+        out = ["What Apex predicted and can now check:"]
+        for r in rows:
+            out.append(f"  #{r['id']} {r['claim']}")
+            out.append(f"      test: {r['method']}")
+            out.append(f"      refuted if: {r['refutation']}")
+        return "\n".join(out)
+
+    if action == "show":
+        data = _g.get(int(inputs.get("id") or 0))
+        return _g.describe(data) if data else f"No hypothesis #{inputs.get('id')}."
+
+    if action == "list":
+        status = (inputs.get("status") or "").strip().lower() or None
+        rows = _g.listing(status=status, limit=int(inputs.get("count") or 20))
+        if not rows:
+            return f"No hypotheses{f' with status {status}' if status else ''} yet."
+        return "\n".join(_g.describe(r, full=False) for r in rows)
+
+    if action == "observe":
+        try:
+            data = _g.observe(int(inputs.get("id") or 0),
+                              inputs.get("observation") or "",
+                              (inputs.get("outcome") or "").strip().lower())
+        except ValueError as e:
+            return f"[Genesis] {e}"
+        return _g.describe(data)
+
+    if action != "propose":
+        return ("apex_hypothesis actions are: propose, due, show, list, observe.")
+
+    question = (inputs.get("question") or "").strip()
+    if not question:
+        return "apex_hypothesis propose needs a question."
+    raw_sources = inputs.get("sources") or []
+    sources = [{"id": str(s.get("id", "")).strip(), "text": str(s.get("text", ""))}
+               for s in raw_sources if isinstance(s, dict) and s.get("id")]
+    if not sources:
+        return ("Hypotheses have to cite something. Give `sources` as a list of "
+                "{\"id\", \"text\"} — from deep_research, search_knowledge, "
+                "apex_note or anything else you have actually read. Without them "
+                "every citation fails to resolve and every proposal is rejected, "
+                "which is correct but not useful.")
+
+    model = getattr(_cfg, "AGENT_MODEL", "")
+    try:
+        ids = _g.propose(question, sources, model=model,
+                         count=int(inputs.get("count") or 3))
+    except _g.GenesisError as e:
+        return f"[Genesis] {e}"
+    if not ids:
+        return f"No hypotheses proposed for: {question}"
+
+    critics = _g.critic_models(model)
+    available = len(_g.critic_models("") or [])
+    corpus_base = [s["text"] for s in sources]
+    lines = []
+    for hid in ids:
+        _g.critique_with(hid, critics)
+        data = _g.review(
+            hid,
+            corpus=_g.corpus_for(question, corpus_base, exclude_id=hid),
+            resolves=_g.source_resolver(sources),
+            models_available=max(1, available))
+        lines.append(_g.describe(data))
+
+    kept = [h for h in (_g.get(i) for i in ids)
+            if h and h["status"] in (_g.STANDING, _g.UNVERIFIED)]
+    head = (f"{len(kept)} of {len(ids)} proposals survived the gates. "
+            f"A rejection is a diagnosis — the objection says what to fix.")
+    return head + "\n\n" + "\n\n".join(lines)
+
+
 def _forge_settings() -> dict:
     """The machine, read from config at call time rather than at import.
 
@@ -451,6 +542,45 @@ TOOLS = [
                 "title": {"type": "string", "description": "What to call it on the board. Optional — defaults to the shape name.", "default": ""},
             },
             "required": ["shape", "dims_mm"],
+        },
+    },
+    {
+        "name": "apex_hypothesis",
+        "description": (
+            "Generate and judge falsifiable hypotheses, and record what happened "
+            "when they were tested. Actions:\n"
+            "  propose — needs a `question` and `sources`. Proposes, has another "
+            "model attack each one, then runs four gates and reports the verdict. "
+            "Most proposals are rejected; the objection says why.\n"
+            "  due     — what Apex predicted that can be checked now.\n"
+            "  show    — one hypothesis in full, by id.\n"
+            "  list    — all of them, optionally by status.\n"
+            "  observe — record what actually happened: id, observation, and "
+            "outcome (matched_prediction | matched_refutation | inconclusive).\n"
+            "A hypothesis must cite sources you supply; a citation that does not "
+            "resolve is fatal, so never invent one. Report rejections to the user "
+            "with the reason rather than quietly retrying — the objection is the "
+            "useful part."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "propose | due | show | list | observe"},
+                "question": {"type": "string", "description": "For propose: what to generate hypotheses about.", "default": ""},
+                "sources": {
+                    "type": "array",
+                    "description": (
+                        "For propose. Each {\"id\": \"s1\", \"text\": \"...\"}. These are "
+                        "the only things a hypothesis may cite."),
+                    "items": {"type": "object"},
+                },
+                "count": {"type": "integer", "description": "How many hypotheses to ask for (default 3).", "default": 3},
+                "id": {"type": "integer", "description": "For show and observe."},
+                "status": {"type": "string", "description": "For list: standing | unverified | rejected | supported | refuted | proposed", "default": ""},
+                "observation": {"type": "string", "description": "For observe: what was actually seen.", "default": ""},
+                "outcome": {"type": "string", "description": "For observe: matched_prediction | matched_refutation | inconclusive", "default": ""},
+            },
+            "required": ["action"],
         },
     },
     {
@@ -1957,6 +2087,9 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                   f"grab it with one hand, two to scale.")
             _broadcast_live_event("board", out)
             return out
+
+        elif name == "apex_hypothesis":
+            return _genesis_tool(inputs or {})
 
         elif name == "apex_forge":
             return _forge_tool(inputs or {})
