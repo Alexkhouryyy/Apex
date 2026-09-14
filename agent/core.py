@@ -2913,6 +2913,8 @@ class AgentCore:
 
     def set_model(self, model: str) -> str:
         """Switch the active model at runtime. Returns a status string."""
+        if model == "deepseek-v4.1-flash":
+            model = "deepseek-flash"
         from agent.provider import KNOWN_MODELS, provider_for, is_usable, PROVIDER_KEY_NAMES
         if not is_usable(model):
             # is_usable asks the provider before refusing, so a model released

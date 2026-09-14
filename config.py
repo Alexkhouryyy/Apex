@@ -5,7 +5,16 @@ load_dotenv()
 
 # Model
 AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-5")
-PROACTIVE_MODEL = "claude-haiku-4-5"
+if AGENT_MODEL == "deepseek-v4.1-flash":
+    AGENT_MODEL = "deepseek-flash"
+# Automatic reasoning follows the configured brain; an explicit override can
+# select a cheaper/background provider independently.
+BACKGROUND_MODEL = os.getenv("BACKGROUND_MODEL", "") or AGENT_MODEL
+if BACKGROUND_MODEL == "deepseek-v4.1-flash":
+    BACKGROUND_MODEL = "deepseek-flash"
+PROACTIVE_MODEL = os.getenv("PROACTIVE_MODEL", "") or (
+    "claude-haiku-4-5" if BACKGROUND_MODEL.startswith("claude") else BACKGROUND_MODEL
+)
 THINKING_BUDGET = 8000  # tokens for extended thinking
 
 # API resilience
@@ -28,7 +37,7 @@ CURATOR_ARCHIVE_DAYS = 90
 CONSTELLATION_AUTO          = os.getenv("CONSTELLATION_AUTO", "false").lower() in {"1", "true", "yes"}
 CONSTELLATION_LEARN         = os.getenv("CONSTELLATION_LEARN", "true").lower() in {"1", "true", "yes"}
 CONSTELLATION_MAX_PLANETS   = int(os.getenv("CONSTELLATION_MAX_PLANETS", "4"))
-CONSTELLATION_PLANET_MODEL  = os.getenv("CONSTELLATION_PLANET_MODEL", "claude-sonnet-5")
+CONSTELLATION_PLANET_MODEL  = os.getenv("CONSTELLATION_PLANET_MODEL", "claude-sonnet-5" if BACKGROUND_MODEL.startswith("claude") else BACKGROUND_MODEL)
 CONSTELLATION_SYNTH_MODEL   = os.getenv("CONSTELLATION_SYNTH_MODEL", AGENT_MODEL)
 CONSTELLATION_MEMORY_MODEL  = os.getenv("CONSTELLATION_MEMORY_MODEL", PROACTIVE_MODEL)
 CONSTELLATION_BRIEFING_MAXCHARS = int(os.getenv("CONSTELLATION_BRIEFING_MAXCHARS", "1500"))
@@ -328,12 +337,12 @@ CAMERA_DEVICE_INDEX = int(os.getenv("CAMERA_DEVICE_INDEX", "0"))
 GUARDIAN_ANGEL_ENABLED = os.getenv("GUARDIAN_ANGEL_ENABLED", "true").lower() in {"1", "true", "yes"}
 GUARDIAN_THRESHOLD = float(os.getenv("GUARDIAN_THRESHOLD", "0.70"))
 GUARDIAN_COOLDOWN_MINUTES = int(os.getenv("GUARDIAN_COOLDOWN_MINUTES", "20"))
-GUARDIAN_MODELS = [m.strip() for m in os.getenv("GUARDIAN_MODELS", "claude-haiku-4-5,gpt-5-mini").split(",") if m.strip()]
+GUARDIAN_MODELS = [m.strip() for m in os.getenv("GUARDIAN_MODELS", "claude-haiku-4-5,gpt-5-mini" if BACKGROUND_MODEL.startswith("claude") else BACKGROUND_MODEL).split(",") if m.strip()]
 
 # Time Capsule — long-horizon memory: bookmark goal/emotional statements and
 # surface them as unprompted callbacks days or weeks later.
 TIME_CAPSULE_ENABLED = os.getenv("TIME_CAPSULE_ENABLED", "true").lower() in {"1", "true", "yes"}
-TIME_CAPSULE_MODEL = os.getenv("TIME_CAPSULE_MODEL", "claude-haiku-4-5")
+TIME_CAPSULE_MODEL = os.getenv("TIME_CAPSULE_MODEL", PROACTIVE_MODEL)
 TIME_CAPSULE_SCAN_INTERVAL_SECONDS = int(os.getenv("TIME_CAPSULE_SCAN_INTERVAL_SECONDS", "60"))
 TIME_CAPSULE_SURFACE_INTERVAL_SECONDS = int(os.getenv("TIME_CAPSULE_SURFACE_INTERVAL_SECONDS", "1800"))
 TIME_CAPSULE_DEFAULT_CALLBACK_DAYS = int(os.getenv("TIME_CAPSULE_DEFAULT_CALLBACK_DAYS", "14"))

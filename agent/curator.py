@@ -95,7 +95,9 @@ def _llm_dedup(client, skills: list[dict]) -> list[str]:
             "Reply with a short bullet list of consolidation suggestions, or 'None found.' if clean.\n\n"
             f"{skill_list}"
         )
-        resp = client.messages.create(
+        from agent import telemetry
+        resp = telemetry.create(
+            client, call_site="agent.curator/dedup",
             model=config.PROACTIVE_MODEL,
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],

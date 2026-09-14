@@ -12,6 +12,7 @@ when the verbatim window rolls over.
 """
 import json
 import anthropic
+from openai import APIError as OpenAIAPIError
 import config
 from agent import telemetry, longterm
 
@@ -86,7 +87,7 @@ class Memory:
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
             )
-        except anthropic.APIError as e:
+        except (anthropic.APIError, OpenAIAPIError) as e:
             print(f"[Resilience] conversation summarization skipped ({type(e).__name__}); keeping full history")
             return
 

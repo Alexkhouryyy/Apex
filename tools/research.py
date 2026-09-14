@@ -35,10 +35,12 @@ def search(query: str, num_results: int = None) -> list[dict]:
     num_results = num_results or config.MAX_SEARCH_RESULTS
 
     # Try Anthropic web_search first (works in restricted envs)
-    try:
-        return _search_via_anthropic(query, num_results)
-    except Exception:
-        pass
+    from agent.provider import provider_for
+    if provider_for(config.BACKGROUND_MODEL) == "anthropic" and config.ANTHROPIC_API_KEY:
+        try:
+            return _search_via_anthropic(query, num_results)
+        except Exception:
+            pass
 
     # Fallback: ddgs
     try:

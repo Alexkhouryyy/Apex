@@ -321,6 +321,8 @@ def _translate_kwargs(kwargs: dict) -> dict:
     """Anthropic messages.create kwargs → OpenAI chat.completions.create kwargs."""
     out: dict = {}
     out["model"] = kwargs.get("model", "gpt-4o")
+    if out["model"] == "deepseek-v4.1-flash":
+        out["model"] = "deepseek-flash"
     out["max_tokens"] = kwargs.get("max_tokens", 4096)
     # V4.1 Flash defaults to thinking, which requires replaying reasoning_content
     # on every tool turn. This adapter stores portable text/tool history only.

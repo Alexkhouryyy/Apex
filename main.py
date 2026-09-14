@@ -55,6 +55,8 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
+    if args.model == "deepseek-v4.1-flash":
+        args.model = "deepseek-flash"
     from agent.provider import PROVIDER_KEY_NAMES, provider_for
     starting_model = args.model or config.AGENT_MODEL
     key_name = PROVIDER_KEY_NAMES.get(provider_for(starting_model), "")
@@ -75,6 +77,7 @@ def main():
     print("\n" + "="*60)
     print("  Voice AI Agent")
     print("  Model:     ", starting_model)
+    print("  Background:", config.BACKGROUND_MODEL)
     print("  Mode:      ", "tui" if args.tui else ("text" if args.text else "voice"))
     print("  Thinking:  ", "on" if args.think else "auto")
     print("  Proactive: ", "on" if config.PROACTIVE_ENABLED else "off")

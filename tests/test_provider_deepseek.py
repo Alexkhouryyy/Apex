@@ -291,3 +291,93 @@ class TestAMissingKeySaysWhichKey:
         for m in ("claude-opus-5", "gpt-5.1", "gemini-3-pro", "deepseek-chat",
                   "ollama/llama3.2"):
             assert provider.provider_for(m) in provider.PROVIDER_KEY_NAMES
+
+
+class TestBackgroundBrain:
+    @pytest.mark.parametrize('site', sorted(__import__('agent.telemetry', fromlist=['_BACKGROUND_SITES'])._BACKGROUND_SITES))
+    def test_automatic_calls_use_deepseek_not_stale_client(self, site, fake_deepseek, monkeypatch):
+        from agent import telemetry
+        from unittest.mock import Mock
+        monkeypatch.setattr(config, 'BACKGROUND_MODEL', 'deepseek-flash')
+        old_client = Mock()
+        result = telemetry.create(old_client, call_site=site,
+            model='claude-haiku-4-5', max_tokens=20,
+            messages=[{'role': 'user', 'content': 'test background task'}],
+            thinking={'type': 'enabled', 'budget_tokens': 1024})
+        old_client.messages.create.assert_not_called()
+        assert result.content[0].text == 'Noted.'
+        body = _FakeOpenAI.seen[-1]
+        assert body['model'] == 'deepseek-flash'
+        assert body['thinking'] == {'type': 'disabled'}
+        with fake_deepseek._conn() as c:
+            logged = c.execute('SELECT model FROM usage_log WHERE call_site=?', (site,)).fetchone()
+        assert logged[0] == 'deepseek-flash'
+
+    def test_explicit_council_model_is_preserved(self, monkeypatch):
+        from agent import telemetry
+        from unittest.mock import Mock
+        monkeypatch.setattr(config, 'BACKGROUND_MODEL', 'deepseek-flash')
+        client = Mock()
+        kwargs = {'model': 'claude-opus-5'}
+        actual, request = telemetry._resolve_call(client, 'agent.constellation/planet', kwargs)
+        assert actual is client
+        assert request == kwargs
+
+    def test_search_does_not_try_anthropic_in_deepseek_mode(self, monkeypatch):
+        from tools import research
+        from unittest.mock import Mock
+        import ddgs
+        monkeypatch.setattr(config, 'BACKGROUND_MODEL', 'deepseek-flash')
+        old_search = Mock()
+        monkeypatch.setattr(research, '_search_via_anthropic', old_search)
+        search = Mock()
+        search.return_value.text.return_value = [{'title': 'Result', 'href': 'https://example.com', 'body': 'Evidence'}]
+        monkeypatch.setattr(ddgs, 'DDGS', search)
+        assert research.search('test')[0]['url'] == 'https://example.com'
+        old_search.assert_not_called()
+
+    def test_bad_model_alias_is_normalized_before_tool_mode(self):
+        result = provider._translate_kwargs({'model': 'deepseek-v4.1-flash', 'messages': []})
+        assert result['model'] == 'deepseek-flash'
+        assert result['extra_body']['thinking']['type'] == 'disabled'
+
+    def test_deepseek_config_defaults_do_not_name_anthropic(self):
+        import os
+        import subprocess
+        import sys
+        env = dict(os.environ)
+        for name in ('BACKGROUND_MODEL', 'PROACTIVE_MODEL', 'GUARDIAN_MODELS',
+                     'CONSTELLATION_PLANET_MODEL', 'CONSTELLATION_MEMORY_MODEL',
+                     'CONSTELLATION_SYNTH_MODEL', 'TIME_CAPSULE_MODEL'):
+            env.pop(name, None)
+        env['AGENT_MODEL'] = 'deepseek-v4.1-flash'
+        env['PYTHON_DOTENV_DISABLED'] = '1'
+        script = "import config; print(config.AGENT_MODEL, config.BACKGROUND_MODEL, config.PROACTIVE_MODEL, config.GUARDIAN_MODELS, config.CONSTELLATION_PLANET_MODEL, config.CONSTELLATION_MEMORY_MODEL, config.CONSTELLATION_SYNTH_MODEL, config.TIME_CAPSULE_MODEL)"
+        result = subprocess.run([sys.executable, '-c', script], env=env, capture_output=True, text=True, check=True)
+        assert 'claude' not in result.stdout
+        assert 'deepseek-v4.1-flash' not in result.stdout
+        assert result.stdout.count('deepseek-flash') == 8
+
+    def test_existing_key_migration_preserves_memory_and_secrets(self, tmp_path):
+        import subprocess
+        import sys
+        import shutil
+        from pathlib import Path
+        from dotenv import dotenv_values
+        scripts = tmp_path / 'scripts'
+        scripts.mkdir()
+        root = Path(__file__).resolve().parents[1]
+        for name in ('setup_deepseek.py', 'set_env_key.py'):
+            shutil.copy2(root / 'scripts' / name, scripts / name)
+        original = 'DEEPSEEK_API_KEY=sk-test-private\nDB_PATH=C:/memory/old.db\nDASHBOARD_TOKEN=keep-this\nPROACTIVE_MODEL=claude-haiku-4-5\n'
+        env = tmp_path / '.env'
+        env.write_text(original)
+        result = subprocess.run([sys.executable, str(scripts / 'setup_deepseek.py'), '--use-existing-key'], capture_output=True, text=True, check=True)
+        values = dotenv_values(env)
+        assert values['DEEPSEEK_API_KEY'] == 'sk-test-private'
+        assert values['DB_PATH'] == 'C:/memory/old.db'
+        assert values['DASHBOARD_TOKEN'] == 'keep-this'
+        for name in ('AGENT_MODEL', 'BACKGROUND_MODEL', 'PROACTIVE_MODEL', 'SAFETY_REVIEW_MODEL', 'GUARDIAN_MODELS'):
+            assert values[name] == 'deepseek-flash'
+        assert 'sk-test-private' not in result.stdout + result.stderr
+        assert next(tmp_path.glob('.env.before-deepseek-*')).read_text() == original

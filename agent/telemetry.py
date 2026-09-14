@@ -136,8 +136,41 @@ def log_turn(role: str, content_json: dict | list, tool_calls: Optional[list] = 
         print(f"[Telemetry] log_turn failed: {e}")
 
 
+# Automatic helpers historically received a cached Anthropic client regardless
+# of the configured model. Keep explicit main/council/model-comparison calls out
+# of this list: choosing a council member must still mean choosing that model.
+_BACKGROUND_SITES = {
+    "agent.world_model/build", "agent.reflection/consolidate",
+    "agent.reflection/refine_skill", "agent.reflection/profile_digest",
+    "agent.memory/maybe_summarize", "agent.awareness/review",
+    "agent.cortex/decide", "agent.skill_forge/forge", "agent.skill_forge/acquire",
+    "agent.prefs/distill", "agent.goals/evaluate_recent_work",
+    "agent.core/skill_propose", "agent.core/proactive_check",
+    "agent.curator/dedup", "tools.screen_vision/describe",
+    "deepresearch/plan", "deepresearch/queries", "deepresearch/extract",
+    "deepresearch/gaps", "deepresearch/write",
+}
+
+
+def _resolve_call(client, call_site, kwargs):
+    from agent import provider
+    if call_site not in _BACKGROUND_SITES:
+        return client, kwargs
+    model = config.BACKGROUND_MODEL
+    # Preserve existing injected clients and Haiku budgets in Anthropic mode.
+    if provider.provider_for(model) == "anthropic":
+        model = kwargs.get("model", model)
+    kwargs = {**kwargs, "model": model}
+    if provider.provider_for(model) != "anthropic":
+        for key in ("thinking", "output_config", "temperature", "top_p", "top_k"):
+            kwargs.pop(key, None)
+        client = provider.get_client(model)
+    return client, kwargs
+
+
 def create(client, *, call_site: str, **kwargs):
     """Drop-in replacement for client.messages.create with telemetry capture."""
+    client, kwargs = _resolve_call(client, call_site, kwargs)
     start = time.time()
     resp = client.messages.create(**kwargs)
     latency_ms = int((time.time() - start) * 1000)
@@ -160,6 +193,7 @@ def create(client, *, call_site: str, **kwargs):
 @contextmanager
 def stream(client, *, call_site: str, **kwargs):
     """Drop-in replacement for client.messages.stream that records the final usage."""
+    client, kwargs = _resolve_call(client, call_site, kwargs)
     start = time.time()
     sm = client.messages.stream(**kwargs)
     try:
