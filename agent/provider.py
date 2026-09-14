@@ -65,7 +65,7 @@ KNOWN_MODELS = {
     "gemini-2.5-pro", "gemini-2.5-flash",
     "gemini-2.0-flash",
     # DeepSeek — OpenAI-compatible API, addressed by its bare name.
-    "deepseek-chat", "deepseek-reasoner",
+    "deepseek-flash", "deepseek-chat", "deepseek-reasoner",
     # Ollama local — any model pulled with `ollama pull <name>`; use ollama/ prefix.
     # These are the most common; any other pulled model works the same way.
     "ollama/llama3.2", "ollama/llama3.1", "ollama/llama3",
@@ -322,6 +322,10 @@ def _translate_kwargs(kwargs: dict) -> dict:
     out: dict = {}
     out["model"] = kwargs.get("model", "gpt-4o")
     out["max_tokens"] = kwargs.get("max_tokens", 4096)
+    # V4.1 Flash defaults to thinking, which requires replaying reasoning_content
+    # on every tool turn. This adapter stores portable text/tool history only.
+    if out["model"] == "deepseek-flash":
+        out["extra_body"] = {"thinking": {"type": "disabled"}}
 
     msgs: list = []
     sys_str = _system_str(kwargs.get("system", ""))

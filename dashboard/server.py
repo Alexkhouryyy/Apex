@@ -268,6 +268,7 @@ def list_models():
         "anthropic": bool(config.ANTHROPIC_API_KEY),
         "openai": bool(config.OPENAI_API_KEY),
         "gemini": bool(config.GEMINI_API_KEY),
+        "deepseek": bool(config.DEEPSEEK_API_KEY),
         "ollama": bool(config.OLLAMA_BASE_URL),
     }
     # Union the curated list with what each provider says it serves right now.

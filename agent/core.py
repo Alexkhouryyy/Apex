@@ -2913,7 +2913,7 @@ class AgentCore:
 
     def set_model(self, model: str) -> str:
         """Switch the active model at runtime. Returns a status string."""
-        from agent.provider import KNOWN_MODELS, provider_for, is_usable
+        from agent.provider import KNOWN_MODELS, provider_for, is_usable, PROVIDER_KEY_NAMES
         if not is_usable(model):
             # is_usable asks the provider before refusing, so a model released
             # after this code was written still works. Only reject what nobody
@@ -2923,10 +2923,9 @@ class AgentCore:
                     f"Check the spelling, or add it to EXTRA_MODELS in .env. "
                     f"Built-in: {', '.join(sorted(KNOWN_MODELS))}")
         p = provider_for(model)
-        if p == "openai" and not config.OPENAI_API_KEY:
-            return "OPENAI_API_KEY not set — add it to .env and restart."
-        if p == "gemini" and not config.GEMINI_API_KEY:
-            return "GEMINI_API_KEY not set — add it to .env and restart."
+        key_name = PROVIDER_KEY_NAMES.get(p, "")
+        if key_name and not getattr(config, key_name, ""):
+            return f"{key_name} not set — add it to .env and restart."
         self._model = model
         return f"Switched to {model}"
 
@@ -3075,6 +3074,9 @@ class AgentCore:
         the SDK's own session store — see subscription.transcript_prompt for why
         two histories would be a divergence bug rather than an optimization.
         """
+        from agent.provider import provider_for
+        if provider_for(self._model) != "anthropic":
+            return None
         from agent import subscription as _sub
 
         ok, why = _sub.should_use("agent.core/main")

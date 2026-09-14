@@ -248,6 +248,9 @@ MODEL_PRICING = {
     # unpriced model bills as $0, which silently understates spend. If these go
     # stale, MODEL_PRICING_JSON overrides them without editing code.
     "deepseek-chat":     {"input": 0.28, "output": 0.42, "cache_read": 0.028, "cache_create": 0.28},
+    # V4.1 Flash, conservative peak rates (USD/million tokens), 2026-09-14.
+    # Off-peak invoices are lower; telemetry is an estimate, not a billing record.
+    "deepseek-flash":    {"input": 0.30, "output": 1.20, "cache_read": 0.006, "cache_create": 0.30},
     "deepseek-reasoner": {"input": 0.55, "output": 2.19, "cache_read": 0.14,  "cache_create": 0.55},
     # Ollama local models: any ollama/* model not listed here defaults to $0 (see telemetry._pricing).
 }

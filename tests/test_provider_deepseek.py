@@ -25,6 +25,7 @@ from agent import provider
 class TestRouting:
     @pytest.mark.parametrize("model,expected", [
         ("deepseek-chat", "deepseek"),
+        ("deepseek-flash", "deepseek"),
         ("deepseek-reasoner", "deepseek"),
         ("claude-opus-5", "anthropic"),
         ("gpt-5.1", "openai"),
@@ -175,6 +176,48 @@ class TestItCanActuallyDriveApex:
             "the tool call did not take effect — a non-Anthropic model cannot "
             "drive Apex, whatever the routing says")
         assert events >= 1
+
+    def test_flash_tool_roundtrip_without_anthropic_key(self, fake_deepseek, monkeypatch):
+        from agent.core import AgentCore
+        monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "")
+        monkeypatch.setattr(config, "AGENT_MODEL", "deepseek-flash")
+        a = AgentCore()
+        assert "Noted" in a.run("remember my name", include_screenshot=False)
+        assert len(_FakeOpenAI.seen) >= 2
+        for body in _FakeOpenAI.seen:
+            assert body["model"] == "deepseek-flash"
+            assert body["thinking"] == {"type": "disabled"}
+
+    def test_missing_key_does_not_switch_model(self, fake_deepseek, monkeypatch):
+        from agent.core import AgentCore
+        a = AgentCore()
+        before = a._model
+        monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "")
+        assert "DEEPSEEK_API_KEY" in a.set_model("deepseek-flash")
+        assert a._model == before
+
+    def test_flash_cannot_use_claude_subscription(self, fake_deepseek, monkeypatch):
+        from agent.core import AgentCore
+        monkeypatch.setattr(config, "AGENT_MODEL", "deepseek-flash")
+        monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", True)
+        a = AgentCore()
+        assert a._try_subscription("hello", a.memory) is None
+
+    def test_flash_visible_in_dashboard(self, fake_deepseek, monkeypatch):
+        from dashboard import server
+        monkeypatch.setattr(provider, "discover_all", lambda: {})
+        models = server.list_models()["models"]
+        flash = next(m for m in models if m["model"] == "deepseek-flash")
+        assert flash["available"] is True
+        assert flash["provider"] == "deepseek"
+
+    def test_startup_reports_selected_provider_key(self, monkeypatch, capsys):
+        import main
+        monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "")
+        monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "")
+        monkeypatch.setattr("sys.argv", ["main.py", "--text", "--model", "deepseek-flash"])
+        main.main()
+        assert "needs DEEPSEEK_API_KEY" in capsys.readouterr().out
 
     def test_the_whole_toolbox_is_offered(self, fake_deepseek):
         """Not a reduced set. If the adapter dropped tools, Apex would look

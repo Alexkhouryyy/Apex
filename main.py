@@ -20,10 +20,6 @@ load_dotenv()
 
 import config
 
-if not config.ANTHROPIC_API_KEY:
-    print("ERROR: ANTHROPIC_API_KEY not set. Create a .env file or set the environment variable.")
-    sys.exit(1)
-
 
 # Returned by the text-mode reader when stdin is closed. A distinct object,
 # not "", because "" already means "you pressed enter" and the main loop's
@@ -59,6 +55,12 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
+    from agent.provider import PROVIDER_KEY_NAMES, provider_for
+    starting_model = args.model or config.AGENT_MODEL
+    key_name = PROVIDER_KEY_NAMES.get(provider_for(starting_model), "")
+    if key_name and not getattr(config, key_name, ""):
+        print(f"ERROR: {starting_model} needs {key_name}. Add it to .env.")
+        return
 
     # Resident mode: always-on background companion with tray + global hotkey.
     # Hands off to a dedicated entry point that owns the state machine.
@@ -72,7 +74,7 @@ def main():
 
     print("\n" + "="*60)
     print("  Voice AI Agent")
-    print("  Model:     ", config.AGENT_MODEL)
+    print("  Model:     ", starting_model)
     print("  Mode:      ", "tui" if args.tui else ("text" if args.text else "voice"))
     print("  Thinking:  ", "on" if args.think else "auto")
     print("  Proactive: ", "on" if config.PROACTIVE_ENABLED else "off")
