@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Apex · Screen companion</title>
+  <link rel="icon" href="/static/icons/favicon-64.png">
+  <link rel="stylesheet" href="/static/companion.css">
+  <script src="/static/companion.js" defer></script>
+</head>
+<body>
+<main id="companion">
+  <header class="pywebview-drag-region"><a href="/" aria-label="Open Apex dashboard" class="brand">APEX<span>COMPANION</span></a><nav><a href="/board">Workspace</a> · <a href="/drive">Car</a> · <button id="float" title="Keep the companion above your other windows">Float ↗</button></nav></header>
+  <section class="presence" aria-label="Companion status">
+    <div class="orb" aria-hidden="true"><div></div></div>
+    <div><p class="eyebrow">LET’S THINK IT THROUGH</p><h1>Right here with you.</h1><p id="status" role="status">Connecting to Apex…</p></div>
+  </section>
+  <div class="toolbar">
+    <button id="share" aria-pressed="false">Share screen</button>
+    <button id="review" disabled>Look at this</button>
+    <label class="toggle"><input id="spoken" type="checkbox" checked> Speak replies</label>
+  </div>
+  <div class="context"><span id="screen-status">Screen off · nothing attached</span><button id="new">New chat</button></div>
+  <details id="preview-panel" hidden><summary>Shared screen preview</summary><video id="preview" autoplay muted playsinline></video><p>One snapshot is sent with each message. Stop sharing to stop new snapshots.</p></details>
+  <div class="settings">
+    <label>Mode <select id="mode"><option value="discuss">Discuss</option><option value="work">Work</option></select></label>
+    <label>Voice <select id="voice"><option value="browser">Device voice</option><option value="openai">OpenAI voice</option></select></label>
+    <label class="toggle"><input id="check-in" type="checkbox"> Check in every minute</label>
+  </div>
+  <p class="hint" id="mode-hint">Discuss: look, research, and reason together. Action tools are disabled.</p>
+  <section id="remote-panel" hidden>
+    <p class="hint">Connected to your Apex host. Accepted tasks continue if this screen disconnects. Use the screen while parked.</p>
+    <p id="capabilities" role="status"></p>
+    <div class="toolbar"><label>Recent tasks <select id="jobs"><option value="">Choose a task…</option></select></label><button id="refresh-jobs">Refresh</button><button id="recover" hidden>Reconnect to task</button></div>
+  </section>
+  <section id="messages" role="log" aria-label="Conversation" aria-live="polite">
+    <div id="welcome"><h2>What are we working on?</h2><p>Share a window, talk through an idea, or ask for a second opinion.</p><div class="suggestions"><button data-prompt="Help me think through an idea. Ask me what I want to achieve.">Think with me</button><button data-prompt="Challenge my approach. Ask me to explain it first.">Challenge my approach</button></div></div>
+  </section>
+  <div id="error" role="alert" hidden></div>
+  <form id="composer">
+    <label class="sr-only" for="message">Message Apex</label><textarea id="message" rows="2" maxlength="20000" placeholder="Talk to me, or type here…"></textarea>
+    <div class="composer-actions"><button id="mic" type="button" aria-pressed="false">● Talk</button><span id="mic-note">Tap to record, tap to send</span><button id="stop" type="button" disabled>Stop</button><button id="send" type="submit" class="primary">Send ↑</button></div>
+  </form>
+  <footer>Screen snapshots go to your selected AI provider. <a href="/">Open dashboard ↗</a></footer>
+</main>
+<dialog id="login"><form id="login-form"><h2>Connect to your Apex</h2><p>Enter your dashboard token.</p><label for="token">Dashboard token</label><input id="token" type="password" autocomplete="current-password" required><p id="login-error" role="alert"></p><button class="primary">Connect</button></form></dialog>
+</body></html>

@@ -279,6 +279,10 @@ def choose_delegate(preference: str, try_create):
 def build_landmarker(num_hands: int = 2):
     """The real factory. Returns (landmarker, delegate_used, note)."""
     from mediapipe.tasks.python import BaseOptions, vision
+    # Called only after the tracker has opened a camera. An absent camera
+    # must be reported even when a model download is slow or unavailable.
+    if ensure_model() is None:
+        raise RuntimeError("Hand model is unavailable; check the download connection.")
 
     def _create(delegate_name: str):
         delegate = getattr(BaseOptions.Delegate, delegate_name)
@@ -573,11 +577,6 @@ class HandTracker(threading.Thread):
                   f"overwrite each other. Do NOT just uninstall one — that "
                   f"deletes files the survivor needs and leaves a cv2 with no "
                   f"VideoCapture. Remove them all and install one: {_REPAIR}")
-        if ensure_model() is None:
-            print("[HandTrack] Hand tracking is off: no model file.")
-            self._stop.wait()
-            return
-
         print(f"[HandTrack] Watching camera {self.device_index} at "
               f"{1 / self.interval:.0f} Hz.")
         try:
@@ -621,7 +620,14 @@ class HandTracker(threading.Thread):
             self._say("camera_open", "[HandTrack] Camera open.")
         if self._landmarker is None:
             import mediapipe as mp
-            self._landmarker, used, note = build_landmarker(num_hands=2)
+            model_started = time.monotonic()
+            try:
+                self._landmarker, used, note = build_landmarker(num_hands=2)
+            except Exception as exc:
+                self._teardown()
+                self._retry_at = now + (time.monotonic() - model_started) + CAMERA_RETRY_MAX
+                self._say("model_unavailable", f"[HandTrack] Hand model unavailable: {exc}. Retrying in {CAMERA_RETRY_MAX:.0f}s.")
+                return False
             if note:
                 print(f"[HandTrack] {note}")
             # Always stated, never inferred. Running on CPU while believing you

@@ -118,6 +118,9 @@ class ChatStreamer:
 # === FastAPI app ===
 app = FastAPI(title="Voice Agent Dashboard")
 
+from dashboard.companion import router as companion_router
+app.include_router(companion_router)
+
 # Allow the browser extension (chrome-extension:// / moz-extension://) to call the
 # API cross-origin. Auth is bearer-token (not cookies), so credentials stay off.
 from fastapi.middleware.cors import CORSMiddleware
@@ -170,7 +173,7 @@ async def _auth(request: Request, call_next):
     # NOT exempt, so this must stay an exact match: `path.startswith("/board")`
     # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
-            or path == "/board"
+            or path == "/board" or path == "/companion" or path == "/drive"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
     # Inbound webhooks can't present a bearer token, so they authenticate
@@ -246,6 +249,7 @@ def status():
     except Exception:
         exec_backend = "local"
     return {
+        "agent_ready": _agent_ref is not None,
         "model": _agent_ref._model if _agent_ref else config.AGENT_MODEL,
         "proactive_enabled": config.PROACTIVE_ENABLED,
         "awareness_enabled": config.AWARENESS_ENABLED,
@@ -2176,6 +2180,7 @@ async def ws_board(ws: WebSocket):
             tracker = _ht.active_tracker()
             payload = {
                 "cards": board.cards(),
+                "selection": board.selection(),
                 "cursors": [],
                 "frame": None,
                 # Said explicitly rather than inferred from empty cursors: a

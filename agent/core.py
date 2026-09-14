@@ -291,7 +291,7 @@ def _forge_resolve(inputs: dict):
     title = (inputs.get("title") or "").strip()
     rel = (inputs.get("path") or "").strip()
     asset = None
-    if title:
+    if title and not rel:
         asset = _assets.find_by_title(title)
         if asset is None:
             return None, None, (
@@ -311,6 +311,19 @@ def _forge_resolve(inputs: dict):
     if target is None:
         return None, None, (
             f"'{rel}' is not a readable model inside the props folder.")
+    if inputs.get("path"):
+        # A selected board card may show an older immutable version. Preserve
+        # that source instead of silently exporting the title's latest version.
+        parts = target.relative_to(_props.props_root().resolve()).parts
+        if len(parts) == 3 and parts[0] == _assets.CREATED_DIR:
+            candidate = _assets.load(parts[1])
+            version = next((v for v in (candidate or {}).get("versions", [])
+                            if v["file"] == parts[2]), None)
+            if candidate and version:
+                if title and candidate.get("title", "").lower() != title.lower():
+                    return None, None, "The supplied title and source path refer to different objects."
+                asset = {**candidate, "_source_version": version["version"]}
+                title = candidate.get("title") or title
     try:
         return _forge.read_any(target), asset, (title or rel)
     except _forge.ForgeError as e:
@@ -377,7 +390,7 @@ def _forge_tool(inputs: dict) -> str:
                         "can be saved as a version of that object.")
             slug = asset["id"]
             command = {"tool": "apex_forge", "action": "export", "format": fmt,
-                       "from_version": asset.get("current_version")}
+                       "from_version": asset.get("_source_version", asset.get("current_version"))}
 
         report = _forge.validate(mesh, **settings)
         filename = _assets.next_filename(slug, ext=fmt)
@@ -396,7 +409,7 @@ def _forge_tool(inputs: dict) -> str:
             _assets.create(slug, title, command=command)
         _assets.add_version(
             slug, filename, command=command,
-            parent=asset.get("current_version") if action == "export" else None)
+            parent=asset.get("_source_version", asset.get("current_version")) if action == "export" else None)
         where = f"{_assets.CREATED_DIR}/{slug}/{filename}"
         note = "" if report.ok else "\n(exported on request despite the above)"
         return (f"Wrote {where} — {fmt.upper()}.\n"
@@ -594,7 +607,8 @@ TOOLS = [
             "  make   — build a measured solid in millimetres WITHOUT Blender "
             "and export it. Needs `shape` and `dims_mm`, same as board_create.\n"
             "  export — write an existing object as a manufacturing file. "
-            "Needs `title`.\n"
+            "Needs `title`, or the exact `path` of a saved asset version. When "
+            "the user selected a board object, use its src path to preserve that version.\n"
             "Export refuses a mesh that cannot be made. That is deliberate — ask "
             "the user before setting `force`, and tell them what the objection "
             "was. Default format is 3MF because it states its own unit; STL does "
@@ -687,6 +701,17 @@ TOOLS = [
         "name": "board_clear",
         "description": "Sweep everything off the glass board. Use when the user asks to clear it, start fresh, or when the board is cluttered enough to be in the way.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "board_transform",
+        "description": "Change a board object's view by its exact ID from board_state or the current message selection. Undoable. scale changes display size only, never physical dimensions. Release a held object first.",
+        "input_schema": {"type": "object", "properties": {
+            "id": {"type": "string"},
+            "x": {"type": "number", "minimum": 0, "maximum": 1},
+            "y": {"type": "number", "minimum": 0, "maximum": 1},
+            "scale": {"type": "number", "minimum": .25, "maximum": 4},
+            "rot": {"type": "number", "description": "Y rotation in radians", "minimum": -100, "maximum": 100},
+        }, "required": ["id"]},
     },
     {
         "name": "board_state",
@@ -2170,6 +2195,7 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
 
         elif name == "board_restore":
             from agent import assets as _assets
+            from agent import props as _props
             from agent.board import get_board
             title = (inputs.get("title") or "").strip()
             data = _assets.find_by_title(title)
@@ -2186,8 +2212,17 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             else:
                 rel = _assets.current_file(data["id"])
                 label = f"v{data.get('current_version')}"
+                if rel and not rel.lower().endswith(_props.MODEL_EXTS):
+                    visual = next((v for v in reversed(data.get("versions", []))
+                                   if v["file"].lower().endswith(_props.MODEL_EXTS)), None)
+                    if visual:
+                        rel = _assets.version_file(data["id"], visual["version"])
+                        label = f"v{visual['version']}"
                 if rel is None:
                     return f"'{title}' has no versions saved yet."
+            if not rel.lower().endswith(_props.MODEL_EXTS):
+                return (f"'{title}' ({label}) is a manufacturing export, not a board model. "
+                        "Download it from Manufacturing exports on /board for your slicer.")
             card = get_board().add("model", data.get("title") or title, src=rel)
             out = (f"'{card.title}' ({label}) is back on the board — "
                    f"grab it with one hand, two to scale.")
@@ -2198,16 +2233,20 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             from agent.board import get_board
             return f"Cleared {get_board().clear()} card(s) from the board."
 
+        elif name == "board_transform":
+            from agent.board import get_board
+            try:
+                changed = get_board().transform(inputs.get("id"), **{
+                    k: inputs[k] for k in ("x", "y", "scale", "rot") if k in inputs})
+                return json.dumps({"object": changed, "physical_dimensions_changed": False})
+            except ValueError as exc:
+                return f"[Board] {exc}"
+
         elif name == "board_state":
             from agent.board import get_board
-            cards = get_board().cards()
-            if not cards:
-                return "The board is empty."
-            lines = [f"{len(cards)} card(s) on the board:"]
-            for c in cards:
-                held = "  [in your hand]" if c["held"] else ""
-                lines.append(f"  - {c['title']}{held}")
-            return "\n".join(lines)
+            board = get_board()
+            return json.dumps({"cards": board.cards(), "selection": board.selection(),
+                               "note": "Scale is a view transform, not a manufacturing dimension."})
 
         elif name == "click":
             return computer.click(inputs["x"], inputs["y"], inputs.get("button", "left"), inputs.get("double", False))
@@ -3082,7 +3121,7 @@ class AgentCore:
                  if cost else "."))
         return text
 
-    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None) -> str:
+    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None) -> str:
         """Run a full agent turn. Returns the final text response.
 
         If `streamer` is provided (a StreamingSpeaker), text deltas are fed to it
@@ -3093,9 +3132,21 @@ class AgentCore:
         on the same channel are serialized by a per-channel threading.Lock.
         Pass channel_id=None (default) for the main voice/text conversation.
         """
+        from agent import companion
+        if companion_mode is not None and companion_mode not in {"discuss", "work"}:
+            raise ValueError("Companion mode must be discuss or work.")
+        screen_b64 = companion.validate_screen_image(screen_image)
         memory, lock = self._get_channel(channel_id)
         with lock:
+            if cancel_event is not None and cancel_event.is_set():
+                return "[turn interrupted]"
             memory.maybe_summarize(self.anthropic)
+
+            def turn_system():
+                blocks = self._effective_system_prompt()
+                if companion_mode:
+                    blocks = blocks + [{"type": "text", "text": companion.prompt(companion_mode, bool(screen_b64))}]
+                return blocks
 
             # Build user message content
             user_content: list = []
@@ -3103,7 +3154,12 @@ class AgentCore:
             if memory.context_prefix():
                 user_content.append({"type": "text", "text": memory.context_prefix()})
 
-            if include_screenshot:
+            if screen_b64:
+                user_content.extend([
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": screen_b64}},
+                    {"type": "text", "text": "[Browser-shared screen snapshot, captured for this turn; not the Apex host screen.]"},
+                ])
+            if include_screenshot and not companion_mode and not screen_b64:
                 try:
                     b64, size = computer.screenshot()
                     user_content.append({
@@ -3174,7 +3230,9 @@ class AgentCore:
                 # into the middle of this one. Any failure falls through to the
                 # API below with the conversation untouched, which is the point:
                 # an exhausted five-hour window must not stop Apex working.
-                _sub_text = self._try_subscription(
+                # The CLI subscription adapter only accepts text and owns its
+                # own tools. It cannot preserve screen data or Discuss limits.
+                _sub_text = None if (companion_mode or screen_b64) else self._try_subscription(
                     user_text, memory, streamer=streamer)
                 if _sub_text is not None:
                     return _sub_text
@@ -3184,8 +3242,9 @@ class AgentCore:
                 kwargs = dict(
                     model=_routed_model,
                     max_tokens=16000,
-                    system=self._effective_system_prompt(),
-                    tools=self._all_tools(),
+                    system=turn_system(),
+                    tools=[t for t in self._all_tools()
+                           if companion_mode != "discuss" or t["name"] in companion.DISCUSS_TOOLS],
                     messages=memory.get_messages(),
                 )
 
@@ -3222,7 +3281,7 @@ class AgentCore:
                         try:
                             print(f"[Resilience] Attempting fallback provider ({config.FALLBACK_MODEL})...")
                             system_text = "\n\n".join(
-                                b.get("text", "") for b in self._effective_system_prompt()
+                                b.get("text", "") for b in turn_system()
                                 if isinstance(b, dict) and b.get("type") == "text"
                             )
                             fallback_text = resilience.fallback_create(
@@ -3271,7 +3330,17 @@ class AgentCore:
                     print(f"[TOOL] {block.name}({json.dumps(block.input, ensure_ascii=False)[:120]})")
                     turn_tool_names.append(block.name)
                     _broadcast_live_event("tool", f"{block.name}({json.dumps(block.input, ensure_ascii=False)[:80]})")
-                    result_str = _execute_tool(block.name, block.input)
+                    if cancel_event is not None and cancel_event.is_set():
+                        result_str = "Tool not executed: the user interrupted this turn."
+                    elif companion_mode == "discuss" and block.name not in companion.DISCUSS_TOOLS:
+                        result_str = "Tool not executed: Discuss mode does not permit this action."
+                    else:
+                        if callable(getattr(streamer, "tool", None)):
+                            streamer.tool({"phase": "start", "name": block.name})
+                        result_str = _execute_tool(block.name, block.input)
+                        if callable(getattr(streamer, "tool", None)):
+                            streamer.tool({"phase": "result", "name": block.name,
+                                           "result": result_str[:2000]})
                     tool_results.append(_make_tool_result_content(block.name, block.id, result_str))
                     try:
                         telemetry.log_turn("tool_result", {"tool": block.name, "preview": result_str[:400]})
@@ -3281,7 +3350,8 @@ class AgentCore:
                 memory.add_user(tool_results)
 
             # Self-improving skills: off-thread, propose a skill for complex turns.
-            self._maybe_autocreate_skill(turn_tool_names, user_text)
+            if companion_mode != "discuss":
+                self._maybe_autocreate_skill(turn_tool_names, user_text)
 
             if cancel_event is not None and cancel_event.is_set():
                 return final_text or "[turn interrupted]"

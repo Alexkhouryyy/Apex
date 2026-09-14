@@ -2,7 +2,7 @@
 <!--
   Apex's glass board.
 
-  This page draws and decides NOTHING. It never runs MediaPipe, never sees a
+  This page renders the board and offers explicit touch selection. It never runs MediaPipe, never sees a
   landmark, and never opens the camera — it cannot, because Python is holding it
   exclusively. Cursor positions, card positions and the backdrop all arrive over
   one websocket already decided.
@@ -91,6 +91,17 @@
   #hint h1 { font-size: 20px; margin-bottom: 10px; font-weight: 600; }
   #hint p { font-size: 14px; opacity: .75; }
   #hint.hidden { display: none; }
+  #board-bar {position:fixed;top:14px;left:16px;right:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;z-index:5;background:#0b1726e8;padding:12px;border-radius:12px}
+  #board-bar button,#board-bar a,#board-bar select {font:inherit;color:var(--ink);background:#17283b;border:1px solid #45617c;border-radius:8px;padding:10px;text-decoration:none}
+  #selection-label {flex:1;min-width:160px}
+  .card {cursor:pointer;color:var(--ink);font:inherit;text-align:left}
+  .card.selected {outline:3px solid #7aebc7}
+  .card.model-label {width:auto;min-height:0;max-width:25vw;padding:7px 12px;background:#0a172cdd}
+  .card.model-label h3 {margin:0}
+  #partner-panel {position:fixed;right:12px;top:88px;bottom:36px;width:min(440px,45vw);z-index:6;background:#08111c;border:1px solid #45617c;border-radius:14px;overflow:hidden}
+  #partner-panel iframe {width:100%;height:100%;border:0}
+  [hidden] {display:none!important}
+  @media(max-width:650px){#partner-panel{width:calc(100vw - 24px);top:140px}.card.model-label{max-width:42vw}#board-bar{font-size:12px}}
 </style>
 </head>
 <body>
@@ -102,6 +113,8 @@
   <p id="hint-body">Connecting…</p>
 </div>
 <div id="status">—</div>
+<nav id="board-bar"><a href="/">APEX</a><span id="selection-label" role="status">Pinch an object or tap its label to select it.</span><button id="clear-selection">Deselect</button><button id="partner-toggle" aria-expanded="false">Talk to Apex</button><select id="exports" aria-label="Download a manufacturing export"><option value="">Manufacturing exports…</option></select><button id="refresh-exports">Refresh exports</button></nav>
+<aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; display-capture"></iframe></aside>
 
 <script type="module">
 "use strict";
@@ -135,6 +148,41 @@ function loadToken() {
   try { return localStorage.getItem(_TOKEN_KEY) || ""; } catch (e) { return ""; }
 }
 const token = loadToken();
+if (new URLSearchParams(location.search).has('token')) history.replaceState(null, '', location.pathname);
+let selectedId = null;
+async function api(path, options = {}) {
+  const response = await fetch(path, {...options, headers: {Authorization: `Bearer ${token}`, ...options.headers}});
+  if (!response.ok) throw new Error(response.status === 401 ? 'Log in on the dashboard to continue.' : `Request failed (${response.status}).`);
+  return response;
+}
+async function selectObject(id) {
+  try { await api('/api/board/select', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id})}); }
+  catch (error) { say(error.message); }
+}
+document.getElementById('clear-selection').onclick = () => selectObject(null);
+document.getElementById('partner-toggle').onclick = event => {
+  const panel = document.getElementById('partner-panel'); panel.hidden = !panel.hidden;
+  event.target.setAttribute('aria-expanded', String(!panel.hidden));
+  const frame = panel.querySelector('iframe'); if (!frame.src) frame.src = frame.dataset.src;
+};
+async function refreshExports() {
+  try {
+    const data = await (await api('/api/forge/exports')).json();
+    const menu = document.getElementById('exports'); menu.replaceChildren(new Option('Manufacturing exports…', ''));
+    for (const file of data.files) menu.append(new Option(file, file));
+  } catch(error) { say(error.message); }
+}
+document.getElementById('refresh-exports').onclick = refreshExports;
+document.getElementById('exports').onchange = async event => {
+  if (!event.target.value) return;
+  try {
+    const rel = event.target.value;
+    const response = await api('/api/forge/download/' + rel.split('/').map(encodeURIComponent).join('/'));
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a'); link.href = url; link.download = rel.split('/').pop(); link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch(error) { say(error.message); }
+};
 
 const cards = new Map();   // id -> element
 const rings = [];          // one per hand, created lazily
@@ -147,8 +195,10 @@ function renderCards(list) {
     seen.add(c.id);
     let el = cards.get(c.id);
     if (!el) {
-      el = document.createElement("div");
+      el = document.createElement("button");
+      el.type = 'button';
       el.className = "card";
+      el.onclick = () => selectObject(c.id);
       el.innerHTML = '<h3></h3><p></p>';
       stage.appendChild(el);
       cards.set(c.id, el);
@@ -159,8 +209,11 @@ function renderCards(list) {
     if (h.textContent !== c.title) h.textContent = c.title;
     if (p.textContent !== c.body) p.textContent = c.body || "";
     el.style.left = (c.x * 100) + "%";
-    el.style.top = (c.y * 100) + "%";
+    el.style.top = (Math.min(.91, c.y + (c.kind === 'model' ? .12 * c.scale : 0)) * 100) + "%";
     el.classList.toggle("held", !!c.held);
+    el.classList.toggle('model-label', c.kind === 'model');
+    el.classList.toggle('selected', c.id === selectedId);
+    el.setAttribute('aria-pressed', String(c.id === selectedId));
   }
   for (const [id, el] of cards) {
     if (!seen.has(id)) { el.remove(); cards.delete(id); }
@@ -189,9 +242,29 @@ function renderCursors(list) {
 // text in WebGL is a font-atlas project and DOM already does it perfectly.
 const glCanvas = document.getElementById("gl");
 let renderer = null, scene = null, camera3 = null;
-const loader = new GLTFLoader();
+const manager = new THREE.LoadingManager();
+manager.setURLModifier(url => {
+  const target = new URL(url, location.href);
+  if (target.protocol === 'data:' || (target.protocol === 'blob:' && target.origin === location.origin)) return url;
+  if (target.origin !== location.origin || !target.pathname.startsWith('/board/prop/')) {
+    throw new Error('Model dependencies must stay inside the Apex props folder.');
+  }
+  return target.href;
+});
+const loader = new GLTFLoader(manager);
+loader.setRequestHeader({Authorization: `Bearer ${token}`});
 const models = new Map();       // card id -> { group, src }
-const pending = new Set();      // ids mid-load, so one card loads once
+const pending = new Map();      // id -> src; discard stale loads after edits
+let currentModels = new Map();
+function dispose(group) {
+  group.traverse(obj => { obj.geometry?.dispose();
+    for (const material of (Array.isArray(obj.material) ? obj.material : [obj.material])) {
+      if (!material) continue;
+      for (const value of Object.values(material)) if (value?.isTexture) value.dispose();
+      material.dispose();
+    }
+  });
+}
 
 function init3D() {
   try {
@@ -243,18 +316,23 @@ function fitToUnitBox(obj) {
 }
 
 function syncModels(cards) {
+  currentModels = new Map(cards.map(c => [c.id, c.src]));
   if (!renderer) return;
   const seen = new Set();
   for (const c of cards) {
     if (c.kind !== "model" || !c.src) continue;
     seen.add(c.id);
     let entry = models.get(c.id);
+    if (entry && entry.src !== c.src) {
+      scene.remove(entry.group); dispose(entry.group); models.delete(c.id); entry = null;
+    }
     if (!entry) {
-      if (pending.has(c.id)) continue;
-      pending.add(c.id);
+      if (pending.get(c.id) === c.src) continue;
+      pending.set(c.id, c.src);
       loader.load("/board/prop/" + c.src.split("/").map(encodeURIComponent).join("/"),
         (gltf) => {
-          pending.delete(c.id);
+          if (pending.get(c.id) === c.src) pending.delete(c.id);
+          if (currentModels.get(c.id) !== c.src) { dispose(gltf.scene); return; }
           const wrap = fitToUnitBox(gltf.scene);
           scene.add(wrap);
           models.set(c.id, { group: wrap, src: c.src, base: wrap.scale.x });
@@ -263,7 +341,7 @@ function syncModels(cards) {
         (err) => {
           // A model that will not load must say so rather than leaving an
           // empty space that looks like the board is broken.
-          pending.delete(c.id);
+          if (pending.get(c.id) === c.src) pending.delete(c.id);
           console.warn("prop failed to load:", c.src, err);
           say("could not load " + c.src);
         });
@@ -279,7 +357,7 @@ function syncModels(cards) {
     g.scale.setScalar(entry.base * (c.scale || 1));
   }
   for (const [id, entry] of models) {
-    if (!seen.has(id)) { scene.remove(entry.group); models.delete(id); }
+    if (!seen.has(id)) { scene.remove(entry.group); dispose(entry.group); models.delete(id); }
   }
 }
 
@@ -305,7 +383,9 @@ function connect() {
 
     // Cards and models are two layers of one board: text stays DOM, geometry
     // goes to WebGL, and both read the same positions from Python.
-    renderCards((msg.cards || []).filter(c => c.kind !== "model"));
+    selectedId = msg.selection?.id || null;
+    document.getElementById('selection-label').textContent = msg.selection ? `Selected: ${msg.selection.title} · whole object` : 'Pinch an object or tap its label to select it.';
+    renderCards(msg.cards || []);
     syncModels(msg.cards || []);
     renderCursors(msg.cursors || []);
 
@@ -324,7 +404,7 @@ function connect() {
       say("hand tracking is off");
       hintBody.textContent =
         "Set HANDTRACK_ENABLED=true and BOARD_ENABLED=true, then restart Apex.";
-      hint.classList.remove("hidden");
+      hint.classList.toggle("hidden", (msg.cards || []).length > 0);
     } else if (n === 0) {
       say("tracking — no hands in frame");
       hintBody.textContent = "Hold a hand up in front of the camera.";
@@ -361,6 +441,7 @@ function connect() {
 }
 
 connect();
+refreshExports();
 </script>
 </body>
 </html>
