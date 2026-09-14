@@ -2534,3 +2534,17 @@ pre.md-pre code { background: none; border: none; padding: 0; }
 .chat-msg:hover .chat-copy-btn, .chat-copy-btn:focus-visible { opacity: .7; }
 .chat-copy-btn:hover { opacity: 1 !important; border-color: var(--accent); }
 .chat-copy-btn.copied { opacity: 1 !important; border-color: var(--accent); }
+
+/* Durable specialist workspace within the constellation. */
+#team-workspace { border:1px solid var(--border, #34364b); border-radius:12px; padding:18px; margin-bottom:24px; }
+#team-workspace summary { cursor:pointer; font-weight:600; padding:8px 0; }
+#team-workspace p { line-height:1.55; opacity:.85; }
+#team-workspace label { display:block; margin:8px 0; }
+#team-workspace textarea { display:block; width:100%; box-sizing:border-box; }
+#team-roles { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; }
+#team-roles input[type=checkbox] { margin-right:8px; width:auto; }
+#team-roles input:not([type=checkbox]) { display:block; margin-top:8px; width:100%; box-sizing:border-box; }
+#team-runs > details { border-top:1px solid var(--border, #34364b); padding:12px 0; }
+#team-runs section { border-left:3px solid #8076ef; padding:0 14px; margin:20px 0; }
+#team-runs pre { overflow-wrap:anywhere; font:inherit; line-height:1.5; }
+#team-error { color:#ff9b9b; }

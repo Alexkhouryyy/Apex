@@ -120,6 +120,8 @@ app = FastAPI(title="Voice Agent Dashboard")
 
 from dashboard.companion import router as companion_router
 app.include_router(companion_router)
+from dashboard.team import router as team_router
+app.include_router(team_router)
 
 # Allow the browser extension (chrome-extension:// / moz-extension://) to call the
 # API cross-origin. Auth is bearer-token (not cookies), so credentials stay off.

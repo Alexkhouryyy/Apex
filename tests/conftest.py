@@ -42,6 +42,25 @@ def offline_http(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, 'send', asend)
     monkeypatch.setattr(requests.Session, 'send', rsend)
 
+    # Recent Anthropic SDKs use httpx2; guard that transport as well.
+    try:
+        import httpx2
+    except ImportError:
+        return
+    send2, asend2 = httpx2.Client.send, httpx2.AsyncClient.send
+    def guarded2(self, request, *args, **kwargs):
+        transport = getattr(self, '_transport', None)
+        if not isinstance(transport, (httpx2.MockTransport, httpx2.ASGITransport)):
+            check(request.url, transport)
+        return send2(self, request, *args, **kwargs)
+    async def aguard2(self, request, *args, **kwargs):
+        transport = getattr(self, '_transport', None)
+        if not isinstance(transport, (httpx2.MockTransport, httpx2.ASGITransport)):
+            check(request.url, transport)
+        return await asend2(self, request, *args, **kwargs)
+    monkeypatch.setattr(httpx2.Client, 'send', guarded2)
+    monkeypatch.setattr(httpx2.AsyncClient, 'send', aguard2)
+
 
 @pytest.fixture(autouse=True)
 def block_safety_stdin():

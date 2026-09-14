@@ -36,7 +36,11 @@ def search(query: str, num_results: int = None) -> list[dict]:
 
     # Try Anthropic web_search first (works in restricted envs)
     from agent.provider import provider_for
-    if provider_for(config.BACKGROUND_MODEL) == "anthropic" and config.ANTHROPIC_API_KEY:
+    from agent.subagent_scope import active_role
+    # Budgeted team tasks use direct search, avoiding an unaccounted nested
+    # model call (and a different provider) behind the visible research tool.
+    team_task = (active_role() or '').startswith('team_')
+    if not team_task and provider_for(config.BACKGROUND_MODEL) == "anthropic" and config.ANTHROPIC_API_KEY:
         try:
             return _search_via_anthropic(query, num_results)
         except Exception:

@@ -8,7 +8,7 @@ import io
 MAX_IMAGE_CHARS = 3_000_000
 DISCUSS_TOOLS = frozenset({
     "recall", "kb_search", "web_search", "web_browse", "research",
-    "usage_summary", "replay_session", "evaluate_recent_work",
+    "usage_summary", "replay_session", "evaluate_recent_work", "team_task_status",
     "board_state", "board_history", "board_props",
 })
 

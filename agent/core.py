@@ -422,6 +422,27 @@ def _forge_tool(inputs: dict) -> str:
 
 TOOLS = [
     {
+        "name": "start_team_task",
+        "description": "Start a durable specialist workflow for a concrete user-requested project task. Select only needed roles; research, coding and read-only review run in that order, followed by Apex's summary. Coding can edit host files through existing safety gates. Supply the actual project path and acceptance checks in context. Reuse the same id when retrying a submission. This returns immediately; use team_task_status later. Do not delegate simple questions unnecessarily.",
+        "input_schema": {"type":"object", "properties":{
+            "id":{"type":"string", "description":"Unique 16–80 character letters/digits/underscore/hyphen identifier. Reuse for retries."},
+            "task":{"type":"string"}, "context":{"type":"string"},
+            "roles":{"type":"array", "items":{"type":"string", "enum":["researcher","coder","reviewer"]}},
+            "budget_usd":{"type":"number", "minimum":0.01, "maximum":5, "default":0.5},
+            "models":{"type":"object", "properties":{r:{"type":"string"} for r in ("researcher","coder","reviewer","apex")}, "additionalProperties":False}
+        }, "required":["id","task","context","roles"]}
+    },
+    {
+        "name":"team_task_status",
+        "description":"Read durable team task results and evidence. Supply an id for full results, or omit it to list recent tasks. Completion means the stages answered; inspect review findings before claiming success.",
+        "input_schema":{"type":"object", "properties":{"id":{"type":"string"}}, "required":[]}
+    },
+    {
+        "name":"stop_team_task",
+        "description":"Request that a team task stop after the current model call or tool returns. Does not undo completed changes.",
+        "input_schema":{"type":"object", "properties":{"id":{"type":"string"}}, "required":["id"]}
+    },
+    {
         "name": "screenshot",
         "description": "Capture the current state of the user's screen. Always call this before interacting with the UI.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
@@ -2394,6 +2415,27 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                 if not _iot_enabled():
                     return "[IoT is disabled — toggle it on in the dashboard or say '/iot on']"
             return mcp_client.call(name, inputs)
+
+        elif name == "start_team_task":
+            from agent import team
+            from dashboard import server as dashboard_server
+            if dashboard_server._agent_ref is None:
+                return "Team workspace needs the running Apex dashboard."
+            spec = dict(inputs)
+            spec.setdefault("models", {})
+            # Manual chat model selection also applies to tasks started in chat.
+            spec["models"] = {r: spec["models"].get(r) or dashboard_server._agent_ref._model
+                              for r in ("researcher", "coder", "reviewer", "apex")}
+            result = team.submit(spec, dashboard_server._agent_ref)
+            return json.dumps({"id":result["id"], "status":result["status"], "message":"Task accepted. Inspect it in Constellation or use team_task_status."})
+        elif name == "team_task_status":
+            from agent import team
+            if inputs.get("id"):
+                return json.dumps(team.get(inputs["id"]) or {"error":"Task not found."})
+            return json.dumps([{k:r[k] for k in ("id","task","status","cost_usd","calls","error")} for r in team.recent()])
+        elif name == "stop_team_task":
+            from agent import team
+            return json.dumps({"stop_requested":team.stop(inputs["id"])})
 
         elif name == "spawn_subagent":
             return orchestrator.spawn(inputs["role"], inputs["task"], inputs.get("use_thinking", False))

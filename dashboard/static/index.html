@@ -1079,6 +1079,22 @@
       <h1>The Constellation</h1>
       <div class="page-sub">12 domain-expert planets orbit Apex. Convene them on a decision — or click a planet to talk to it directly.</div>
     </header>
+    <details id="team-workspace" open>
+      <summary>Task workspace · Research, coding and review</summary>
+      <p>Give Apex a concrete task and project path. Specialists work in order and leave inspectable results. Coding can change files on the Apex host under its existing permissions.</p>
+      <form id="team-form" class="add-form vertical">
+        <label>Task<textarea id="team-task" required maxlength="12000" rows="3" placeholder="Inspect my project, implement a specific fix, and review the changes."></textarea></label>
+        <label>Project context<textarea id="team-context" maxlength="12000" rows="2" placeholder="Project folder, current goal, constraints and acceptance checks"></textarea></label>
+        <div id="team-roles"></div>
+        <label>Apex summary model <input id="team-model-apex" list="team-model-options" placeholder="Current startup model"></label>
+        <datalist id="team-model-options"></datalist>
+        <label>Task budget, USD <input id="team-budget" type="number" min="0.01" max="5" step="0.01" value="0.50" required></label>
+        <p>Stops before the next call when the estimated budget is reached; an in-flight call can exceed it. Maximum four calls per stage and 24 tools per task. Stop takes effect after the current call or tool returns.</p>
+        <button class="primary-btn" type="submit" id="team-start">Start task</button>
+      </form>
+      <p id="team-error" role="alert"></p>
+      <div id="team-runs" aria-live="polite"></div>
+    </details>
     <form id="cst-form" class="add-form vertical">
       <textarea id="cst-question" placeholder="Ask the constellation a big question — “Should I take the job in a new city?”" rows="2"></textarea>
       <div class="cst-controls">
@@ -1162,5 +1178,6 @@
 <script src="/static/voice-mobile.js?v=omni30"></script>
 <script type="module" src="/static/avatar3d.js?v=vision3"></script>
 <script type="module" src="/static/cst3d.js?v=omni30"></script>
+<script src="/static/team.js"></script>
 </body>
 </html>
