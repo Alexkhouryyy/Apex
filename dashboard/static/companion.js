@@ -17,19 +17,38 @@
   let threadId = Number(localStorage.getItem('apex_companion_thread')) || null;
   let active = null, shareStream = null, recorder = null, micStream = null;
   let speechEpoch = 0, audio = null, audioUrl = null, speechRequest = null;
-  let recordingTimer = null, checkins = 0, pip = null, recordingEpoch = 0;
+  let recordingTimer = null, pip = null, recordingEpoch = 0;
+  let speechBusy = false, hands = null, handsRequest = null, resumeTimer = null;
+  let lastInteraction = Date.now(), lastCheck = Date.now();
+  function resumeHands() {
+    clearTimeout(resumeTimer);
+    resumeTimer=setTimeout(() => {
+      if (hands?.enabled && !active && !recorder && !pendingRemote && !speechBusy && !audio) hands.resume();
+      controls();
+    }, 400);
+  }
+  function disableHands() {
+    clearTimeout(resumeTimer); handsRequest?.abort(); handsRequest=null;
+    hands?.stop(); $('hands-free').checked=false;
+    $('mic-note').textContent='Tap to record, tap to send'; controls();
+  }
+  async function transcribeBlob(blob, signal) {
+    const response=await request('/api/companion/transcribe?engine='+$('stt-engine').value,
+      {method:'POST', body:blob, signal, headers:{'Content-Type':blob.type || 'audio/webm'}});
+    return (await response.json()).text || '';
+  }
   const token = () => localStorage.getItem('apex_token') || '';
   const headers = () => token() ? {Authorization: `Bearer ${token()}`} : {};
   function error(text = '') { $('error').textContent = text; $('error').hidden = !text; }
   function state(name, text) { root.className = name; $('status').textContent = text; }
   function controls() {
-    const busy = Boolean(active) || Boolean(recorder) || Boolean(pendingRemote);
+    const busy = Boolean(active) || Boolean(recorder) || Boolean(pendingRemote) || Boolean(hands?.busy);
     $('send').disabled = busy;
     $('new').disabled = busy;
     $('mode').disabled = busy;
-    $('mic').disabled = Boolean(active) || Boolean(pendingRemote);
+    $('mic').disabled = Boolean(active) || Boolean(pendingRemote) || Boolean(hands?.enabled);
     $('review').disabled = busy || !shareStream;
-    $('stop').disabled = !(busy || audio || root.classList.contains('speaking'));
+    $('stop').disabled = !(busy || audio || speechBusy || hands?.enabled || $('check-in').checked || root.classList.contains('speaking'));
     $('recover').disabled = Boolean(active);
     $('jobs').disabled = Boolean(active) || Boolean(pendingRemote);
   }
@@ -57,17 +76,18 @@
   }
   function scroll() { $('messages').scrollTop = $('messages').scrollHeight; }
   function stopSpeech() {
-    speechEpoch++;
+    speechEpoch++; speechBusy=false;
     speechRequest?.abort(); speechRequest = null;
     window.speechSynthesis?.cancel();
     if (audio) { audio.pause(); audio = null; }
     if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
     if (!active && !recorder) state('', 'Ready when you are.');
-    controls();
+    resumeHands(); controls();
   }
   async function speak(text) {
     stopSpeech();
-    if (!$('spoken').checked || !text) return;
+    if (!$('spoken').checked || !text) { resumeHands(); return; }
+    hands?.pause(); speechBusy=true;
     const epoch = speechEpoch;
     const finish = () => { if (epoch === speechEpoch) stopSpeech(); };
     try {
@@ -149,12 +169,14 @@
       await new Promise(resolve => setTimeout(resolve, 1200));
     }
   }
-  async function send(text, automatic = false, recovery = null) {
-    if (active || recorder || (pendingRemote && !recovery) || !text.trim()) return;
+  async function send(text, automatic = false, recovery = null, fromHands = false) {
+    if (active || recorder || (hands?.busy && !fromHands) || (pendingRemote && !recovery) || !text.trim()) return;
+    hands?.pause();
+    if (!automatic) lastInteraction=Date.now();
     stopSpeech(); error();
     let image;
     try { image = snapshot(); } catch (exc) { error(exc.message); return; }
-    const turn = {id: recovery?.turn_id || crypto.randomUUID(), stopped: false, done: false, text: ''};
+    const turn = {id: recovery?.turn_id || crypto.randomUUID(), stopped: false, done: false, text: '', automatic};
     active = turn; controls(); state('thinking', automatic ? 'Checking in on your screen…' : 'Thinking with you…');
     if (!automatic && !recovery) { bubble('user', text); $('message').value = ''; }
     const output = bubble('agent', automatic ? 'Checking your shared screen…' : 'Thinking…');
@@ -188,7 +210,7 @@
       } else {
       const response = await request('/api/companion/chat', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({message: text, thread_id: threadId, turn_id: turn.id,
-          screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace})});
+          screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace, proactive: automatic})});
       const reader = response.body.getReader(), decoder = new TextDecoder(); let pending = '';
       try {
         while (true) {
@@ -207,14 +229,19 @@
     } catch (exc) {
       output.content.textContent = (turn.text ? `${turn.text}\n\n` : '') + exc.message;
       error(drive ? `${exc.message} Reconnect to retrieve the task; do not submit it again as a new task.` : exc.message); turn.stopped = true;
+      if (automatic) $('check-in').checked=false;
+      if (hands?.enabled) disableHands();
       // Do not silently lose a message on a failed request.
       if (!automatic && !$('message').value) $('message').value = text;
     } finally {
       active = null; state('', pendingRemote ? 'Connection interrupted · task outcome not confirmed.' : turn.stopped ? 'Stopped. Ready for your next instruction.' : 'Ready when you are.'); controls();
     }
+    if (automatic && /^\[Safety\]/.test(turn.text)) $('check-in').checked=false;
     if (!turn.stopped && turn.text.trim() !== 'NOTHING_TO_ADD') await speak(turn.text);
+    else resumeHands();
   }
   async function stop() {
+    disableHands(); $('check-in').checked=false;
     stopSpeech();
     if (recorder) { recordingEpoch++; if (recorder.state === 'recording') recorder.stop(); }
     if (active) {
@@ -255,10 +282,7 @@
         try {
           if (epoch !== recordingEpoch) return;
           state('thinking', 'Transcribing your message…');
-          const type = local.mimeType || 'audio/webm'; const data = new FormData();
-          data.append('file', new Blob(chunks, {type}), type.includes('mp4') ? 'speech.mp4' : 'speech.webm');
-          const response = await request('/api/transcribe', {method: 'POST', body: data});
-          const transcript = await response.json();
+          const transcript = {text: await transcribeBlob(new Blob(chunks, {type: local.mimeType || 'audio/webm'}))};
           if (epoch !== recordingEpoch) return;
           if (!transcript.text) throw new Error('No speech was detected. Try again.');
           recorder = null; $('message').value = transcript.text; await send(transcript.text);
@@ -269,16 +293,42 @@
       state('listening', 'Listening · tap Talk again to send'); $('mic').setAttribute('aria-pressed', 'true'); $('mic').textContent = '■ Send voice'; controls();
     } catch (exc) { micStream?.getTracks().forEach(track => track.stop()); recorder = null; error(exc.message); controls(); }
   };
+  $('hands-free').onchange = async () => {
+    if (!$('hands-free').checked) { disableHands(); state('', 'Hands-free off.'); return; }
+    if (active || recorder || pendingRemote) { $('hands-free').checked=false; error('Wait for the current turn to finish, then enable hands-free.'); return; }
+    error(); stopSpeech(); $('spoken').checked=true;
+    if (!window.ApexHandsFree) { $('hands-free').checked=false; error('Reload the companion to load hands-free controls.'); return; }
+    hands = new window.ApexHandsFree({
+      threshold: () => Number($('mic-threshold').value),
+      onState: text => {
+        if (text === 'ready') { resumeHands(); return; }
+        if (!active && !speechBusy) state(text.startsWith('Listening') ? 'listening' : 'thinking', text);
+        if (text.startsWith('Listening · pause')) lastInteraction=Date.now();
+        $('mic-note').textContent=text; controls();
+      },
+      onError: exc => { disableHands(); error(exc.message); state('', 'Hands-free stopped.'); },
+      onSegment: async (blob, epoch) => {
+        handsRequest=new AbortController();
+        const text=await transcribeBlob(blob,handsRequest.signal);
+        if (!hands.enabled || hands.epoch!==epoch) return;
+        if (text.trim()) { $('message').value=text; await send(text, false, null, true); }
+      }
+    });
+    await hands.start(); controls();
+  };
   $('check-in').onchange = () => {
-    checkins = 0;
-    if ($('check-in').checked && !shareStream) { $('check-in').checked = false; error('Share a screen first to enable check-ins.'); }
-    else if ($('check-in').checked) error('Check-ins send one snapshot per minute, up to 10 checks. They use AI credits and always run in Discuss mode.');
+    lastCheck=Date.now();
+    if ($('check-in').checked && !shareStream) { $('check-in').checked = false; error('Share a screen first to enable proactive comments.'); }
+    else if ($('check-in').checked) error('Proactive comments send periodic screen snapshots to your selected AI provider and use credits. Apex stays quiet when there is nothing useful to add.');
+    controls();
   };
   setInterval(() => {
-    if (!$('check-in').checked || !shareStream || active || recorder || root.classList.contains('speaking')) return;
-    if (++checkins >= 10) $('check-in').checked = false;
-    send('Optional screen check-in: mention only one new, concrete issue or useful next step visible in this snapshot and relevant to our conversation. Do not repeat previous advice. Do not use tools. If there is nothing useful to add, respond exactly NOTHING_TO_ADD.', true);
-  }, 60000);
+    const now=Date.now(), interval=Number($('check-frequency').value)*1000;
+    if (!$('check-in').checked || !shareStream || active || recorder || hands?.busy || speechBusy || root.classList.contains('speaking')) return;
+    if (now-lastCheck<interval || now-lastInteraction<20000 || $('message').value.trim()) return;
+    lastCheck=now;
+    send('Optional screen comment.', true);
+  }, 1000);
   $('new').onclick = () => { stopSpeech(); threadId = null; localStorage.removeItem('apex_companion_thread'); $('messages').replaceChildren($('welcome')); error(); };
   $('float').onclick = async () => {
     error();
@@ -313,7 +363,7 @@
     catch (exc) { $('login-error').textContent = exc.message; }
   };
   $('login').addEventListener('cancel', event => event.preventDefault());
-  window.addEventListener('pagehide', () => { stopShare(); stopSpeech(); recordingEpoch++; micStream?.getTracks().forEach(track => track.stop()); });
+  window.addEventListener('pagehide', () => { disableHands(); stopShare(); stopSpeech(); recordingEpoch++; micStream?.getTracks().forEach(track => track.stop()); });
   $('recover').onclick = () => { if (pendingRemote) send(pendingRemote.message || 'Reconnected task', false, pendingRemote); };
   $('refresh-jobs').onclick = () => refreshJobs().catch(exc => error(exc.message));
   $('jobs').onchange = () => {

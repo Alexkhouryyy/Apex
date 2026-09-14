@@ -133,6 +133,15 @@ async def companion_chat(request: Request, durable: bool = False):
             raise ValueError("Expected a message object.")
         message = body.get("message")
         mode = body.get("mode", "discuss")
+        proactive = body.get("proactive", False)
+        if type(proactive) is not bool:
+            raise ValueError("Invalid proactive flag.")
+        if proactive:
+            if durable or not body.get("screen_image"):
+                raise ValueError("Proactive comments require a fresh shared screen snapshot.")
+            mode = "observe"
+        elif mode not in ("discuss", "work"):
+            raise ValueError("Choose Discuss or Work mode.")
         turn_id = body.get("turn_id")
         if not isinstance(message, str) or not 1 <= len(message.strip()) <= 20_000:
             raise ValueError("Enter a message of 1–20,000 characters.")
@@ -142,7 +151,7 @@ async def companion_chat(request: Request, durable: bool = False):
         companion.validate_screen_image(body.get("screen_image"))
         if durable and body.get("screen_image"):
             raise ValueError("Remote tasks accept text or transcribed speech; use the companion for screen snapshots.")
-        agent_message = workspace_message(body, message.strip())
+        agent_message = companion.CHECKIN_PROMPT if proactive else workspace_message(body, message.strip())
         thread_id = body.get("thread_id")
         if thread_id is not None:
             if type(thread_id) is not int or thread_id < 1:
@@ -209,15 +218,18 @@ async def companion_chat(request: Request, durable: bool = False):
                             memory.add_user(item["text"])
                         else:
                             memory.add_assistant([{"type": "text", "text": item["text"]}])
-            conversations.add_message(thread_id, "user", message.strip())
+            if not proactive:
+                conversations.add_message(thread_id, "user", message.strip())
             response = agent.run(
                 agent_message, include_screenshot=False, streamer=Streamer(),
                 channel_id=channel_id, cancel_event=cancel,
                 companion_mode=mode, screen_image=body.get("screen_image"),
+                max_iterations=1 if proactive else None,
             )
             if cancel.is_set():
                 response = (response or "") + "\n[Interrupted; any completed actions remain in effect.]"
-            conversations.add_message(thread_id, "agent", response)
+            if not proactive or response.strip() != "NOTHING_TO_ADD":
+                conversations.add_message(thread_id, "agent", response)
             if durable:
                 jobs.update(turn_id, text=response or "", evidence=progress["evidence"],
                             status="interrupted" if cancel.is_set() else "done")
@@ -262,3 +274,39 @@ async def companion_chat(request: Request, durable: bool = False):
         return JSONResponse({"id": turn_id, "thread_id": thread_id, "status": "running"}, status_code=202)
     return StreamingResponse(events(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+# Bound concurrent browser transcriptions. Local model work keeps running if
+# the browser disconnects, but a stopped client will discard the stale result.
+_stt_slots = threading.BoundedSemaphore(2)
+
+
+@router.post('/api/companion/transcribe')
+async def transcribe_browser(request: Request):
+    _check_origin(request)
+    engine = request.query_params.get('engine', 'local')
+    if engine not in ('local', 'openai'):
+        raise HTTPException(400, 'Choose local or OpenAI transcription.')
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > 8_000_000:
+            raise HTTPException(413, 'Audio is too large. Keep each utterance under 30 seconds.')
+    if not data:
+        raise HTTPException(400, 'Empty audio.')
+    if not _stt_slots.acquire(blocking=False):
+        raise HTTPException(429, 'Transcription is busy. Try again shortly.')
+    name = 'speech.mp4' if 'mp4' in request.headers.get('content-type', '') else 'speech.webm'
+    def work():
+        try:
+            from voice.browser_stt import transcribe
+            return transcribe(bytes(data), name, engine)
+        finally:
+            _stt_slots.release()
+    try:
+        result = await asyncio.shield(asyncio.get_running_loop().run_in_executor(None, work))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, 'Transcription unavailable: ' + str(exc)) from exc
+    return {'text': result}

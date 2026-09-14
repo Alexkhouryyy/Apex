@@ -14,7 +14,7 @@ w.fetch=async(path,opts={})=>{
  requests.push({path,opts});
  if(path==='/api/status')return Response.json({});
  if(path.startsWith('/api/chat/threads'))return Response.json({messages:[]});
- if(path==='/api/transcribe')return new Promise(r=>{transcribeResolve=r;});
+ if(path.startsWith('/api/companion/transcribe'))return new Promise(r=>{transcribeResolve=r;});
  if(path==='/api/speak')return new Promise(r=>{ttsResolve=r;});
  if(path.includes('/cancel/'))return Response.json({cancel_requested:true});
  if(path==='/api/companion/chat'){

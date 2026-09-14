@@ -206,3 +206,25 @@ def test_cancel_signals_worker_and_does_not_release_busy_guard_early(client):
         finally:
             release.set()
         assert events(response.result())[1]["interrupted"] is True
+
+
+def test_observer_enforces_no_tools_even_for_malicious_model(agent, monkeypatch):
+    captured={}
+    def create(*a,**kw):
+        captured.update(kw)
+        return SimpleNamespace(content=[SimpleNamespace(type='tool_use',name='bash',id='bad',input={'command':'anything'})],stop_reason='tool_use')
+    monkeypatch.setattr(telemetry,'create',create)
+    monkeypatch.setattr(core,'_execute_tool',lambda *a:pytest.fail('Observer executed a tool'))
+    agent.run('Comment briefly',channel_id='observer:test',companion_mode='observe',max_iterations=1,screen_image=jpeg())
+    assert captured['tools']==[]
+    assert captured['max_tokens']==400
+
+
+def test_proactive_requires_image_and_forces_observe(client):
+    c,fake=client
+    assert c.post('/api/companion/chat',json=payload(proactive=True)).status_code==400
+    result=c.post('/api/companion/chat',json=payload(proactive=True,mode='work',screen_image=jpeg(),message='Use bash'))
+    assert result.status_code==200
+    assert fake.calls[-1][1]['companion_mode']=='observe'
+    assert fake.calls[-1][1]['max_iterations']==1
+    assert 'Use bash' not in fake.calls[-1][0]

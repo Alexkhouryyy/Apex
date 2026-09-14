@@ -3179,7 +3179,7 @@ class AgentCore:
         Pass channel_id=None (default) for the main voice/text conversation.
         """
         from agent import companion
-        if companion_mode is not None and companion_mode not in {"discuss", "work"}:
+        if companion_mode is not None and companion_mode not in {"discuss", "work", "observe"}:
             raise ValueError("Companion mode must be discuss or work.")
         screen_b64 = companion.validate_screen_image(screen_image)
         memory, lock = self._get_channel(channel_id)
@@ -3287,10 +3287,10 @@ class AgentCore:
                 _routed_model, _complexity = _router.route_model(user_text, self._model, use_thinking)
                 kwargs = dict(
                     model=_routed_model,
-                    max_tokens=16000,
+                    max_tokens=400 if companion_mode == "observe" else 16000,
                     system=turn_system(),
                     tools=[t for t in self._all_tools()
-                           if companion_mode != "discuss" or t["name"] in companion.DISCUSS_TOOLS],
+                           if companion_mode != "observe" and (companion_mode != "discuss" or t["name"] in companion.DISCUSS_TOOLS)],
                     messages=memory.get_messages(),
                 )
 
@@ -3345,7 +3345,7 @@ class AgentCore:
                 # of before. Done BEFORE add_assistant so the winner is what enters
                 # conversation history — otherwise memory would diverge from what
                 # the user actually saw.
-                if self._rerank_eligible(stop_reason, streamer is not None):
+                if companion_mode != "observe" and self._rerank_eligible(stop_reason, streamer is not None):
                     response_content, this_text = self._rerank_answer(
                         kwargs, response_content, this_text
                     )
@@ -3378,8 +3378,8 @@ class AgentCore:
                     _broadcast_live_event("tool", f"{block.name}({json.dumps(block.input, ensure_ascii=False)[:80]})")
                     if cancel_event is not None and cancel_event.is_set():
                         result_str = "Tool not executed: the user interrupted this turn."
-                    elif companion_mode == "discuss" and block.name not in companion.DISCUSS_TOOLS:
-                        result_str = "Tool not executed: Discuss mode does not permit this action."
+                    elif companion_mode == "observe" or (companion_mode == "discuss" and block.name not in companion.DISCUSS_TOOLS):
+                        result_str = "Tool not executed: Observe mode has no tools." if companion_mode == "observe" else "Tool not executed: Discuss mode does not permit this action."
                     else:
                         if callable(getattr(streamer, "tool", None)):
                             streamer.tool({"phase": "start", "name": block.name})
@@ -3396,7 +3396,7 @@ class AgentCore:
                 memory.add_user(tool_results)
 
             # Self-improving skills: off-thread, propose a skill for complex turns.
-            if companion_mode != "discuss":
+            if companion_mode not in {"discuss", "observe"}:
                 self._maybe_autocreate_skill(turn_tool_names, user_text)
 
             if cancel_event is not None and cancel_event.is_set():
