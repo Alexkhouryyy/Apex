@@ -33,7 +33,7 @@ w.fetch=async(url,opts={})=>{
 };
 w.eval(fs.readFileSync(path.join(base,'handsfree.js'),'utf8'));w.eval(fs.readFileSync(path.join(base,'companion.js'),'utf8'));
 (async()=>{
- await tick();$('hands-free').checked=true;$('hands-free').dispatchEvent(new w.Event('change'));await tick();
+ await tick();$('voice').value='browser';$('hands-free').checked=true;$('hands-free').dispatchEvent(new w.Event('change'));await tick();
  assert.equal(micRequests,1);assert.equal(recorders.at(-1).state,'recording');
  advance(8100,0);await tick();assert.equal(uploads,0); // silence stays local
  advance(500,.05);advance(1300,0);await tick();await tick();

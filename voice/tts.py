@@ -30,14 +30,16 @@ def speak(text: str, interruptible: bool = True) -> bool:
         _speaking.set()
         interrupt_mod.reset()
 
-        engine = _get_pyttsx3() if config.TTS_ENGINE != "elevenlabs" else None
+        engine = _get_pyttsx3() if config.TTS_ENGINE == "pyttsx3" else None
         stop_watcher = (
             interrupt_mod.start_listening_for_interrupt(tts_engine=engine)
             if interruptible else lambda: None
         )
 
         try:
-            if config.TTS_ENGINE == "openai" and config.OPENAI_API_KEY:
+            if config.TTS_ENGINE == "voicebox":
+                _speak_voicebox(text)
+            elif config.TTS_ENGINE == "openai" and config.OPENAI_API_KEY:
                 _speak_openai(text)
             elif config.TTS_ENGINE == "elevenlabs" and config.ELEVENLABS_API_KEY:
                 _speak_elevenlabs(text)
@@ -101,3 +103,27 @@ def _speak_elevenlabs(text: str) -> None:
     )
     if proc.returncode != 0:
         _speak_pyttsx3(text)
+
+
+def _speak_voicebox(text):
+    import asyncio
+    import io
+    import wave
+    import numpy as np
+    import sounddevice as sd
+    import time
+    from voice.voicebox import synthesize
+    audio = asyncio.run(synthesize(text))
+    if interrupt_mod.is_interrupted():
+        return
+    with wave.open(io.BytesIO(audio), 'rb') as wav:
+        if wav.getsampwidth() != 2:
+            raise ValueError('Voicebox terminal playback requires PCM16 WAV.')
+        samples = np.frombuffer(wav.readframes(wav.getnframes()), dtype='<i2')
+        samples = samples.reshape(-1, wav.getnchannels())
+        sd.play(samples, wav.getframerate())
+        try:
+            while sd.get_stream().active and not interrupt_mod.is_interrupted():
+                time.sleep(0.05)
+        finally:
+            sd.stop()

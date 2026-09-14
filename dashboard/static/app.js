@@ -2001,7 +2001,7 @@ async function transcribeAndSend(blob, type) {
 function speakText(text) {
   if (!document.getElementById('voice-output')?.checked) return;
   const engine = document.getElementById('voice-engine')?.value || 'browser';
-  if (engine === 'openai') speakOpenAI(text);
+  if (['openai', 'voicebox'].includes(engine)) speakOpenAI(text, engine);
   else speakBrowser(text);
 }
 function speakBrowser(text) {
@@ -2017,22 +2017,29 @@ function speakBrowser(text) {
     window.speechSynthesis.speak(u);
   } catch (e) {}
 }
-async function speakOpenAI(text) {
+async function speakOpenAI(text, engine) {
   try {
     const r = await fetch('/api/speak', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, engine }),
     });
-    if (!r.ok) { speakBrowser(text); return; }
-    const audio = new Audio(URL.createObjectURL(await r.blob()));
+    if (!r.ok) { const detail = await r.json().catch(() => ({})); throw new Error(detail.error || 'Voice generation failed'); }
+    const audioUrl = URL.createObjectURL(await r.blob());
+    const audio = new Audio(audioUrl);
+    audio.addEventListener('ended', () => URL.revokeObjectURL(audioUrl), {once:true});
+    audio.addEventListener('error', () => { URL.revokeObjectURL(audioUrl); _setApexState('idle'); }, {once:true});
     audio.crossOrigin = 'anonymous';
     _setApexState('speaking');
     // Real lip-sync: drive the avatar mouth from the live audio amplitude.
     const wired = _attachLipSync(audio);
     if (!wired) audio.addEventListener('ended', () => _setApexState('idle'));
     audio.play().catch(() => {});
-  } catch (e) { speakBrowser(text); }
+  } catch (e) {
+    _setApexState('idle');
+    const message = document.getElementById('chat-model-msg');
+    if (message) message.textContent = e.message;
+  }
 }
 
 // ============== COUNCIL ==============

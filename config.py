@@ -56,7 +56,7 @@ MAX_RECORD_SECONDS = 60         # hard cap on recording length
 SAMPLE_RATE = 16000
 
 # TTS
-TTS_ENGINE = os.getenv("TTS_ENGINE", "pyttsx3")  # pyttsx3 | elevenlabs | openai
+TTS_ENGINE = os.getenv("TTS_ENGINE", "voicebox")  # voicebox | pyttsx3 | elevenlabs | openai
 TTS_RATE = 185                  # words per minute (pyttsx3)
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
 OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "alloy")   # alloy|echo|fable|onyx|nova|shimmer
@@ -598,3 +598,8 @@ FORGE_BUILD_Z_MM = float(os.getenv("FORGE_BUILD_Z_MM", "256"))
 # which is the failure this module exists to stop. STL is offered because every
 # machine eats it, not because it is good.
 FORGE_DEFAULT_FORMAT = os.getenv("FORGE_DEFAULT_FORMAT", "3mf").strip().lower()
+
+# Local Qwen speech via the Voicebox desktop application.
+VOICEBOX_URL = os.getenv("VOICEBOX_URL", "http://127.0.0.1:17493")
+VOICEBOX_PROFILE = os.getenv("VOICEBOX_PROFILE", "")  # exact profile ID or unique name
+VOICEBOX_SPEAKER = os.getenv("VOICEBOX_SPEAKER", "Ryan")

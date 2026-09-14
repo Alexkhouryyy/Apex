@@ -84,6 +84,19 @@
     if (!active && !recorder) state('', 'Ready when you are.');
     resumeHands(); controls();
   }
+  async function loadVoiceboxProfiles() {
+    try {
+      const data = await (await request('/api/voicebox/profiles')).json();
+      const select = $('voicebox-profile');
+      const chosen = localStorage.getItem('apex.voicebox.profile') || '';
+      select.replaceChildren(new Option('Apex default · Ryan preset', ''));
+      for (const p of data.profiles) select.add(new Option(p.name, p.id));
+      if ([...select.options].some(o => o.value === chosen)) select.value = chosen;
+    } catch (_) { /* Voicebox may be opened later; retry when voice changes. */ }
+  }
+  $('voicebox-profile').addEventListener('change', () => localStorage.setItem('apex.voicebox.profile', $('voicebox-profile').value));
+  $('voice').addEventListener('change', loadVoiceboxProfiles);
+  loadVoiceboxProfiles();
   async function speak(text) {
     stopSpeech();
     if (!$('spoken').checked || !text) { resumeHands(); return; }
@@ -91,10 +104,10 @@
     const epoch = speechEpoch;
     const finish = () => { if (epoch === speechEpoch) stopSpeech(); };
     try {
-      if ($('voice').value === 'openai') {
+      if (['openai', 'voicebox'].includes($('voice').value)) {
         speechRequest = new AbortController();
         const response = await request('/api/speak', {method: 'POST', signal: speechRequest.signal,
-          headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text})});
+          headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text, engine: $('voice').value, profile: $('voicebox-profile').value})});
         const blob = await response.blob();
         if (epoch !== speechEpoch) return;
         audioUrl = URL.createObjectURL(blob); audio = new Audio(audioUrl);

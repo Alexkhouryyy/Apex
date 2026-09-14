@@ -1884,13 +1884,38 @@ async def transcribe_endpoint(file: UploadFile = File(...)):
     return {"text": (getattr(tr, "text", "") or "").strip()}
 
 
-# --- Voice: text-to-speech (OpenAI TTS) ---
+# --- Voice: local Voicebox or explicitly selected OpenAI TTS ---
 @app.post("/api/speak")
 async def speak_endpoint(request: Request):
+    from dashboard.companion import _check_origin
+    _check_origin(request)
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > 24000:
+            return JSONResponse({"error": "Speech request too large"}, status_code=413)
+    try:
+        body = json.loads(raw)
+        text = body.get("text", "").strip()
+        engine = body.get("engine", config.TTS_ENGINE)
+        profile = body.get("profile", "")
+        if not isinstance(profile, str) or len(profile) > 200 or len(text) > 4000:
+            raise ValueError()
+    except (ValueError, AttributeError, TypeError):
+        return JSONResponse({"error": "Invalid speech request"}, status_code=400)
+    if not text:
+        return JSONResponse({"error": "empty text"}, status_code=400)
+    if engine == "voicebox":
+        from voice.voicebox import synthesize
+        try:
+            audio = await synthesize(text, profile)
+            return Response(content=audio, media_type="audio/wav")
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+    if engine != "openai":
+        return JSONResponse({"error": "Choose voicebox or openai"}, status_code=400)
     if not config.OPENAI_API_KEY:
         return JSONResponse({"error": "OPENAI_API_KEY not set"}, status_code=503)
-    body = await request.json()
-    text = (body.get("text") or "").strip()
     if not text:
         return JSONResponse({"error": "empty text"}, status_code=400)
 
@@ -2358,3 +2383,14 @@ def start_in_background(port: int = 7860, host: str | None = None) -> threading.
     t.dashboard_url = f"http://{shown}:{port}"
     t.dashboard_host, t.dashboard_port = _host, port
     return t
+
+
+@app.get("/api/voicebox/profiles")
+async def voicebox_profiles():
+    from voice.voicebox import profiles
+    try:
+        rows = await profiles()
+        return {"profiles": [{"id": p["id"], "name": p["name"]} for p in rows
+                             if p.get("voice_type") != "preset" or p.get("preset_engine") == "qwen_custom_voice"]}
+    except Exception:
+        return JSONResponse({"error": "Keep Voicebox open on the Apex laptop."}, status_code=503)
