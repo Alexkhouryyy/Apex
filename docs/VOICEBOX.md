@@ -27,6 +27,30 @@ The /drive page uses the same voice controls. The main dashboard also offers
 Local Qwen under Voice, with a separate Speak replies checkbox.
 Terminal voice mode uses TTS_ENGINE=voicebox (omit --text when starting Apex).
 
+## Which voices Apex offers
+
+One rule, `voicebox.resolve_engine`, decides it — and the same rule runs on both
+the list and the speech, so **anything shown in the picker works, and anything
+not shown is refused if its id is sent directly.** Those used to be four
+different rules in four places, and the dropdown was a suggestion rather than a
+statement about what would play.
+
+Offered: Qwen presets (`preset_engine` of `qwen` or `qwen_custom_voice`) and
+cloned voices. Not offered: presets built on another engine, and imported
+recordings.
+
+A voice type Apex has never seen is still offered and driven as a clone. That is
+deliberate, and it is the one place this does not follow Apex's usual
+deny-by-default rule: Voicebox owns this vocabulary, not Apex, so refusing an
+unrecognised type would break a working voice the first time Voicebox ships a
+new kind. There is no safety question here to justify that risk. If a future
+voice kind needs different handling, `resolve_engine` is the single line to
+change.
+
+If a profile you pinned with `VOICEBOX_PROFILE`, or one remembered in a
+browser, stops being usable, Apex says so by name and says what kind of voice it
+is — it does not report it as missing.
+
 ## Select your voice
 
 In Companion, select an existing Qwen voice in **Qwen profile**. This choice is

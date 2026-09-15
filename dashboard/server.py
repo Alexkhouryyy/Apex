@@ -2389,8 +2389,11 @@ def start_in_background(port: int = 7860, host: str | None = None) -> threading.
 async def voicebox_profiles():
     from voice.voicebox import profiles
     try:
+        # A pure projection. The eligibility rule used to live here as a SECOND
+        # filter on top of profiles(), which meant it did not exist for any
+        # other caller — not synthesize, not voice/tts.py, not setup_voicebox.
+        # It now lives in voicebox.resolve_engine, which profiles() applies.
         rows = await profiles()
-        return {"profiles": [{"id": p["id"], "name": p["name"]} for p in rows
-                             if p.get("voice_type") != "preset" or p.get("preset_engine") == "qwen_custom_voice"]}
+        return {"profiles": [{"id": p["id"], "name": p["name"]} for p in rows]}
     except Exception:
         return JSONResponse({"error": "Keep Voicebox open on the Apex laptop."}, status_code=503)
