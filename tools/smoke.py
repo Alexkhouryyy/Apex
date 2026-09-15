@@ -546,6 +546,32 @@ NOT_CONFIGURED = (
     "disabled", "unavailable", "no api key", "missing",
 )
 
+# The same idea one layer down: an optional dependency that is a SEPARATE
+# PROGRAM, not a credential. Voicebox is a desktop app on the user's laptop, and
+# "it is not running" is correctly reported as 503 Service Unavailable — the
+# route is healthy and honest. Every machine without that app, CI included,
+# would otherwise fail this check forever.
+#
+# Deliberately NOT "any 503 is fine". A 503 counts as unconfigured only when
+# its body names the thing that is absent; a 503 with an opaque body is still
+# broken, because a route that swallows a real error into a generic 503 is the
+# exact fail-open shape this sweep exists to catch.
+# Written out rather than built from NOT_CONFIGURED, and that is the whole
+# point. The first version was `NOT_CONFIGURED + (...)`, which inherits the word
+# "unavailable" — and the default HTTP reason phrase for a 503 is literally
+# "Service Unavailable". Every opaque 503 in the codebase would have been
+# excused by the generic string the protocol itself supplies. Caught by
+# `test_an_opaque_503_is_still_broken`, not by reading it back.
+#
+# Each phrase below names a THING that is absent. None of them appears in a
+# stock 5xx body.
+SERVICE_ABSENT = (
+    "keep voicebox open", "is not running", "isn't running",
+    "not reachable", "cannot reach", "can't reach", "connection refused",
+    "not configured", "not set up", "no credentials", "not installed",
+    "start it", "open it on",
+)
+
 ROUTE_PARAMS = {
     "thread_id": "1", "goal_id": "1", "doc_id": "1",
     "session_id": "1", "uid": "1", "token_id": "1",
@@ -618,6 +644,8 @@ def every_dashboard_tab_answers(r: BootResult) -> Finding:
             broken.append(f"{e['route']} -> {body[:80]}")
         elif status == 404:
             continue                      # a made-up id is legitimately absent
+        elif status == 503 and any(w in body.lower() for w in SERVICE_ABSENT):
+            unconfigured.append(f"{e['route']} -> 503 {body[:60]}")
         elif status >= 500:
             broken.append(f"{e['route']} -> HTTP {status}")
         elif status == 401:

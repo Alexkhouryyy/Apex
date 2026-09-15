@@ -302,9 +302,20 @@ class TestConversationFallback:
         def add_assistant(self, content): self.added.append(content)
 
     def test_disabled_returns_none_so_the_api_path_runs(self, monkeypatch):
+        """`_model` is set here for the same reason every sibling below sets it.
+
+        `_try_subscription` now checks the provider FIRST — that is the
+        "selecting DeepSeek never routes through the Claude subscription
+        adapter" guarantee, and it belongs first. This test predates that check
+        and reached it with a bare object, so it died on AttributeError before
+        testing anything. Without an Anthropic model it would now exit at the
+        provider gate and pass without ever touching SUBSCRIPTION_ENABLED,
+        which is the branch it is named after.
+        """
         import config
         monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", False, raising=False)
         core, mem = self._core(), self._Mem()
+        monkeypatch.setattr(type(core), "_model", "claude-opus-5", raising=False)
         assert core._try_subscription("hi", mem) is None
         assert mem.added == [], "a skipped turn must not touch memory"
 

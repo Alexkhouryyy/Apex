@@ -115,13 +115,31 @@ class TestRoleIsolationEndToEnd:
         assert subagent_scope.active_role() is None
 
 
+# Imported for its SIDE EFFECT, and that is the point. `agent/team.py` injects
+# `team_*` entries into subagent_scope.ROLE_TOOLS at import time, and the
+# parametrize below reads that dict at COLLECTION time — so whether the team
+# roles were covered at all depended on whether anything else happened to
+# import team first. The suite's contents varied between runs, which is worse
+# than a failing test: it is a test suite that does not know what it is
+# testing. Importing it here makes the role list the same every run.
+from agent import team as _team_roles  # noqa: F401
+
+
 class TestNoRecursiveSpawning:
     """orchestrator.py's own docstring: "Sub-agents cannot recursively spawn
     (to prevent runaways)." Nothing checked that before subagent_scope.check()
     existed. Revert the fix and a sub-agent spawning a grandchild succeeds.
+
+    Two different mechanisms satisfy this, and both count. A generic role is
+    spawned and its grandchild is refused by `subagent_scope.check`. A `team_*`
+    role cannot be reached through `orchestrator.spawn` at ALL — team.py says
+    so in as many words: "These names cannot be selected by the existing
+    generic spawn tool." That is a stronger guarantee, not a missing one, and
+    the earlier version of this test read it as a failure because it assumed
+    every role in ROLE_TOOLS was spawnable.
     """
 
-    @pytest.mark.parametrize("role", list(subagent_scope.ROLE_TOOLS))
+    @pytest.mark.parametrize("role", sorted(subagent_scope.ROLE_TOOLS))
     def test_a_subagent_of_any_role_cannot_spawn_a_grandchild(self, role):
         from agent import core
         captured = {}
@@ -133,6 +151,13 @@ class TestNoRecursiveSpawning:
 
         orchestrator.set_agent_factory(lambda: _FakeAgent(fake_run))
         sub_id = orchestrator.spawn(role, "try to spawn a grandchild")
+        if "Unknown role" in str(sub_id):
+            assert role not in ("researcher", "coder", "browser", "analyst",
+                                "writer", "planner"), \
+                f"'{role}' should be spawnable and was refused: {sub_id}"
+            return          # never spawned, so no grandchild was ever possible
         orchestrator.wait_for([sub_id], timeout=5)
+        assert "result" in captured, \
+            f"a '{role}' sub-agent never ran, so nothing was proven"
         assert "[Blocked]" in captured["result"], \
             f"a '{role}' sub-agent was able to spawn a grandchild"
