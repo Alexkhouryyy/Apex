@@ -1,15 +1,35 @@
 """MCP client — discovers and connects to MCP servers configured in Claude Code settings.
 
 Reads mcpServers from ~/.claude/settings.json (or project .claude/settings.json),
-starts each server as a subprocess, handshakes, and exposes their tools to the agent.
+connects to each server, handshakes, and exposes their tools to the agent.
 
-Tool calls are dispatched synchronously via the MCP SDK's stdio transport.
+## Two kinds of server, one door
+
+A server is either a LOCAL PROCESS Apex starts (`command`/`args`, stdio) or a
+REMOTE ENDPOINT Apex connects to (`url`, streamable HTTP or SSE). Both arrive
+through `_transport()`, which every one of the three places that opens a
+connection — `probe`, `_connect_server`, `_call_tool` — goes through. Three
+copies of "which transport is this" is how one of them ends up supporting a
+config shape the other two silently refuse.
+
+The transport is never guessed when the config is ambiguous. A config carrying
+both `command` and `url` is refused with its name, because picking one would
+mean quietly connecting somewhere the author did not mean.
+
+## Headers carry credentials, and `mcp_servers.json` is in git
+
+A remote server usually authenticates with a header, and that is a new way for
+a secret to reach a tracked file — the same mistake this repo already made once
+with `env`. Header values get the same `${VAR}` expansion, and a
+credential-shaped header written literally is warned about by name at
+discovery. See `agent/mcp_catalog.py` for the placeholder convention.
 """
 import asyncio
 import json
 import os
 import threading
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -65,6 +85,7 @@ def _run(coro):
 def _find_settings_files() -> list[Path]:
     candidates = [
         Path.cwd() / "mcp_servers.json",                                          # project config (our primary)
+        Path.cwd() / ".mcp.json",                                                 # Claude Code project scope
         Path.home() / ".claude" / "settings.json",                                # Claude Code
         Path.home() / ".config" / "Claude" / "claude_desktop_config.json",        # Claude Desktop (Linux)
         Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",  # Mac
@@ -124,6 +145,171 @@ def _params(config: dict):
     )
 
 
+# The transports Apex can open. `websocket` exists in the SDK and is
+# deliberately absent: nothing writes that config shape today, and a transport
+# nobody has ever connected over is a claim, not a feature.
+STDIO, HTTP, SSE = "stdio", "http", "sse"
+TRANSPORTS = (STDIO, HTTP, SSE)
+
+# Spellings seen in the wild for the same thing. Claude Code writes `"type"`,
+# its CLI flag is `--transport`, and the MCP docs say "streamable HTTP"; a
+# config that names the transport correctly must not fail because it hyphenated
+# it differently from us.
+_TRANSPORT_ALIASES = {
+    "stdio": STDIO, "http": HTTP, "https": HTTP,
+    "streamable-http": HTTP, "streamable_http": HTTP, "streamablehttp": HTTP,
+    "sse": SSE,
+}
+
+# Header names that conventionally carry a credential. Deliberately a list of
+# names rather than a guess about which VALUES look secret: a heuristic on
+# values warns about `X-Client-Id: claude-code` too, and a warning that fires on
+# harmless configs is one nobody reads by Tuesday.
+_CREDENTIAL_HEADERS = ("authorization", "proxy-authorization", "cookie",
+                       "x-api-key", "api-key", "x-auth-token")
+_CREDENTIAL_WORDS = ("token", "secret", "password", "apikey", "api_key")
+
+
+def transport_of(config: dict) -> str:
+    """Which transport this config describes. Raises ValueError on ambiguity.
+
+    Order matters: an explicit `type`/`transport` wins, because a config that
+    says what it is should not be second-guessed by what other keys happen to
+    be present. Only when nothing is declared is it inferred from `url` vs
+    `command` — and a config with BOTH is refused rather than resolved, since
+    either choice would connect somewhere the author did not ask for.
+    """
+    declared = str(config.get("type") or config.get("transport") or "").strip().lower()
+    if declared:
+        kind = _TRANSPORT_ALIASES.get(declared)
+        if kind is None:
+            raise ValueError(
+                f"unknown transport {declared!r}. Apex speaks: {', '.join(TRANSPORTS)}.")
+        if kind == STDIO and not config.get("command"):
+            raise ValueError("a stdio server needs a 'command'.")
+        if kind in (HTTP, SSE) and not config.get("url"):
+            raise ValueError(f"a {kind} server needs a 'url'.")
+        return kind
+    has_url, has_cmd = bool(config.get("url")), bool(config.get("command"))
+    if has_url and has_cmd:
+        raise ValueError(
+            "it has both 'command' and 'url', so Apex cannot tell whether to "
+            "start a local process or connect to a remote endpoint. Remove one, "
+            "or set 'type' to stdio or http.")
+    if has_url:
+        return HTTP
+    if has_cmd:
+        return STDIO
+    raise ValueError("it has neither 'command' nor 'url'.")
+
+
+def _url_of(config: dict) -> str:
+    """The endpoint, placeholders resolved, or a refusal naming what is missing.
+
+    The unset-variable check runs BEFORE expansion, and that ordering is the
+    whole point. `_expand_env` turns an unset `${MCP_HOST}` into an empty
+    string, so `http://${MCP_HOST}/mcp` becomes `http:///mcp` — which still
+    starts with `http://` and no longer contains a placeholder to notice. The
+    first version of this function checked afterwards and could therefore never
+    fire; the connection failed later with a network error blaming the network.
+    Found by the test that asserts this refusal, not by reading the code.
+    """
+    raw = str(config.get("url", "")).strip()
+    missing = [v for v in _ENV_REF.findall(raw) if not os.environ.get(v)]
+    if missing:
+        raise ValueError(
+            f"url references {', '.join('${' + v + '}' for v in missing)}, which "
+            f"{'is' if len(missing) == 1 else 'are'} not set. Put "
+            f"{'it' if len(missing) == 1 else 'them'} in .env.")
+    url = str(_expand_env(raw)).strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise ValueError(f"url must start with http:// or https://, got {url[:60]!r}")
+    return url
+
+
+def _headers_of(config: dict) -> dict:
+    """Header values with `${VAR}` resolved. Pure: warnings live next door."""
+    raw = config.get("headers") or {}
+    if not isinstance(raw, dict):
+        raise ValueError("'headers' must be an object of name -> value.")
+    return {str(k): str(v) for k, v in _expand_env(raw).items()}
+
+
+def literal_credential_headers(config: dict) -> list[str]:
+    """Header names that look like credentials and were written out in full.
+
+    Separate from `_headers_of` because it is a DISCOVERY-time warning, not a
+    connection-time one: folded into the header builder it fired on every
+    single tool call, which is how a warning becomes wallpaper.
+    """
+    raw = config.get("headers") or {}
+    if not isinstance(raw, dict):
+        return []
+    out = []
+    for key, value in raw.items():
+        low = str(key).lower()
+        if (low in _CREDENTIAL_HEADERS or any(w in low for w in _CREDENTIAL_WORDS)) \
+                and "${" not in str(value):
+            out.append(str(key))
+    return out
+
+
+def endpoint_of(config: dict) -> str:
+    """What this server IS, in one string, for status and error messages."""
+    try:
+        kind = transport_of(config)
+    except ValueError:
+        return str(config.get("url") or config.get("command") or "")
+    if kind == STDIO:
+        args = config.get("args") or []
+        return " ".join([str(config.get("command", ""))] + [str(a) for a in args]).strip()
+    return str(config.get("url", ""))
+
+
+@asynccontextmanager
+async def _transport(config: dict, *, timeout: float = 30.0):
+    """Open one server's transport and yield (read, write).
+
+    The single place that knows how each kind is opened. Note the streamable
+    HTTP client yields THREE values, not two — the third is a session-id
+    getter — so unpacking it like the stdio client raises ValueError at the
+    first connection. That is the kind of thing a wiring diagram hides and a
+    real connection finds immediately.
+    """
+    kind = transport_of(config)
+    if kind == STDIO:
+        from mcp.client.stdio import stdio_client
+        async with stdio_client(_params(config)) as (read, write):
+            yield read, write
+    elif kind == HTTP:
+        import mcp.client.streamable_http as _sh
+        url, headers = _url_of(config), _headers_of(config)
+        # The SDK renamed this and CHANGED ITS SIGNATURE at the same time: the
+        # new `streamable_http_client` takes neither `headers` nor `timeout` —
+        # both now live on an httpx client you build and pass in. Swapping the
+        # names alone still connects, still passes a "does it list tools" test,
+        # and silently sends no Authorization header at all. Found by the test
+        # that asserts the header arrives at the server.
+        new_api = getattr(_sh, "streamable_http_client", None)
+        if new_api is not None:
+            import httpx
+            from mcp.shared._httpx_utils import create_mcp_http_client
+            client = create_mcp_http_client(headers=headers,
+                                            timeout=httpx.Timeout(timeout))
+            async with new_api(url, http_client=client) as (read, write, _sid):
+                yield read, write
+        else:
+            async with _sh.streamablehttp_client(
+                    url, headers=headers, timeout=timeout) as (read, write, _sid):
+                yield read, write
+    else:
+        from mcp.client.sse import sse_client
+        async with sse_client(_url_of(config),
+                              headers=_headers_of(config),
+                              timeout=timeout) as (read, write):
+            yield read, write
+
+
 def probe(config: dict, timeout: float = 180.0) -> tuple:
     """Start a server, handshake, stop. Returns (ok, detail).
 
@@ -133,8 +319,7 @@ def probe(config: dict, timeout: float = 180.0) -> tuple:
     """
     async def _go():
         from mcp import ClientSession
-        from mcp.client.stdio import stdio_client
-        async with stdio_client(_params(config)) as (read, write):
+        async with _transport(config, timeout=min(timeout, 60.0)) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
@@ -160,12 +345,20 @@ def probe(config: dict, timeout: float = 180.0) -> tuple:
 async def _connect_server(name: str, config: dict) -> list[dict]:
     """Connect to an MCP server, return its tool definitions."""
     from mcp import ClientSession
-    from mcp.client.stdio import stdio_client, StdioServerParameters
 
-    cmd = config.get("command", "")
-    params = _params(config)
+    # Built INSIDE the try. It used to sit above it, which was harmless while
+    # every config was stdio and nothing here could raise — but transport
+    # selection can refuse a config, and an exception escaping this function
+    # aborts `discover()`'s whole loop. One malformed server would have taken
+    # every other server down with it, and the tools would simply be absent.
+    cmd = endpoint_of(config)
     try:
-        async with stdio_client(params) as (read, write):
+        kind = transport_of(config)
+        for header in literal_credential_headers(config):
+            print(f"[MCP] {name}: header '{header}' holds a literal value. If this "
+                  f"config lives in mcp_servers.json it is tracked by git — put the "
+                  f"secret in .env and write ${{VAR_NAME}} here instead.")
+        async with _transport(config) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools_result = await session.list_tools()
@@ -180,12 +373,13 @@ async def _connect_server(name: str, config: dict) -> list[dict]:
                     }
                     for t in (tools_result.tools or [])
                 ]
-                print(f"[MCP] {name}: {len(tools)} tools")
+                print(f"[MCP] {name}: {len(tools)} tools over {kind}")
                 _status[name] = {
                     "server": name, "state": "connected",
                     "tools": len(tools),
                     "tool_names": [t["_original"] for t in tools][:60],
-                    "command": cmd, "source": _source_of.get(name, ""),
+                    "command": cmd, "transport": kind, "endpoint": cmd,
+                    "source": _source_of.get(name, ""),
                     "error": "",
                 }
                 return tools
@@ -193,18 +387,25 @@ async def _connect_server(name: str, config: dict) -> list[dict]:
         print(f"[MCP] {name}: failed to connect — {e}")
         _status[name] = {
             "server": name, "state": "failed", "tools": 0, "tool_names": [],
-            "command": cmd, "source": _source_of.get(name, ""),
+            "command": cmd, "transport": _safe_transport(config), "endpoint": cmd,
+            "source": _source_of.get(name, ""),
             "error": f"{type(e).__name__}: {e}",
         }
         return []
 
 
+def _safe_transport(config: dict) -> str:
+    """The transport name, or "" when the config is the reason we failed."""
+    try:
+        return transport_of(config)
+    except ValueError:
+        return ""
+
+
 async def _call_tool(server_name: str, tool_name: str, inputs: dict, config: dict) -> str:
     from mcp import ClientSession
-    from mcp.client.stdio import stdio_client, StdioServerParameters
 
-    params = _params(config)
-    async with stdio_client(params) as (read, write):
+    async with _transport(config) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(tool_name, arguments=inputs)

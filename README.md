@@ -102,7 +102,7 @@ ones, something running alongside Apex:
 | Hand tracking + 3D glass board | `HANDTRACK_ENABLED=true`, `BOARD_ENABLED=true` | A webcam. Open `/board` on the dashboard. |
 | Voice-driven 3D creation | `BLENDER_ENABLED=true` | Blender running with `blender/apex_blender_addon.py` installed — see [blender/README.md](blender/README.md). |
 | Run on your Claude subscription | `SUBSCRIPTION_ENABLED=true` | The `claude` CLI installed and logged in. |
-| MCP tool servers | — | `mcpServers` in `mcp_servers.json` or `~/.claude/settings.json`; check status on the dashboard's **Control** tab. |
+| MCP tool servers | — | `mcpServers` in `mcp_servers.json`, `.mcp.json` or `~/.claude/settings.json`. Either a local process (`command`) or a remote endpoint (`url` + `headers`). Secrets go in `.env` as `${VAR}` — these files are in git. Status on the dashboard's **Control** tab. |
 
 ## Remote Access (Tailscale)
 

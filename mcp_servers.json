@@ -1,10 +1,13 @@
 {
-  "_comment": "Add your MCP servers here. Same format as Claude Desktop config.",
+  "_comment": "Add your MCP servers here. Same format as Claude Desktop config. Two kinds: a LOCAL process Apex starts (command + args), or a REMOTE endpoint Apex connects to (url + optional headers). Never put a secret here - this file is tracked in git. Write ${VAR_NAME} and put the value in .env.",
   "_docs": "https://modelcontextprotocol.io/quickstart/user",
   "mcpServers": {
     "_example_slack": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-slack"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-slack"
+      ],
       "env": {
         "SLACK_BOT_TOKEN": "xoxb-your-token-here",
         "SLACK_TEAM_ID": "T0000000000"
@@ -12,30 +15,59 @@
     },
     "_example_notion": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-notion"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-notion"
+      ],
       "env": {
         "NOTION_API_KEY": "secret_your-notion-key"
       }
     },
     "_example_gmail": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-google-drive"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-google-drive"
+      ],
       "env": {
         "GDRIVE_CREDENTIALS_PATH": "~/.config/gcloud/credentials.json"
       }
     },
     "_example_filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home", "/tmp"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/home",
+        "/tmp"
+      ],
       "env": {}
     },
     "_example_homeassistant": {
       "_note": "Remove the leading underscore from this key to activate. Requires: pip install mcp-server-home-assistant",
       "command": "uvx",
-      "args": ["mcp-server-home-assistant"],
+      "args": [
+        "mcp-server-home-assistant"
+      ],
       "env": {
         "HASS_URL": "http://homeassistant.local:8123",
         "HASS_TOKEN": "your_long_lived_access_token_here"
+      }
+    },
+    "_example_remote_http": {
+      "_note": "A remote MCP server. Remove the leading underscore to activate. 'type' is optional - a 'url' already means http.",
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${EXAMPLE_MCP_TOKEN}",
+        "X-Client-Id": "apex"
+      }
+    },
+    "_example_voicebox": {
+      "_note": "A local HTTP server, e.g. one already running on your machine.",
+      "url": "http://127.0.0.1:17493/mcp",
+      "headers": {
+        "X-Voicebox-Client-Id": "apex"
       }
     }
   }

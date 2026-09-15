@@ -4581,6 +4581,12 @@ async function _loadControlMcp() {
           sv.state === 'connected'
             ? `${sv.tools} tool${sv.tools === 1 ? '' : 's'}`
             : escapeHTML(sv.error || 'failed')}${
+          // Only when it is NOT a local process: every server used to be one,
+          // so "stdio" on every row is a column of noise. A remote endpoint is
+          // the thing worth seeing, because it is reachable over the network.
+          sv.transport && sv.transport !== 'stdio'
+            ? ` · <b>${escapeHTML(sv.transport)}</b> ${escapeHTML(sv.endpoint || '')}`
+            : ''}${
           on ? '' : ' · <b>switched off</b>'}</span>
         <button class="ghost-btn mcp-toggle" data-server="${escapeHTML(sv.server)}"
                 data-enable="${on ? '0' : '1'}">${on ? 'Turn off' : 'Turn on'}</button>
