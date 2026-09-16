@@ -50,6 +50,7 @@ jobs:
           export NODE_PATH="$RUNNER_TEMP/apex-ui-check/node_modules"
           node --check dashboard/static/companion.js
           node scripts/check_companion_ui.cjs
+          node scripts/check_companion_voice_ui.cjs
           node scripts/check_drive_spatial_ui.cjs
 
       - name: Structural audits (informational — never fails the build)

@@ -92,10 +92,22 @@
       select.replaceChildren(new Option('Apex default · Ryan preset', ''));
       for (const p of data.profiles) select.add(new Option(p.name, p.id));
       if ([...select.options].some(o => o.value === chosen)) select.value = chosen;
-    } catch (_) { /* Voicebox may be opened later; retry when voice changes. */ }
+    } catch (_) {
+      // Silent on purpose: Voicebox may simply not be open yet, and an error
+      // banner on every page load would train the user to ignore the banner.
+      // The list is refreshed from boot() once a token exists, and again
+      // whenever the Voice dropdown changes.
+    }
   }
   $('voicebox-profile').addEventListener('change', () => localStorage.setItem('apex.voicebox.profile', $('voicebox-profile').value));
   $('voice').addEventListener('change', loadVoiceboxProfiles);
+  // Fired here for the tokenless-localhost case, and again from boot() after a
+  // token is accepted. Without the second call the very first load of a
+  // token-protected dashboard fetches this list BEFORE the login dialog is
+  // answered, takes a 401, and never retries — so the Qwen profile dropdown
+  // shows only 'Apex default' and a user's own cloned voice is invisible until
+  // they happen to reload. The old comment said "retry when voice changes",
+  // but Voicebox is already the DEFAULT voice, so that change never happens.
   loadVoiceboxProfiles();
   async function speak(text) {
     stopSpeech();
@@ -358,6 +370,11 @@
   async function boot() {
     const status = await (await request('/api/status')).json();
     if ($('login').open) $('login').close();
+    // A successful boot clears whatever the last failure was. Without this the
+    // 401 raised before the token was entered leaves its red banner on screen
+    // for the rest of the session — the login handler cleared #login-error and
+    // not this one — so a page that is working correctly reads as broken.
+    error('');
     if (threadId) {
       const data = await (await request(`/api/chat/threads/${threadId}`)).json();
       $('messages').replaceChildren();
@@ -365,6 +382,7 @@
       if (!data.messages?.length) { threadId = null; localStorage.removeItem('apex_companion_thread'); $('messages').append($('welcome')); }
     }
     state('', status.agent_ready === false ? 'Apex agent is not connected yet. Start Apex, then try a message.' : 'Ready when you are.'); controls();
+    loadVoiceboxProfiles();
     if (drive) {
       await refreshJobs();
       if (pendingRemote) send(pendingRemote.message || 'Reconnected task', false, pendingRemote);
