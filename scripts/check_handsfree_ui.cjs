@@ -31,7 +31,7 @@ w.fetch=async(url,opts={})=>{
  }
  throw Error(url);
 };
-w.eval(fs.readFileSync(path.join(base,'handsfree.js'),'utf8'));w.eval(fs.readFileSync(path.join(base,'companion.js'),'utf8'));
+w.eval(fs.readFileSync(path.join(base,'speech_queue.js'),'utf8'));w.eval(fs.readFileSync(path.join(base,'handsfree.js'),'utf8'));w.eval(fs.readFileSync(path.join(base,'companion.js'),'utf8'));
 (async()=>{
  await tick();$('voice').value='browser';$('hands-free').checked=true;$('hands-free').dispatchEvent(new w.Event('change'));await tick();
  assert.equal(micRequests,1);assert.equal(recorders.at(-1).state,'recording');
@@ -54,3 +54,4 @@ w.eval(fs.readFileSync(path.join(base,'handsfree.js'),'utf8'));w.eval(fs.readFil
  console.log('PASS: automatic utterance sending, silence discard, microphone reuse, echo pause, automatic re-listening, stale transcript suppression, proactive snapshot, quiet result and Stop.');
  dom.window.close();
 })().catch(e=>{console.error(e);dom.window.close();process.exitCode=1;});
+

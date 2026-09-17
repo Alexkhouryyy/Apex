@@ -25,7 +25,7 @@ w.fetch=async(path,opts={})=>{
 };
 const emit=(c,data)=>c.enqueue(new TextEncoder().encode(JSON.stringify(data)+'\n'));
 function finish(text='A tested reply.'){const c=streams.at(-1);emit(c,{type:'start',thread_id:71});emit(c,{type:'token',text});emit(c,{type:'tool',name:'recall',phase:'result',result:'<script>untrusted result</script>'});emit(c,{type:'done',text,interrupted:false});c.close();}
-w.eval(fs.readFileSync(base+'companion.js','utf8'));
+w.eval(fs.readFileSync(base+'speech_queue.js','utf8'));w.eval(fs.readFileSync(base+'companion.js','utf8'));
 (async()=>{
  await tick(); assert.match($('status').textContent,/Ready/);
  $('spoken').checked=false;
@@ -57,6 +57,19 @@ w.eval(fs.readFileSync(base+'companion.js','utf8'));
  audioInstance.onended();await tick();assert.ok(!d.getElementById('companion').classList.contains('speaking'));
  $('spoken').checked=true;$('voice').value='voicebox';$('message').value='Speak this';$('send').click();await tick();finish();await tick();
  assert.equal(JSON.parse(requests.filter(r=>r.path==='/api/speak').at(-1).opts.body).engine,'voicebox');assert.ok(ttsResolve);$('spoken').checked=false;$('spoken').dispatchEvent(new w.Event('change'));ttsResolve(new Response(new Blob(['audio'])));await tick();assert.equal(spoken,0);
+
+ // Stop must keep the send guard while a GPU request drains, including Enter.
+ $('spoken').checked=true;$('message').value='Busy voice';$('send').click();await tick();finish();await tick();
+ assert.equal($('send').disabled,true);$('stop').click();await tick();
+ assert.equal($('send').disabled,true);
+ const chatsBefore=requests.filter(r=>r.path==='/api/companion/chat').length;
+ $('message').value='Do not overlap';$('message').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter'}));await tick();
+ assert.equal(requests.filter(r=>r.path==='/api/companion/chat').length,chatsBefore);
+ ttsResolve(new Response(new Blob(['discard'])));await tick();assert.equal($('send').disabled,false);
+ $('message').value='Failure visibility';$('send').click();await tick();finish();await tick();
+ ttsResolve(Response.json({detail:'Local voice failed'},{status:503}));await tick();
+ assert.match($('error').textContent,/Local voice failed/);assert.equal($('send').disabled,false);
+ $('spoken').checked=false;
  w.MediaRecorder=class{constructor(){this.state='inactive';this.mimeType='audio/webm';}start(){this.state='recording';}stop(){this.state='inactive';this.ondataavailable?.({data:new w.Blob(['voice'])});this.onstop?.();}};
  $('mic').click();await tick();assert.equal($('mic').getAttribute('aria-pressed'),'true');$('mic').click();await tick();
  assert.ok(transcribeResolve);const before=requests.filter(r=>r.path==='/api/companion/chat').length;
@@ -70,3 +83,4 @@ w.eval(fs.readFileSync(base+'companion.js','utf8'));
  console.log('PASS: client streaming, stable thread, mode selection, tool text escaping, snapshot attachment, capture stop, cancellation handshake, stale TTS suppression, stopped transcription, floating DOM transfer and new chat.');
  dom.window.close();
 })().catch(e=>{console.error(e);dom.window.close();process.exitCode=1;});
+

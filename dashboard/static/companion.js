@@ -16,14 +16,15 @@
   };
   let threadId = Number(localStorage.getItem('apex_companion_thread')) || null;
   let active = null, shareStream = null, recorder = null, micStream = null;
-  let speechEpoch = 0, audio = null, audioUrl = null, speechRequest = null;
+  let speechEpoch = 0, audio = null, audioUrl = null;
+  let speechDraining = false, endPlayback = null;
   let recordingTimer = null, pip = null, recordingEpoch = 0;
   let speechBusy = false, hands = null, handsRequest = null, resumeTimer = null;
   let lastInteraction = Date.now(), lastCheck = Date.now();
   function resumeHands() {
     clearTimeout(resumeTimer);
     resumeTimer=setTimeout(() => {
-      if (hands?.enabled && !active && !recorder && !pendingRemote && !speechBusy && !audio) hands.resume();
+      if (hands?.enabled && !active && !recorder && !pendingRemote && !speechBusy && !speechDraining && !audio) hands.resume();
       controls();
     }, 400);
   }
@@ -42,11 +43,11 @@
   function error(text = '') { $('error').textContent = text; $('error').hidden = !text; }
   function state(name, text) { root.className = name; $('status').textContent = text; }
   function controls() {
-    const busy = Boolean(active) || Boolean(recorder) || Boolean(pendingRemote) || Boolean(hands?.busy);
+    const busy = speechBusy || speechDraining || Boolean(active) || Boolean(recorder) || Boolean(pendingRemote) || Boolean(hands?.busy);
     $('send').disabled = busy;
     $('new').disabled = busy;
     $('mode').disabled = busy;
-    $('mic').disabled = Boolean(active) || Boolean(pendingRemote) || Boolean(hands?.enabled);
+    $('mic').disabled = speechBusy || speechDraining || Boolean(active) || Boolean(pendingRemote) || Boolean(hands?.enabled);
     $('review').disabled = busy || !shareStream;
     $('stop').disabled = !(busy || audio || speechBusy || hands?.enabled || $('check-in').checked || root.classList.contains('speaking'));
     $('recover').disabled = Boolean(active);
@@ -77,11 +78,12 @@
   function scroll() { $('messages').scrollTop = $('messages').scrollHeight; }
   function stopSpeech() {
     speechEpoch++; speechBusy=false;
-    speechRequest?.abort(); speechRequest = null;
+    // Let an in-flight local generation finish; aborting HTTP does not stop GPU work.
+    endPlayback?.(); endPlayback = null;
     window.speechSynthesis?.cancel();
     if (audio) { audio.pause(); audio = null; }
     if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
-    if (!active && !recorder) state('', 'Ready when you are.');
+    if (!active && !recorder) state('', speechDraining ? 'Stopping audio · finishing the current voice section…' : 'Ready when you are.');
     resumeHands(); controls();
   }
   async function loadVoiceboxProfiles() {
@@ -89,7 +91,7 @@
       const data = await (await request('/api/voicebox/profiles')).json();
       const select = $('voicebox-profile');
       const chosen = localStorage.getItem('apex.voicebox.profile') || '';
-      select.replaceChildren(new Option('Apex default · Ryan preset', ''));
+      select.replaceChildren(new Option('Apex default voice', ''));
       for (const p of data.profiles) select.add(new Option(p.name, p.id));
       if ([...select.options].some(o => o.value === chosen)) select.value = chosen;
     } catch (_) {
@@ -117,15 +119,41 @@
     const finish = () => { if (epoch === speechEpoch) stopSpeech(); };
     try {
       if (['openai', 'voicebox'].includes($('voice').value)) {
-        speechRequest = new AbortController();
-        const response = await request('/api/speak', {method: 'POST', signal: speechRequest.signal,
-          headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text, engine: $('voice').value, profile: $('voicebox-profile').value})});
-        const blob = await response.blob();
-        if (epoch !== speechEpoch) return;
-        audioUrl = URL.createObjectURL(blob); audio = new Audio(audioUrl);
-        audio.onended = finish; audio.onerror = () => { error('Audio playback failed. Your reply is available as text.'); finish(); };
-        state('speaking', 'Speaking · tap Stop or Talk to interrupt'); controls();
-        await audio.play();
+        speechDraining = true;
+        state('thinking', 'Preparing voice · the first section will play as soon as it is ready…'); controls();
+        const engine = $('voice').value, profile = $('voicebox-profile').value;
+        const generate = async section => {
+          const response = await request('/api/speak', {method: 'POST',
+            headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: section, engine, profile})});
+          return response.blob();
+        };
+        const play = blob => new Promise((resolve, reject) => {
+          if (epoch !== speechEpoch) { resolve(); return; }
+          audioUrl = URL.createObjectURL(blob); audio = new Audio(audioUrl);
+          const current = audio, url = audioUrl;
+          const done = exc => {
+            current.onended = current.onerror = null;
+            if (audio === current) { audio = null; audioUrl = null; endPlayback = null; }
+            URL.revokeObjectURL(url);
+            if (exc) reject(exc); else resolve();
+          };
+          endPlayback = () => { current.pause(); done(); };
+          current.onended = () => done();
+          current.onerror = () => done(new Error('Audio playback failed. Your reply remains on screen.'));
+          state('speaking', 'Speaking · Stop ends playback'); controls();
+          current.play().catch(exc => done(new Error(exc.name === 'NotAllowedError'
+            ? 'Your browser blocked audio. Allow sound for this site, then send a short message.' : exc.message)));
+        });
+        try {
+          await window.ApexSpeechQueue.run(window.ApexSpeechQueue.chunks(text), generate, play,
+            () => epoch !== speechEpoch);
+        } catch (exc) {
+          if (epoch === speechEpoch) error(exc.message);
+        } finally {
+          speechDraining = false;
+          if (epoch === speechEpoch) finish();
+          else { if (!active && !recorder) state('', 'Stopped. Ready for your next message.'); resumeHands(); controls(); }
+        }
       } else {
         if (!window.speechSynthesis) throw new Error('Device speech is unavailable. Choose OpenAI voice or read the reply.');
         const utterance = new SpeechSynthesisUtterance(text); utterance.rate = 1.02;
@@ -195,7 +223,7 @@
     }
   }
   async function send(text, automatic = false, recovery = null, fromHands = false) {
-    if (active || recorder || (hands?.busy && !fromHands) || (pendingRemote && !recovery) || !text.trim()) return;
+    if (speechBusy || speechDraining || active || recorder || (hands?.busy && !fromHands) || (pendingRemote && !recovery) || !text.trim()) return;
     hands?.pause();
     if (!automatic) lastInteraction=Date.now();
     stopSpeech(); error();
@@ -291,7 +319,7 @@
     : 'Discuss: look, research, and reason together. Action tools are disabled.'; };
   $('mic').onclick = async () => {
     if (recorder) { if (recorder.state === 'recording') recorder.stop(); return; }
-    if (active || pendingRemote) return;
+    if (speechBusy || speechDraining || active || pendingRemote) return;
     stopSpeech(); error();
     const epoch = ++recordingEpoch;
     recorder = {state: 'requesting'}; controls();
@@ -320,7 +348,7 @@
   };
   $('hands-free').onchange = async () => {
     if (!$('hands-free').checked) { disableHands(); state('', 'Hands-free off.'); return; }
-    if (active || recorder || pendingRemote) { $('hands-free').checked=false; error('Wait for the current turn to finish, then enable hands-free.'); return; }
+    if (speechBusy || speechDraining || active || recorder || pendingRemote) { $('hands-free').checked=false; error('Wait for the current turn to finish, then enable hands-free.'); return; }
     error(); stopSpeech(); $('spoken').checked=true;
     if (!window.ApexHandsFree) { $('hands-free').checked=false; error('Reload the companion to load hands-free controls.'); return; }
     hands = new window.ApexHandsFree({
@@ -349,7 +377,7 @@
   };
   setInterval(() => {
     const now=Date.now(), interval=Number($('check-frequency').value)*1000;
-    if (!$('check-in').checked || !shareStream || active || recorder || hands?.busy || speechBusy || root.classList.contains('speaking')) return;
+    if (!$('check-in').checked || !shareStream || active || recorder || hands?.busy || speechBusy || speechDraining || root.classList.contains('speaking')) return;
     if (now-lastCheck<interval || now-lastInteraction<20000 || $('message').value.trim()) return;
     lastCheck=now;
     send('Optional screen comment.', true);
@@ -418,3 +446,4 @@
   }
   boot().catch(exc => { state('', 'Apex is not connected yet.'); error(exc.message); });
 })();
+
