@@ -315,6 +315,163 @@ def status() -> dict:
 APPLY_MAX_ATTEMPTS = 3
 
 
+# ── the check that makes step 9 finishable ───────────────────────────────────
+
+CHECK_OK, CHECK_FAIL, CHECK_SKIP = "ok", "FAIL", "skip"
+
+
+def check() -> list[dict]:
+    """Drive the real relay and report what actually happened, stage by stage.
+
+    `status()` reports what THIS PROCESS has done, so on a freshly opened shell
+    it says "never_pushed" whether the relay is perfect or unplugged. That is
+    the wrong instrument for the only question that matters after setting one
+    up: did it work? Deploying a relay and having no way to tell is how a
+    subsystem ends up built, wired and silently doing nothing — which is the
+    failure this whole codebase is organised against.
+
+    Every stage returns a remedy on failure, in the shape `tools/doctor.py`
+    uses. The sealing stages are the point: they prove the relay is holding
+    ciphertext by fetching it back and looking, rather than asserting it.
+    """
+    import json as _json
+    out: list[dict] = []
+
+    def add(stage, state, detail, fix=""):
+        out.append({"stage": stage, "state": state, "detail": detail, "fix": fix})
+        return state == CHECK_OK
+
+    if not enabled():
+        add("configured", CHECK_FAIL, "RELAY_ENABLED is false.",
+            "Set RELAY_ENABLED=true in .env on the laptop.")
+        return out
+    url = str(getattr(config, "RELAY_URL", "") or "")
+    if not url:
+        add("configured", CHECK_FAIL, "RELAY_URL is empty.",
+            "Set RELAY_URL to the relay's address, e.g. http://192.168.1.50:8788")
+        return out
+    if not str(getattr(config, "RELAY_TOKEN", "") or ""):
+        add("configured", CHECK_FAIL, "RELAY_TOKEN is empty.",
+            "Use the same token you set as RELAY_SERVER_TOKEN on the relay.")
+        return out
+    try:
+        _fernet()
+    except Exception as e:
+        add("configured", CHECK_FAIL, f"RELAY_KEY is unusable: {e}",
+            "python -m agent.relay --new-key, then put it in .env as RELAY_KEY.")
+        return out
+    add("configured", CHECK_OK, f"pointing at {url}")
+
+    # The token has to be doing work, not merely present.
+    try:
+        import urllib.request as _u
+        _u.urlopen(_u.Request(url.rstrip("/") + "/snapshot"), timeout=10).read()
+        add("relay refuses strangers", CHECK_FAIL,
+            "the relay served /snapshot with NO token.",
+            "Stop it, set RELAY_SERVER_TOKEN, and start it again. Anyone who "
+            "finds the URL can currently take your sealed memory.")
+    except urllib.error.HTTPError as e:
+        add("relay refuses strangers", CHECK_OK if e.code in (401, 403)
+            else CHECK_FAIL, f"unauthenticated request got {e.code}",
+            "" if e.code in (401, 403) else "Expected 401 or 403.")
+    except Exception as e:
+        add("relay reachable", CHECK_FAIL, f"could not reach {url}: {e}",
+            "Is the relay running, and is this machine allowed to reach it? "
+            "A private VPN address only works from inside that VPN.")
+        return out
+
+    # BEFORE pushing. Pushing first re-seals the snapshot with whatever key is
+    # configured right now, so "can my key open what is stored" then compares
+    # this key against itself and passes however wrong it is. That is exactly
+    # how a laptop restored from a backup with a stale RELAY_KEY would be told
+    # everything was fine while every snapshot already on the relay was
+    # unreadable. Checked against a deliberately mismatched key, which the
+    # push-first version reported as healthy.
+    try:
+        existing = _http("GET", "/snapshot")
+    except Exception:
+        existing = b""
+    if existing:
+        try:
+            unseal(existing)
+            add("the snapshot already there opens", CHECK_OK,
+                f"{len(existing)} bytes, and this key opens it")
+        except Exception as e:
+            add("the snapshot already there opens", CHECK_FAIL,
+                f"a snapshot is stored that this RELAY_KEY cannot open: {e}",
+                "This laptop's RELAY_KEY is not the one that sealed it. Restore "
+                "the original key, or accept the loss and overwrite it by "
+                "pushing again — nothing can recover it without that key.")
+    else:
+        add("the snapshot already there opens", CHECK_SKIP,
+            "nothing stored yet; the push below is the first")
+
+    try:
+        pushed = push_snapshot()
+    except Exception as e:
+        pushed = {"ok": False, "error": str(e)}
+    if not pushed.get("ok"):
+        add("snapshot uploads", CHECK_FAIL, str(pushed.get("error", "failed")),
+            "Check the relay's own log; it records why it refused.")
+        return out
+    add("snapshot uploads", CHECK_OK, f"{pushed.get('bytes', 0)} bytes sealed and sent")
+
+    # _http, NOT pull_snapshot: pull_snapshot unseals for you, so asking it
+    # whether the relay holds ciphertext gets you the answer you wanted to hear
+    # every time. The first version of this check did exactly that and reported
+    # a correctly-sealed relay as storing plaintext — caught only by running it
+    # against a relay already known to be good.
+    try:
+        fetched = _http("GET", "/snapshot")
+    except Exception as e:
+        add("snapshot comes back", CHECK_FAIL, str(e))
+        return out
+    add("snapshot comes back", CHECK_OK, f"{len(fetched)} bytes, as stored")
+
+    # The security claim, checked rather than repeated.
+    probe = b"SQLite format 3"
+    if probe in fetched:
+        add("relay cannot read it", CHECK_FAIL,
+            "the snapshot came back as a readable database.",
+            "It was stored unsealed. Do not leave this relay running.")
+    else:
+        add("relay cannot read it", CHECK_OK,
+            f"stored as ciphertext ({fetched[:8]!r}...)")
+
+    try:
+        plain = unseal(fetched)
+    except Exception as e:
+        add("your key opens it", CHECK_FAIL, f"unseal failed: {e}",
+            "RELAY_KEY here is not the key that sealed what the relay holds.")
+        return out
+    add("your key opens it", CHECK_OK if plain[:15] == probe else CHECK_FAIL,
+        f"unsealed {len(plain)} bytes"
+        + ("; a real database" if plain[:15] == probe else "; NOT a database"))
+
+    try:
+        ctx = push_context()
+        add("context uploads", CHECK_OK if ctx.get("ok") else CHECK_FAIL,
+            f"{ctx.get('chars', 0)} chars from {', '.join(ctx.get('sources') or [])}"
+            if ctx.get("ok") else str(ctx.get("error", "failed")))
+    except Exception as e:
+        add("context uploads", CHECK_FAIL, str(e))
+    return out
+
+
+def check_report() -> str:
+    lines, bad = [], 0
+    for r in check():
+        mark = {CHECK_OK: "ok  ", CHECK_FAIL: "FAIL", CHECK_SKIP: "skip"}[r["state"]]
+        lines.append(f"  [{mark}] {r['stage']}: {r['detail']}")
+        if r["fix"]:
+            lines.append(f"         -> {r['fix']}")
+        if r["state"] == CHECK_FAIL:
+            bad += 1
+    head = ("Relay: everything checked passed." if not bad
+            else f"Relay: {bad} stage(s) failed.")
+    return head + "\n" + "\n".join(lines)
+
+
 def init_db() -> None:
     from agent import longterm
     with longterm._conn() as c:
@@ -690,5 +847,9 @@ if __name__ == "__main__":
         print(new_key())
         print("\nPut this in .env as RELAY_KEY. Never give it to the relay, and "
               "never commit it — a snapshot sealed with a lost key is lost.")
+    elif "--check" in sys.argv:
+        report = check_report()
+        print(report)
+        sys.exit(1 if "[FAIL]" in report else 0)
     else:
         print(json.dumps(status(), indent=2))

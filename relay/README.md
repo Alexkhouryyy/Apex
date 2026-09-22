@@ -79,6 +79,47 @@ RELAY_KEY=<python -m agent.relay --new-key>
 config and there is nowhere on the relay to put it. Keep a copy somewhere safe:
 a snapshot sealed with a lost key is lost.
 
+## Then check it, before trusting it
+
+```
+python -m agent.relay --check
+```
+
+This is the step that was missing. `python -m agent.relay` on its own reports
+what the CURRENT PROCESS has done, so in a freshly opened shell it says
+"never_pushed" whether the relay is perfect or unplugged — which is the wrong
+instrument for the only question you have after setting one up.
+
+`--check` talks to the real relay and reports each stage, exiting non-zero if
+any fail. A healthy one looks like this:
+
+```
+Relay: everything checked passed.
+  [ok  ] configured: pointing at https://apex-relay.example.com
+  [ok  ] relay refuses strangers: unauthenticated request got 401
+  [ok  ] the snapshot already there opens: 835684 bytes, and this key opens it
+  [ok  ] snapshot uploads: 835684 bytes sealed and sent
+  [ok  ] snapshot comes back: 835684 bytes, as stored
+  [ok  ] relay cannot read it: stored as ciphertext (b'gAAAAABq'...)
+  [ok  ] your key opens it: unsealed 626688 bytes; a real database
+  [ok  ] context uploads: 636 chars from conversation, memories, schedule
+```
+
+Two of those stages are the security claim rather than a formality:
+
+- **relay refuses strangers** fetches `/snapshot` with no token at all. If that
+  succeeds, anyone who finds the URL has your sealed memory, and the check says
+  so instead of moving on.
+- **relay cannot read it** reads the bytes the relay actually stored and looks
+  at them. It does not go through `pull_snapshot()`, which unseals on the way
+  past and would return the comfortable answer every time.
+
+**the snapshot already there opens** runs BEFORE the check pushes anything. A
+laptop restored from a backup with a stale `RELAY_KEY` would otherwise be told
+it was healthy — the push re-seals with the current key, and the stage then
+compares that key against itself. Nothing recovers a snapshot whose key is
+gone, so being told immediately matters.
+
 ## Configuration, in full
 
 | Variable | Default | |
