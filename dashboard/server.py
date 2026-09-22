@@ -2216,12 +2216,25 @@ async def ws_board(ws: WebSocket):
                 # identical on the wire, and the page should be able to tell you
                 # which without guessing.
                 "tracking": tracker is not None,
+                "hands": [],
+                "grabs": [],
             }
             if tracker is not None:
+                cursors = tracker.latest_cursors()
                 payload["cursors"] = [
                     {"x": round(c[0], 4), "y": round(c[1], 4), "p": 1 if c[2] else 0}
-                    for c in tracker.latest_cursors()
+                    for c in cursors
                 ]
+                # The readout. A pinch that does not grab has five different
+                # causes that look identical on screen, and until now the only
+                # place any of the deciding numbers existed was a
+                # HANDTRACK_DEBUG print into a scrolling terminal.
+                try:
+                    payload["hands"] = tracker.latest_hands()
+                    payload["grabs"] = board.hand_report(cursors)
+                except Exception as e:
+                    payload["hands"], payload["grabs"] = [], []
+                    payload["diag_error"] = f"{type(e).__name__}: {e}"
                 jpeg = tracker.latest_jpeg()
                 if jpeg:
                     payload["frame"] = base64.b64encode(jpeg).decode()

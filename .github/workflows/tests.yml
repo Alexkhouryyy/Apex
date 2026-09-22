@@ -51,6 +51,7 @@ jobs:
           node --check dashboard/static/companion.js
           node scripts/check_companion_ui.cjs
           node scripts/check_companion_voice_ui.cjs
+          node scripts/check_board_readout_ui.cjs
           node scripts/check_drive_spatial_ui.cjs
 
       - name: Structural audits (informational — never fails the build)

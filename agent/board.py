@@ -208,6 +208,9 @@ class Board:
         self._pre_grab: dict[str, tuple] = {}
         # Reported by hand_state() for tests and any future UI — see HandState.
         self._hand_state: dict[int, str] = {}
+        # The last frame's hands, so hand_report() can explain a
+        # near-miss without the caller having to supply them again.
+        self._last_hands: list = []
         # Off for a bare Board() so tests get pure in-memory behaviour without
         # touching the real database; get_board() turns it on for the live one.
         self.persist = False
@@ -543,6 +546,55 @@ class Board:
         with self._lock:
             return self._hand_state.get(idx, HandState.IDLE)
 
+    def hand_report(self, cursors=None) -> list[dict]:
+        """Why each hand is or is not holding something, for the live readout.
+
+        A pinch that does not grab has five different causes and they look
+        identical from the outside: the hand is not pinched, the pinch has not
+        held for ARM_DWELL_SECONDS yet, there is no card within GRAB_RADIUS,
+        the nearest card is already held by two hands, or an open palm is
+        cancelling. Telling someone "it did not grab" is useless; telling them
+        "nothing within reach — nearest card is 0.31 away, reach is 0.14" is
+        the whole difference between a five-minute fix and giving up.
+
+        Read-only. It recomputes the same distance `_nearest` uses rather than
+        recording what `_nearest` decided, so the reach number shown is the one
+        actually applied and cannot drift from it.
+        """
+        cursors = list(cursors if cursors is not None else self._last_hands)
+        out = []
+        with self._lock:
+            for idx, hand in enumerate(cursors):
+                try:
+                    hx, hy, pinched, open_palm = hand[0], hand[1], hand[2], hand[3]
+                except (IndexError, TypeError):
+                    continue
+                holding = next((c for c in self._cards if idx in c.held_by), None)
+                nearest, nearest_d, blocked = None, None, False
+                for c in reversed(self._cards):
+                    if idx in c.held_by:
+                        continue
+                    d = ((c.x - hx) ** 2 + (c.y - hy) ** 2) ** 0.5
+                    if nearest_d is None or d < nearest_d:
+                        nearest, nearest_d = c, d
+                        blocked = len(c.held_by) >= 2
+                armed = self._armed_since.get(idx)
+                out.append({
+                    "hand": idx,
+                    "state": self._hand_state.get(idx, HandState.IDLE),
+                    "pinched": bool(pinched),
+                    "open_palm": bool(open_palm),
+                    "holding": holding.title if holding else None,
+                    "nearest": nearest.title if nearest else None,
+                    "distance": round(nearest_d, 4) if nearest_d is not None else None,
+                    "reach": GRAB_RADIUS,
+                    "in_reach": bool(nearest_d is not None and nearest_d < GRAB_RADIUS),
+                    "nearest_is_full": bool(blocked),
+                    "dwell_needed": ARM_DWELL_SECONDS,
+                    "arming": armed is not None,
+                })
+        return out
+
     def apply_hands(self, cursors, now: Optional[float] = None) -> None:
         """Move, scale and rotate according to this frame's hands.
 
@@ -556,6 +608,9 @@ class Board:
         """
         now = now if now is not None else time.time()
         hands = self.read_cursors(cursors)
+        # Recorded AFTER normalisation, so the readout explains the hands the
+        # board actually acted on rather than the raw ones it was handed.
+        self._last_hands = list(hands)
         if not hands:
             # Hands gone: release everything. Without this an object stays stuck
             # to a hand that left the frame, and the only way to free it is to

@@ -52,6 +52,15 @@ class TestSubscriptionStore(unittest.TestCase):
 
 
 class TestDedup(unittest.TestCase):
+    def setUp(self):
+        """Same reason as TestFanout._notifier: dedup is measured by counting
+        what reached a sink, and a held notification reaches none of them. On a
+        machine where restraint has learned to be quiet, that reads as perfect
+        deduplication."""
+        was = getattr(config, "RESTRAINT_ENABLED", True)
+        config.RESTRAINT_ENABLED = False
+        self.addCleanup(setattr, config, "RESTRAINT_ENABLED", was)
+
     def test_same_key_suppressed_within_window(self):
         from agent.notify import Notifier
         config.NOTIFY_DEDUP_SECONDS = 30
@@ -78,7 +87,24 @@ class TestDedup(unittest.TestCase):
 
 class TestFanout(unittest.TestCase):
     def _notifier(self):
+        """Fanout, with restraint out of the way.
+
+        These tests are about which sinks a payload reaches. `notify()` asks
+        `restraint.should_hold` first, and restraint LEARNS from the real
+        memory database — so once a machine has accumulated enough ignored
+        pings, it starts holding notifications and four of these tests fail
+        with no code change anywhere near them. Apex learning to be quiet broke
+        its own test suite, which is a good sign for restraint and a bad one
+        for a test that depended on machine state.
+
+        `restraint.hold_all` in tests/test_restraint.py is where holding is
+        tested; here it is disabled so the fanout is what is being measured.
+        """
+        import config
         from agent.notify import Notifier
+        self._restraint_was = getattr(config, "RESTRAINT_ENABLED", True)
+        config.RESTRAINT_ENABLED = False
+        self.addCleanup(setattr, config, "RESTRAINT_ENABLED", self._restraint_was)
         n = Notifier()
         n._ws_broadcast = lambda p: None
         return n

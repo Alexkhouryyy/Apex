@@ -100,6 +100,24 @@
   .card.model-label h3 {margin:0}
   #partner-panel {position:fixed;right:12px;top:88px;bottom:36px;width:min(440px,45vw);z-index:6;background:#08111c;border:1px solid #45617c;border-radius:14px;overflow:hidden}
   #partner-panel iframe {width:100%;height:100%;border:0}
+  #diag {position:fixed;right:12px;bottom:56px;z-index:40;width:310px;
+         background:rgba(6,14,18,.93);border:1px solid #17313a;border-radius:10px;
+         color:#cfe9e2;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
+         padding:10px 12px;box-shadow:0 8px 28px rgba(0,0,0,.45)}
+  #diag[hidden]{display:none}
+  .diag-head{display:flex;justify-content:space-between;align-items:center;
+             text-transform:uppercase;letter-spacing:.08em;font-size:10px;
+             color:#6f9aa4;margin-bottom:8px}
+  .diag-head button{background:none;border:0;color:#6f9aa4;font-size:16px;cursor:pointer;line-height:1}
+  .diag-hand{border-top:1px solid #14272e;padding-top:7px;margin-top:7px}
+  .diag-hand:first-child{border-top:0;padding-top:0;margin-top:0}
+  .diag-row{display:flex;justify-content:space-between;gap:10px}
+  .diag-k{color:#6f9aa4}
+  .diag-bar{position:relative;height:6px;background:#12262d;border-radius:3px;margin:5px 0 6px}
+  .diag-fill{position:absolute;inset:0 auto 0 0;background:#2f8f7e;border-radius:3px}
+  .diag-mark{position:absolute;top:-3px;width:2px;height:12px;background:#e0b341}
+  .diag-yes{color:#5fd0ae}.diag-no{color:#d98b7a}
+  .diag-why{margin-top:7px;color:#e6d9a8}
   [hidden] {display:none!important}
   @media(max-width:650px){#partner-panel{width:calc(100vw - 24px);top:140px}.card.model-label{max-width:42vw}#board-bar{font-size:12px}}
 </style>
@@ -113,6 +131,13 @@
   <p id="hint-body">Connecting…</p>
 </div>
 <div id="status">—</div>
+<!-- The readout. A pinch that does not grab has five causes and they are
+     indistinguishable on screen; until now the numbers that decide it existed
+     only in a HANDTRACK_DEBUG print. Toggle with D, or ?diag=1. -->
+<div id="diag" hidden>
+  <div class="diag-head">what the tracker sees <button id="diag-close" aria-label="Hide">×</button></div>
+  <div id="diag-body">waiting for a frame…</div>
+</div>
 <nav id="board-bar"><a href="/">APEX</a><span id="selection-label" role="status">Pinch an object or tap its label to select it.</span><button id="clear-selection">Deselect</button><button id="partner-toggle" aria-expanded="false">Talk to Apex</button><select id="exports" aria-label="Download a manufacturing export"><option value="">Manufacturing exports…</option></select><button id="refresh-exports">Refresh exports</button></nav>
 <aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; display-capture"></iframe></aside>
 
@@ -377,6 +402,79 @@ function connect() {
 
   ws.onopen = () => say("connected");
 
+  const diagEl = document.getElementById("diag");
+  // Off by default — it is an instrument, not furniture. On with D, or with
+  // ?diag=1 so a link can be handed to someone mid-problem.
+  if (new URLSearchParams(location.search).get("diag") === "1") diagEl.hidden = false;
+  document.getElementById("diag-close").onclick = () => { diagEl.hidden = true; };
+  addEventListener("keydown", ev => {
+    if (ev.key !== "d" && ev.key !== "D") return;
+    const t = ev.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    diagEl.hidden = !diagEl.hidden;
+  });
+
+  // Card titles come from the user and from models, and the panel below
+  // builds markup. Everywhere else on this page a title goes in via
+  // textContent; here it does not, so it is escaped.
+  const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g,
+    ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch]));
+
+  // --- the readout -----------------------------------------------------
+  // Names the FIRST reason a grab is not happening, in the order the board
+  // itself checks them, so the line on screen and the code that refused are
+  // the same sequence.
+  function whyNot(hand, grab) {
+    if (!hand) return "no hand in frame";
+    if (hand.open_palm) return "open palm — that cancels a grab";
+    if (hand.ratio === null) return "hand seen but its shape was unreadable";
+    if (!hand.pinched)
+      return `not pinched — ratio ${hand.ratio.toFixed(3)} must fall below ${hand.threshold.toFixed(3)}`;
+    if (!grab) return "pinched";
+    if (grab.holding) return `holding ${grab.holding}`;
+    if (!grab.nearest) return "pinched, but there is nothing on the board";
+    if (!grab.in_reach)
+      return `pinched, but ${grab.nearest} is ${grab.distance.toFixed(3)} away and reach is ${grab.reach.toFixed(2)}`;
+    if (grab.nearest_is_full) return `${grab.nearest} is already held by two hands`;
+    if (grab.state === "armed") return `arming — hold the pinch ${grab.dwell_needed.toFixed(2)}s`;
+    return "pinched and in reach";
+  }
+
+  function renderDiag(msg) {
+    const body = document.getElementById("diag-body");
+    if (!msg.tracking) { body.textContent = "hand tracking is off"; return; }
+    if (msg.diag_error) { body.textContent = "readout failed: " + msg.diag_error; return; }
+    const hands = msg.hands || [], grabs = msg.grabs || [];
+    if (!hands.length) { body.textContent = "tracking, but no hands in frame"; return; }
+    body.replaceChildren(...hands.map((h, i) => {
+      const g = grabs[i];
+      const el = document.createElement("div");
+      el.className = "diag-hand";
+      // The ratio bar: fill is the measured ratio, the marker is the
+      // threshold. Pinch is ratio BELOW threshold, so a fill left of the
+      // marker means pinched — the one thing worth being able to see at a
+      // glance while moving your fingers.
+      const pct = h.ratio === null ? 0 : Math.min(100, (h.ratio / 1.2) * 100);
+      const mark = Math.min(100, (h.threshold / 1.2) * 100);
+      el.innerHTML =
+        `<div class="diag-row"><span>${esc(h.label)} hand</span>` +
+        `<span class="${h.pinched ? "diag-yes" : "diag-no"}">` +
+        `${h.pinched ? "PINCHED" : "open"}</span></div>` +
+        `<div class="diag-bar"><div class="diag-fill" style="width:${pct.toFixed(1)}%"></div>` +
+        `<div class="diag-mark" style="left:${mark.toFixed(1)}%"></div></div>` +
+        `<div class="diag-row"><span class="diag-k">ratio / threshold</span>` +
+        `<span>${h.ratio === null ? "n/a" : h.ratio.toFixed(3)} / ${h.threshold.toFixed(3)}</span></div>` +
+        (g ? `<div class="diag-row"><span class="diag-k">nearest</span><span>` +
+             `${g.nearest ? esc(g.nearest) : "—"}` +
+             `${g.distance === null ? "" : ` @ ${g.distance.toFixed(3)}`}` +
+             ` (reach ${g.reach.toFixed(2)})</span></div>` +
+             `<div class="diag-row"><span class="diag-k">state</span><span>${esc(g.state)}</span></div>`
+           : "") +
+        `<div class="diag-why">${esc(whyNot(h, g))}</div>`;
+      return el;
+    }));
+  }
+
   ws.onmessage = (ev) => {
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
@@ -388,6 +486,7 @@ function connect() {
     renderCards(msg.cards || []);
     syncModels(msg.cards || []);
     renderCursors(msg.cursors || []);
+    if (!diagEl.hidden) renderDiag(msg);
 
     if (msg.frame) {
       cam.src = "data:image/jpeg;base64," + msg.frame;

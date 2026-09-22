@@ -459,6 +459,10 @@ class HandTracker(threading.Thread):
         self._latest_frame = None       # BGR ndarray, for tools/camera.py
         self._latest_ts = 0.0
         self._latest_cursors: list = []
+        # Per-hand detail for the board's live readout. Kept BESIDE the cursor
+        # list rather than widening it: `latest_cursors` feeds the gesture
+        # recognizer and the board, and both unpack 4-tuples.
+        self._latest_hands: list = []
         self._jpeg_error_logged = False  # see latest_jpeg
         self._cap = None
         self._landmarker = None
@@ -545,6 +549,16 @@ class HandTracker(threading.Thread):
         """This frame's hands, for anything that needs them outside the loop."""
         with self._lock:
             return list(self._latest_cursors)
+
+    def latest_hands(self) -> list:
+        """The same hands with the numbers that decided the pinch.
+
+        For the board's readout: a pinch that does not grab is otherwise
+        indistinguishable from a camera that sees nothing, and both look like
+        "it is broken".
+        """
+        with self._lock:
+            return [dict(d) for d in self._latest_hands]
 
     def latest_frame(self):
         """The most recent camera frame, or None.
@@ -693,17 +707,30 @@ class HandTracker(threading.Thread):
 
         cursors, labels = [], []
         mirror = getattr(config, "HANDTRACK_MIRROR", True)
+        threshold = float(getattr(config, "HANDTRACK_PINCH_RATIO",
+                                  DEFAULT_PINCH_RATIO))
+        details = []
         for idx, lms in enumerate(result.hand_landmarks or []):
             cur = landmarks_to_cursor(lms, mirror=mirror)
             if cur is None:
                 continue
             cursors.append(cur)
             labels.append(_handedness_label(result, idx))
+            # Measured once and kept, not measured once and printed. The ratio
+            # is the number that decides whether a pinch happens, and it used
+            # to exist only inside a HANDTRACK_DEBUG print — a scrolling log,
+            # which 7fc8f34 already concluded is the wrong place to read a
+            # threshold off. The board shows it live instead.
+            r = pinch_ratio(lms)
+            details.append({
+                "label": labels[-1] or "?",
+                "x": round(cur[0], 4), "y": round(cur[1], 4),
+                "ratio": round(r, 4) if r is not None else None,
+                "threshold": round(threshold, 4),
+                "pinched": bool(cur[2]),
+                "open_palm": bool(cur[3]),
+            })
             if getattr(config, "HANDTRACK_DEBUG", False):
-                # The tuning surface. The shipped HANDTRACK_PINCH_RATIO came
-                # from one hand on one camera; print the ratio actually
-                # measured so yours can disagree with it out loud.
-                r = pinch_ratio(lms)
                 shown = f"{r:.3f}" if r is not None else "n/a"
                 print(f"[HandTrack] hand={labels[-1] or '?'} x={cur[0]:.3f} "
                       f"y={cur[1]:.3f} pinch_ratio={shown} pinched={cur[2]}")
@@ -715,6 +742,7 @@ class HandTracker(threading.Thread):
         # and then a card would be somewhere your gesture said you were not.
         with self._lock:
             self._latest_cursors = list(cursors)
+            self._latest_hands = list(details)
 
         if getattr(config, "BOARD_ENABLED", False):
             try:
