@@ -429,6 +429,63 @@ def order_by_handedness(cursors: list, labels: list) -> list:
     return [c for _lab, c in keyed]
 
 
+class PinchLatch:
+    """Per-hand pinch with hysteresis: starts below `enter`, ends above `release`.
+
+    One threshold decided afresh every frame is what the board had, and on real
+    hardware it produced a 70% grab rate where every miss was "picked up, then
+    dropped". A pinch that sits near 0.70 reads 0.69, 0.71, 0.69 on successive
+    frames; each 0.71 was an "open" frame, and one open frame releases a held
+    card. The board's own docstring cites a gesture contract of "confidence,
+    dwell time, hysteresis, and cooldown" — dwell was built, hysteresis was not.
+
+    Keyed by hand identity rather than detection order, because detection order
+    renumbers between frames and a latch that followed the wrong hand would
+    carry one hand's pinch onto the other.
+
+    A ratio of None — landmarks unusable for a frame — KEEPS the previous state.
+    That is the same rule `_tick` applies to a dropped camera frame: a missing
+    observation is not an observation that the hand opened, and treating it as
+    one is a second way to drop a card mid-move.
+    """
+
+    def __init__(self):
+        self._on: dict = {}
+
+    def update(self, key, ratio, enter: float, release: float) -> bool:
+        release = max(float(release), float(enter))   # release <= enter: no hysteresis
+        was = self._on.get(key, False)
+        if ratio is None:
+            now = was
+        elif was:
+            now = ratio < release
+        else:
+            now = ratio < enter
+        self._on[key] = now
+        return now
+
+    def keep_only(self, keys) -> None:
+        """Forget hands not seen this frame, so one that leaves and comes back
+        starts open rather than resuming a pinch from before it left."""
+        keys = set(keys)
+        for k in list(self._on):
+            if k not in keys:
+                del self._on[k]
+
+
+def hand_keys(labels: list) -> list:
+    """Stable identities for this frame's hands.
+
+    MediaPipe's Left/Right when every hand has a distinct one; otherwise the
+    detection index. Two hands both labelled "Right" happens, and keying both
+    on "Right" would give them one shared latch.
+    """
+    clean = [str(l or "") for l in labels]
+    if all(clean) and len(set(clean)) == len(clean):
+        return clean
+    return [f"#{i}" for i in range(len(clean))]
+
+
 class HandTracker(threading.Thread):
     """Reads the webcam, finds hands, feeds gestures into the awareness log.
 
@@ -705,37 +762,7 @@ class HandTracker(threading.Thread):
         result = self._landmarker.detect_for_video(
             image, int(self._frame_no * self.interval * 1000))
 
-        cursors, labels = [], []
-        mirror = getattr(config, "HANDTRACK_MIRROR", True)
-        threshold = float(getattr(config, "HANDTRACK_PINCH_RATIO",
-                                  DEFAULT_PINCH_RATIO))
-        details = []
-        for idx, lms in enumerate(result.hand_landmarks or []):
-            cur = landmarks_to_cursor(lms, mirror=mirror)
-            if cur is None:
-                continue
-            cursors.append(cur)
-            labels.append(_handedness_label(result, idx))
-            # Measured once and kept, not measured once and printed. The ratio
-            # is the number that decides whether a pinch happens, and it used
-            # to exist only inside a HANDTRACK_DEBUG print — a scrolling log,
-            # which 7fc8f34 already concluded is the wrong place to read a
-            # threshold off. The board shows it live instead.
-            r = pinch_ratio(lms)
-            details.append({
-                "label": labels[-1] or "?",
-                "x": round(cur[0], 4), "y": round(cur[1], 4),
-                "ratio": round(r, 4) if r is not None else None,
-                "threshold": round(threshold, 4),
-                "pinched": bool(cur[2]),
-                "open_palm": bool(cur[3]),
-            })
-            if getattr(config, "HANDTRACK_DEBUG", False):
-                shown = f"{r:.3f}" if r is not None else "n/a"
-                print(f"[HandTrack] hand={labels[-1] or '?'} x={cur[0]:.3f} "
-                      f"y={cur[1]:.3f} pinch_ratio={shown} pinched={cur[2]}")
-
-        cursors = order_by_handedness(cursors, labels)
+        cursors, details = self._read_hands(result)
 
         # The board reads the SAME cursor list the recognizer does, rather than
         # tracking hands a second time. Two readings of one camera would drift,
@@ -754,6 +781,66 @@ class HandTracker(threading.Thread):
 
         for g in self.recognizer.feed_cursors(cursors, now):
             self._dispatch(g)
+
+    def _read_hands(self, result):
+        """One frame's MediaPipe result -> (cursors, details), pinch latched.
+
+        Pulled out of `_tick` so it can be driven with a recorded sequence of
+        frames. The bug it fixes only exists ACROSS frames, and a loop that
+        cannot be fed frames without a camera could not have a test for it.
+        """
+        mirror = getattr(config, "HANDTRACK_MIRROR", True)
+        enter = float(getattr(config, "HANDTRACK_PINCH_RATIO", DEFAULT_PINCH_RATIO))
+        release = float(getattr(config, "HANDTRACK_PINCH_RELEASE_RATIO", enter))
+        if release < enter:
+            release = enter        # a release below entry would make no sense; ignore it
+        if not hasattr(self, "_latch"):
+            self._latch = PinchLatch()
+
+        raw = list(result.hand_landmarks or [])
+        all_labels = [_handedness_label(result, i) for i in range(len(raw))]
+        all_keys = hand_keys(all_labels)
+
+        cursors, labels, details, seen = [], [], [], []
+        for idx, lms in enumerate(raw):
+            cur = landmarks_to_cursor(lms, mirror=mirror)
+            if cur is None:
+                continue
+            r = pinch_ratio(lms)
+            key = all_keys[idx]
+            seen.append(key)
+            pinched = self._latch.update(key, r, enter, release)
+            cur = (cur[0], cur[1], pinched, cur[3])
+            cursors.append(cur)
+            labels.append(all_labels[idx])
+            # Measured once and kept, not measured once and printed. The ratio
+            # is the number that decides whether a pinch happens, and it used
+            # to exist only inside a HANDTRACK_DEBUG print — a scrolling log,
+            # which 7fc8f34 already concluded is the wrong place to read a
+            # threshold off. The board shows it live instead.
+            details.append({
+                "label": all_labels[idx] or "?",
+                "x": round(cur[0], 4), "y": round(cur[1], 4),
+                "ratio": round(r, 4) if r is not None else None,
+                "threshold": round(enter, 4),
+                "release": round(release, 4),
+                "pinched": bool(pinched),
+                "open_palm": bool(cur[3]),
+            })
+            if getattr(config, "HANDTRACK_DEBUG", False):
+                shown = f"{r:.3f}" if r is not None else "n/a"
+                print(f"[HandTrack] hand={labels[-1] or '?'} x={cur[0]:.3f} "
+                      f"y={cur[1]:.3f} pinch_ratio={shown} pinched={pinched}")
+        self._latch.keep_only(seen)
+
+        # Reorder the details WITH the cursors. They used to be left in
+        # detection order while the cursors were sorted by handedness, so the
+        # board's readout could pair the left hand's ratio with the right
+        # hand's grab state.
+        paired = order_by_handedness(list(zip(cursors, range(len(cursors)))), labels)
+        cursors = [c for c, _ in paired]
+        details = [details[i] for _, i in paired]
+        return cursors, details
 
     def _dispatch(self, gesture: str) -> None:
         from agent import gestures as _g

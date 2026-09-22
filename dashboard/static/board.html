@@ -116,6 +116,7 @@
   .diag-bar{position:relative;height:6px;background:#12262d;border-radius:3px;margin:5px 0 6px}
   .diag-fill{position:absolute;inset:0 auto 0 0;background:#2f8f7e;border-radius:3px}
   .diag-mark{position:absolute;top:-3px;width:2px;height:12px;background:#e0b341}
+  .diag-release{background:#6f9aa4}
   .diag-yes{color:#5fd0ae}.diag-no{color:#d98b7a}
   .diag-why{margin-top:7px;color:#e6d9a8}
   [hidden] {display:none!important}
@@ -429,7 +430,7 @@ function connect() {
     if (hand.open_palm) return "open palm — that cancels a grab";
     if (hand.ratio === null) return "hand seen but its shape was unreadable";
     if (!hand.pinched)
-      return `not pinched — ratio ${hand.ratio.toFixed(3)} must fall below ${hand.threshold.toFixed(3)}`;
+      return `not pinched — ratio ${hand.ratio.toFixed(3)} must fall below ${hand.threshold.toFixed(3)} to start`;
     if (!grab) return "pinched";
     if (grab.holding) return `holding ${grab.holding}`;
     if (!grab.nearest) return "pinched, but there is nothing on the board";
@@ -456,14 +457,24 @@ function connect() {
       // glance while moving your fingers.
       const pct = h.ratio === null ? 0 : Math.min(100, (h.ratio / 1.2) * 100);
       const mark = Math.min(100, (h.threshold / 1.2) * 100);
+      // Second marker: where a HELD pinch lets go. Between the two marks a
+      // pinch that has started stays on — that band is the hysteresis, and
+      // seeing it explains why 0.74 can read PINCHED.
+      const rel = h.release == null ? null : Math.min(100, (h.release / 1.2) * 100);
       el.innerHTML =
         `<div class="diag-row"><span>${esc(h.label)} hand</span>` +
         `<span class="${h.pinched ? "diag-yes" : "diag-no"}">` +
         `${h.pinched ? "PINCHED" : "open"}</span></div>` +
         `<div class="diag-bar"><div class="diag-fill" style="width:${pct.toFixed(1)}%"></div>` +
-        `<div class="diag-mark" style="left:${mark.toFixed(1)}%"></div></div>` +
+        `<div class="diag-mark" style="left:${mark.toFixed(1)}%"></div>` +
+        (rel === null ? "" :
+          `<div class="diag-mark diag-release" style="left:${rel.toFixed(1)}%"></div>`) +
+        `</div>` +
         `<div class="diag-row"><span class="diag-k">ratio / threshold</span>` +
         `<span>${h.ratio === null ? "n/a" : h.ratio.toFixed(3)} / ${h.threshold.toFixed(3)}</span></div>` +
+        (h.release == null ? "" :
+          `<div class="diag-row"><span class="diag-k">held until above</span>` +
+          `<span>${h.release.toFixed(3)}</span></div>`) +
         (g ? `<div class="diag-row"><span class="diag-k">nearest</span><span>` +
              `${g.nearest ? esc(g.nearest) : "—"}` +
              `${g.distance === null ? "" : ` @ ${g.distance.toFixed(3)}`}` +

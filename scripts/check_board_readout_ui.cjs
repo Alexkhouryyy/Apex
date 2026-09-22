@@ -79,6 +79,17 @@ assert.match(whyNot(hand({pinched: true, ratio: .4}),
              /nothing on the board/);
 assert.match(whyNot(null, null), /no hand/);
 
+// The hysteresis band must be visible: a hand reading 0.74 while PINCHED is
+// otherwise indistinguishable from a broken threshold.
+renderDiag({tracking: true, hands: [hand({pinched: true, ratio: .74, release: 0.78})],
+            grabs: [grabOf({pinched: true, state: 'grabbed', holding: 'Grab Me'})]});
+{
+  const b = dom.window.document.getElementById('diag-body');
+  assert.match(b.textContent, /held until above/, 'the release threshold is not shown');
+  assert.match(b.textContent, /0\.780/);
+  assert.equal(b.querySelectorAll('.diag-release').length, 1, 'no release marker on the bar');
+}
+
 // A card title is user- and model-supplied, and this panel builds markup.
 // Everywhere else on the page a title goes in via textContent; here it does not.
 const HOSTILE = '<img src=x onerror=alert(1)>';

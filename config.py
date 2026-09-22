@@ -493,6 +493,17 @@ HANDTRACK_MIRROR = os.getenv("HANDTRACK_MIRROR", "true").lower() in {"1", "true"
 # So: run scripts/calibrate_pinch.py for your own hand. It will tell you if
 # yours disagrees, and refuse rather than guess if the reading is ambiguous.
 HANDTRACK_PINCH_RATIO = float(os.getenv("HANDTRACK_PINCH_RATIO", "0.70"))
+# Hysteresis: a pinch STARTS below HANDTRACK_PINCH_RATIO and only ENDS once the
+# ratio rises above this. One threshold decided afresh every frame meant a pinch
+# hovering near 0.70 flickered on and off, and one "open" frame dropped a held
+# card mid-move — observed on real hardware as a 70% success rate, with every
+# miss being "picked up, then dropped".
+#
+# 0.78 is placed from the same calibration as 0.70: pinched hands read up to
+# 0.62 and open hands from 0.83. It has to sit BELOW 0.83 or an ordinary open
+# hand could fail to let go; 0.78 clears every open reading measured. Set it
+# equal to HANDTRACK_PINCH_RATIO to turn hysteresis off.
+HANDTRACK_PINCH_RELEASE_RATIO = float(os.getenv("HANDTRACK_PINCH_RELEASE_RATIO", "0.78"))
 HANDTRACK_DEBUG = os.getenv("HANDTRACK_DEBUG", "false").lower() in {"1", "true", "yes"}
 # The webcam is exclusive: while Apex holds it, no video call can open it. This
 # is how long `release_camera` hands it back before tracking resumes on its own,
