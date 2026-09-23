@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/companion.css">
   <script src="/static/handsfree.js" defer></script>
   <script src="/static/speech_queue.js?v=1" defer></script>
-  <script src="/static/companion.js?v=voice-sections-1" defer></script>
+  <script src="/static/companion.js?v=voice-timing-1" defer></script>
 </head>
 <body>
 <main id="companion">
@@ -44,6 +44,7 @@
     <div id="welcome"><h2>What are we working on?</h2><p>Share a window, talk through an idea, or ask for a second opinion.</p><div class="suggestions"><button data-prompt="Help me think through an idea. Ask me what I want to achieve.">Think with me</button><button data-prompt="Challenge my approach. Ask me to explain it first.">Challenge my approach</button></div></div>
   </section>
   <div id="error" role="alert" hidden></div>
+  <p class="hint" id="voice-timing" role="status" hidden></p>
   <form id="composer">
     <label class="sr-only" for="message">Message Apex</label><textarea id="message" rows="2" maxlength="20000" placeholder="Talk to me, or type here…"></textarea>
     <div class="composer-actions"><button id="mic" type="button" aria-pressed="false">● Talk</button><span id="mic-note">Tap to record, tap to send</span><button id="stop" type="button" disabled>Stop</button><button id="send" type="submit" class="primary">Send ↑</button></div>

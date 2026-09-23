@@ -57,7 +57,7 @@ a big mission is the most tempting excuse for more breadth there is.
 
 | Gate | Check | Status |
 |---|---|---|
-| **G1 — Pinch** | 20 grabs per hand on `/board`: **≥ 18/20 on each hand**, then two-hand scale works | 70% measured before the hysteresis and hand-identity fixes; **not re-measured** |
+| **G1 — Pinch** | 20 grabs per hand on `/board`: **≥ 18/20 on each hand**, then two-hand scale works | **Reported passed by the user, 2026-09-23**, after the hysteresis and hand-identity fixes. The per-hand counts were not recorded, so the margin over 18/20 is unknown |
 | **G2 — Relay** | Relay on an always-on machine, `python -m agent.relay --check` all green, then **lid shut, phone still answers from Apex's memory** | Proven on localhost only |
 
 Nothing in section 3 starts until both are met. If G1 fails, the readout names
@@ -92,11 +92,30 @@ timestamp in one log line per turn):
 | Model's first sentence (DeepSeek, streaming) | 0.5 s |
 | First audio chunk from TTS (Qwen / Voicebox, streaming) | 0.4 s |
 
+**Measuring it (built 2026-09-23):** every spoken companion turn now records
+six stages, in milliseconds since you stopped talking, on the browser's own
+clock — transcript back, first word of the reply, whole reply written, voice
+requested, first audio received, first sound — plus the server's own time for
+speech-to-text and for the first voice section. The last turn shows as one
+line under the message box. After 20 spoken turns:
+
+    .venv\Scripts\python -m agent.voice_timing
+
+prints the median and 90th percentile per stage and the verdict: `unknown`
+under 20 turns, then `pass` or `fail` against this check. Code:
+`agent/voice_timing.py`, `dashboard/static/companion.js`.
+
+**Known before measuring, from the code:** the companion does not request the
+first voice section until the model has finished the *whole* reply, tool
+calls included, so "first sound" can never be earlier than "whole reply
+written". And hands-free waits 1.2 s of silence before sending. The numbers
+will say how much each of those costs.
+
 **Work:**
-1. Instrument the whole turn end to end and measure 20 turns *before* changing
-   anything. Your `Test-Apex-Fast-Voice.cmd` benchmark measures the TTS stage
-   alone; its `first_chunk_seconds` tells us whether streaming Qwen can meet
-   0.4 s on your GPU.
+1. ~~Instrument the whole turn end to end~~ — done; measure 20 turns *before*
+   changing anything. Your `Test-Apex-Fast-Voice.cmd` benchmark measures the
+   TTS stage alone; its `first_chunk_seconds` tells us whether streaming Qwen
+   can meet 0.4 s on your GPU.
 2. Stream TTS by sentence into playback (the companion already queues
    sentences; the local Qwen server does not stream yet).
 3. Barge-in that works with speakers, not only headphones.

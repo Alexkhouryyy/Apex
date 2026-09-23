@@ -4,6 +4,37 @@
   const els = Object.fromEntries([...document.querySelectorAll('[id]')].map(el => [el.id, el]));
   const $ = id => els[id];
   const root = $('companion');
+  // --- Voice-turn timing (Pillar 1, docs/APEX_V2_PLAN.md) -------------------
+  // Every stage is ms since you STOPPED TALKING, on one performance.now()
+  // clock, so "Celine takes minutes" becomes a line saying which stage the
+  // minutes are in. Measurement only: nothing here changes what a turn does.
+  let timing = null;
+  function timingStart(mode, speechEnd) {
+    timing = {mode, t0: speechEnd, stages: {}, awaitingSend: true};
+  }
+  function mark(stage) {
+    if (timing && !(stage in timing.stages)) timing.stages[stage] = Math.max(0, performance.now() - timing.t0);
+  }
+  function serverTiming(response, name, key) {
+    if (!timing || key in timing.stages) return;
+    const m = new RegExp(`(?:^|,)\\s*${name};dur=([0-9.]+)`).exec(response.headers.get('Server-Timing') || '');
+    if (m) timing.stages[key] = Number(m[1]);
+  }
+  function timingLine(st) {
+    const s = ms => ms == null ? '—' : (ms / 1000).toFixed(1) + 's';
+    const head = st.first_sound != null ? `First sound after ${s(st.first_sound)}` : 'No sound this turn';
+    return `${head} · transcript ${s(st.stt_done)} · first word ${s(st.first_token)} · ` +
+      `reply written ${s(st.reply_done)} · voice ready ${s(st.tts_ready)}`;
+  }
+  async function timingFinish() {
+    const t = timing; timing = null;
+    if (!t || !Object.keys(t.stages).length) return;
+    $('voice-timing').textContent = timingLine(t.stages); $('voice-timing').hidden = false;
+    try {
+      await request('/api/companion/timing', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: t.mode, voice: $('voice').value, stages: t.stages})});
+    } catch (_) { /* Measurement must never break a turn. */ }
+  }
   const drive = location.pathname === '/drive';
   const workspace = new URLSearchParams(location.search).get('workspace') === 'board' ? 'board' : null;
   let pendingRemote = null;
@@ -36,7 +67,9 @@
   async function transcribeBlob(blob, signal) {
     const response=await request('/api/companion/transcribe?engine='+$('stt-engine').value,
       {method:'POST', body:blob, signal, headers:{'Content-Type':blob.type || 'audio/webm'}});
-    return (await response.json()).text || '';
+    const text = (await response.json()).text || '';
+    mark('stt_done'); serverTiming(response, 'stt', 'stt_server');
+    return text;
   }
   const token = () => localStorage.getItem('apex_token') || '';
   const headers = () => token() ? {Authorization: `Bearer ${token()}`} : {};
@@ -123,9 +156,12 @@
         state('thinking', 'Preparing voice · the first section will play as soon as it is ready…'); controls();
         const engine = $('voice').value, profile = $('voicebox-profile').value;
         const generate = async section => {
+          mark('tts_start');
           const response = await request('/api/speak', {method: 'POST',
             headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: section, engine, profile})});
-          return response.blob();
+          const blob = await response.blob();
+          mark('tts_ready'); serverTiming(response, 'tts', 'tts_server');
+          return blob;
         };
         const play = blob => new Promise((resolve, reject) => {
           if (epoch !== speechEpoch) { resolve(); return; }
@@ -139,6 +175,7 @@
           };
           endPlayback = () => { current.pause(); done(); };
           current.onended = () => done();
+          current.onplaying = () => mark('first_sound');
           current.onerror = () => done(new Error('Audio playback failed. Your reply remains on screen.'));
           state('speaking', 'Speaking · Stop ends playback'); controls();
           current.play().catch(exc => done(new Error(exc.name === 'NotAllowedError'
@@ -158,6 +195,7 @@
         if (!window.speechSynthesis) throw new Error('Device speech is unavailable. Choose OpenAI voice or read the reply.');
         const utterance = new SpeechSynthesisUtterance(text); utterance.rate = 1.02;
         utterance.onend = finish;
+        utterance.onstart = () => mark('first_sound');
         utterance.onerror = event => { if (!['interrupted', 'canceled'].includes(event.error)) error('Device voice could not play.'); finish(); };
         state('speaking', 'Speaking · tap Stop or Talk to interrupt'); controls();
         window.speechSynthesis.speak(utterance);
@@ -223,7 +261,10 @@
     }
   }
   async function send(text, automatic = false, recovery = null, fromHands = false) {
-    if (speechBusy || speechDraining || active || recorder || (hands?.busy && !fromHands) || (pendingRemote && !recovery) || !text.trim()) return;
+    if (speechBusy || speechDraining || active || recorder || (hands?.busy && !fromHands) || (pendingRemote && !recovery) || !text.trim()) { timing = null; return; }
+    // Only the send that a transcript triggered is a voice turn; a typed
+    // message or a proactive check-in must not inherit a stale clock.
+    if (timing?.awaitingSend && !automatic && !recovery) timing.awaitingSend = false; else timing = null;
     hands?.pause();
     if (!automatic) lastInteraction=Date.now();
     stopSpeech(); error();
@@ -240,6 +281,7 @@
       } else if (item.type === 'progress') {
         turn.text = item.text; output.content.textContent = item.text;
       } else if (item.type === 'token' && !turn.stopped) {
+        mark('first_token');
         turn.text += item.text; if (!automatic) output.content.textContent = turn.text;
       } else if (item.type === 'tool') {
         let detail = document.createElement('details');
@@ -249,6 +291,7 @@
         if (item.result) { let result = document.createElement('pre'); result.textContent = item.result; detail.append(result); }
         output.wrapper.append(detail);
       } else if (item.type === 'done') {
+        mark('reply_done');
         turn.done = true; turn.stopped = turn.stopped || item.interrupted; turn.text = item.text;
         output.content.textContent = item.text;
         if (automatic && item.text.trim() === 'NOTHING_TO_ADD') output.wrapper.remove();
@@ -292,6 +335,7 @@
     if (automatic && /^\[Safety\]/.test(turn.text)) $('check-in').checked=false;
     if (!turn.stopped && turn.text.trim() !== 'NOTHING_TO_ADD') await speak(turn.text);
     else resumeHands();
+    timingFinish();
   }
   async function stop() {
     disableHands(); $('check-in').checked=false;
@@ -330,6 +374,8 @@
       const chunks = []; const local = new MediaRecorder(micStream); recorder = local;
       local.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
       local.onstop = async () => {
+        // Tap mode: tapping "Send voice" IS the end of speech.
+        if (epoch === recordingEpoch) timingStart('tap', performance.now());
         clearTimeout(recordingTimer); micStream?.getTracks().forEach(track => track.stop()); micStream = null;
         $('mic').setAttribute('aria-pressed', 'false'); $('mic').textContent = '● Talk';
         try {
@@ -337,7 +383,7 @@
           state('thinking', 'Transcribing your message…');
           const transcript = {text: await transcribeBlob(new Blob(chunks, {type: local.mimeType || 'audio/webm'}))};
           if (epoch !== recordingEpoch) return;
-          if (!transcript.text) throw new Error('No speech was detected. Try again.');
+          if (!transcript.text) { timing = null; throw new Error('No speech was detected. Try again.'); }
           recorder = null; $('message').value = transcript.text; await send(transcript.text);
         } catch (exc) { error(exc.message); }
         finally { recorder = null; if (!active && !root.classList.contains('speaking')) state('', 'Ready when you are.'); controls(); }
@@ -361,10 +407,14 @@
       },
       onError: exc => { disableHands(); error(exc.message); state('', 'Hands-free stopped.'); },
       onSegment: async (blob, epoch) => {
+        // Hands-free: your speech ended at the last voiced frame, not when the
+        // 1.2 s silence timer fired — that wait is part of what you feel.
+        timingStart('hands_free', hands.lastVoice || performance.now());
         handsRequest=new AbortController();
         const text=await transcribeBlob(blob,handsRequest.signal);
         if (!hands.enabled || hands.epoch!==epoch) return;
         if (text.trim()) { $('message').value=text; await send(text, false, null, true); }
+        else timing = null;
       }
     });
     await hands.start(); controls();

@@ -314,10 +314,38 @@ async def transcribe_browser(request: Request):
             return transcribe(bytes(data), name, engine)
         finally:
             _stt_slots.release()
+    started = time.perf_counter()
     try:
         result = await asyncio.shield(asyncio.get_running_loop().run_in_executor(None, work))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(503, 'Transcription unavailable: ' + str(exc)) from exc
-    return {'text': result}
+    # Server-Timing, so the voice-turn timing can split "transcript back" into
+    # the model's time and the time spent uploading and waiting for it.
+    took = (time.perf_counter() - started) * 1000
+    return JSONResponse({'text': result},
+                        headers={'Server-Timing': f'stt;dur={took:.1f}'})
+
+
+@router.post('/api/companion/timing')
+async def record_voice_timing(request: Request):
+    """One voice turn's stage timings, measured in the browser. See
+    agent/voice_timing.py for why the browser owns the clock."""
+    _check_origin(request)
+    raw = await request.body()
+    if len(raw) > 4000:
+        raise HTTPException(413, 'Timing record too large.')
+    try:
+        from agent import voice_timing
+        stored = voice_timing.record(json.loads(raw or b'null'))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'stored': stored}
+
+
+@router.get('/api/companion/timing')
+async def voice_timing_summary(limit: int = 20):
+    from agent import voice_timing
+    limit = max(1, min(200, int(limit)))
+    return {'summary': voice_timing.summary(limit), 'turns': voice_timing.recent(limit)}

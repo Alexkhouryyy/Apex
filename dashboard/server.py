@@ -1932,8 +1932,13 @@ async def speak_endpoint(request: Request):
     if engine == "voicebox":
         from voice.voicebox import synthesize
         try:
+            started = time.perf_counter()
             audio = await synthesize(text, profile)
-            return Response(content=audio, media_type="audio/wav")
+            # Server-Timing: how much of "first audio received" was synthesis
+            # rather than the request queueing or the transfer.
+            took = (time.perf_counter() - started) * 1000
+            return Response(content=audio, media_type="audio/wav",
+                            headers={"Server-Timing": f"tts;dur={took:.1f}"})
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=503)
     if engine != "openai":
@@ -1947,6 +1952,7 @@ async def speak_endpoint(request: Request):
     client = OpenAI(api_key=config.OPENAI_API_KEY)
     voice = getattr(config, "OPENAI_TTS_VOICE", "alloy")
     loop = asyncio.get_event_loop()
+    started = time.perf_counter()
     try:
         audio = await loop.run_in_executor(
             None,
@@ -1954,7 +1960,9 @@ async def speak_endpoint(request: Request):
         )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-    return Response(content=audio, media_type="audio/mpeg")
+    took = (time.perf_counter() - started) * 1000
+    return Response(content=audio, media_type="audio/mpeg",
+                    headers={"Server-Timing": f"tts;dur={took:.1f}"})
 
 
 # --- Control: config, keys, restart, update, MCP -------------------------
