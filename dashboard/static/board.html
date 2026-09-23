@@ -19,8 +19,8 @@
 <title>Apex — Board</title>
 <script type="importmap">
 { "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three": "/static/vendor/three/build/three.module.min.js",
+  "three/addons/": "/static/vendor/three/examples/jsm/"
 } }
 </script>
 <style>
@@ -185,7 +185,18 @@ function loadToken() {
   try { return localStorage.getItem(_TOKEN_KEY) || ""; } catch (e) { return ""; }
 }
 const token = loadToken();
-if (new URLSearchParams(location.search).has('token')) history.replaceState(null, '', location.pathname);
+// Take the token out of the address bar, and ONLY the token. This used to
+// replace the whole query with the bare path, which also threw away ?diag=1 —
+// so the one link most worth handing to someone mid-problem, token plus
+// readout, opened with the readout missing.
+{
+  const q = new URLSearchParams(location.search);
+  if (q.has('token')) {
+    q.delete('token');
+    const rest = q.toString();
+    history.replaceState(null, '', location.pathname + (rest ? '?' + rest : ''));
+  }
+}
 let selectedId = null;
 async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers: {Authorization: `Bearer ${token}`, ...options.headers}});

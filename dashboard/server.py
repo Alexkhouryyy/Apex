@@ -135,6 +135,28 @@ app.add_middleware(
     allow_credentials=False,
 )
 
+def _pin_script_mime_types() -> None:
+    """Serve .js as JavaScript whatever the machine's registry says.
+
+    StaticFiles asks Python's `mimetypes`, and on Windows that reads the
+    registry, where installed software sometimes sets `.js` to text/plain.
+    Ordinary <script> tags shrug that off. ES MODULES DO NOT: the browser
+    refuses to run a module served as text/plain. /board imports three.js as a
+    module from /static/vendor/, so on an affected machine vendoring it would
+    have turned "dead offline" into "dead everywhere" — and only on Windows,
+    which is where Apex actually runs.
+
+    `add_type` overrides whatever the registry loaded. Called at import time,
+    before the mount, so the first lookup already sees it.
+    """
+    import mimetypes
+    mimetypes.add_type("text/javascript", ".js")
+    mimetypes.add_type("text/javascript", ".mjs")
+    mimetypes.add_type("text/css", ".css")
+
+
+_pin_script_mime_types()
+
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

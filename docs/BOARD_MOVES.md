@@ -44,3 +44,12 @@ swipes will do nothing** — delete the line, or add
 
 Each gesture has a 3-second cooldown (`HANDTRACK_GESTURE_COOLDOWN_SECONDS`), so
 one swipe in each direction every 3 seconds.
+
+## Works offline
+
+`/board` no longer needs the internet. three.js 0.160.0 (MIT) is bundled under
+`dashboard/static/vendor/three/`, and `.js` is always served as JavaScript,
+even on Windows machines whose registry says `text/plain` (ES modules refuse
+to run otherwise). `tests/test_board_offline.py` fails if anyone adds a CDN
+import back. Opening `/board?token=…&diag=1` now removes only the token from
+the address bar, so the diag panel is still there after a reload.
