@@ -16,6 +16,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+import httpx
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -2438,6 +2440,14 @@ async def voicebox_profiles():
         # other caller — not synthesize, not voice/tts.py, not setup_voicebox.
         # It now lives in voicebox.resolve_engine, which profiles() applies.
         rows = await profiles()
-        return {"profiles": [{"id": p["id"], "name": p["name"]} for p in rows]}
-    except Exception:
+    except httpx.RequestError:
         return JSONResponse({"error": "Keep Voicebox open on the Apex laptop."}, status_code=503)
+    except ValueError as exc:
+        # Voicebox answered, but with an error, or VOICEBOX_URL is wrong.
+        # "Keep it open" would send the user to check the one thing that
+        # is already fine.
+        return JSONResponse({"error": str(exc)}, status_code=503)
+    # Anything else is a bug in Apex and surfaces as one (500, logged), not
+    # as advice to restart a program that is running.
+    return {"profiles": [{"id": p.get("id"), "name": p.get("name") or p.get("id")}
+                         for p in rows if p.get("id")]}

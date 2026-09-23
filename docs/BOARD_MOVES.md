@@ -53,3 +53,14 @@ even on Windows machines whose registry says `text/plain` (ES modules refuse
 to run otherwise). `tests/test_board_offline.py` fails if anyone adds a CDN
 import back. Opening `/board?token=…&diag=1` now removes only the token from
 the address bar, so the diag panel is still there after a reload.
+
+## Wave, pinch-hold, swipe-down
+
+These were only wired in `--resident` mode, so everywhere else they did nothing
+without saying so. They now work in every mode, and each one writes what
+happened to the dashboard's event feed:
+
+| Gesture (default action) | `--wake` | voice | `--text` / `--tui` |
+|---|---|---|---|
+| wave (`wake`), pinch-hold (`listen`) | starts listening | "already listening" | "ignored — no microphone" |
+| swipe-down (`stop`) | cuts Voicebox speech mid-sentence; other TTS engines finish the sentence first | same | same (nothing is spoken, so "nothing to stop") |

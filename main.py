@@ -40,6 +40,52 @@ def read_text_input() -> str:
         return ""
 
 
+def make_gesture_handler(mode: str, wake_event=None, log=None):
+    """What wave / pinch-hold / swipe-down do in `main.py`.
+
+    Until now only app/resident.py set the tracker's on_gesture hook, so in
+    every other mode these gestures were recognised, logged, and then did
+    nothing — silently. Board gestures (board:*) never reach here; the tracker
+    runs them itself.
+
+    mode is "text", "tui", "wake" or "voice". Each call returns what happened,
+    and writes it to the awareness log when one is given, so "I waved and
+    nothing happened" always has an answer on the dashboard.
+    """
+    def _say(what: str) -> str:
+        if log is not None:
+            try:
+                log.add("gesture", what)
+            except Exception:
+                pass
+        return what
+
+    def on_gesture(gesture: str, action: str) -> str:
+        if action in ("wake", "listen"):
+            if mode == "wake" and wake_event is not None:
+                wake_event.set()
+                return _say(f"{gesture}: listening")
+            if mode == "voice":
+                return _say(f"{gesture}: already listening (voice mode always is)")
+            return _say(f"{gesture}: ignored — {mode} mode has no microphone")
+        if action == "stop":
+            from voice import tts as _tts
+            from voice import interrupt as _interrupt
+            if not _tts.is_speaking():
+                return _say(f"{gesture}: nothing to stop")
+            _interrupt.trigger()
+            if config.TTS_ENGINE == "voicebox":
+                return _say(f"{gesture}: stopped speaking")
+            # Only the Voicebox player polls the interrupt flag between
+            # chunks; ffplay and pyttsx3 run to the end of the sentence.
+            return _say(f"{gesture}: stop requested — {config.TTS_ENGINE} "
+                        "finishes the current sentence first")
+        return _say(f"{gesture}: unknown action '{action}' — "
+                    "check HANDTRACK_GESTURE_ACTIONS")
+
+    return on_gesture
+
+
 def build_parser():
     p = argparse.ArgumentParser(description="Voice AI Agent")
     p.add_argument("--text", action="store_true", help="Text I/O instead of voice")
@@ -372,6 +418,14 @@ def main():
         wake_listener = WakeWordListener(wake_phrases=config.WAKE_PHRASES)
         wake_listener.start(on_wake=wake_event.set)
         speak("Wake mode on. Say 'hey agent' to wake me.")
+
+    # Gestures (wave / pinch-hold / swipe-down). resident.py wires its own.
+    _tracker = getattr(monitor, "handtrack", None) if monitor else None
+    if _tracker is not None and _tracker.on_gesture is None:
+        _mode = ("tui" if args.tui else "text" if args.text
+                 else "wake" if args.wake else "voice")
+        _tracker.on_gesture = make_gesture_handler(
+            _mode, wake_event=wake_event, log=getattr(monitor, "log", None))
 
     # Stream STT partials to the dashboard if it's running
     def _on_partial(text: str):

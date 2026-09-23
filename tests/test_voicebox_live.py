@@ -352,3 +352,39 @@ class TestItNeverQuietlySpeaksInAnotherVoice:
             monkeypatch.setattr(config, "VOICEBOX_URL", bad)
             with pytest.raises(ValueError):
                 vb.base_url()
+
+
+class TestThePickerSaysWhatIsActuallyWrong:
+    """/api/voicebox/profiles used to answer every failure — including bugs
+    in Apex — with "Keep Voicebox open on the Apex laptop.", sending the user
+    to restart a program that was already running."""
+
+    def test_voicebox_not_running_says_keep_it_open(self, monkeypatch, client):
+        import config
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()  # nothing listens here
+        monkeypatch.setattr(config, "VOICEBOX_URL", f"http://127.0.0.1:{port}")
+        monkeypatch.setattr(config, "DASHBOARD_TOKEN", "t0ken")
+        r = client.get("/api/voicebox/profiles", headers=AUTH)
+        assert r.status_code == 503
+        assert "Keep Voicebox open" in r.json()["error"]
+
+    def test_voicebox_answering_badly_is_not_told_to_stay_open(self, voicebox, client):
+        voicebox.profiles = {"not": "a list"}
+        r = client.get("/api/voicebox/profiles", headers=AUTH)
+        assert r.status_code == 503
+        assert "Update Voicebox" in r.json()["error"]
+        assert "Keep Voicebox open" not in r.json()["error"]
+
+    def test_an_apex_bug_is_a_500_not_advice(self, monkeypatch, voicebox):
+        from voice import voicebox as vb
+
+        async def broken():
+            raise KeyError("a bug in Apex")
+        monkeypatch.setattr(vb, "profiles", broken)
+        from dashboard.server import app
+        r = TestClient(app, raise_server_exceptions=False).get(
+            "/api/voicebox/profiles", headers=AUTH)
+        assert r.status_code == 500
