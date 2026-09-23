@@ -516,7 +516,13 @@ HANDTRACK_GESTURE_COOLDOWN_SECONDS = float(os.getenv("HANDTRACK_GESTURE_COOLDOWN
 # Known gestures: wave, pinch_hold, swipe_left/right/up/down, hands_present, hands_gone.
 # Known actions: wake, listen, stop.
 HANDTRACK_GESTURE_ACTIONS = [e.strip() for e in os.getenv(
-    "HANDTRACK_GESTURE_ACTIONS", "wave:wake,pinch_hold:listen,swipe_down:stop").split(",") if e.strip()]
+    "HANDTRACK_GESTURE_ACTIONS",
+    "wave:wake,pinch_hold:listen,swipe_down:stop,"
+    # Board gestures work in every mode, not only resident. Swipes are
+    # refused while a card is held or was just released, so a drag or a
+    # flick is never read as one.
+    "swipe_up:board:summon,swipe_left:board:prev,swipe_right:board:next"
+).split(",") if e.strip()]
 
 # Which MediaPipe delegate the hand tracker runs on: auto | gpu | cpu.
 # "auto" tries GPU and falls back to CPU, reporting which it got — measured at

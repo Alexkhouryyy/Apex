@@ -109,5 +109,42 @@ renderDiag({tracking: true, diag_error: 'BoomError: nope'});
 assert.match(body.textContent, /readout failed/,
   'a broken readout must say so rather than showing a stale frame');
 
-console.log('PASS: every refusal names its number, titles cannot inject markup, '
+// --- board events: throw, summon, swipe ------------------------------------
+// Extracted by name from the real page, like the readout functions above.
+{
+  const dom2 = new JSDOM(
+    '<div id="toast"></div><aside id="partner-panel" hidden><iframe data-src="/companion"></iframe></aside>' +
+    '<button id="partner-toggle" aria-expanded="false"></button>', {runScripts: 'outside-only'});
+  const w2 = dom2.window;
+  w2.eval(`let toastTimer = null;\n${grab('toast')}\n${grab('openPartner')}\n${grab('handleBoardEvents')}\n` +
+          `globalThis._h = handleBoardEvents;`);
+  const doc = w2.document;
+
+  w2._h([{seq: 1, type: 'thrown', id: 'x', title: '<img src=x onerror=alert(1)>'}]);
+  assert.equal(doc.querySelectorAll('#toast img').length, 0,
+    'a thrown card title injected markup into the toast');
+  assert.match(doc.getElementById('toast').textContent, /undo/,
+    'a throw must tell the user how to get it back');
+
+  assert.ok(doc.getElementById('partner-panel').hidden);
+  w2._h([{seq: 2, type: 'summon'}]);
+  assert.ok(!doc.getElementById('partner-panel').hidden, 'swipe-up did not summon Apex');
+  assert.equal(doc.getElementById('partner-toggle').getAttribute('aria-expanded'), 'true');
+  w2._h([{seq: 3, type: 'summon'}]);
+  assert.ok(!doc.getElementById('partner-panel').hidden,
+    'a second summon must not toggle the panel shut');
+
+  w2._h([{seq: 4, type: 'selected', id: 'a', title: 'Calendar'}]);
+  assert.match(doc.getElementById('toast').textContent, /Selected Calendar/);
+  w2._h(undefined);                      // a frame with no events is normal
+  dom2.window.close();
+}
+// The pointed ring must be distinct from the selection ring: they can be
+// different objects, and Apex is told both.
+assert.ok(html.includes('.card.pointed'), 'no style for the pointed card');
+assert.ok(/classList\.toggle\('pointed', c\.id === pointedId\)/.test(html),
+  'renderCards no longer marks the pointed card');
+
+console.log('PASS: board events (throw, summon, select) render safely; '
+  + 'every refusal names its number, titles cannot inject markup, '
   + 'and off / no-hands / broken are three distinct messages.');

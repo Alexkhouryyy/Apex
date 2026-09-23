@@ -2202,6 +2202,9 @@ async def ws_board(ws: WebSocket):
     board = _board_mod.get_board()
     interval = 1.0 / max(1.0, float(getattr(config, "BOARD_FPS", 15)))
     import base64
+    # Start from NOW, not from zero: a tab opened after a card was thrown must
+    # not replay "thrown away" for something that happened before it existed.
+    seen_event = board.latest_event_seq()
 
     try:
         while True:
@@ -2218,7 +2221,13 @@ async def ws_board(ws: WebSocket):
                 "tracking": tracker is not None,
                 "hands": [],
                 "grabs": [],
+                "pointed": (board.pointed() or {}).get("id"),
+                "events": [],
             }
+            fresh = board.events_since(seen_event)
+            if fresh:
+                payload["events"] = fresh
+                seen_event = fresh[-1]["seq"]
             if tracker is not None:
                 cursors = tracker.latest_cursors()
                 payload["cursors"] = [

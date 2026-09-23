@@ -842,17 +842,63 @@ class HandTracker(threading.Thread):
         details = [details[i] for _, i in paired]
         return cursors, details
 
+    def _board_gesture(self, gesture: str, action: str) -> None:
+        if not getattr(config, "BOARD_ENABLED", False):
+            return
+        try:
+            what = run_board_action(action)
+        except Exception as e:
+            what = f"failed: {e}"
+        self.log.add("gesture", f"{gesture} -> {action}: {what}")
+
     def _dispatch(self, gesture: str) -> None:
         from agent import gestures as _g
         # Always logged, whatever the allowlist says: recognition and action are
         # separate gates, so "I waved and nothing happened" stays diagnosable.
         self.log.add("gesture", _g.describe(gesture))
         action = _g.gesture_action(gesture)
+        if action and action.startswith("board:"):
+            # Board gestures are handled HERE, not through on_gesture. That
+            # hook is only ever set by app/resident.py, so in `main.py --text`
+            # — the way Apex is normally run — every mapped gesture was
+            # recognised, logged and then did nothing at all.
+            self._board_gesture(gesture, action)
+            return
         if action and self.on_gesture:
             try:
                 self.on_gesture(gesture, action)
             except Exception as e:
                 print(f"[HandTrack] gesture handler error: {e}")
+
+
+# What each board action does. Named rather than inlined so the allowlist in
+# HANDTRACK_GESTURE_ACTIONS can only point at something that exists — an
+# unknown "board:x" is reported, not silently ignored.
+BOARD_ACTIONS = ("board:summon", "board:next", "board:prev")
+
+
+def run_board_action(action: str, board=None) -> str:
+    """Carry out one board gesture. Returns what happened, for the log.
+
+    A module function rather than a method so it can be exercised without a
+    camera, a thread or a tracker.
+    """
+    if board is None:
+        from agent.board import get_board
+        board = get_board()
+    allowed, why = board.swipes_allowed()
+    if not allowed:
+        return f"ignored ({why})"
+    if action == "board:summon":
+        board.emit("summon")
+        return "summoned Apex"
+    if action in ("board:next", "board:prev"):
+        card = board.select_step(1 if action == "board:next" else -1)
+        if card is None:
+            return "nothing on the board to select"
+        board.emit("selected", id=card["id"], title=card["title"])
+        return f"selected {card['title']}"
+    return f"unknown board action {action!r} — check HANDTRACK_GESTURE_ACTIONS"
 
 
 def _handedness_label(result, idx: int) -> str:

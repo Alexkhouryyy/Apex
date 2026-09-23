@@ -109,6 +109,94 @@ ARM_DWELL_SECONDS = 0.12
 # one slowly forever.
 UNDO_DEPTH = 50
 
+# --- Jarvis-style interaction ------------------------------------------------
+#
+# How long "what you pointed at" is remembered. You point, THEN you speak, and
+# a spoken sentence plus the tap to send it takes several seconds — a memory
+# shorter than that would forget the object before the words that name it
+# arrive. Long enough to survive speech, short enough that "this" does not
+# quietly mean something you pointed at a minute ago; Apex is told the age so
+# it can ask when it is stale.
+POINT_MEMORY_SECONDS = 8.0
+
+# A flick throws a card off the board. Measured on the HAND, not the card: the
+# card is clamped to the board, so a card flung at the edge stops dead there
+# and would report no speed at all.
+#   FLICK_SPEED           window-widths per second the hand must be moving at
+#                         the moment of release. An ordinary set-down is slow.
+#   FLICK_WINDOW_SECONDS  how far back the speed is measured over.
+#   FLICK_PROJECT_SECONDS the throw has to be heading OFF the board: where the
+#                         card would be this long after release must be
+#                         outside it. A fast move across the middle is a
+#                         drag that ended quickly, not a throw.
+#
+# These have measured nobody yet — first guesses, set on the safe side. A throw
+# DELETES a card, so the asymmetry runs one way: a missed throw costs a second
+# flick, a false one loses something. The first values (1.2, 0.3 s) treated a
+# brisk drag ending in the middle of the board as a throw — a card moving at
+# two widths a second, released at 0.5, projected past the edge. Tune these
+# from a real hand the way HANDTRACK_PINCH_RATIO was.
+FLICK_SPEED = 1.5
+FLICK_WINDOW_SECONDS = 0.15
+FLICK_PROJECT_SECONDS = 0.2
+TRAIL_SECONDS = 0.4
+MIN_FLICK_SPAN_SECONDS = 0.03
+
+# Where a card summoned by voice appears, if a hand was seen this recently:
+# at the hand. Older than this and the hand is probably down — the default
+# spot is better than a stale one.
+HAND_ANCHOR_SECONDS = 6.0
+
+# Swipes are ignored this long after a release, because the flick that threw
+# a card IS a fast directional movement and the recognizer would read the tail
+# of it as a swipe.
+SWIPE_QUIET_AFTER_RELEASE = 0.8
+
+EVENT_BACKLOG = 50
+
+
+def flick_velocity(trail, window: float = FLICK_WINDOW_SECONDS):
+    """(vx, vy) in window-fractions per second over the last `window` of the
+    trail, or None if there is not enough of it to say.
+
+    Pure, so the whole throw decision can be tested with a table of samples.
+    """
+    if not trail or len(trail) < 2:
+        return None
+    t_end = trail[-1][0]
+    recent = [s for s in trail if s[0] >= t_end - window]
+    if len(recent) < 2:
+        recent = list(trail[-2:])
+    (t0, x0, y0), (t1, x1, y1) = recent[0], recent[-1]
+    dt = t1 - t0
+    # Speed over less than ~one camera frame is not a measurement. Frames that
+    # arrive microseconds apart — repeated timestamps, or any caller not
+    # passing real time — turn an ordinary 0.3 move into thousands of widths a
+    # second, and the first version of this threw away a card that had just
+    # been set down in the middle of a drag test. 30 ms is under one frame at
+    # the tracker's 20 Hz, so two real consecutive frames always qualify.
+    if dt < MIN_FLICK_SPAN_SECONDS:
+        return None
+    return ((x1 - x0) / dt, (y1 - y0) / dt)
+
+
+def is_flick(trail) -> bool:
+    """Fast enough AND heading off the board. Both, deliberately.
+
+    Speed alone would throw away a card you set down briskly in the middle of
+    the board. Direction alone would throw away one you slid slowly to the
+    edge. A throw is a fast movement that would carry the card off the board.
+    """
+    v = flick_velocity(trail)
+    if v is None:
+        return False
+    vx, vy = v
+    if (vx * vx + vy * vy) ** 0.5 < FLICK_SPEED:
+        return False
+    _, x, y = trail[-1]
+    px, py = x + vx * FLICK_PROJECT_SECONDS, y + vy * FLICK_PROJECT_SECONDS
+    return not (0.0 <= px <= 1.0 and 0.0 <= py <= 1.0)
+
 
 class HandState:
     """Named states for one tracked hand slot, for introspection and tests.
@@ -222,6 +310,19 @@ class Board:
         self._undo: list[dict] = []
         self._redo: list[dict] = []
         self._selected: str | None = None
+        # What an open hand was last pointing at, and when. See
+        # POINT_MEMORY_SECONDS.
+        self._pointed: tuple[str, float] | None = None
+        # Recent hand positions of a card held by ONE hand, for the flick.
+        self._trail: dict[str, list] = {}
+        # The last place a hand was seen, for summoning a card to it.
+        self._hand_seen: tuple[float, float, float] | None = None
+        self._last_release_at: float = 0.0
+        # Things the browser should react to that are not state — a card
+        # thrown away, Apex summoned. Numbered so each socket can ask for only
+        # what it has not seen.
+        self._events: list[dict] = []
+        self._event_seq = 0
 
     # -- history -----------------------------------------------------------
     @staticmethod
@@ -517,6 +618,107 @@ class Board:
         self._write(card)
         return result
 
+    # -- Jarvis-style interaction ----------------------------------------
+    def emit(self, kind: str, **data) -> dict:
+        """Something the page should react to that is not board state."""
+        with self._lock:
+            self._event_seq += 1
+            ev = {"seq": self._event_seq, "type": kind, **data}
+            self._events.append(ev)
+            del self._events[:-EVENT_BACKLOG]
+            return ev
+
+    def events_since(self, seq: int) -> list[dict]:
+        with self._lock:
+            return [dict(e) for e in self._events if e["seq"] > seq]
+
+    def latest_event_seq(self) -> int:
+        with self._lock:
+            return self._event_seq
+
+    def pointed(self, now: Optional[float] = None,
+                max_age: float = POINT_MEMORY_SECONDS) -> dict | None:
+        """The card an open hand last pointed at, with how long ago.
+
+        None when nothing was pointed at recently, or the card has since gone.
+        The age travels with it so the model can tell "this, right now" from
+        "the thing you pointed at seven seconds ago" and ask when unsure.
+        """
+        now = now if now is not None else time.time()
+        with self._lock:
+            if self._pointed is None:
+                return None
+            card_id, at = self._pointed
+            if now - at > max_age:
+                return None
+            card = next((c for c in self._cards if c.id == card_id), None)
+            if card is None:
+                return None
+            out = card.as_dict()
+        out["seconds_ago"] = round(now - at, 1)
+        return out
+
+    def hand_anchor(self, now: Optional[float] = None,
+                    max_age: float = HAND_ANCHOR_SECONDS):
+        """Where a summoned card should appear: at the hand, if one was up
+        recently. Clamped so the whole card is on the board, not half off it."""
+        now = now if now is not None else time.time()
+        with self._lock:
+            seen = self._hand_seen
+        if seen is None or now - seen[2] > max_age:
+            return None
+        x = min(1.0 - CARD_W / 2, max(CARD_W / 2, seen[0]))
+        y = min(1.0 - CARD_H / 2, max(CARD_H / 2, seen[1]))
+        return (x, y)
+
+    def swipes_allowed(self, now: Optional[float] = None) -> tuple[bool, str]:
+        """Whether a swipe should act, and if not, why.
+
+        Moving a held card fast IS a swipe to the recognizer, which knows
+        nothing about cards. Without this, dragging a card left would also page
+        the selection left, and every flick would fire a swipe on its way out.
+        """
+        now = now if now is not None else time.time()
+        with self._lock:
+            # One check covers holding too: a card is only ever held by a
+            # pinched hand (`kept` is filtered on pinched), so a separate
+            # "is anything held" test was a second copy of this one that a
+            # revert audit showed could never fail on its own.
+            if any(len(h) > 2 and h[2] for h in self._last_hands):
+                return False, "a hand is pinched (holding, or about to grab)"
+            if now - self._last_release_at < SWIPE_QUIET_AFTER_RELEASE:
+                return False, "a card was just released"
+        return True, ""
+
+    def select_step(self, step: int) -> dict | None:
+        """Move the selection to the next (+1) or previous (-1) card, wrapping.
+        With nothing selected, starts from the most recent card."""
+        with self._lock:
+            if not self._cards:
+                return None
+            ids = [c.id for c in self._cards]
+            if self._selected in ids:
+                i = (ids.index(self._selected) + step) % len(ids)
+            else:
+                i = len(ids) - 1
+            self._selected = ids[i]
+            return self._cards[i].as_dict()
+
+    def _throw(self, card: "Card", pre) -> None:
+        """Remove a flicked card, undoably, remembering where it CAME from.
+
+        `remove()` snapshots the card as it is, which for a throw is jammed
+        against the edge it was flung at. Putting it back to its pre-grab spot
+        first means "undo" returns it home rather than to the edge.
+        """
+        if pre is not None:
+            card.x, card.y, card.scale, card.rot = pre
+        with self._lock:
+            if self._selected == card.id:
+                self._selected = None
+        if self.remove(card.id):
+            self.emit("thrown", id=card.id, title=card.title)
+
     # -- hands ------------------------------------------------------------
     @staticmethod
     def read_cursors(cursors) -> list:
@@ -611,16 +813,24 @@ class Board:
         # Recorded AFTER normalisation, so the readout explains the hands the
         # board actually acted on rather than the raw ones it was handed.
         self._last_hands = list(hands)
+        if hands:
+            self._hand_seen = (hands[0][0], hands[0][1], now)
         if not hands:
             # Hands gone: release everything. Without this an object stays stuck
             # to a hand that left the frame, and the only way to free it is to
             # reach back to exactly where it was. Not a cancel — the position
             # it was left at is kept, same as an ordinary release.
             with self._lock:
-                released = [(c, self._pre_grab.get(c.id))
+                # Flinging a hand out of the camera's view is the most natural
+                # throw there is, so it is checked here as well as on un-pinch.
+                released = [(c, self._pre_grab.get(c.id),
+                             len(c.held_by) == 1 and is_flick(self._trail.get(c.id)))
                             for c in self._cards if c.held_by]
+                if released:
+                    self._last_release_at = now
                 for c in self._cards:
                     c.held_by = []
+                self._trail.clear()
                 self._grab_offset.clear()
                 self._pair_ref.clear()
                 self._armed_since.clear()
@@ -629,7 +839,10 @@ class Board:
             # Hands leaving the frame ends a hold as surely as un-pinching does,
             # so it commits the same way — otherwise walking away from the
             # camera mid-drag would silently discard the move.
-            for c, pre in released:
+            for c, pre, thrown in released:
+                if thrown:
+                    self._throw(c, pre)
+                    continue
                 self._write(c)
                 after = (c.x, c.y, c.scale, c.rot)
                 if pre is not None and tuple(pre) != after:
@@ -647,8 +860,22 @@ class Board:
             # participant is doing.
             released = []
             for c in self._cards:
+                # The release frame's own hand position is part of the throw:
+                # the fingers open at the END of the fling, while still moving.
+                if len(c.held_by) == 1 and c.id in self._trail:
+                    i = c.held_by[0]
+                    if i < len(hands):
+                        self._trail[c.id].append((now, hands[i][0], hands[i][1]))
+                flung = len(c.held_by) == 1 and is_flick(self._trail.get(c.id))
                 cancelled = any(
                     i < len(hands) and hands[i][3] for i in c.held_by)
+                # A hand that opens WHILE flinging is finishing a throw, not
+                # asking to cancel — and it is thrown, because the release
+                # below carries `flung` whatever this branch does. The cancel
+                # also puts the card back where it was picked up, which is
+                # exactly the spot a throw's undo should return it to. An
+                # earlier version special-cased "cancelled and flung" here; a
+                # revert audit showed the outcome identical without it.
                 if cancelled:
                     pre = self._pre_grab.pop(c.id, None)
                     if pre is not None:
@@ -666,7 +893,9 @@ class Board:
                         # commit point. A cancel lands here too — it reverted
                         # the card, and that revert is just as much the state
                         # worth keeping as a deliberate drop would be.
-                        released.append((c, pre))
+                        released.append((c, pre, flung))
+                        self._last_release_at = now
+                    self._trail.pop(c.id, None)
                 c.held_by = kept
 
             for idx, (hx, hy, pinched, open_palm) in enumerate(hands):
@@ -674,6 +903,12 @@ class Board:
                     self._grab_offset.pop(idx, None)
                     self._armed_since.pop(idx, None)
                     self._hand_state[idx] = HandState.IDLE
+                    # An open hand over a card is pointing at it — the same
+                    # reach a pinch would grab with, so "this" means exactly
+                    # the card a pinch would have picked up.
+                    target = self._nearest(hx, hy, idx)
+                    if target is not None:
+                        self._pointed = (target.id, now)
                     continue
                 holding = next((c for c in self._cards if idx in c.held_by), None)
                 if holding is not None:
@@ -706,6 +941,7 @@ class Board:
                     if was_unheld:
                         self._pre_grab[target.id] = (
                             target.x, target.y, target.scale, target.rot)
+                        self._trail[target.id] = [(now, hx, hy)]
                         self._hand_state[idx] = HandState.GRABBED
                     else:
                         self._pair_ref.pop(target.id, None)
@@ -715,16 +951,35 @@ class Board:
                 if len(c.held_by) == 1:
                     idx = c.held_by[0]
                     hx, hy = hands[idx][0], hands[idx][1]
+                    trail = self._trail.setdefault(c.id, [])
+                    if not trail or trail[-1][0] != now:
+                        trail.append((now, hx, hy))
+                    del trail[:-64]
+                    cutoff = now - TRAIL_SECONDS
+                    while len(trail) > 2 and trail[0][0] < cutoff:
+                        trail.pop(0)
                     ox, oy = self._grab_offset.get(idx, (0.0, 0.0))
                     c.x = min(1.0, max(0.0, hx + ox))
                     c.y = min(1.0, max(0.0, hy + oy))
                     self._pair_ref.pop(c.id, None)
                 elif len(c.held_by) == 2:
+                    # A two-handed hold cannot be flicked, and that is
+                    # structural: the trail is only ever APPENDED while one
+                    # hand holds, so there is no speed to measure. Dropping it
+                    # here and the `len == 1` tests at release are belt and
+                    # braces — a revert audit confirmed none of the three is
+                    # load-bearing on its own, which is the point of having
+                    # them. This one also stops a stale one-hand trail being
+                    # resumed if the card goes back to one hand.
+                    self._trail.pop(c.id, None)
                     self._two_handed(c, hands)
 
         # Outside the lock, and only for cards a hand just let go of — the
         # whole point of committing on release rather than per frame.
-        for c, pre in released:
+        for c, pre, thrown in released:
+            if thrown:
+                self._throw(c, pre)
+                continue
             self._write(c)
             after = (c.x, c.y, c.scale, c.rot)
             # A cancel already put the card back, so before == after and there

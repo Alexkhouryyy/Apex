@@ -20,6 +20,8 @@ Designing physical objects and checking they can actually be made:
 **[docs/FORGE.md](docs/FORGE.md)**.
 Generating hypotheses that could be wrong, and recording what happened:
 **[docs/GENESIS.md](docs/GENESIS.md)**.
+What your hands can do on the board — grab, point, throw, swipe, summon:
+**[docs/BOARD_MOVES.md](docs/BOARD_MOVES.md)**.
 
 ## What it does
 

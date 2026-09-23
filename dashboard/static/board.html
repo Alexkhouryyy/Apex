@@ -96,6 +96,16 @@
   #selection-label {flex:1;min-width:160px}
   .card {cursor:pointer;color:var(--ink);font:inherit;text-align:left}
   .card.selected {outline:3px solid #7aebc7}
+  /* Pointed-at: what "this" means right now. Deliberately unlike the selection
+     ring — dashed and amber — because the two can differ and Apex is told
+     both. */
+  .card.pointed {outline:2px dashed #e0b341;outline-offset:3px}
+  .card.selected.pointed {outline:3px solid #7aebc7;box-shadow:0 0 0 6px rgba(224,179,65,.35)}
+  #toast {position:fixed;left:50%;top:78px;transform:translateX(-50%);z-index:45;
+          background:rgba(6,14,18,.94);border:1px solid #17313a;border-radius:999px;
+          color:#dff3ec;font:13px/1.3 system-ui,sans-serif;padding:8px 16px;
+          opacity:0;transition:opacity .25s;pointer-events:none}
+  #toast.show {opacity:1}
   .card.model-label {width:auto;min-height:0;max-width:25vw;padding:7px 12px;background:#0a172cdd}
   .card.model-label h3 {margin:0}
   #partner-panel {position:fixed;right:12px;top:88px;bottom:36px;width:min(440px,45vw);z-index:6;background:#08111c;border:1px solid #45617c;border-radius:14px;overflow:hidden}
@@ -132,6 +142,7 @@
   <p id="hint-body">Connecting…</p>
 </div>
 <div id="status">—</div>
+<div id="toast" role="status" aria-live="polite"></div>
 <!-- The readout. A pinch that does not grab has five causes and they are
      indistinguishable on screen; until now the numbers that decide it existed
      only in a HANDTRACK_DEBUG print. Toggle with D, or ?diag=1. -->
@@ -215,6 +226,31 @@ const rings = [];          // one per hand, created lazily
 
 function say(text) { statusEl.textContent = text; }
 
+let pointedId = null;
+let toastTimer = null;
+function toast(text, ms = 3200) {
+  const t = document.getElementById("toast");
+  t.textContent = text;             // textContent: titles are user-supplied
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), ms);
+}
+function openPartner() {
+  const panel = document.getElementById('partner-panel');
+  if (!panel.hidden) return;
+  panel.hidden = false;
+  const frame = panel.querySelector('iframe');
+  if (!frame.src) frame.src = frame.dataset.src;
+  document.getElementById('partner-toggle').setAttribute('aria-expanded', 'true');
+}
+function handleBoardEvents(events) {
+  for (const ev of events || []) {
+    if (ev.type === "thrown") toast(`Threw away ${ev.title} — say "undo" to bring it back`);
+    else if (ev.type === "summon") { openPartner(); toast("Apex is listening"); }
+    else if (ev.type === "selected") toast(`Selected ${ev.title}`, 1600);
+  }
+}
+
 function renderCards(list) {
   const seen = new Set();
   for (const c of list) {
@@ -239,6 +275,7 @@ function renderCards(list) {
     el.classList.toggle("held", !!c.held);
     el.classList.toggle('model-label', c.kind === 'model');
     el.classList.toggle('selected', c.id === selectedId);
+    el.classList.toggle('pointed', c.id === pointedId);
     el.setAttribute('aria-pressed', String(c.id === selectedId));
   }
   for (const [id, el] of cards) {
@@ -493,6 +530,8 @@ function connect() {
     // Cards and models are two layers of one board: text stays DOM, geometry
     // goes to WebGL, and both read the same positions from Python.
     selectedId = msg.selection?.id || null;
+    pointedId = msg.pointed || null;
+    handleBoardEvents(msg.events);
     document.getElementById('selection-label').textContent = msg.selection ? `Selected: ${msg.selection.title} · whole object` : 'Pinch an object or tap its label to select it.';
     renderCards(msg.cards || []);
     syncModels(msg.cards || []);

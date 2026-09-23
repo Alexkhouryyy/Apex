@@ -504,9 +504,14 @@ TOOLS = [
             "Put something on Apex's glass board — the hand-tracked surface "
             "floating over the user's camera. Reach for this whenever the "
             "user asks to SEE something ('show me', 'put it up', 'pull up X') "
-            "instead of answering with a wall of text. Pass `src` to show an "
-            "existing image or 3D model instead of text — call board_props "
-            "first to see which ones exist."
+            "instead of answering with a wall of text. If the user's hand was "
+            "up in the last few seconds the card appears AT their hand, so "
+            "'show me my calendar' lands where they are reaching. Pass `src` to "
+            "show an existing image or 3D model instead of text — call "
+            "board_props first to see which ones exist. On the board the user "
+            "can point at a card and say 'this', flick a card off the edge to "
+            "throw it away (board_undo brings it back), and swipe to step "
+            "through cards or summon you."
         ),
         "input_schema": {
             "type": "object",
@@ -2057,6 +2062,13 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
 
         elif name == "board_present":
             from agent.board import get_board
+            board = get_board()
+            # Summoned to the hand: if a hand was up in the last few seconds,
+            # the card appears there rather than in a fixed spot — "show me my
+            # calendar" lands where you are reaching, like pulling something
+            # up in front of you. No hand, the usual default.
+            anchor = board.hand_anchor()
+            place = {"x": anchor[0], "y": anchor[1]} if anchor else {}
             src = (inputs.get("src") or "").strip()
             if src:
                 from agent import props as _props
@@ -2066,10 +2078,11 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                             f"in .glb, .gltf, .png, .jpg or .jpeg. Run "
                             f"board_props to see what is there.")
                 kind = "model" if _props.is_model(src) else "image"
-                card = get_board().add(kind, inputs["title"], src=src)
+                card = board.add(kind, inputs["title"], src=src, **place)
             else:
-                card = get_board().add("card", inputs["title"], inputs.get("body", ""))
-            out = f"'{card.title}' is on the board ({get_board().count()} up)."
+                card = board.add("card", inputs["title"], inputs.get("body", ""), **place)
+            where = " at your hand" if anchor else ""
+            out = f"'{card.title}' is on the board{where} ({board.count()} up)."
             _broadcast_live_event("board", out)
             return out
 
