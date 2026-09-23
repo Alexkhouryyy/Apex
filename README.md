@@ -22,6 +22,8 @@ Generating hypotheses that could be wrong, and recording what happened:
 **[docs/GENESIS.md](docs/GENESIS.md)**.
 What your hands can do on the board — grab, point, throw, swipe, summon:
 **[docs/BOARD_MOVES.md](docs/BOARD_MOVES.md)**.
+Where Apex goes next — the v2 plan, its gates and its three checks:
+**[docs/APEX_V2_PLAN.md](docs/APEX_V2_PLAN.md)**.
 
 ## What it does
 
