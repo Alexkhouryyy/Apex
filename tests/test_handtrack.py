@@ -184,8 +184,20 @@ class TestLandmarksToCursor:
         survives into the gesture."""
         rec = gestures.GestureRecognizer(cooldown_seconds=0)
         fired = []
+        # Held still first: a hand that is still coming INTO view is not
+        # swiping (SWIPE_SETTLE_SECONDS), and this test is about the sign.
+        # The thumb is moved well clear so the hand is OPEN throughout — the
+        # fixture's default thumb sits where this path starts, which reads as
+        # a pinch, and letting go of a pinch is not a swipe.
+        for k in range(14):
+            lms = _hand()
+            lms[handtrack.INDEX_TIP] = _lm(0.9, 0.5)
+            lms[handtrack.THUMB_TIP] = _lm(0.5, 0.95)
+            rec.feed_cursors([handtrack.landmarks_to_cursor(lms, mirror=True)],
+                             999.3 + k * 0.05)
         for i in range(16):
             lms = _hand()
+            lms[handtrack.THUMB_TIP] = _lm(0.5, 0.95)
             # In IMAGE space the hand travels LEFT, because the user moving
             # right appears to move left in an unmirrored frame.
             lms[handtrack.INDEX_TIP] = _lm(0.9 - i * 0.05, 0.5)
@@ -219,24 +231,6 @@ class TestLandmarksToCursor:
     @pytest.mark.parametrize("bad", [[], None, [_lm(0, 0)]])
     def test_garbage_yields_no_cursor_rather_than_raising(self, bad):
         assert handtrack.landmarks_to_cursor(bad) is None
-
-
-class TestHandedness:
-    def test_hands_are_ordered_by_label_not_detection_order(self):
-        """Detection order carries no identity — it is what makes a second hand
-        look like a screen-wide swipe. Handedness is better evidence than
-        proximity, and MediaPipe gives it away for free."""
-        left, right = (0.2, 0.5, False), (0.8, 0.5, False)
-        a = handtrack.order_by_handedness([left, right], ["Left", "Right"])
-        b = handtrack.order_by_handedness([right, left], ["Right", "Left"])
-        assert a == b, "the same two hands must land in the same slots"
-
-    @pytest.mark.parametrize("labels", [[], ["Left"], ["", ""], None])
-    def test_missing_labels_fall_back_to_the_given_order(self, labels):
-        """Handedness is an improvement, not a dependency — the recognizer's
-        proximity pairing still covers the case where MediaPipe won't say."""
-        cursors = [(0.2, 0.5, False), (0.8, 0.5, False)]
-        assert handtrack.order_by_handedness(cursors, labels) == cursors
 
 
 class TestAvailability:

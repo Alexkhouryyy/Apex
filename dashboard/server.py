@@ -2243,6 +2243,11 @@ async def ws_board(ws: WebSocket):
                 # identical on the wire, and the page should be able to tell you
                 # which without guessing.
                 "tracking": tracker is not None,
+                # The tracker can run with the board off, and then it sees
+                # your hands while nothing acts on them. The readout needs to
+                # know that, or it reports "pinched and in reach" for a grab
+                # that can never happen.
+                "board_enabled": bool(getattr(config, "BOARD_ENABLED", False)),
                 "hands": [],
                 "grabs": [],
                 "pointed": (board.pointed() or {}).get("id"),

@@ -158,17 +158,40 @@ class TestPinchLatch:
         assert l.update("R", 0.74, 0.70, 0.78) is False
 
 
-class TestHandKeys:
+class TestHandIdentities:
+    """Identity by position. MediaPipe's label flips and its detection order
+    renumbers; keying on either moved a held card to the other hand."""
 
-    def test_distinct_labels_are_used(self):
-        assert ht.hand_keys(["Right", "Left"]) == ["Right", "Left"]
+    def test_the_same_hand_keeps_its_id_as_it_moves(self):
+        ids = ht.HandIdentities()
+        a = ids.assign([(0.5, 0.5)], 100.0)
+        b = ids.assign([(0.55, 0.5)], 100.05)
+        assert a == b
 
-    def test_duplicate_labels_fall_back_to_position(self):
-        """Two hands both called "Right" would otherwise share one latch."""
-        assert ht.hand_keys(["Right", "Right"]) == ["#0", "#1"]
+    def test_detection_order_does_not_matter(self):
+        ids = ht.HandIdentities()
+        first = ids.assign([(0.2, 0.5), (0.8, 0.5)], 100.0)
+        swapped = ids.assign([(0.8, 0.5), (0.2, 0.5)], 100.05)
+        assert swapped == [first[1], first[0]]
 
-    def test_a_missing_label_falls_back_to_position(self):
-        assert ht.hand_keys(["Right", ""]) == ["#0", "#1"]
+    def test_a_new_hand_gets_a_new_id_and_takes_nobody_elses(self):
+        ids = ht.HandIdentities()
+        (held,) = ids.assign([(0.7, 0.5)], 100.0)
+        new, still = ids.assign([(0.3, 0.5), (0.7, 0.5)], 100.05)
+        assert still == held and new != held
+
+    def test_a_missed_frame_keeps_the_id(self):
+        ids = ht.HandIdentities()
+        (a,) = ids.assign([(0.5, 0.5)], 100.0)
+        ids.assign([], 100.05)
+        (b,) = ids.assign([(0.52, 0.5)], 100.10)
+        assert a == b
+
+    def test_a_hand_gone_past_the_grace_is_a_new_hand(self):
+        ids = ht.HandIdentities()
+        (a,) = ids.assign([(0.5, 0.5)], 100.0)
+        (b,) = ids.assign([(0.5, 0.5)], 100.0 + ht.HAND_LOSS_GRACE_SECONDS + 0.05)
+        assert a != b
 
 
 # --------------------------------------------------------------------------
@@ -240,10 +263,41 @@ class TestAHandThatLeavesComesBackOpen:
         still passing. A hand pinched, lowered out of frame and raised again
         reading 0.74 is NOT pinching — it is a hand coming back up."""
         t = tracker()
-        t._read_hands(frame(hand(0.40)))
-        t._read_hands(frame())                         # hand out of frame
-        _c, details = t._read_hands(frame(hand(0.74)))
+        t._read_hands(frame(hand(0.40)), now=100.0)
+        t._read_hands(frame(), now=100.05)             # hand out of frame...
+        t._read_hands(frame(), now=100.4)              # ...for real
+        _c, details = t._read_hands(frame(hand(0.74)), now=100.45)
         assert details[0]["pinched"] is False
+
+    def test_one_missed_detection_keeps_the_pinch(self):
+        """The other side of the same rule. Motion blur on a fast drag makes
+        MediaPipe miss a frame; forgetting the latch on it meant the hand came
+        back in the 0.70-0.78 band reading OPEN, and the card was dropped."""
+        t = tracker()
+        t._read_hands(frame(hand(0.40)), now=100.0)
+        t._read_hands(frame(), now=100.05)             # missed one frame
+        _c, details = t._read_hands(frame(hand(0.74)), now=100.10)
+        assert details[0]["pinched"] is True
+
+    def test_a_label_flip_does_not_reset_the_pinch(self):
+        """MediaPipe calls the same hand Right, then Left for one frame. The
+        latch used to be keyed on that label, so the flip read as a new,
+        open hand at 0.74 and dropped the card."""
+        t = tracker()
+        t._read_hands(frame(hand(0.40), labels=["Right"]), now=100.0)
+        _c, details = t._read_hands(frame(hand(0.74), labels=["Left"]), now=100.05)
+        assert details[0]["pinched"] is True
+
+    def test_swapped_detection_order_keeps_each_hands_pinch(self):
+        """Right pinched, Left open; next frame MediaPipe lists them the other
+        way round, both at 0.74. Right is still pinched, Left still is not."""
+        t = tracker()
+        t._read_hands(frame(hand(0.40, 0.7, 0.5), hand(0.95, 0.3, 0.5),
+                            labels=["Right", "Left"]), now=100.0)
+        _c, details = t._read_hands(frame(hand(0.74, 0.3, 0.5), hand(0.74, 0.7, 0.5),
+                                          labels=["Left", "Right"]), now=100.05)
+        by_x = {round(d["x"], 1): d["pinched"] for d in details}
+        assert by_x == {0.7: True, 0.3: False}
 
 
 class TestTheReadoutStaysHonest:
@@ -266,8 +320,95 @@ class TestTheReadoutStaysHonest:
         handedness, so the panel could show the left hand's ratio next to the
         right hand's grab."""
         t = tracker()
-        cursors, details = t._read_hands(frame(hand(0.40, 0.2, 0.5), hand(0.95, 0.8, 0.5),
-                                               labels=["Right", "Left"]))
-        assert [d["label"] for d in details] == ["Left", "Right"]
+        t._read_hands(frame(hand(0.40, 0.2, 0.5), hand(0.95, 0.8, 0.5),
+                            labels=["Right", "Left"]), now=100.0)
+        cursors, details = t._read_hands(frame(hand(0.95, 0.8, 0.5), hand(0.40, 0.2, 0.5),
+                                               labels=["Left", "Right"]), now=100.05)
+        assert [d["label"] for d in details] == ["Right", "Left"], \
+            "order must follow the hand, not MediaPipe's listing"
         for c, d in zip(cursors, details):
             assert (round(c[0], 4), round(c[1], 4)) == (d["x"], d["y"])
+            assert c[4] == d["id"]
+
+
+class TestTheRealFrameLoop:
+    """Every other test here calls `_read_hands` directly. This one drives
+    `HandTracker._tick` — camera read, MediaPipe call, latch, board — with only
+    the camera and the model faked, so a `_tick` that stopped using the
+    latched, identity-keyed `_read_hands` (or stopped passing its result to
+    the board) fails here even though every unit above still passes."""
+
+    def test_a_wobbly_pinch_through_tick_keeps_the_card(self, db, monkeypatch):
+        import numpy as np
+        monkeypatch.setattr(config, "BOARD_ENABLED", True, raising=False)
+        b = Board()
+        card = b.add("note", "Grab Me", src="")
+        card.x, card.y = 0.5, 0.5
+        monkeypatch.setattr(board_mod, "get_board", lambda: b)
+
+        frames = iter([frame(hand(r)) for r in WOBBLY_HOLD]
+                      + [frame(), frame(hand(0.74))])     # one missed detection
+
+        class Cap:
+            def read(self):
+                return True, np.zeros((4, 4, 3), dtype=np.uint8)
+
+        class Landmarker:
+            def detect_for_video(self, image, ts):
+                return next(frames)
+
+        class MP:
+            class ImageFormat:
+                SRGB = 1
+
+            @staticmethod
+            def Image(image_format, data):
+                return data
+
+        from agent.awareness import AwarenessLog
+        t = ht.HandTracker(AwarenessLog())
+        t._cap, t._landmarker, t._mp = Cap(), Landmarker(), MP()
+        monkeypatch.setattr(t, "_open", lambda now: True)
+        held = []
+        for i in range(len(WOBBLY_HOLD) + 2):
+            t._tick(100.0 + i * 0.05)
+            held.append(bool(card.held_by))
+        first = held.index(True)
+        assert all(held[first:]), f"dropped mid-hold: {held}"
+        assert t.latest_hands()[0]["pinched"] is True
+
+
+class TestTheReleaseFollowsTheEntry:
+    """Release used to be a fixed 0.78 whatever HANDTRACK_PINCH_RATIO said,
+    and the calibrator only rewrites the entry: a calibrated 0.80 collapsed
+    the band to nothing, and a calibrated 0.55 left a release your hand might
+    never rise above while holding."""
+
+    def test_unset_release_is_entry_plus_the_margin(self, monkeypatch):
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_RELEASE_RATIO", None)
+        assert ht.pinch_release_ratio(0.70) == pytest.approx(0.78)
+        assert ht.pinch_release_ratio(0.80) == pytest.approx(0.88)
+
+    def test_an_explicit_release_is_used(self, monkeypatch):
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_RELEASE_RATIO", 0.75)
+        assert ht.pinch_release_ratio(0.70) == pytest.approx(0.75)
+
+    def test_a_release_below_entry_means_no_hysteresis_not_nonsense(self, monkeypatch):
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_RELEASE_RATIO", 0.60)
+        assert ht.pinch_release_ratio(0.70) == pytest.approx(0.70)
+
+    def test_the_frame_loop_uses_the_derived_release(self, monkeypatch):
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_RATIO", 0.80)
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_RELEASE_RATIO", None)
+        t = tracker()
+        t._read_hands(frame(hand(0.40)), now=100.0)
+        _c, details = t._read_hands(frame(hand(0.84)), now=100.05)
+        assert details[0]["release"] == pytest.approx(0.88)
+        assert details[0]["pinched"] is True, "0.84 is inside the band for entry 0.80"
+
+
+def test_the_calibrator_places_release_between_entry_and_the_open_hand():
+    from scripts import calibrate_pinch as cal
+    open_samples = [0.83, 0.85, 0.9, 0.95, 1.0] * 6
+    release = cal.recommend_release(0.70, open_samples)
+    assert 0.70 < release < 0.83

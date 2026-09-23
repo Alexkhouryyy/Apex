@@ -108,6 +108,26 @@ assert.match(body.textContent, /no hands in frame/);
 renderDiag({tracking: true, diag_error: 'BoomError: nope'});
 assert.match(body.textContent, /readout failed/,
   'a broken readout must say so rather than showing a stale frame');
+// Tracking on, board off: the tracker sees hands that nothing will act on.
+renderDiag({tracking: true, board_enabled: false,
+            hands: [hand({pinched: true, ratio: .3})], grabs: [grabOf({pinched: true})]});
+assert.match(body.textContent, /board is off/,
+  'with BOARD_ENABLED off the readout must not promise a grab');
+// Pinched and in reach but idle is not success.
+assert.match(whyNot(hand({pinched: true, ratio: .4}), grabOf({pinched: true, state: 'idle'})),
+             /has not taken it \(state: idle\)/);
+assert.equal(whyNot(hand({pinched: true, ratio: .4}), grabOf({pinched: true, state: 'grabbed'})),
+             'pinched and in reach');
+
+// The D shortcut and ?diag=1 are page setup, not per-connection setup: they
+// must run once, outside connect(), or every reconnect stacks another toggle.
+{
+  const conn = grab('connect');
+  assert.ok(!conn.includes('addEventListener("keydown"'),
+    'connect() adds a keydown listener — it runs again on every reconnect');
+  assert.ok(!conn.includes('get("diag")'), 'connect() re-applies ?diag=1 on every reconnect');
+  assert.equal((html.match(/addEventListener\("keydown"/g) || []).length, 1);
+}
 
 // --- board events: throw, summon, swipe ------------------------------------
 // Extracted by name from the real page, like the readout functions above.
@@ -129,6 +149,10 @@ assert.match(body.textContent, /readout failed/,
   assert.ok(doc.getElementById('partner-panel').hidden);
   w2._h([{seq: 2, type: 'summon'}]);
   assert.ok(!doc.getElementById('partner-panel').hidden, 'swipe-up did not summon Apex');
+  // Summon opens the panel; nothing starts the microphone, so the page must
+  // not say it is listening.
+  assert.doesNotMatch(doc.getElementById('toast').textContent, /listening/i);
+  assert.match(doc.getElementById('toast').textContent, /tap the mic/);
   assert.equal(doc.getElementById('partner-toggle').getAttribute('aria-expanded'), 'true');
   w2._h([{seq: 3, type: 'summon'}]);
   assert.ok(!doc.getElementById('partner-panel').hidden,

@@ -9,11 +9,11 @@ happen.
 | **Grab** | Pinch thumb to index on a card and hold a beat | It follows your hand |
 | **Scale / rotate** | Grab with both hands, pull apart or twist | Bigger, smaller, turned |
 | **Cancel** | Open your palm and hold it still while holding | The card goes back where it was |
-| **Point** | Open hand over a card | Amber dashed ring — this is what "this" means |
-| **"Make this blue"** | Point (or select), then talk in *Talk to Apex* | Apex acts on the card you pointed at |
+| **Point** | Open hand held over a card for a moment (0.3 s) | Amber dashed ring — this is what "this" means |
+| **"Make this blue" / "make this bigger"** | Point (or select), then say it — in *Talk to Apex*, by voice, or from the resident | Apex acts on the card you pointed at |
 | **Throw away** | Grab, flick toward an edge, let go while moving | Gone. Say **"undo"** to bring it back home |
 | **Next / previous** | Open-hand swipe right / left | Steps the selection through your cards |
-| **Summon Apex** | Open-hand swipe up | Opens the Apex panel, listening |
+| **Summon Apex** | Open-hand swipe up | Opens the Apex panel. It does **not** start the mic — tap it to talk |
 | **Show me …** | "Show me my calendar" with a hand up | The card appears **at your hand** |
 
 ## The rules that stop these fighting each other
@@ -30,6 +30,31 @@ happen.
   how long ago you pointed, and asks when it's unclear which card you mean.
 - **Every throw is undoable**, back to where the card was picked up, not to the
   edge it was flung at.
+- **A held card stays with the hand holding it.** Each hand is followed by
+  where it is, not by MediaPipe's Left/Right label (which flips for a frame)
+  or its place in the list (which changes when a second hand comes into view).
+  Before this, a second hand appearing could take, drop or throw the card.
+- **One missed camera frame does not drop the card.** A hand the tracker loses
+  for up to 0.25 s (`HAND_LOSS_GRACE_SECONDS`) keeps its hold and its pinch.
+  A hand gone longer than that lets go, and a hand flung out of view is still
+  a throw. A camera that stalls for half a second is not a throw.
+- **Pointing needs a moment.** A hand crossing a card on its way out of view
+  does not replace the card you pointed at. With two open hands, the one that
+  arrived at its card most recently is the one pointing.
+- **Letting go of a card is not a swipe.** The drag before the release is
+  dropped from the swipe window, so letting go of a card you dragged down
+  does not fire swipe-down (stop) and cut Apex off.
+- **Raising a hand is not a swipe.** A hand has to be in view for half a
+  second before it can swipe, so lifting it into frame does not summon Apex.
+- **A return stroke is not a swipe.** After any swipe or wave, no swipe in any
+  direction for a second, so bringing your hand back after a swipe-right does
+  not page straight back. Known gap: the first stroke of a wide wave can still
+  page once before the wave is recognised.
+- **Holding a card still is not pinch-hold.** Pinch-hold (listen) is ignored
+  while a card is held or was just let go, and fires once per pinch, not every
+  three seconds.
+- **A refused gesture gives its cooldown back**, so the next deliberate swipe
+  in that direction is not silently dropped.
 
 ## Tuning
 
@@ -44,6 +69,10 @@ swipes will do nothing** — delete the line, or add
 
 Each gesture has a 3-second cooldown (`HANDTRACK_GESTURE_COOLDOWN_SECONDS`), so
 one swipe in each direction every 3 seconds.
+
+The pinch **release** ratio follows the entry: leave
+`HANDTRACK_PINCH_RELEASE_RATIO` empty and it is `HANDTRACK_PINCH_RATIO + 0.08`.
+`scripts/calibrate_pinch.py` measures your hand and writes both.
 
 ## Works offline
 
@@ -63,4 +92,7 @@ happened to the dashboard's event feed:
 | Gesture (default action) | `--wake` | voice | `--text` / `--tui` |
 |---|---|---|---|
 | wave (`wake`), pinch-hold (`listen`) | starts listening | "already listening" | "ignored — no microphone" |
-| swipe-down (`stop`) | cuts Voicebox speech mid-sentence; other TTS engines finish the sentence first | same | same (nothing is spoken, so "nothing to stop") |
+| swipe-down (`stop`) | stops the whole reply — including between sentences, while a tool runs. Voicebox cuts the current sentence at once; other TTS engines finish it first | same | nothing is spoken, so "nothing to stop" |
+
+`--tui` (what `Apex.bat` launches) now gets these too; its wiring used to sit
+after the TUI's early return and never ran.

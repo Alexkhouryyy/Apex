@@ -121,6 +121,31 @@ class TestServedAsJavaScript:
         """Without this, the next test could pass because add_type did nothing."""
         assert mimetypes.guess_type("x.js")[0] == "text/plain"
 
+    def test_the_server_pins_the_types_itself_at_startup(self):
+        """In a fresh process: poison the registry FIRST, then import the
+        server, then fetch. Calling the pin from the test (as the test below
+        does) would pass even if server.py stopped calling it — this cannot."""
+        import subprocess
+        import sys
+        code = (
+            "import mimetypes; mimetypes.init()\n"
+            "for e in ('.js', '.mjs', '.css'): mimetypes.add_type('text/plain', e)\n"
+            "import config; config.DASHBOARD_TOKEN = ''\n"
+            "from dashboard import server\n"
+            "from fastapi.testclient import TestClient\n"
+            "r = TestClient(server.app).get("
+            "'/static/vendor/three/examples/jsm/loaders/GLTFLoader.js')\n"
+            "print(r.status_code, r.headers['content-type'])\n"
+        )
+        env = dict(__import__("os").environ,
+                   ANTHROPIC_API_KEY="sk-ant-placeholder-for-ci-tests-only")
+        out = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT), env=env,
+                             capture_output=True, text=True, timeout=120)
+        assert out.returncode == 0, out.stderr[-2000:]
+        status, ctype = out.stdout.strip().splitlines()[-1].split(" ", 1)
+        assert status == "200"
+        assert ctype.split(";")[0] in ("text/javascript", "application/javascript"), ctype
+
     def test_vendored_modules_are_javascript_even_when_the_os_says_text(self, client, poisoned_registry):
         c, server = client
         server._pin_script_mime_types()

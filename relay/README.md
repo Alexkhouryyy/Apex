@@ -120,6 +120,12 @@ it was healthy — the push re-seals with the current key, and the stage then
 compares that key against itself. Nothing recovers a snapshot whose key is
 gone, so being told immediately matters.
 
+When that stage fails, **nothing is pushed** — the check stops there, and so
+does Apex's own relay loop, which would otherwise overwrite the snapshot within
+seconds of boot. The stored copy stays readable by the original key until you
+restore it. If that key is gone for good and you want to start over, set
+`RELAY_OVERWRITE_UNREADABLE=true`.
+
 ## Configuration, in full
 
 | Variable | Default | |

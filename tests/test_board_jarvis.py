@@ -26,6 +26,7 @@ import pytest
 
 from agent import board as board_mod
 from agent.board import (Board, ARM_DWELL_SECONDS, CARD_W, FLICK_SPEED,
+                         HAND_LOSS_GRACE_SECONDS, POINT_DWELL_SECONDS,
                          POINT_MEMORY_SECONDS, is_flick, flick_velocity)
 
 FRAME = 0.05                                    # 20 Hz, the tracker's rate
@@ -43,6 +44,12 @@ def card_at(b: Board, title: str, x: float, y: float):
     c = b.add("card", title)
     c.x, c.y = x, y
     return c
+
+
+def point(b: Board, cursors, t: float) -> None:
+    """Hold open hands still over cards for the pointing dwell, ending at t."""
+    b.apply_hands(cursors, now=t - POINT_DWELL_SECONDS - 0.01)
+    b.apply_hands(cursors, now=t)
 
 
 def grab(b: Board, x: float, y: float, t0: float) -> float:
@@ -70,21 +77,21 @@ class TestPointing:
     def test_an_open_hand_over_a_card_points_at_it(self, db):
         b = Board()
         c = card_at(b, "Phone Stand", 0.5, 0.5)
-        b.apply_hands([(0.52, 0.5, False, False)], now=100.0)
+        point(b, [(0.52, 0.5, False, False)], 100.0)
         assert b.pointed(now=100.0)["id"] == c.id
 
     def test_pointing_uses_the_same_reach_as_grabbing(self, db):
         """So "this" means exactly the card a pinch would have picked up."""
         b = Board()
         card_at(b, "Far", 0.9, 0.9)
-        b.apply_hands([(0.1, 0.1, False, False)], now=100.0)
+        point(b, [(0.1, 0.1, False, False)], 100.0)
         assert b.pointed(now=100.0) is None
 
     def test_it_is_remembered_through_the_sentence(self, db):
         """You point THEN speak. The hand can drop before the words arrive."""
         b = Board()
         card_at(b, "Phone Stand", 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, False, False)], now=100.0)
+        point(b, [(0.5, 0.5, False, False)], 100.0)
         b.apply_hands([], now=101.0)                     # hand drops
         got = b.pointed(now=100.0 + POINT_MEMORY_SECONDS - 0.5)
         assert got is not None and got["title"] == "Phone Stand"
@@ -92,29 +99,64 @@ class TestPointing:
     def test_it_is_forgotten_after_the_memory_window(self, db):
         b = Board()
         card_at(b, "Phone Stand", 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, False, False)], now=100.0)
+        point(b, [(0.5, 0.5, False, False)], 100.0)
         assert b.pointed(now=100.0 + POINT_MEMORY_SECONDS + 0.1) is None
 
     def test_the_age_travels_with_it(self, db):
         """So the model can tell "this, now" from "a while ago" and ask."""
         b = Board()
         card_at(b, "Phone Stand", 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, False, False)], now=100.0)
+        point(b, [(0.5, 0.5, False, False)], 100.0)
         assert b.pointed(now=103.0)["seconds_ago"] == 3.0
 
     def test_the_latest_point_wins(self, db):
         b = Board()
         card_at(b, "Left", 0.2, 0.5)
         right = card_at(b, "Right", 0.8, 0.5)
-        b.apply_hands([(0.2, 0.5, False, False)], now=100.0)
-        b.apply_hands([(0.8, 0.5, False, False)], now=100.5)
+        point(b, [(0.2, 0.5, False, False)], 100.0)
+        point(b, [(0.8, 0.5, False, False)], 100.5)
         assert b.pointed(now=100.5)["id"] == right.id
 
     def test_a_card_that_is_gone_is_not_pointed_at(self, db):
         b = Board()
         c = card_at(b, "Phone Stand", 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, False, False)], now=100.0)
+        point(b, [(0.5, 0.5, False, False)], 100.0)
         b.remove(c.id)
+        assert b.pointed(now=100.0) is None
+
+
+
+    def test_a_hand_passing_over_a_card_does_not_steal_the_point(self, db):
+        """Point at A, then the hand crosses B on its way out of view. "This"
+        is still A — a card the hand only passed over was never pointed at."""
+        b = Board()
+        a = card_at(b, "A", 0.3, 0.5)
+        card_at(b, "B", 0.6, 0.5)
+        point(b, [(0.3, 0.5, False, False)], 100.0)
+        b.apply_hands([(0.6, 0.5, False, False)], now=100.05)   # passes B
+        b.apply_hands([(0.6, 0.5, False, False)], now=100.10)
+        b.apply_hands([], now=100.15)                           # gone
+        assert b.pointed(now=101.0)["id"] == a.id
+
+    def test_a_resting_hand_does_not_beat_the_pointing_one(self, db):
+        """Two open hands: one has rested over a card all along, the other has
+        just arrived at one. The arrival is the point, whatever the order of
+        the hands in the list."""
+        b = Board()
+        card_at(b, "Resting", 0.2, 0.5)
+        target = card_at(b, "Target", 0.8, 0.5)
+        rest = (0.2, 0.5, False, False, "rest")
+        b.apply_hands([rest], now=99.0)
+        b.apply_hands([rest], now=99.4)
+        b.apply_hands([(0.5, 0.2, False, False, "p"), rest], now=99.6)
+        b.apply_hands([(0.8, 0.5, False, False, "p"), rest], now=99.7)
+        b.apply_hands([(0.8, 0.5, False, False, "p"), rest], now=100.01)
+        assert b.pointed(now=100.01)["id"] == target.id
+
+    def test_a_single_frame_is_not_a_point(self, db):
+        b = Board()
+        card_at(b, "Phone Stand", 0.5, 0.5)
+        b.apply_hands([(0.5, 0.5, False, False)], now=100.0)
         assert b.pointed(now=100.0) is None
 
 
@@ -125,7 +167,8 @@ class TestPointingReachesApex:
         from dashboard.companion import workspace_message
         b = Board()
         card_at(b, "Phone Stand", 0.5, 0.5)
-        b.apply_hands([(0.5, 0.5, False, False)])
+        import time
+        point(b, [(0.5, 0.5, False, False)], time.time())
         monkeypatch.setattr(bm, "get_board", lambda: b)
         out = workspace_message({"workspace": "board"}, "what is this?")
         assert "pointed at" in out and "Phone Stand" in out
@@ -223,7 +266,9 @@ class TestThrowingACardAway:
         c = card_at(b, "Junk", 0.6, 0.5)
         t = grab(b, 0.6, 0.5, 100.0)
         t = drag(b, [(0.7, 0.5), (0.82, 0.5), (0.94, 0.5)], t)
-        b.apply_hands([], now=t)
+        # The camera keeps delivering frames with no hand in them.
+        for k in range(1, 8):
+            b.apply_hands([], now=t + 0.05 * k)
         assert c.id not in [x["id"] for x in b.cards()]
 
     def test_an_open_hand_at_the_end_of_a_fling_is_a_throw_not_a_cancel(self, db):
@@ -280,6 +325,35 @@ class TestThrowingACardAway:
 # --------------------------------------------------------------------------
 
 class TestSwipes:
+
+    def test_a_swipe_works_while_open_hands_are_in_view(self, db, monkeypatch):
+        """Every other swipe test uses a board that has never seen a hand, so
+        a veto that fired whenever ANY hand was up would pass them all."""
+        from agent.handtrack import run_board_action
+        b = Board()
+        card_at(b, "A", 0.2, 0.5)
+        card_at(b, "B", 0.5, 0.5)
+        for k in range(4):
+            b.apply_hands([(0.8, 0.8, False, False)], now=100.0 + k * FRAME)
+        monkeypatch.setattr(board_mod.time, "time", lambda: 100.0 + 4 * FRAME)
+        before = b.selection()
+        what = run_board_action("board:next", b)
+        assert not what.startswith("ignored"), what
+        assert b.selection() != before
+
+    def test_the_quiet_after_a_release_ends(self, db, monkeypatch):
+        """Pinned from both sides: refused just after letting go, allowed once
+        SWIPE_QUIET_AFTER_RELEASE has passed."""
+        from agent.board import SWIPE_QUIET_AFTER_RELEASE
+        from agent.handtrack import run_board_action
+        b = Board()
+        card_at(b, "A", 0.5, 0.5)
+        t = grab(b, 0.5, 0.5, 100.0)
+        b.apply_hands([(0.5, 0.5, False, False)], now=t)                 # let go
+        monkeypatch.setattr(board_mod.time, "time", lambda: t + SWIPE_QUIET_AFTER_RELEASE - 0.3)
+        assert run_board_action("board:next", b).startswith("ignored")
+        monkeypatch.setattr(board_mod.time, "time", lambda: t + SWIPE_QUIET_AFTER_RELEASE + 0.1)
+        assert not run_board_action("board:next", b).startswith("ignored")
 
     def test_left_and_right_step_through_cards(self, db):
         from agent.handtrack import run_board_action
@@ -416,3 +490,98 @@ class TestEvents:
         for _ in range(board_mod.EVENT_BACKLOG + 20):
             b.emit("summon")
         assert len(b.events_since(0)) == board_mod.EVENT_BACKLOG
+
+
+# --------------------------------------------------------------------------
+# A held card stays with the hand that holds it
+# --------------------------------------------------------------------------
+
+class TestTheHoldFollowsTheHand:
+    """Found on review, and a candidate for the field symptom "picked up then
+    dropped": holds were keyed by list position, and one missed frame let go."""
+
+    def test_a_second_hand_coming_into_view_does_not_take_the_card(self, db):
+        """The right hand holds; the left comes into view and sorts FIRST in
+        the list. The card used to jump to it — thrown, dropped or reset."""
+        b = Board()
+        c = card_at(b, "Held", 0.7, 0.5)
+        right = lambda x: (x, 0.5, True, False, "R")
+        b.apply_hands([right(0.7)], now=100.0)
+        b.apply_hands([right(0.7)], now=100.0 + ARM_DWELL_SECONDS + 0.01)
+        assert c.held_by == ["R"]
+        t = 100.2
+        for k in range(6):
+            t += 0.05
+            b.apply_hands([(0.3, 0.5, False, False, "L"), right(0.7 - 0.01 * k)], now=t)
+        assert c.id in [x["id"] for x in b.cards()], "card was thrown away"
+        assert c.held_by == ["R"]
+        assert c.x == pytest.approx(0.65, abs=0.02)
+
+    def test_one_missed_frame_mid_drag_does_not_drop_the_card(self, db):
+        b = Board()
+        c = card_at(b, "Held", 0.4, 0.5)
+        t = grab(b, 0.4, 0.5, 100.0)
+        t = drag(b, [(0.45, 0.5), (0.5, 0.5)], t)
+        b.apply_hands([], now=t + 0.05)               # MediaPipe missed one
+        t = drag(b, [(0.55, 0.5), (0.6, 0.5)], t + 0.05)
+        assert c.held_by, "one missed frame dropped the card"
+        assert c.x == pytest.approx(0.6, abs=0.02)
+
+    def test_one_missed_frame_on_a_brisk_drag_does_not_throw_it(self, db):
+        b = Board()
+        c = card_at(b, "Held", 0.6, 0.5)
+        t = grab(b, 0.6, 0.5, 100.0)
+        t = drag(b, [(0.7, 0.5), (0.8, 0.5), (0.9, 0.5)], t)   # fast, to the edge
+        b.apply_hands([], now=t + 0.05)
+        assert c.id in [x["id"] for x in b.cards()]
+        assert c.held_by
+
+    def test_a_hand_gone_for_good_still_lets_go(self, db):
+        b = Board()
+        c = card_at(b, "Held", 0.4, 0.5)
+        t = grab(b, 0.4, 0.5, 100.0)
+        t = drag(b, [(0.45, 0.5)], t)
+        b.apply_hands([], now=t + 0.05)
+        b.apply_hands([], now=t + HAND_LOSS_GRACE_SECONDS + 0.06)
+        assert not c.held_by
+
+    def test_a_camera_stall_is_not_a_throw(self, db):
+        """Brisk drag toward the edge, then no frames for a second: the
+        motion from before the stall is not a throw after it."""
+        b = Board()
+        c = card_at(b, "Held", 0.6, 0.5)
+        t = grab(b, 0.6, 0.5, 100.0)
+        t = drag(b, [(0.7, 0.5), (0.8, 0.5), (0.9, 0.5)], t)
+        b.apply_hands([], now=t + 1.0)
+        b.apply_hands([], now=t + 1.05)
+        assert c.id in [x["id"] for x in b.cards()]
+        assert not c.held_by
+
+    def test_a_card_held_through_a_missed_frame_still_blocks_swipes(self, db, monkeypatch):
+        b = Board()
+        card_at(b, "Held", 0.4, 0.5)
+        t = grab(b, 0.4, 0.5, 100.0)
+        b.apply_hands([], now=t + 0.05)
+        monkeypatch.setattr(board_mod.time, "time", lambda: t + 0.05)
+        ok, why = b.swipes_allowed()
+        assert not ok and "held" in why
+
+
+class TestPointingReachesEveryTurn:
+    """"Make this bigger" by voice or from the resident: the model's only
+    view of the board there is board_state, which did not carry the pointed
+    card, so it acted on the selection instead."""
+
+    def test_board_state_carries_the_pointed_card(self, db, monkeypatch):
+        import json
+        import time
+        from agent import core
+        b = Board()
+        card_at(b, "Other", 0.2, 0.5)
+        target = card_at(b, "Phone Stand", 0.7, 0.5)
+        point(b, [(0.7, 0.5, False, False)], time.time())
+        monkeypatch.setattr(board_mod, "get_board", lambda: b)
+        out = json.loads(core._execute_tool("board_state", {}))
+        assert out["pointed"]["id"] == target.id
+        assert "seconds_ago" in out["pointed"]
+        assert "prefer it when it is recent" in out["note"]

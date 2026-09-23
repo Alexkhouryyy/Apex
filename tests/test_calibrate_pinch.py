@@ -260,3 +260,44 @@ class TestExplainNoReadings:
             cal.explain_no_readings(junk, junk)
         except TypeError:
             pytest.fail("must survive incomplete stats")
+
+
+def test_write_sets_the_release_as_well_as_the_entry(monkeypatch):
+    """Writing only the entry left a release fitted to someone else's hand
+    next to it. Driven through main() with the camera and model faked."""
+    import sys
+    import types
+    from agent import handtrack
+    from scripts import set_env_key
+
+    class Cap:
+        def isOpened(self):
+            return True
+
+        def release(self):
+            pass
+
+    class Landmarker:
+        def close(self):
+            pass
+
+    monkeypatch.setitem(sys.modules, "cv2", types.SimpleNamespace(VideoCapture=lambda i: Cap()))
+    monkeypatch.setitem(sys.modules, "mediapipe", types.SimpleNamespace())
+    monkeypatch.setattr(handtrack, "available", lambda: (True, ""))
+    monkeypatch.setattr(handtrack, "opencv_conflict", lambda: [])
+    monkeypatch.setattr(handtrack, "ensure_model", lambda: "model")
+    monkeypatch.setattr(handtrack, "build_landmarker", lambda num_hands=1: (Landmarker(), "cpu", ""))
+    monkeypatch.setattr(cal, "countdown", lambda *a, **k: None)
+    open_s = [0.83, 0.86, 0.9, 0.95, 1.0] * 8
+    pinch_s = [0.25, 0.3, 0.4, 0.5, 0.6] * 8
+    stats = {"frames": 40, "dropped": 0, "hands": 40}
+    runs = iter([(open_s, 40, stats), (pinch_s, 80, stats)])
+    monkeypatch.setattr(cal, "collect", lambda *a, **k: next(runs))
+    written = {}
+    monkeypatch.setattr(set_env_key, "set_key",
+                        lambda path, key, value: written.__setitem__(key, float(value)) or "set")
+
+    assert cal.main(["--write"]) == 0
+    entry = written["HANDTRACK_PINCH_RATIO"]
+    release = written["HANDTRACK_PINCH_RELEASE_RATIO"]
+    assert entry < release < 0.83, (entry, release)

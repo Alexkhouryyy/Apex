@@ -202,6 +202,46 @@ def enabled() -> bool:
     return bool(getattr(config, "RELAY_ENABLED", False))
 
 
+# The RELAY_KEY a stored snapshot has been confirmed readable with (or confirmed
+# absent for). Checked once per key per process, not on every push.
+_verified_key: Optional[str] = None
+
+
+def _refuse_to_bury_an_unreadable_snapshot() -> None:
+    """Before the first push with a key, make sure it can open what is there.
+
+    A laptop restored from a backup with a stale RELAY_KEY starts the relay
+    loop, and the loop pushes within seconds of boot. Without this, that first
+    push replaces the only copy the ORIGINAL key can open with one sealed by
+    the wrong key — silently, before anyone runs --check. Refusing costs one
+    GET per key; overwriting costs the snapshot.
+
+    RELAY_OVERWRITE_UNREADABLE=true is the explicit "I have lost that key,
+    start over".
+    """
+    global _verified_key
+    key = str(getattr(config, "RELAY_KEY", "") or "")
+    if _verified_key == key:
+        return
+    try:
+        existing = _http("GET", "/snapshot")
+    except RelayError as e:
+        if "returned 404" not in str(e):
+            raise RelayError(f"not pushing: could not check what the relay "
+                             f"holds first ({e})")
+        existing = b""
+    if existing and not getattr(config, "RELAY_OVERWRITE_UNREADABLE", False):
+        try:
+            unseal(existing)
+        except RelayError:
+            raise RelayError(
+                "not pushing: the relay holds a snapshot this RELAY_KEY cannot "
+                "open, and pushing would destroy it. Restore the key that "
+                "sealed it, or set RELAY_OVERWRITE_UNREADABLE=true to give it "
+                "up and start over.")
+    _verified_key = key
+
+
 def push_snapshot() -> dict:
     """Seal the brain and send it. Returns what happened; never raises upward.
 
@@ -215,7 +255,8 @@ def push_snapshot() -> dict:
         _last["error"] = ""
         return {"ok": False, "skipped": "RELAY_ENABLED is false"}
     try:
-        blob = seal(snapshot_bytes())
+        blob = seal(snapshot_bytes())          # no key -> stops before the network
+        _refuse_to_bury_an_unreadable_snapshot()
         _http("PUT", "/snapshot", blob)
     except RelayError as e:
         _last["error"] = str(e)
@@ -387,9 +428,21 @@ def check() -> list[dict]:
     # everything was fine while every snapshot already on the relay was
     # unreadable. Checked against a deliberately mismatched key, which the
     # push-first version reported as healthy.
+    #
+    # And if that check fails, STOP. Pushing anyway would replace the one copy
+    # the original key can still open with one sealed by the wrong key — the
+    # check would destroy the thing it had just told you to go and recover.
+    # Likewise when the GET fails for any reason other than "nothing stored":
+    # not knowing what is there is not permission to overwrite it.
     try:
         existing = _http("GET", "/snapshot")
-    except Exception:
+    except RelayError as e:
+        if "returned 404" not in str(e):
+            add("the snapshot already there opens", CHECK_FAIL,
+                f"could not read what the relay holds: {e}",
+                "Nothing was pushed, so whatever is stored is untouched. Fix "
+                "the error above and run --check again.")
+            return out
         existing = b""
     if existing:
         try:
@@ -400,8 +453,13 @@ def check() -> list[dict]:
             add("the snapshot already there opens", CHECK_FAIL,
                 f"a snapshot is stored that this RELAY_KEY cannot open: {e}",
                 "This laptop's RELAY_KEY is not the one that sealed it. Restore "
-                "the original key, or accept the loss and overwrite it by "
-                "pushing again — nothing can recover it without that key.")
+                "the original key and run --check again — nothing can recover "
+                "it without that key. Nothing was pushed, and Apex's relay loop "
+                "refuses to push over it too. To give it up and start over, set "
+                "RELAY_OVERWRITE_UNREADABLE=true.")
+            add("snapshot uploads", CHECK_SKIP,
+                "not run: pushing would overwrite the snapshot above")
+            return out
     else:
         add("the snapshot already there opens", CHECK_SKIP,
             "nothing stored yet; the push below is the first")

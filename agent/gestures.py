@@ -72,6 +72,14 @@ SWIPE_DOMINANCE = 2.0          # the main axis must beat the other by this much
 
 # Pinch-hold: held closed, roughly in place.
 PINCH_HOLD_SECONDS = 1.2
+# A hand that has just come into view is not swiping — raising your hand into
+# the frame is a long, fast, vertical stroke, and read as swipe_up it summoned
+# Apex every time you lifted a hand.
+SWIPE_SETTLE_SECONDS = 0.5
+# After a swipe (or a wave), no swipe in ANY direction for this long. The
+# per-gesture cooldown is per name, so the stroke that brings your hand back
+# after a swipe_right used to fire swipe_left and undo it.
+SWIPE_REFRACTORY_SECONDS = 1.0
 PINCH_HOLD_RADIUS = 0.08
 
 GESTURES = (
@@ -86,12 +94,15 @@ Cursor = tuple
 class _Track:
     """One hand's recent history, within a stretch of constant hand count."""
 
-    __slots__ = ("samples", "pinch_start", "pinch_anchor")
+    __slots__ = ("samples", "pinch_start", "pinch_anchor", "hold_fired")
 
     def __init__(self) -> None:
         self.samples: list[tuple[float, float, float]] = []  # ts, x, y
         self.pinch_start: Optional[float] = None
         self.pinch_anchor: Optional[tuple[float, float]] = None
+        # pinch_hold fires once per continuous pinch, not every cooldown —
+        # holding a card still for ten seconds is one hold, not three.
+        self.hold_fired = False
 
     def trim(self, now: float, keep: float) -> None:
         cutoff = now - keep
@@ -114,6 +125,8 @@ class GestureRecognizer:
         self._tracks: list[_Track] = []
         self._hand_count = 0
         self._last_emit: dict[str, float] = {}
+        self._prev_emit: dict[str, float] = {}
+        self._last_stroke = float("-inf")
         self._announced_present = False
 
     def reset(self) -> None:
@@ -182,7 +195,14 @@ class GestureRecognizer:
                 if tr.pinch_start is None:
                     tr.pinch_start, tr.pinch_anchor = now, (x, y)
             else:
+                if tr.pinch_start is not None:
+                    # Just let go. The motion before this frame was a drag
+                    # (or a throw), not a swipe; left in the window, letting
+                    # go of a card dragged downward fired swipe_down -> stop
+                    # and cut Apex off mid-sentence.
+                    tr.samples = tr.samples[-1:]
                 tr.pinch_start = tr.pinch_anchor = None
+                tr.hold_fired = False
 
             fired += self._emit(self._gestures_for(tr, now, pinched), now)
 
@@ -242,16 +262,23 @@ class GestureRecognizer:
     def _gestures_for(self, tr: _Track, now: float, pinched: bool) -> list[str]:
         found: list[str] = []
         if pinched:
-            if self._is_pinch_hold(tr, now):
+            if not tr.hold_fired and self._is_pinch_hold(tr, now):
+                tr.hold_fired = True
                 found.append("pinch_hold")
             # A pinched hand is carrying something; swipes and waves are for
             # open hands, so stop here.
             return found
+        settled = tr.samples and now - tr.samples[0][0] >= SWIPE_SETTLE_SECONDS
         swipe = self._swipe(tr, now)
-        if swipe:
+        if (swipe and settled
+                and now - self._last_stroke >= SWIPE_REFRACTORY_SECONDS):
             found.append(swipe)
         if self._is_wave(tr, now):
             found.append("wave")
+        if swipe or "wave" in found:
+            # Any stroke — even one refused above — restarts the quiet
+            # period, so the tail of a wave cannot page the board either.
+            self._last_stroke = now
         return found
 
     def _is_pinch_hold(self, tr: _Track, now: float) -> bool:
@@ -301,9 +328,17 @@ class GestureRecognizer:
             last = self._last_emit.get(name, 0.0)
             if now - last < self.cooldown_seconds:
                 continue
+            self._prev_emit[name] = last
             self._last_emit[name] = now
             out.append(name)
         return out
+
+    def refund(self, name: str) -> None:
+        """Give back the cooldown a gesture spent without doing anything —
+        refused because a card was held, say. Otherwise the next deliberate
+        swipe in that direction was silently dropped for three seconds."""
+        if name in self._prev_emit:
+            self._last_emit[name] = self._prev_emit.pop(name)
 
 
 def gesture_action(gesture: str) -> Optional[str]:

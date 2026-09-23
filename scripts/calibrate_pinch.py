@@ -92,6 +92,17 @@ def clean(samples) -> list:
     return out
 
 
+def recommend_release(entry: float, open_samples) -> float:
+    """Where a pinch should end, given where it starts and the open readings.
+
+    Halfway from entry to the tightest open hand. Above entry, so there is a
+    band a jittery held pinch can wobble in without letting go; below every
+    open reading, so an ordinary open hand always does let go.
+    """
+    open_lo = percentile(clean(open_samples), 5)
+    return round(entry + max(0.0, open_lo - entry) / 2, 2)
+
+
 def recommend_threshold(open_samples, pinch_samples) -> tuple:
     """(value | None, reason). Pure, so the judgement is testable without a hand.
 
@@ -391,18 +402,27 @@ def main(argv=None) -> int:
     if value is None:
         print(f"No threshold recommended.\n  {reason}")
         return 2
+    release = recommend_release(value, open_samples)
     print(f"Recommended HANDTRACK_PINCH_RATIO = {value}\n  {reason}")
+    print(f"Recommended HANDTRACK_PINCH_RELEASE_RATIO = {release}\n  "
+          f"halfway between where a pinch starts and your tightest open hand, "
+          f"so a held pinch can wobble without letting go.")
 
     if not args.write:
         answer = input("\nWrite this to .env now? (y/N): ").strip().lower()
         if answer not in {"y", "yes"}:
-            print("Not written. Set it yourself with:\n"
-                  f"  python scripts/set_env_key.py HANDTRACK_PINCH_RATIO {value}")
+            print("Not written. Set them yourself with:\n"
+                  f"  python scripts/set_env_key.py HANDTRACK_PINCH_RATIO {value}\n"
+                  f"  python scripts/set_env_key.py HANDTRACK_PINCH_RELEASE_RATIO {release}")
             return 0
 
     from scripts.set_env_key import set_key
-    what = set_key(Path(".env"), "HANDTRACK_PINCH_RATIO", str(value))
-    print(f"[env] HANDTRACK_PINCH_RATIO {what} in .env — restart Apex to use it.")
+    # Both, always. Writing only the entry left a release fixed for someone
+    # else's hand next to it.
+    for key, v in (("HANDTRACK_PINCH_RATIO", value),
+                   ("HANDTRACK_PINCH_RELEASE_RATIO", release)):
+        what = set_key(Path(".env"), key, str(v))
+        print(f"[env] {key} {what} in .env — restart Apex to use it.")
     return 0
 
 

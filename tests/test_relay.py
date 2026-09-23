@@ -232,6 +232,8 @@ class TestPushing:
             if m == "PUT":
                 store["blob"] = body
                 return b""
+            if "blob" not in store:     # what the real relay says when empty
+                raise relay.RelayError("relay returned 404 for GET /snapshot")
             return store["blob"]
         monkeypatch.setattr(relay, "_http", _fake)
         relay.push_snapshot()

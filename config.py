@@ -409,6 +409,12 @@ RELAY_KEY = os.getenv("RELAY_KEY", "")
 # something actually read it, because a setting nobody reads is worse than no
 # setting — somebody sets it and nothing happens.
 RELAY_SNAPSHOT_MINUTES = int(os.getenv("RELAY_SNAPSHOT_MINUTES", "30"))
+# The relay refuses to push over a snapshot this RELAY_KEY cannot open — that
+# snapshot is only readable with the key that sealed it, and pushing would
+# destroy it. Set true only when that key is gone for good and you want to
+# start over.
+RELAY_OVERWRITE_UNREADABLE = os.getenv(
+    "RELAY_OVERWRITE_UNREADABLE", "false").lower() in {"1", "true", "yes"}
 
 # === Delegated work — what the Core may make THIS machine do ===
 #
@@ -499,11 +505,15 @@ HANDTRACK_PINCH_RATIO = float(os.getenv("HANDTRACK_PINCH_RATIO", "0.70"))
 # card mid-move — observed on real hardware as a 70% success rate, with every
 # miss being "picked up, then dropped".
 #
-# 0.78 is placed from the same calibration as 0.70: pinched hands read up to
-# 0.62 and open hands from 0.83. It has to sit BELOW 0.83 or an ordinary open
-# hand could fail to let go; 0.78 clears every open reading measured. Set it
-# equal to HANDTRACK_PINCH_RATIO to turn hysteresis off.
-HANDTRACK_PINCH_RELEASE_RATIO = float(os.getenv("HANDTRACK_PINCH_RELEASE_RATIO", "0.78"))
+# Unset (the default), release is HANDTRACK_PINCH_RATIO + 0.08 — 0.78 for the
+# stock 0.70, placed from the same calibration: pinched hands read up to 0.62
+# and open hands from 0.83. It has to sit BELOW the loosest open hand or an
+# ordinary open hand could fail to let go. Derived rather than fixed, because
+# a fixed 0.78 next to a recalibrated entry either collapsed the band (entry
+# 0.80: no hysteresis at all) or sat above your open hand. The calibrator
+# writes both. Set it equal to HANDTRACK_PINCH_RATIO to turn hysteresis off.
+_release = os.getenv("HANDTRACK_PINCH_RELEASE_RATIO", "").strip()
+HANDTRACK_PINCH_RELEASE_RATIO = float(_release) if _release else None
 HANDTRACK_DEBUG = os.getenv("HANDTRACK_DEBUG", "false").lower() in {"1", "true", "yes"}
 # The webcam is exclusive: while Apex holds it, no video call can open it. This
 # is how long `release_camera` hands it back before tracking resumes on its own,

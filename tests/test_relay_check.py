@@ -230,3 +230,61 @@ class TestEachMisconfigurationIsNamed:
         finally:
             srv.shutdown()
             srv.server_close()
+
+
+class TestNothingOverwritesAnUnreadableSnapshot:
+    """--check used to report "this key cannot open what is stored" and then
+    push anyway, replacing the only copy the original key could open. The
+    relay loop did the same on every boot, before anyone ran --check."""
+
+    def _stale_key_laptop(self, laptop, monkeypatch):
+        import config
+        from agent import relay
+        original = config.RELAY_KEY
+        laptop.push_snapshot()                       # sealed with the original key
+        monkeypatch.setattr(config, "RELAY_KEY", relay.new_key(), raising=False)
+        return original
+
+    def _original_key_still_opens(self, relay, monkeypatch, original):
+        import config
+        monkeypatch.setattr(config, "RELAY_KEY", original, raising=False)
+        relay.unseal(relay._http("GET", "/snapshot"))   # raises if destroyed
+
+    def test_check_leaves_the_stored_snapshot_alone(self, laptop, monkeypatch):
+        original = self._stale_key_laptop(laptop, monkeypatch)
+        result = states(laptop.check())
+        assert result["the snapshot already there opens"] == laptop.CHECK_FAIL
+        assert result["snapshot uploads"] == laptop.CHECK_SKIP
+        self._original_key_still_opens(laptop, monkeypatch, original)
+
+    def test_the_relay_loop_refuses_too(self, laptop, monkeypatch):
+        original = self._stale_key_laptop(laptop, monkeypatch)
+        r = laptop.push_snapshot()
+        assert not r["ok"] and "cannot open" in r["error"]
+        assert "cannot open" in laptop.status().get("error", "") or \
+            "cannot open" in laptop._last["error"]
+        self._original_key_still_opens(laptop, monkeypatch, original)
+
+    def test_overwrite_is_an_explicit_choice(self, laptop, monkeypatch):
+        import config
+        self._stale_key_laptop(laptop, monkeypatch)
+        monkeypatch.setattr(config, "RELAY_OVERWRITE_UNREADABLE", True, raising=False)
+        assert laptop.push_snapshot()["ok"]
+        laptop.unseal(laptop._http("GET", "/snapshot"))   # now the new key's
+
+    def test_an_unreadable_relay_is_not_permission_to_push(self, laptop, monkeypatch):
+        """A GET failure other than 404 means "don't know what is there"."""
+        real = laptop._http
+
+        def flaky(method, path, *a, **k):
+            if method == "GET":
+                raise laptop.RelayError("relay returned 500 for GET /snapshot")
+            return real(method, path, *a, **k)
+        monkeypatch.setattr(laptop, "_http", flaky)
+        assert not laptop.push_snapshot()["ok"]
+        result = states(laptop.check())
+        assert result["the snapshot already there opens"] == laptop.CHECK_FAIL
+        assert "snapshot uploads" not in result
+
+    def test_a_first_push_to_an_empty_relay_still_works(self, laptop):
+        assert laptop.push_snapshot()["ok"]

@@ -51,6 +51,7 @@ two hands cross or one leaves.
 """
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
@@ -408,25 +409,78 @@ def landmarks_to_cursor(lms, *, mirror: bool = True,
     return (x, y, pinched, open_palm)
 
 
-def order_by_handedness(cursors: list, labels: list) -> list:
-    """Put hands in a stable order using MediaPipe's Left/Right call.
+# A hand MediaPipe misses for a frame or two (motion blur on a fast drag, a
+# finger crossing the palm) is still the same hand. Its identity, its pinch
+# latch and anything it holds survive this long unseen; only after it do they
+# count as gone. One number, owned by the board, so the hold and the identity
+# can never expire at different moments.
+from agent.board import HAND_LOSS_GRACE_SECONDS  # noqa: E402
+# How far a hand may move between sightings and still be the same hand:
+# a base radius plus a speed allowance for the time it was unseen.
+MATCH_RADIUS = 0.15
+MATCH_SPEED = 2.0          # frame-widths per second
 
-    Detection order carries no identity and can renumber between frames, which
-    is what makes a second hand appear as a screen-wide swipe. The recognizer
-    defends against that with proximity pairing, but handedness is better
-    evidence than proximity and it costs nothing: sorting by label means the
-    left hand stays in the same slot even when it briefly leaves and returns.
 
-    Falls back to the given order when labels are missing or ambiguous — the
-    recognizer's proximity pairing still covers that case.
+# Release sits this far above entry when HANDTRACK_PINCH_RELEASE_RATIO is unset.
+PINCH_RELEASE_MARGIN = 0.08
+
+
+def pinch_release_ratio(enter: float) -> float:
+    """The ratio a pinch must rise above to end. Never below entry — a release
+    below entry would make no sense, so it degrades to no hysteresis."""
+    configured = getattr(config, "HANDTRACK_PINCH_RELEASE_RATIO", None)
+    release = float(configured) if configured is not None else enter + PINCH_RELEASE_MARGIN
+    return max(release, float(enter))
+
+
+class HandIdentities:
+    """Stable ids for hands across frames, by where they are.
+
+    Everything downstream — the pinch latch, the board's holds — needs "the
+    same hand as last frame", and neither thing MediaPipe offers is that.
+    Detection order renumbers between frames. The Left/Right label flips on
+    a single frame and duplicates ("Right", "Right") happen. Keying on either
+    moved a held card to the OTHER hand the moment a second hand came into
+    view, which threw it away, dropped it, or snapped it back.
+
+    Position is the evidence that holds up: a hand is where it just was, give
+    or take how fast a hand can move. Each new sighting is paired with the
+    closest live track (closest pairs first, so two hands near each other
+    cannot steal each other's identity); anything unpaired is a new hand with
+    a new id. Ids are never reused, so a hand that left and came back is a
+    new hand — it does not resume a pinch from before it left.
     """
-    if not labels or len(labels) != len(cursors):
-        return cursors
-    try:
-        keyed = sorted(zip(labels, cursors), key=lambda pair: str(pair[0]))
-    except Exception:
-        return cursors
-    return [c for _lab, c in keyed]
+
+    def __init__(self):
+        self._tracks: dict[int, tuple[float, float, float]] = {}
+        self._next = 0
+
+    def assign(self, points: list, now: float) -> list:
+        self._tracks = {k: v for k, v in self._tracks.items()
+                        if now - v[2] <= HAND_LOSS_GRACE_SECONDS}
+        pairs = []
+        for i, (x, y) in enumerate(points):
+            for k, (tx, ty, ts) in self._tracks.items():
+                d = math.hypot(x - tx, y - ty)
+                if d <= MATCH_RADIUS + MATCH_SPEED * max(0.0, now - ts):
+                    pairs.append((d, i, k))
+        pairs.sort()
+        ids: list = [None] * len(points)
+        used = set()
+        for _d, i, k in pairs:
+            if ids[i] is None and k not in used:
+                ids[i] = k
+                used.add(k)
+        for i, (x, y) in enumerate(points):
+            if ids[i] is None:
+                ids[i] = self._next
+                self._next += 1
+            self._tracks[ids[i]] = (x, y, now)
+        return ids
+
+    def alive(self) -> set:
+        """Ids seen within the grace period, including ones missing right now."""
+        return set(self._tracks)
 
 
 class PinchLatch:
@@ -439,9 +493,8 @@ class PinchLatch:
     card. The board's own docstring cites a gesture contract of "confidence,
     dwell time, hysteresis, and cooldown" — dwell was built, hysteresis was not.
 
-    Keyed by hand identity rather than detection order, because detection order
-    renumbers between frames and a latch that followed the wrong hand would
-    carry one hand's pinch onto the other.
+    Keyed by HandIdentities id — not detection order, which renumbers, and not
+    MediaPipe's Left/Right, which flips for a frame and resets the latch.
 
     A ratio of None — landmarks unusable for a frame — KEEPS the previous state.
     That is the same rule `_tick` applies to a dropped camera frame: a missing
@@ -465,25 +518,12 @@ class PinchLatch:
         return now
 
     def keep_only(self, keys) -> None:
-        """Forget hands not seen this frame, so one that leaves and comes back
-        starts open rather than resuming a pinch from before it left."""
+        """Forget hands that are gone — pass HandIdentities.alive(), so a hand
+        missed for a frame keeps its pinch and a hand that left does not."""
         keys = set(keys)
         for k in list(self._on):
             if k not in keys:
                 del self._on[k]
-
-
-def hand_keys(labels: list) -> list:
-    """Stable identities for this frame's hands.
-
-    MediaPipe's Left/Right when every hand has a distinct one; otherwise the
-    detection index. Two hands both labelled "Right" happens, and keying both
-    on "Right" would give them one shared latch.
-    """
-    clean = [str(l or "") for l in labels]
-    if all(clean) and len(set(clean)) == len(clean):
-        return clean
-    return [f"#{i}" for i in range(len(clean))]
 
 
 class HandTracker(threading.Thread):
@@ -762,7 +802,7 @@ class HandTracker(threading.Thread):
         result = self._landmarker.detect_for_video(
             image, int(self._frame_no * self.interval * 1000))
 
-        cursors, details = self._read_hands(result)
+        cursors, details = self._read_hands(result, now)
 
         # The board reads the SAME cursor list the recognizer does, rather than
         # tracking hands a second time. Two readings of one camera would drift,
@@ -774,7 +814,9 @@ class HandTracker(threading.Thread):
         if getattr(config, "BOARD_ENABLED", False):
             try:
                 from agent.board import get_board
-                get_board().apply_hands(cursors)
+                # The same `now`: the hold's grace period and the identity's
+                # must expire on one clock, not two that drift.
+                get_board().apply_hands(cursors, now=now)
             except Exception as e:
                 # The board is a view. Losing it must not cost us gestures.
                 print(f"[Board] apply_hands failed: {e}")
@@ -782,65 +824,68 @@ class HandTracker(threading.Thread):
         for g in self.recognizer.feed_cursors(cursors, now):
             self._dispatch(g)
 
-    def _read_hands(self, result):
+    def _read_hands(self, result, now: Optional[float] = None):
         """One frame's MediaPipe result -> (cursors, details), pinch latched.
 
         Pulled out of `_tick` so it can be driven with a recorded sequence of
         frames. The bug it fixes only exists ACROSS frames, and a loop that
         cannot be fed frames without a camera could not have a test for it.
+
+        Each cursor is `(x, y, pinched, open_palm, hand_id)`. The id is what
+        the board keys holds on and the latch keys pinches on; see
+        HandIdentities for why it is not the label or the list position.
         """
+        now = now if now is not None else time.time()
         mirror = getattr(config, "HANDTRACK_MIRROR", True)
         enter = float(getattr(config, "HANDTRACK_PINCH_RATIO", DEFAULT_PINCH_RATIO))
-        release = float(getattr(config, "HANDTRACK_PINCH_RELEASE_RATIO", enter))
-        if release < enter:
-            release = enter        # a release below entry would make no sense; ignore it
+        release = pinch_release_ratio(enter)
         if not hasattr(self, "_latch"):
             self._latch = PinchLatch()
+        if not hasattr(self, "_ids"):
+            self._ids = HandIdentities()
 
         raw = list(result.hand_landmarks or [])
-        all_labels = [_handedness_label(result, i) for i in range(len(raw))]
-        all_keys = hand_keys(all_labels)
-
-        cursors, labels, details, seen = [], [], [], []
+        found = []
         for idx, lms in enumerate(raw):
             cur = landmarks_to_cursor(lms, mirror=mirror)
-            if cur is None:
-                continue
+            if cur is not None:
+                found.append((idx, lms, cur))
+        ids = self._ids.assign([(cur[0], cur[1]) for _i, _l, cur in found], now)
+
+        rows = []
+        for (idx, lms, cur), hid in zip(found, ids):
             r = pinch_ratio(lms)
-            key = all_keys[idx]
-            seen.append(key)
-            pinched = self._latch.update(key, r, enter, release)
-            cur = (cur[0], cur[1], pinched, cur[3])
-            cursors.append(cur)
-            labels.append(all_labels[idx])
+            pinched = self._latch.update(hid, r, enter, release)
+            label = _handedness_label(result, idx) or "?"
+            cur = (cur[0], cur[1], pinched, cur[3], hid)
             # Measured once and kept, not measured once and printed. The ratio
             # is the number that decides whether a pinch happens, and it used
             # to exist only inside a HANDTRACK_DEBUG print — a scrolling log,
             # which 7fc8f34 already concluded is the wrong place to read a
             # threshold off. The board shows it live instead.
-            details.append({
-                "label": all_labels[idx] or "?",
+            detail = {
+                "id": hid, "label": label,
                 "x": round(cur[0], 4), "y": round(cur[1], 4),
                 "ratio": round(r, 4) if r is not None else None,
                 "threshold": round(enter, 4),
                 "release": round(release, 4),
                 "pinched": bool(pinched),
                 "open_palm": bool(cur[3]),
-            })
+            }
+            rows.append((hid, cur, detail))
             if getattr(config, "HANDTRACK_DEBUG", False):
                 shown = f"{r:.3f}" if r is not None else "n/a"
-                print(f"[HandTrack] hand={labels[-1] or '?'} x={cur[0]:.3f} "
+                print(f"[HandTrack] hand={hid}/{label} x={cur[0]:.3f} "
                       f"y={cur[1]:.3f} pinch_ratio={shown} pinched={pinched}")
-        self._latch.keep_only(seen)
+        # Forget only hands that are GONE. Forgetting every hand not seen this
+        # frame reset a pinch on one missed detection, which is one of the
+        # ways a held card was dropped mid-drag.
+        self._latch.keep_only(self._ids.alive())
 
-        # Reorder the details WITH the cursors. They used to be left in
-        # detection order while the cursors were sorted by handedness, so the
-        # board's readout could pair the left hand's ratio with the right
-        # hand's grab state.
-        paired = order_by_handedness(list(zip(cursors, range(len(cursors)))), labels)
-        cursors = [c for c, _ in paired]
-        details = [details[i] for _, i in paired]
-        return cursors, details
+        # Oldest hand first, details reordered WITH the cursors, so the
+        # readout never pairs one hand's ratio with the other's grab state.
+        rows.sort(key=lambda row: row[0])
+        return [c for _h, c, _d in rows], [d for _h, _c, d in rows]
 
     def _board_gesture(self, gesture: str, action: str) -> None:
         if not getattr(config, "BOARD_ENABLED", False):
@@ -849,7 +894,33 @@ class HandTracker(threading.Thread):
             what = run_board_action(action)
         except Exception as e:
             what = f"failed: {e}"
+        if what.startswith("ignored"):
+            self.recognizer.refund(gesture)
         self.log.add("gesture", f"{gesture} -> {action}: {what}")
+
+    def _board_blocks(self, gesture: str) -> str:
+        """Why the board vetoes this gesture right now, or "".
+
+        The recognizer knows nothing about cards. Moving a held card IS a
+        swipe to it, and holding one still IS a pinch_hold. Only board:*
+        actions used to be checked, so letting go of a card dragged downward
+        fired swipe_down -> stop, and holding a card still fired
+        pinch_hold -> listen every three seconds.
+        """
+        if not getattr(config, "BOARD_ENABLED", False):
+            return ""
+        try:
+            from agent.board import get_board
+            board = get_board()
+            if gesture.startswith("swipe_"):
+                ok, why = board.swipes_allowed()
+                return "" if ok else why
+            if gesture == "pinch_hold":
+                ok, why = board.hands_idle()
+                return "" if ok else why
+        except Exception as e:
+            print(f"[HandTrack] board check failed: {e}")
+        return ""
 
     def _dispatch(self, gesture: str) -> None:
         from agent import gestures as _g
@@ -857,6 +928,14 @@ class HandTracker(threading.Thread):
         # separate gates, so "I waved and nothing happened" stays diagnosable.
         self.log.add("gesture", _g.describe(gesture))
         action = _g.gesture_action(gesture)
+        if action:
+            blocked = self._board_blocks(gesture)
+            if blocked:
+                # Refunded: a gesture that did nothing must not spend the
+                # cooldown the next deliberate one needs.
+                self.recognizer.refund(gesture)
+                self.log.add("gesture", f"{gesture} -> {action}: ignored ({blocked})")
+                return
         if action and action.startswith("board:"):
             # Board gestures are handled HERE, not through on_gesture. That
             # hook is only ever set by app/resident.py, so in `main.py --text`

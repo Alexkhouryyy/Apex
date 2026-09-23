@@ -40,7 +40,45 @@ def read_text_input() -> str:
         return ""
 
 
-def make_gesture_handler(mode: str, wake_event=None, log=None):
+class ActiveReply:
+    """The reply being spoken right now, so a stop gesture can end all of it.
+
+    Between two sentences — while a tool runs, or the next sentence is being
+    synthesised — nothing is playing, so "is audio playing?" said "nothing to
+    stop" and the rest of the reply carried on. Stop has to mean the reply,
+    not the current sound.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._streamer = None
+        self._cancel = None
+
+    def begin(self, streamer, cancel) -> None:
+        with self._lock:
+            self._streamer, self._cancel = streamer, cancel
+
+    def end(self) -> None:
+        with self._lock:
+            self._streamer = self._cancel = None
+
+    def stop(self) -> bool:
+        """End the active reply. False when there is none."""
+        with self._lock:
+            streamer, cancel = self._streamer, self._cancel
+        if streamer is None and cancel is None:
+            return False
+        if cancel is not None:
+            cancel.set()
+        if streamer is not None:
+            streamer.interrupt()
+        return True
+
+
+ACTIVE_REPLY = ActiveReply()
+
+
+def make_gesture_handler(mode: str, wake_event=None, log=None, reply=None):
     """What wave / pinch-hold / swipe-down do in `main.py`.
 
     Until now only app/resident.py set the tracker's on_gesture hook, so in
@@ -71,9 +109,19 @@ def make_gesture_handler(mode: str, wake_event=None, log=None):
         if action == "stop":
             from voice import tts as _tts
             from voice import interrupt as _interrupt
-            if not _tts.is_speaking():
+            active = reply if reply is not None else ACTIVE_REPLY
+            speaking = _tts.is_speaking()
+            if speaking:
+                _interrupt.trigger()
+            if active.stop():
+                # The rest of the reply is cancelled either way; the sentence
+                # playing right now stops at once only on Voicebox.
+                if not speaking or config.TTS_ENGINE == "voicebox":
+                    return _say(f"{gesture}: stopped the reply")
+                return _say(f"{gesture}: stopped the reply — {config.TTS_ENGINE} "
+                            "finishes the current sentence first")
+            if not speaking:
                 return _say(f"{gesture}: nothing to stop")
-            _interrupt.trigger()
             if config.TTS_ENGINE == "voicebox":
                 return _say(f"{gesture}: stopped speaking")
             # Only the Voicebox player polls the interrupt flag between
@@ -391,6 +439,18 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
+    # Before the TUI branch, which returns: --tui is what Apex.bat and
+    # Apex.ps1 launch, and wiring placed after that return never ran there.
+    # Before monitor.start(), so no gesture can arrive before its handler.
+    wake_event = threading.Event()
+    # Gestures (wave / pinch-hold / swipe-down). resident.py wires its own.
+    _tracker = getattr(monitor, "handtrack", None) if monitor else None
+    if _tracker is not None and _tracker.on_gesture is None:
+        _mode = ("tui" if args.tui else "text" if args.text
+                 else "wake" if args.wake else "voice")
+        _tracker.on_gesture = make_gesture_handler(
+            _mode, wake_event=wake_event, log=getattr(monitor, "log", None))
+
     if monitor is not None:
         monitor.start()
 
@@ -411,21 +471,12 @@ def main():
     speak(greeting)
 
     # Wake word mode setup
-    wake_event = threading.Event()
     wake_listener = None
     if args.wake and not args.text and not args.tui:
         from voice.wake import WakeWordListener
         wake_listener = WakeWordListener(wake_phrases=config.WAKE_PHRASES)
         wake_listener.start(on_wake=wake_event.set)
         speak("Wake mode on. Say 'hey agent' to wake me.")
-
-    # Gestures (wave / pinch-hold / swipe-down). resident.py wires its own.
-    _tracker = getattr(monitor, "handtrack", None) if monitor else None
-    if _tracker is not None and _tracker.on_gesture is None:
-        _mode = ("tui" if args.tui else "text" if args.text
-                 else "wake" if args.wake else "voice")
-        _tracker.on_gesture = make_gesture_handler(
-            _mode, wake_event=wake_event, log=getattr(monitor, "log", None))
 
     # Stream STT partials to the dashboard if it's running
     def _on_partial(text: str):
@@ -628,13 +679,19 @@ def main():
                 from voice.streamer import StreamingSpeaker
                 streamer = StreamingSpeaker()
                 streamer.start()
-                response = agent.run(
-                    user_input,
-                    include_screenshot=not args.no_screenshot,
-                    use_thinking=think,
-                    streamer=streamer,
-                )
-                streamer.finish()
+                cancel = threading.Event()
+                ACTIVE_REPLY.begin(streamer, cancel)
+                try:
+                    response = agent.run(
+                        user_input,
+                        include_screenshot=not args.no_screenshot,
+                        use_thinking=think,
+                        streamer=streamer,
+                        cancel_event=cancel,
+                    )
+                    streamer.finish()
+                finally:
+                    ACTIVE_REPLY.end()
                 print(f"\nAGENT: {response}\n")
         except Exception as e:
             response = f"Something went wrong: {e}"

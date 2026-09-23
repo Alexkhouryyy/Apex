@@ -10,7 +10,8 @@ logic can be tested without a webcam and a browser.
 """
 import pytest
 
-from agent.board import ARM_DWELL_SECONDS, Board, GRAB_RADIUS, HandState
+from agent.board import (ARM_DWELL_SECONDS, Board, GRAB_RADIUS,
+                         HAND_LOSS_GRACE_SECONDS, HandState)
 
 
 def _grab_now(b, cursors, t=0.0):
@@ -21,6 +22,13 @@ def _grab_now(b, cursors, t=0.0):
     outlasts one frame."""
     b.apply_hands(cursors, now=t)
     b.apply_hands(cursors, now=t + ARM_DWELL_SECONDS + 0.01)
+
+
+def _hands_gone(b):
+    """The hands have left the frame for real — longer than the grace a hand
+    MediaPipe misses for a frame or two gets. One empty frame is not this."""
+    b.apply_hands([], now=b._last_frame_at + 0.05)
+    b.apply_hands([], now=b._last_frame_at + HAND_LOSS_GRACE_SECONDS + 0.01)
 
 
 class TestContent:
@@ -382,6 +390,37 @@ class TestBoardEndpoints:
             msg = ws.receive_json()
         assert [c["title"] for c in msg["cards"]] == ["FROM A TEST"]
         get_board().clear()
+
+    def test_events_arrive_once_and_are_not_replayed(self, monkeypatch):
+        """The event channel end to end: a tab that just opened must not get
+        the backlog (a "threw away X" toast for something from before it
+        existed), a new event must arrive exactly once, and later frames must
+        not repeat it — the page toasts every event it is sent."""
+        from agent.board import get_board
+        b = get_board()
+        b.emit("summon")                               # from before the tab
+        with self._client(monkeypatch).websocket_connect("/ws/board") as ws:
+            first = ws.receive_json()
+            assert first["events"] == [], "a new tab replayed the backlog"
+            b.emit("selected", id="x", title="Calendar")
+            got = []
+            for _ in range(30):
+                got += ws.receive_json()["events"]
+                if got:
+                    break
+            assert [e["type"] for e in got] == ["selected"]
+            for _ in range(3):
+                assert ws.receive_json()["events"] == [], "an event was sent twice"
+
+    def test_the_socket_says_whether_the_board_is_on(self, monkeypatch):
+        import config
+        with self._client(monkeypatch).websocket_connect("/ws/board") as ws:
+            assert ws.receive_json()["board_enabled"] is True
+        monkeypatch.setattr(config, "BOARD_ENABLED", False, raising=False)
+        from fastapi.testclient import TestClient
+        from dashboard import server
+        with TestClient(server.app).websocket_connect("/ws/board") as ws:
+            assert ws.receive_json()["board_enabled"] is False
 
     def test_tracking_off_is_stated_not_inferred(self, monkeypatch):
         """A tracker that is OFF and a tracker seeing NO HANDS both send an
@@ -774,7 +813,7 @@ class TestPersistence:
         b.add("card", "DRAGGED", x=0.30, y=0.30)
         _grab_now(b, [(0.30, 0.30, True)])
         b.apply_hands([(0.70, 0.70, True)])
-        b.apply_hands([])                            # hands gone
+        _hands_gone(b)
 
         restored = self._restart(tmp_path, monkeypatch).cards()[0]
         assert (restored["x"], restored["y"]) == pytest.approx((0.70, 0.70))
@@ -1018,6 +1057,7 @@ class TestModels:
         _grab_now(b, [(0.45, 0.5, True), (0.55, 0.5, True)])
         b.apply_hands([(0.40, 0.5, True), (0.60, 0.5, True)])
         assert c.scale == pytest.approx(2.0, abs=0.01)
-        b.apply_hands([])                                        # let go
-        _grab_now(b, [(0.45, 0.5, True), (0.55, 0.5, True)])     # grab again
+        _hands_gone(b)                                           # let go
+        _grab_now(b, [(0.45, 0.5, True), (0.55, 0.5, True)],     # grab again
+                  t=b._last_frame_at + 0.05)
         assert c.scale == pytest.approx(2.0, abs=0.01)

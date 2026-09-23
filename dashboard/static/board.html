@@ -257,7 +257,9 @@ function openPartner() {
 function handleBoardEvents(events) {
   for (const ev of events || []) {
     if (ev.type === "thrown") toast(`Threw away ${ev.title} — say "undo" to bring it back`);
-    else if (ev.type === "summon") { openPartner(); toast("Apex is listening"); }
+    // Opens the panel; it does not start the microphone. Saying "listening"
+    // here promised something nothing did.
+    else if (ev.type === "summon") { openPartner(); toast("Apex is open — tap the mic to talk"); }
     else if (ev.type === "selected") toast(`Selected ${ev.title}`, 1600);
   }
 }
@@ -445,94 +447,107 @@ if (has3D) draw3D();
 
 let lastFrameAt = 0;
 
+const diagEl = document.getElementById("diag");
+// Off by default — it is an instrument, not furniture. On with D, or with
+// ?diag=1 so a link can be handed to someone mid-problem.
+//
+// Page-level, run ONCE. This used to live inside connect(), which runs again
+// on every reconnect: each run added another D listener (an even number of
+// them toggles the panel open and straight shut again) and re-opened a panel
+// you had closed.
+if (new URLSearchParams(location.search).get("diag") === "1") diagEl.hidden = false;
+document.getElementById("diag-close").onclick = () => { diagEl.hidden = true; };
+addEventListener("keydown", ev => {
+  if (ev.key !== "d" && ev.key !== "D") return;
+  const t = ev.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  diagEl.hidden = !diagEl.hidden;
+});
+
+// Card titles come from the user and from models, and the panel below
+// builds markup. Everywhere else on this page a title goes in via
+// textContent; here it does not, so it is escaped.
+const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g,
+  ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch]));
+
+// --- the readout -----------------------------------------------------
+// Names the FIRST reason a grab is not happening, in the order the board
+// itself checks them, so the line on screen and the code that refused are
+// the same sequence.
+function whyNot(hand, grab) {
+  if (!hand) return "no hand in frame";
+  if (hand.open_palm) return "open palm — that cancels a grab";
+  if (hand.ratio === null) return "hand seen but its shape was unreadable";
+  if (!hand.pinched)
+    return `not pinched — ratio ${hand.ratio.toFixed(3)} must fall below ${hand.threshold.toFixed(3)} to start`;
+  if (!grab) return "pinched";
+  if (grab.holding) return `holding ${grab.holding}`;
+  if (!grab.nearest) return "pinched, but there is nothing on the board";
+  if (!grab.in_reach)
+    return `pinched, but ${grab.nearest} is ${grab.distance.toFixed(3)} away and reach is ${grab.reach.toFixed(2)}`;
+  if (grab.nearest_is_full) return `${grab.nearest} is already held by two hands`;
+  if (grab.state === "armed") return `arming — hold the pinch ${grab.dwell_needed.toFixed(2)}s`;
+  if (grab.state === "grabbed" || grab.state === "transforming") return "pinched and in reach";
+  return `pinched and in reach, but the board has not taken it (state: ${grab.state})`;
+}
+
+function renderDiag(msg) {
+  const body = document.getElementById("diag-body");
+  if (!msg.tracking) { body.textContent = "hand tracking is off"; return; }
+  // Tracking on and the board off: the tracker sees your hands but nothing
+  // acts on them, so "pinched and in reach" below would be a false promise.
+  if (msg.board_enabled === false) {
+    body.textContent = "the board is off — set BOARD_ENABLED=true and restart Apex";
+    return;
+  }
+  if (msg.diag_error) { body.textContent = "readout failed: " + msg.diag_error; return; }
+  const hands = msg.hands || [], grabs = msg.grabs || [];
+  if (!hands.length) { body.textContent = "tracking, but no hands in frame"; return; }
+  body.replaceChildren(...hands.map((h, i) => {
+    const g = grabs[i];
+    const el = document.createElement("div");
+    el.className = "diag-hand";
+    // The ratio bar: fill is the measured ratio, the marker is the
+    // threshold. Pinch is ratio BELOW threshold, so a fill left of the
+    // marker means pinched — the one thing worth being able to see at a
+    // glance while moving your fingers.
+    const pct = h.ratio === null ? 0 : Math.min(100, (h.ratio / 1.2) * 100);
+    const mark = Math.min(100, (h.threshold / 1.2) * 100);
+    // Second marker: where a HELD pinch lets go. Between the two marks a
+    // pinch that has started stays on — that band is the hysteresis, and
+    // seeing it explains why 0.74 can read PINCHED.
+    const rel = h.release == null ? null : Math.min(100, (h.release / 1.2) * 100);
+    el.innerHTML =
+      `<div class="diag-row"><span>${esc(h.label)} hand</span>` +
+      `<span class="${h.pinched ? "diag-yes" : "diag-no"}">` +
+      `${h.pinched ? "PINCHED" : "open"}</span></div>` +
+      `<div class="diag-bar"><div class="diag-fill" style="width:${pct.toFixed(1)}%"></div>` +
+      `<div class="diag-mark" style="left:${mark.toFixed(1)}%"></div>` +
+      (rel === null ? "" :
+        `<div class="diag-mark diag-release" style="left:${rel.toFixed(1)}%"></div>`) +
+      `</div>` +
+      `<div class="diag-row"><span class="diag-k">ratio / threshold</span>` +
+      `<span>${h.ratio === null ? "n/a" : h.ratio.toFixed(3)} / ${h.threshold.toFixed(3)}</span></div>` +
+      (h.release == null ? "" :
+        `<div class="diag-row"><span class="diag-k">held until above</span>` +
+        `<span>${h.release.toFixed(3)}</span></div>`) +
+      (g ? `<div class="diag-row"><span class="diag-k">nearest</span><span>` +
+           `${g.nearest ? esc(g.nearest) : "—"}` +
+           `${g.distance === null ? "" : ` @ ${g.distance.toFixed(3)}`}` +
+           ` (reach ${g.reach.toFixed(2)})</span></div>` +
+           `<div class="diag-row"><span class="diag-k">state</span><span>${esc(g.state)}</span></div>`
+         : "") +
+      `<div class="diag-why">${esc(whyNot(h, g))}</div>`;
+    return el;
+  }));
+}
+
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws/board?token=${encodeURIComponent(token)}`);
 
   ws.onopen = () => say("connected");
-
-  const diagEl = document.getElementById("diag");
-  // Off by default — it is an instrument, not furniture. On with D, or with
-  // ?diag=1 so a link can be handed to someone mid-problem.
-  if (new URLSearchParams(location.search).get("diag") === "1") diagEl.hidden = false;
-  document.getElementById("diag-close").onclick = () => { diagEl.hidden = true; };
-  addEventListener("keydown", ev => {
-    if (ev.key !== "d" && ev.key !== "D") return;
-    const t = ev.target;
-    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-    diagEl.hidden = !diagEl.hidden;
-  });
-
-  // Card titles come from the user and from models, and the panel below
-  // builds markup. Everywhere else on this page a title goes in via
-  // textContent; here it does not, so it is escaped.
-  const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g,
-    ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch]));
-
-  // --- the readout -----------------------------------------------------
-  // Names the FIRST reason a grab is not happening, in the order the board
-  // itself checks them, so the line on screen and the code that refused are
-  // the same sequence.
-  function whyNot(hand, grab) {
-    if (!hand) return "no hand in frame";
-    if (hand.open_palm) return "open palm — that cancels a grab";
-    if (hand.ratio === null) return "hand seen but its shape was unreadable";
-    if (!hand.pinched)
-      return `not pinched — ratio ${hand.ratio.toFixed(3)} must fall below ${hand.threshold.toFixed(3)} to start`;
-    if (!grab) return "pinched";
-    if (grab.holding) return `holding ${grab.holding}`;
-    if (!grab.nearest) return "pinched, but there is nothing on the board";
-    if (!grab.in_reach)
-      return `pinched, but ${grab.nearest} is ${grab.distance.toFixed(3)} away and reach is ${grab.reach.toFixed(2)}`;
-    if (grab.nearest_is_full) return `${grab.nearest} is already held by two hands`;
-    if (grab.state === "armed") return `arming — hold the pinch ${grab.dwell_needed.toFixed(2)}s`;
-    return "pinched and in reach";
-  }
-
-  function renderDiag(msg) {
-    const body = document.getElementById("diag-body");
-    if (!msg.tracking) { body.textContent = "hand tracking is off"; return; }
-    if (msg.diag_error) { body.textContent = "readout failed: " + msg.diag_error; return; }
-    const hands = msg.hands || [], grabs = msg.grabs || [];
-    if (!hands.length) { body.textContent = "tracking, but no hands in frame"; return; }
-    body.replaceChildren(...hands.map((h, i) => {
-      const g = grabs[i];
-      const el = document.createElement("div");
-      el.className = "diag-hand";
-      // The ratio bar: fill is the measured ratio, the marker is the
-      // threshold. Pinch is ratio BELOW threshold, so a fill left of the
-      // marker means pinched — the one thing worth being able to see at a
-      // glance while moving your fingers.
-      const pct = h.ratio === null ? 0 : Math.min(100, (h.ratio / 1.2) * 100);
-      const mark = Math.min(100, (h.threshold / 1.2) * 100);
-      // Second marker: where a HELD pinch lets go. Between the two marks a
-      // pinch that has started stays on — that band is the hysteresis, and
-      // seeing it explains why 0.74 can read PINCHED.
-      const rel = h.release == null ? null : Math.min(100, (h.release / 1.2) * 100);
-      el.innerHTML =
-        `<div class="diag-row"><span>${esc(h.label)} hand</span>` +
-        `<span class="${h.pinched ? "diag-yes" : "diag-no"}">` +
-        `${h.pinched ? "PINCHED" : "open"}</span></div>` +
-        `<div class="diag-bar"><div class="diag-fill" style="width:${pct.toFixed(1)}%"></div>` +
-        `<div class="diag-mark" style="left:${mark.toFixed(1)}%"></div>` +
-        (rel === null ? "" :
-          `<div class="diag-mark diag-release" style="left:${rel.toFixed(1)}%"></div>`) +
-        `</div>` +
-        `<div class="diag-row"><span class="diag-k">ratio / threshold</span>` +
-        `<span>${h.ratio === null ? "n/a" : h.ratio.toFixed(3)} / ${h.threshold.toFixed(3)}</span></div>` +
-        (h.release == null ? "" :
-          `<div class="diag-row"><span class="diag-k">held until above</span>` +
-          `<span>${h.release.toFixed(3)}</span></div>`) +
-        (g ? `<div class="diag-row"><span class="diag-k">nearest</span><span>` +
-             `${g.nearest ? esc(g.nearest) : "—"}` +
-             `${g.distance === null ? "" : ` @ ${g.distance.toFixed(3)}`}` +
-             ` (reach ${g.reach.toFixed(2)})</span></div>` +
-             `<div class="diag-row"><span class="diag-k">state</span><span>${esc(g.state)}</span></div>`
-           : "") +
-        `<div class="diag-why">${esc(whyNot(h, g))}</div>`;
-      return el;
-    }));
-  }
 
   ws.onmessage = (ev) => {
     let msg;
