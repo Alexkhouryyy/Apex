@@ -4,41 +4,54 @@ Written 2026-09-23. **No v2 code before the two v1 gates below are met.** That
 was the decision ("no rewrite — prove the relay and the pinch first; v2 is the
 upgrade"), and this document holds it to that.
 
-v2 is an **upgrade, not a rewrite**. Everything in `docs/APEX_BLUEPRINT_STATUS.md`
-stays; v2 is a small number of claims Apex can make that the big assistants
-cannot, each with a success check measured the way the blueprint measures a
-phase — by observation, never by the existence of code.
+---
+
+## 0. The mission
+
+> **Every person gets an AI they own, that helps them invent, and that proves
+> everything it does.**
+
+v2 is not aimed at other assistants. Competing with the big assistants, or
+with agent projects like Hermes and OpenClaw, is a race decided by whoever
+rents the best model this month — Apex rents its intelligence like everyone
+else, and a v2 aimed there moves nobody anywhere. The mission is three things
+the world does not have yet, and Apex already holds a working seed of each:
+
+| | What the world has now | What Apex makes normal | The seed already in Apex |
+|---|---|---|---|
+| **Ownership** | People rent their AI; the company keeps the memory | Your AI's memory lives on your disk, opens only with your key, and outlives any model you swap in | One SQLite brain; `agent/relay.py` sealing; any-model adapter |
+| **Invention** | Turning an idea into a tested claim or a made object takes a lab, a workshop and training | Anyone goes from a spoken idea to a tested hypothesis or a validated, manufacturable object | `agent/genesis.py`, `agent/forge.py` |
+| **Trust** | Agents act in the world and you take their word for it | Every action carries a receipt anyone can check, and `unknown` is never reported as done | Three-state verdicts across Forge, Genesis, `relay --check` |
+
+**The guard against the breadth trap.** "All three, equal" is the easiest
+mission in the world to fail by starting nine things and proving none. So the
+mission is judged by ONE flagship demonstration that needs all three at once
+(section 4), plus one proof per leg. Nothing counts as mission progress unless
+it moves one of those checks.
+
+**The mission sits on a foundation.** Nobody invents with an AI that takes
+minutes to answer and drops what you hand it. The three pillars in section 3
+are that foundation, and they come first.
 
 ---
 
 ## 1. The honest starting point
 
-**Where Apex cannot win.** Apex rents its intelligence. Whatever model it runs
-— DeepSeek, Claude, GPT, Gemini — the company that makes that model has the
-same model in its own app, with more engineers, more polish and more users.
-Apex will not out-think ChatGPT, Gemini or the Claude apps, and a v2 that tries
-("smarter answers", "more tools", "more tabs") loses by construction.
-
 **Where v1 already is.** Breadth is not the problem: 104 tools, 27 dashboard
 tabs, six messaging channels, a council, Forge, Genesis, a relay, a hand-tracked
 board. The problem is that most of it is *built* and much less of it is
 *proven* — the gap analysis exists because "never wired up" and "working
-perfectly" looked identical from outside. More breadth makes that worse.
+perfectly" looked identical from outside. More breadth makes that worse, and
+a big mission is the most tempting excuse for more breadth there is.
 
-**Where Apex can win.** Things a cloud assistant is not built to be, because it
-lives in someone else's data centre:
+**What Apex is that a cloud assistant is not built to be:**
 
 - **It is in the room.** It holds your camera, your screen, your microphone and
   your hands, continuously, on your machine — not a tab you open.
 - **It is yours.** One memory on your disk, readable only by your key, that
   outlives any model you swap in or out.
 - **It shows its proof.** The whole codebase is organised around one rule —
-  `unknown` is never `pass` — and no mainstream assistant tells you, per
-  action, what it checked and what it merely assumed.
-
-v2 turns those three into claims a stranger could test in five minutes.
-
----
+  `unknown` is never `pass`.
 
 ## 2. The gates (finish v1 first)
 
@@ -52,7 +65,7 @@ the failing number and that gets fixed — not the next feature.
 
 ---
 
-## 3. The three pillars
+## 3. The foundation — three pillars
 
 Each pillar is one sentence a user would say, one measurable check, and the
 work that check implies. The checks are the contract; the work list is a guess
@@ -126,16 +139,66 @@ the model is told to report `unknown` rather than claim success.
 
 ---
 
-## 4. What v2 does not do
+## 4. The mission proofs
 
-- **No new tools, tabs or channels** until the three checks pass. Breadth is
-  v1's strength and its liability.
+v2 is done when the flagship demo passes and each leg has its own proof. Each
+check is something observed, never the existence of code.
+
+### The flagship demo — all three at once
+
+**A person who is not an engineer, on their own machine, with their own Apex:**
+1. says an idea out loud ("a phone stand that holds my phone at 60°", or "does
+   my plant grow faster by the window?");
+2. Apex turns it into either a Forge design that passes validation, or a
+   Genesis hypothesis with a stated way it could be wrong;
+3. it is made or tested — the part is printed, or the observation is recorded
+   and the hypothesis is marked supported or refuted;
+4. Apex exports a **receipt bundle**: what was asked, what was done, the
+   checks and their verdicts, the files;
+5. **a stranger, on a different machine, verifies the bundle** with a
+   standalone checker and gets the same verdicts.
+
+**Pass:** 3 different non-engineers, one session each, 60 minutes or less,
+every step above observed. A refuted hypothesis counts as a pass — Genesis
+reports `refuted` as the system working.
+
+### Ownership — proof
+
+- A stranger sets up Apex from the README on a clean machine in **30 minutes
+  or less, without help**.
+- Switch the model mid-conversation (`/model`), and Apex still remembers
+  everything from before the switch.
+- **One command exports all of your data, and one command deletes all of it** —
+  and after the delete, nothing of yours is left on disk or on the relay.
+- G2 passes: lid shut, phone still answers from your own memory.
+
+### Invention — proof
+
+The flagship demo, with at least one **printed** Forge part and at least one
+**recorded real-world observation** that moved a Genesis hypothesis.
+
+### Trust — proof
+
+- The receipt format is written up as an open spec (`docs/RECEIPTS_SPEC.md`),
+  under Apex's MIT licence, so any agent can emit it.
+- The standalone checker verifies a bundle **without Apex installed**.
+- Tamper test: change one byte of a receipt and the checker says so.
+- Whether other projects adopt the spec is not in Apex's control, so it is
+  not the check. Making it easy to adopt is.
+
+---
+
+## 5. What v2 does not do
+
+- **No new tools, tabs or channels** unless they move one of the checks in
+  sections 3 and 4. Breadth is v1's strength and its liability.
 - **Not a rewrite.** Each pillar is built on the modules that exist.
 - **Not CarPlay.** Phase 11 is gated on Apple, not on Apex.
-- **Not a model race.** Model choice stays a setting (`AGENT_MODEL`); Apex
-  gets better answers when the models do, for free.
+- **Not a model race, and not a feature race** with other assistants or agent
+  projects. Model choice stays a setting (`AGENT_MODEL`); Apex gets better
+  answers when the models do, for free.
 
-## 5. Constraints v2 must not break
+## 6. Constraints v2 must not break
 
 - Local-first: memory stays on your disk; the relay only ever holds sealed
   snapshots and an allowlisted, redacted context page.
@@ -143,18 +206,21 @@ the model is told to report `unknown` rather than claim success.
 - Deny-by-default for anything outward-facing, as everywhere else in Apex.
 - Three-state verdicts: `unknown` is never reported as `pass`.
 
-## 6. Order
+## 7. Order
 
 1. **G1** — your 20+20 grab test.
 2. **G2** — relay on an always-on machine, lid-shut test.
-3. **Pillar 1** — measure the voice turn, then make it sub-second-ish.
+3. **Pillar 1** — measure the voice turn, then make it fast.
 4. **Pillar 2** — the no-keyboard session.
-5. **Pillar 3** — receipts.
+5. **Pillar 3** — receipts. This is also the start of the Trust leg: the
+   receipts page and the receipt bundle are the same data.
+6. **Ownership** — clean-machine setup, export all, delete all.
+7. **The flagship demo** — first with you, then with three non-engineers.
 
 Pillar 1 comes before 2 on purpose: press-to-talk and summon are only magic if
-the answer starts within a second or two.
+the answer starts within a second or two. And the flagship demo comes last on
+purpose: it is the proof, and it can only pass on a foundation that works.
 
-When all three checks pass, v2 is done — and the claim to put next to any other
-assistant is three sentences a stranger can verify: *it answers as fast as a
-person, it works with your hands on your own screen, and it shows you proof
-for everything it did.*
+When it passes, the claim is not "better than another assistant". It is that
+**an ordinary person, with an AI they own, invented something real and can
+prove it** — and that is a claim about the future, not about a leaderboard.
