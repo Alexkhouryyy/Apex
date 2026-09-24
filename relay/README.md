@@ -12,6 +12,10 @@ It does not reason. It holds no model key. **It cannot open anything it stores.*
 
 ## Deploying it
 
+**Step by step on a cloud server, with the phone page and the lid-shut test:
+[`docs/RELAY_DEPLOY.md`](../docs/RELAY_DEPLOY.md).** What follows is the short
+version and the reasoning.
+
 One file, standard library only. No `pip install`.
 
 ```bash

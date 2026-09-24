@@ -258,3 +258,26 @@ def test_a_deployed_relay_gains_the_new_column(tmp_path):
     with sqlite3.connect(db) as c:
         cols = {r[1] for r in c.execute("PRAGMA table_info(replies)")}
     assert "question_id" in cols
+
+
+def test_the_watch_log_is_flushed_for_systemd():
+    """Under systemd stdout is a pipe; an unflushed line never shows in
+    `systemctl status`, and docs/RELAY_DEPLOY.md tells you to look there."""
+    import subprocess
+    import sys
+    code = ("import importlib.util as u; s=u.spec_from_file_location('a', 'relay/answer.py');"
+            " m=u.module_from_spec(s); s.loader.exec_module(m); m._log('hello from the answerer');"
+            " import time; time.sleep(30)")
+    import os
+    # As systemd runs it: no PYTHONUNBUFFERED. Left set (as some shells and CI
+    # do), it hides exactly the buffering this test is about.
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONUNBUFFERED"}
+    p = subprocess.Popen([sys.executable, "-c", code], cwd=str(ROOT),
+                         stdout=subprocess.PIPE, text=True, env=env)
+    got = []
+    reader = threading.Thread(target=lambda: got.append(p.stdout.readline()), daemon=True)
+    reader.start()
+    reader.join(timeout=5)                  # unflushed, it only arrives at exit
+    p.kill()
+    assert got and got[0].strip() == "hello from the answerer", \
+        "the log line did not arrive while the process was running"

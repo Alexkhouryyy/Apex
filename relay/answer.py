@@ -151,7 +151,14 @@ def answer(question: str, *, call=None, question_id: int | None = None) -> dict:
     return out
 
 
-def watch_once(*, call=None, log=print) -> int:
+def _log(*args) -> None:
+    """print, flushed. Under systemd stdout is a pipe and Python buffers it, so
+    an unflushed "watching…" line never reaches `systemctl status` — and a
+    service that says nothing reads as a service that is not running."""
+    print(*args, flush=True)
+
+
+def watch_once(*, call=None, log=_log) -> int:
     """Answer every question waiting on the relay. Returns how many.
 
     Claim first, atomically, so two answerers never answer one question. An
@@ -178,7 +185,7 @@ def watch_once(*, call=None, log=print) -> int:
     return done
 
 
-def watch(interval: float = 2.0, *, log=print) -> None:
+def watch(interval: float = 2.0, *, log=_log) -> None:
     """Keep answering questions from the phone page until stopped.
 
     A relay that is briefly unreachable is logged and retried, not fatal — this
