@@ -33,6 +33,14 @@ commands, and requests become queued tasks rather than executed ones — so the
 worst a hostile relay achieves is a wrong answer and a task you can see sitting
 in the queue.
 
+## Answering from the phone
+
+`python answer.py --watch` keeps running and answers every question asked on
+the relay's `/phone` page: it claims a question, answers it from the context,
+and files the reply against that question so the page can show it. A failure
+is recorded against the question with its reason, so the phone never waits on
+something that will not come.
+
 ## Configuration
 
     RELAY_SERVER_URL     where server.py is (default http://127.0.0.1:8799)
@@ -48,6 +56,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -125,7 +134,7 @@ def ask_model(question: str, ctx_text: str, *, call=None) -> dict:
     return {"answer": answer, "requests": requests[:10]}
 
 
-def answer(question: str, *, call=None) -> dict:
+def answer(question: str, *, call=None, question_id: int | None = None) -> dict:
     ctx = context()
     text = ((ctx.get("context") or {}).get("text") or "").strip()
     if not text:
@@ -135,8 +144,55 @@ def answer(question: str, *, call=None) -> dict:
     else:
         out = ask_model(question, text, call=call)
     out["question"] = question
-    _call("/reply", "POST", json.dumps(out).encode())
+    body = dict(out)
+    if question_id is not None:
+        body["question_id"] = question_id      # so the phone page finds it
+    _call("/reply", "POST", json.dumps(body).encode())
     return out
+
+
+def watch_once(*, call=None, log=print) -> int:
+    """Answer every question waiting on the relay. Returns how many.
+
+    Claim first, atomically, so two answerers never answer one question. An
+    answer that fails is recorded as failed WITH the reason — the phone page
+    shows it, rather than a spinner that never ends.
+    """
+    pending = json.loads(_call("/questions/pending").decode()).get("items") or []
+    done = 0
+    for item in pending:
+        qid = item.get("id")
+        claimed = json.loads(_call(f"/questions/{qid}/claim", "POST", b"{}").decode())
+        if not claimed.get("changed"):
+            continue                              # someone else has it
+        try:
+            answer(str(item.get("text") or ""), call=call, question_id=qid)
+            done += 1
+        except Exception as e:
+            why = f"{type(e).__name__}: {e}"[:500]
+            log(f"[answer] question {qid} failed: {why}")
+            try:
+                _call(f"/questions/{qid}/error", "POST", json.dumps({"error": why}).encode())
+            except Exception as e2:
+                log(f"[answer] could not record the failure: {e2}")
+    return done
+
+
+def watch(interval: float = 2.0, *, log=print) -> None:
+    """Keep answering questions from the phone page until stopped.
+
+    A relay that is briefly unreachable is logged and retried, not fatal — this
+    runs unattended on a box you are not looking at.
+    """
+    log(f"[answer] watching {SERVER} for questions every {interval:g}s")
+    while True:
+        try:
+            n = watch_once(log=log)
+            if n:
+                log(f"[answer] answered {n}")
+        except Exception as e:
+            log(f"[answer] relay unreachable: {type(e).__name__}: {e}")
+        time.sleep(interval)
 
 
 def main(argv: list) -> int:
@@ -147,8 +203,11 @@ def main(argv: list) -> int:
         print("ANTHROPIC_API_KEY is not set. This file is the only part of the "
               "relay that needs one — the mailbox does not.", file=sys.stderr)
         return 2
+    if len(argv) >= 2 and argv[1] == "--watch":
+        watch()
+        return 0
     if len(argv) < 2:
-        print("usage: python answer.py \"your question\"", file=sys.stderr)
+        print("usage: python answer.py \"your question\"   (or --watch)", file=sys.stderr)
         return 2
     out = answer(" ".join(argv[1:]))
     print(out["answer"])

@@ -141,7 +141,11 @@ restore it. If that key is gone for good and you want to start over, set
 ```
 snapshot   one row, enforced by CHECK (id = 1)   updated_at, byte_len, ciphertext
 outbox     created_at, kind, ciphertext, done_at
+questions  created_at, text, status, claimed_at, answered_at, reply_id, error
 ```
+
+`questions`, like `replies` and `context`, is readable: the answerer has to
+read a question to answer it. They come from your own phone, with your token.
 
 Two BLOB columns and some timestamps. There is no column for anything readable,
 which is the schema making the promise rather than this file doing it.
@@ -151,6 +155,14 @@ which is the schema making the promise rather than this file doing it.
 | | | |
 |---|---|---|
 | `GET` | `/health` | No auth. Returns `{"ok":true}` and nothing else — anything more is a fact about you served to strangers |
+| `GET` | `/phone`, `/` | No auth. The phone page — static, no data in it |
+| `GET` | `/status` | How old the context and snapshot are, and when the answerer last asked for work |
+| `POST` | `/questions` | Ask: `{"text": "..."}`, up to 2000 characters, at most 50 waiting |
+| `GET` | `/questions` | The 20 most recent, with answers |
+| `GET` | `/questions/{id}` | One question: `queued`, `answering`, `answered` or `failed` |
+| `GET` | `/questions/pending` | For the answerer; also records that it is alive |
+| `POST` | `/questions/{id}/claim` | For the answerer. `changed: 0` means someone else has it |
+| `POST` | `/questions/{id}/error` | For the answerer: record why an answer failed |
 | `PUT` | `/snapshot` | Store sealed bytes. Empty bodies refused |
 | `GET` | `/snapshot` | Return them. `404` when none stored, never an empty `200` |
 | `GET` | `/snapshot/meta` | Size and age, without the bytes |
@@ -162,6 +174,27 @@ which is the schema making the promise rather than this file doing it.
 | `POST` | `/reply` | An answer from `answer.py`. Empty answers refused |
 | `GET` | `/replies` | Replies the laptop has not filed yet |
 | `POST` | `/replies/{id}/done` | Mark filed |
+
+## Asking from your phone
+
+Open `https://<your-relay>/phone` on your phone — the same address the laptop
+uses as `RELAY_URL`, with `/phone` on the end. The first time, it asks for the
+relay token (the `RELAY_TOKEN` from the laptop's `.env`) and keeps it on that
+phone only; "Forget the token" removes it.
+
+Ask a question and the page waits for the answerer (below) to pick it up. It
+shows:
+
+- **Answerer online / offline** — whether `answer.py --watch` has asked for
+  work in the last 30 seconds. Offline means questions will wait, and after
+  20 seconds each one says so instead of spinning.
+- **Laptop last sent …** — how old the summary is that answers come from.
+- Any action the answer needs, as **queued for your laptop**, never done.
+
+The page itself holds no data and loads nothing from anywhere else; the one
+inline script and style are pinned by hash in its Content-Security-Policy, and
+every answer is shown as text, never as markup. On a phone, "Add to Home
+Screen" makes it an app icon.
 
 ## Optional: letting it answer while the laptop is off
 
@@ -177,6 +210,32 @@ export ANTHROPIC_API_KEY=...      # ONLY this file needs one
 export RELAY_SERVER_TOKEN=...     # the same token
 python3 answer.py "what did I say about the Berlin trip?"
 ```
+
+For the phone page, run it as a service instead, so it keeps answering:
+
+```bash
+python3 answer.py --watch
+```
+
+```ini
+# /etc/systemd/system/apex-answer.service
+[Unit]
+Description=Apex Relay answerer
+After=apex-relay.service
+
+[Service]
+WorkingDirectory=/home/you/apex-relay
+EnvironmentFile=/etc/apex-relay.env     # RELAY_SERVER_TOKEN and ANTHROPIC_API_KEY
+ExecStart=/usr/bin/python3 answer.py --watch
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+It claims each question before answering it, so two answerers never answer one;
+a question claimed by an answerer that then died is offered again after three
+minutes; and a failed answer is recorded against the question with its reason.
 
 It reads the working context your laptop pushed, asks a model, and POSTs the
 answer back. It touches no account, runs no command, opens no file. When

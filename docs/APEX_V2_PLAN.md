@@ -58,7 +58,7 @@ a big mission is the most tempting excuse for more breadth there is.
 | Gate | Check | Status |
 |---|---|---|
 | **G1 — Pinch** | 20 grabs per hand on `/board`: **≥ 18/20 on each hand**, then two-hand scale works | **Reported passed by the user, 2026-09-23**, after the hysteresis and hand-identity fixes. The per-hand counts were not recorded, so the margin over 18/20 is unknown |
-| **G2 — Relay** | Relay on an always-on machine, `python -m agent.relay --check` all green, then **lid shut, phone still answers from Apex's memory** | Proven on localhost only |
+| **G2 — Relay** | Relay on an always-on machine, `python -m agent.relay --check` all green, then **lid shut, phone still answers from Apex's memory** | Proven on localhost only. The phone side now exists: `https://<relay>/phone`, answered by `answer.py --watch` (2026-09-24) — deploy steps in `relay/README.md` |
 
 Nothing in section 3 starts until both are met. If G1 fails, the readout names
 the failing number and that gets fixed — not the next feature.
