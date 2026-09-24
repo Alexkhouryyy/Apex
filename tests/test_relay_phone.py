@@ -281,3 +281,80 @@ def test_the_watch_log_is_flushed_for_systemd():
     p.kill()
     assert got and got[0].strip() == "hello from the answerer", \
         "the log line did not arrive while the process was running"
+
+
+class TestDeepSeekAnswers:
+    """Apex runs on DeepSeek; the answerer used to speak only Anthropic, so the
+    phone needed a second paid account just for this."""
+
+    @pytest.fixture
+    def fake_deepseek(self):
+        """A real HTTP server posing as DeepSeek's OpenAI-compatible API."""
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        seen = []
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                seen.append({"path": self.path, "auth": self.headers.get("Authorization"),
+                             "body": body})
+                out = json.dumps({"choices": [{"message": {"role": "assistant", "content":
+                      json.dumps({"answer": "From DeepSeek: Tuesday.", "requests": []})}}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+        port = _free_port()
+        srv = ThreadingHTTPServer(("127.0.0.1", port), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            yield f"http://127.0.0.1:{port}/v1", seen
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_a_deepseek_key_alone_answers_through_deepseek(self, relay, fake_deepseek):
+        _m, ans, base, _db = relay
+        url, seen = fake_deepseek
+        ans.API_KEY, ans.DEEPSEEK_API_KEY, ans.DEEPSEEK_BASE_URL = "", "ds-key", url
+        ans.PROVIDER, ans.MODEL = "", ""
+        push_context(base)
+        qid = json.loads(req(base, "/questions", "POST", {"text": "dentist?"})[1])["id"]
+        assert ans.watch_once() == 1
+        (call,) = seen
+        assert call["path"] == "/v1/chat/completions"
+        assert call["auth"] == "Bearer ds-key"
+        assert call["body"]["model"] == "deepseek-flash"
+        assert call["body"]["messages"][0] == {"role": "system", "content": ans.SYSTEM}
+        assert "dentist is on Tuesday" in call["body"]["messages"][1]["content"]
+        q = json.loads(req(base, f"/questions/{qid}")[1])
+        assert q["status"] == "answered" and q["answer"] == "From DeepSeek: Tuesday."
+
+    def test_the_provider_can_be_pinned_when_both_keys_are_set(self, relay, fake_deepseek):
+        _m, ans, base, _db = relay
+        url, seen = fake_deepseek
+        ans.API_KEY, ans.DEEPSEEK_API_KEY, ans.DEEPSEEK_BASE_URL = "an-key", "ds-key", url
+        ans.PROVIDER, ans.MODEL = "deepseek", ""
+        assert ans.provider() == "deepseek"
+        ans.PROVIDER = ""
+        assert ans.provider() == "anthropic", "with both keys and no pin, Anthropic answers"
+
+    def test_no_key_at_all_is_a_reason_on_the_phone_not_a_spinner(self, relay):
+        _m, ans, base, _db = relay
+        ans.API_KEY = ans.DEEPSEEK_API_KEY = ans.PROVIDER = ""
+        push_context(base)
+        qid = json.loads(req(base, "/questions", "POST", {"text": "hi"})[1])["id"]
+        ans.watch_once(log=lambda *a: None)
+        q = json.loads(req(base, f"/questions/{qid}")[1])
+        assert q["status"] == "failed" and "no model key" in q["error"]
+
+    def test_the_cli_refuses_to_start_with_no_key(self, relay, capsys):
+        _m, ans, _base, _db = relay
+        ans.API_KEY = ans.DEEPSEEK_API_KEY = ans.PROVIDER = ""
+        assert ans.main(["answer.py", "--watch"]) == 2
+        assert "DEEPSEEK_API_KEY" in capsys.readouterr().err

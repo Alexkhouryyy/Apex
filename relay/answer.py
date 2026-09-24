@@ -43,13 +43,17 @@ something that will not come.
 
 ## Configuration
 
-    RELAY_SERVER_URL     where server.py is (default http://127.0.0.1:8799)
-    RELAY_SERVER_TOKEN   the same shared secret the laptop uses
-    ANTHROPIC_API_KEY    the model key. Only this file needs it.
-    RELAY_ANSWER_MODEL   default claude-haiku-4-5-20251001
+    RELAY_SERVER_URL       where server.py is (default http://127.0.0.1:8799)
+    RELAY_SERVER_TOKEN     the same shared secret the laptop uses
+    ANTHROPIC_API_KEY      a model key — this one, or:
+    DEEPSEEK_API_KEY       the other. Only this file needs one.
+    DEEPSEEK_BASE_URL      only for a gateway; default https://api.deepseek.com/v1
+    RELAY_ANSWER_PROVIDER  anthropic | deepseek, when both keys are set
+                           (default: Anthropic if its key is set, else DeepSeek)
+    RELAY_ANSWER_MODEL     default claude-haiku-4-5-20251001 / deepseek-flash
 
-`ANTHROPIC_API_KEY` on this box is a real cost of letting the cloud answer, and
-it is why this is a separate file: the mailbox alone needs no such thing.
+A model key on this box is a real cost of letting the cloud answer, and it is
+why this is a separate file: the mailbox alone needs no such thing.
 """
 from __future__ import annotations
 
@@ -62,8 +66,29 @@ import urllib.request
 
 SERVER = os.getenv("RELAY_SERVER_URL", "http://127.0.0.1:8799").rstrip("/")
 TOKEN = os.getenv("RELAY_SERVER_TOKEN", "")
-MODEL = os.getenv("RELAY_ANSWER_MODEL", "claude-haiku-4-5-20251001")
+MODEL = os.getenv("RELAY_ANSWER_MODEL", "")
 API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = (os.getenv("DEEPSEEK_BASE_URL", "")
+                     or "https://api.deepseek.com/v1").rstrip("/")
+PROVIDER = os.getenv("RELAY_ANSWER_PROVIDER", "").strip().lower()
+DEFAULT_MODELS = {"anthropic": "claude-haiku-4-5-20251001",
+                  "deepseek": "deepseek-flash"}
+
+
+def provider() -> str:
+    """Which model provider answers: RELAY_ANSWER_PROVIDER if set, else
+    whichever key is present — Anthropic first, then DeepSeek. "" if none.
+
+    Apex itself can run on DeepSeek; an answerer that only spoke Anthropic
+    made the phone need a second paid account just for this."""
+    if PROVIDER in DEFAULT_MODELS:
+        return PROVIDER
+    if API_KEY:
+        return "anthropic"
+    if DEEPSEEK_API_KEY:
+        return "deepseek"
+    return ""
 
 SYSTEM = (
     "You are answering on behalf of Apex while its owner's laptop is offline. "
@@ -99,26 +124,43 @@ def context() -> dict:
 def ask_model(question: str, ctx_text: str, *, call=None) -> dict:
     """Ask, and always come back with a dict. `call` is injectable for tests —
     the interesting logic here is what happens to a bad answer, not the HTTP."""
-    payload = json.dumps({
-        "model": MODEL, "max_tokens": 1024, "system": SYSTEM,
-        "messages": [{"role": "user", "content":
-                      f"What Apex knows:\n{ctx_text}\n\nQuestion: {question}"}],
-    }).encode()
+    which = provider()
+    if not which:
+        raise RuntimeError("no model key: set ANTHROPIC_API_KEY or DEEPSEEK_API_KEY")
+    model = MODEL or DEFAULT_MODELS[which]
+    user = f"What Apex knows:\n{ctx_text}\n\nQuestion: {question}"
+    if which == "anthropic":
+        payload = json.dumps({
+            "model": model, "max_tokens": 1024, "system": SYSTEM,
+            "messages": [{"role": "user", "content": user}],
+        }).encode()
+        url = "https://api.anthropic.com/v1/messages"
+        headers = {"x-api-key": API_KEY, "anthropic-version": "2023-06-01",
+                   "content-type": "application/json"}
+    else:
+        # OpenAI-compatible, as agent/provider.py reaches DeepSeek.
+        payload = json.dumps({
+            "model": model, "max_tokens": 1024, "stream": False,
+            "messages": [{"role": "system", "content": SYSTEM},
+                         {"role": "user", "content": user}],
+        }).encode()
+        url = f"{DEEPSEEK_BASE_URL}/chat/completions"
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                   "content-type": "application/json"}
 
     if call is None:
         def call(body: bytes) -> bytes:
-            req = urllib.request.Request(
-                "https://api.anthropic.com/v1/messages", data=body,
-                method="POST",
-                headers={"x-api-key": API_KEY,
-                         "anthropic-version": "2023-06-01",
-                         "content-type": "application/json"})
+            req = urllib.request.Request(url, data=body, method="POST", headers=headers)
             with urllib.request.urlopen(req, timeout=120) as r:
                 return r.read()
 
     raw = json.loads(call(payload).decode())
-    text = "".join(b.get("text", "") for b in raw.get("content", [])
-                   if b.get("type") == "text").strip()
+    if which == "anthropic":
+        text = "".join(b.get("text", "") for b in raw.get("content", [])
+                       if b.get("type") == "text").strip()
+    else:
+        choices = raw.get("choices") or [{}]
+        text = str((choices[0].get("message") or {}).get("content") or "").strip()
 
     # A model asked for JSON does not always send JSON. Falling back to the raw
     # text is right: a slightly malformed answer is still an answer, and
@@ -206,9 +248,10 @@ def main(argv: list) -> int:
     if not TOKEN:
         print("RELAY_SERVER_TOKEN is not set.", file=sys.stderr)
         return 2
-    if not API_KEY:
-        print("ANTHROPIC_API_KEY is not set. This file is the only part of the "
-              "relay that needs one — the mailbox does not.", file=sys.stderr)
+    if not provider():
+        print("No model key: set ANTHROPIC_API_KEY or DEEPSEEK_API_KEY. This "
+              "file is the only part of the relay that needs one — the mailbox "
+              "does not.", file=sys.stderr)
         return 2
     if len(argv) >= 2 and argv[1] == "--watch":
         watch()

@@ -9,7 +9,7 @@ What runs where:
 |---|---|---|
 | Your laptop | Apex, as always | Your memory, and `RELAY_KEY` — the only key that can open it |
 | Cloud server | `relay/server.py` — the mailbox | Sealed snapshots it cannot open, a short summary, your questions |
-| Cloud server | `relay/answer.py --watch` — the answerer | A model API key. Nothing else |
+| Cloud server | `relay/answer.py --watch` — the answerer | A model API key (DeepSeek or Anthropic). Nothing else |
 | Your phone | `https://<relay>/phone` in the browser | The relay token |
 
 The network is **Tailscale**: a free private network between your own
@@ -99,10 +99,12 @@ the summary on its own.
 
 ## Part C — the answerer, and the phone page
 
-**On the server**, give the answerer a model key, and run it as a service:
+**On the server**, give the answerer a model key — the same DeepSeek key Apex
+uses is fine — and run it as a service:
 
 ```bash
-echo "ANTHROPIC_API_KEY=YOUR_ANTHROPIC_KEY" | sudo tee -a /etc/apex-relay.env >/dev/null
+echo "DEEPSEEK_API_KEY=YOUR_DEEPSEEK_KEY" | sudo tee -a /etc/apex-relay.env >/dev/null
+# or, for Claude instead:  ANTHROPIC_API_KEY=YOUR_ANTHROPIC_KEY
 
 sudo tee /etc/systemd/system/apex-answer.service >/dev/null <<EOF
 [Unit]
@@ -148,7 +150,7 @@ last sent …**. On iPhone or Android, "Add to Home Screen" makes it an icon.
 | `--check`: *the snapshot already there opens* FAIL | This laptop's `RELAY_KEY` is not the one that sealed what is stored | Restore the saved key. Nothing was overwritten |
 | Page: **Answerer offline** | `answer.py --watch` is not running | `sudo systemctl status apex-answer`, then `journalctl -u apex-answer -n 50` |
 | Page: **Laptop last sent never** | Apex has not pushed a summary | Is `RELAY_ENABLED=true` on the laptop, and was Apex restarted after? |
-| Page: a question **Failed: …** | The answerer tried and the model call failed | The reason is on the card — usually the API key |
+| Page: a question **Failed: …** | The answerer tried and the model call failed | The reason is on the card — usually the API key. "no model key" means neither `DEEPSEEK_API_KEY` nor `ANTHROPIC_API_KEY` is in `/etc/apex-relay.env` |
 | Page asks for the token again | The token was refused | It must equal `RELAY_TOKEN` in the laptop's `.env` exactly |
 
 ## Updating later
@@ -168,3 +170,7 @@ The relay's database carries over; new columns are added on start.
   memories, schedule) — not the full memory, which stays sealed and unread.
 - A question asked from the phone is answered in the cloud; the laptop only
   files the answer when it wakes.
+- With both keys on the server, Anthropic answers; set
+  `RELAY_ANSWER_PROVIDER=deepseek` in `/etc/apex-relay.env` to pin DeepSeek.
+  `RELAY_ANSWER_MODEL` overrides the model (defaults: `deepseek-flash`,
+  `claude-haiku-4-5-20251001`).

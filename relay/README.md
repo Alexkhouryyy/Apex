@@ -210,7 +210,7 @@ decision — answering is opt-in at the level of *which processes you start*, no
 a flag inside one that a config you did not write could flip.
 
 ```bash
-export ANTHROPIC_API_KEY=...      # ONLY this file needs one
+export DEEPSEEK_API_KEY=...       # or ANTHROPIC_API_KEY — ONLY this file needs one
 export RELAY_SERVER_TOKEN=...     # the same token
 python3 answer.py "what did I say about the Berlin trip?"
 ```
@@ -229,7 +229,7 @@ After=apex-relay.service
 
 [Service]
 WorkingDirectory=/home/you/apex-relay
-EnvironmentFile=/etc/apex-relay.env     # RELAY_SERVER_TOKEN and ANTHROPIC_API_KEY
+EnvironmentFile=/etc/apex-relay.env     # RELAY_SERVER_TOKEN and a model key
 ExecStart=/usr/bin/python3 answer.py --watch
 Restart=always
 
