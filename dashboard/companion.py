@@ -100,6 +100,45 @@ async def select_object(request: Request):
         raise HTTPException(400, str(exc)) from exc
 
 
+async def _small_json(request: Request) -> dict:
+    raw = await request.body()
+    if len(raw) > 1024:
+        raise ValueError("Request is too large.")
+    body = json.loads(raw)
+    if not isinstance(body, dict):
+        raise ValueError("Expected a JSON object.")
+    return body
+
+
+@router.post("/api/board/parts")
+async def parts_mode(request: Request):
+    """Turn parts mode on for one model (P on the board), or off with id null."""
+    _check_origin(request)
+    from agent.board import get_board
+    try:
+        body = await _small_json(request)
+        if body.get("id") is not None and not isinstance(body["id"], str):
+            raise ValueError("Expected an object identifier.")
+        return {"parts_mode": get_board().set_parts_mode(body.get("id"))}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/board/viewport")
+async def board_viewport(request: Request):
+    """The board page's size: where a model's parts are drawn depends on it."""
+    _check_origin(request)
+    from agent.board import get_board
+    try:
+        body = await _small_json(request)
+        w, h = body.get("width"), body.get("height")
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (w, h)):
+            raise ValueError("width and height must be numbers")
+        return {"aspect": get_board().set_viewport(w, h)}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/api/forge/download/{rel:path}")
 async def download_fabrication(rel: str):
     from agent import props

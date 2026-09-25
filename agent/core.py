@@ -599,6 +599,26 @@ TOOLS = [
         },
     },
     {
+        "name": "board_parts",
+        "description": (
+            "Turn parts mode on or off for a model on the board. In parts mode "
+            "the user's pinch grabs one PART of the model (the rocket's nose, a "
+            "chair leg) instead of the whole thing: one hand moves it, two hands "
+            "resize it, a quick tap asks about it; letting go saves the model as "
+            "a new version. Only models made with board_build have parts. Use it "
+            "when the user says 'let me move its parts', 'take it apart', or "
+            "'done with the parts'. With no title, the selected or pointed-at model."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "on": {"type": "boolean", "description": "true to start, false to stop."},
+                "title": {"type": "string", "description": "Which model. Optional.", "default": ""},
+            },
+            "required": ["on"],
+        },
+    },
+    {
         "name": "board_create",
         "description": (
             "Create a real, measured 3D object with Blender and put it on Apex's "
@@ -2185,6 +2205,33 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                 ver = f" (v{r['version']}; v{r['parent']} is kept)" if r["revised"] else ""
                 out = (f"'{title}' built from {r['parts']} parts ({size}){ver} and on the board{where} — "
                        f"pinch to grab it, two hands to resize and turn it.")
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name == "board_parts":
+            from agent.board import get_board
+            board = get_board()
+            if not inputs.get("on"):
+                board.set_parts_mode(None)
+                out = "Parts mode is off — pinches grab whole objects again."
+                _broadcast_live_event("board", out)
+                return out
+            title = " ".join(str(inputs.get("title") or "").split()).lower()
+            cards = [c for c in board.cards() if c["kind"] == "model"]
+            if title:
+                card = next((c for c in cards if c["title"].lower() == title), None)
+            else:
+                ref = board.pointed() or board.selection() or {}
+                card = next((c for c in cards if c["id"] == ref.get("id")), None)
+            if card is None:
+                return ("Which model? Nothing matching is on the board — point at it, "
+                        "or say its name." if title or cards else "There is no model on the board.")
+            try:
+                board.set_parts_mode(card["id"])
+            except ValueError as e:
+                return str(e)
+            out = (f"Parts mode on for '{card['title']}': pinch a part to move it, two hands to "
+                   f"resize it, tap to ask about it. Letting go saves a new version.")
             _broadcast_live_event("board", out)
             return out
 

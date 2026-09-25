@@ -269,7 +269,10 @@ def to_glb(parts: list[dict], title: str = "build") -> bytes:
                                                    "roughnessFactor": 0.35 if part["metal"] else 0.6}})
         meshes.append({"name": part["name"], "primitives": [
             {"attributes": {"POSITION": a, "NORMAL": a + 1}, "indices": a + 2, "material": k}]})
-        nodes.append({"name": part["name"], "mesh": k})
+        # extras -> three.js userData: which part this is, and its centre in
+        # metres, so the board can move or resize just this part live.
+        nodes.append({"name": part["name"], "mesh": k,
+                      "extras": {"part": k, "centre": [round(v / 100.0, 6) for v in part["at"]]}})
     nodes.append({"name": title, "children": list(range(len(parts)))})
     while len(blob) % 4:
         blob.append(0)

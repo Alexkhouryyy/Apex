@@ -108,6 +108,7 @@
   #toast.show {opacity:1}
   .card.model-label {width:auto;min-height:0;max-width:25vw;padding:7px 12px;background:#0a172cdd}
   .card.model-label h3 {margin:0}
+  .card.parts {border-color:#f2c14e;box-shadow:0 0 0 2px #f2c14e55}
   #partner-panel {position:fixed;right:12px;top:88px;bottom:36px;width:min(440px,45vw);z-index:6;background:#08111c;border:1px solid #45617c;border-radius:14px;overflow:hidden}
   #partner-panel iframe {width:100%;height:100%;border:0}
   /* Voice on: a strip in the corner, so the board stays free for your hands. */
@@ -203,7 +204,13 @@ const token = loadToken();
 let selectedId = null;
 async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers: {Authorization: `Bearer ${token}`, ...options.headers}});
-  if (!response.ok) throw new Error(response.status === 401 ? 'Log in on the dashboard to continue.' : `Request failed (${response.status}).`);
+  if (!response.ok) {
+    // The server's reason when it gave one ("…wasn't built from parts…"),
+    // not just a status number.
+    let detail = '';
+    try { detail = (await response.json()).detail || ''; } catch (_) {}
+    throw new Error(response.status === 401 ? 'Log in on the dashboard to continue.' : detail || `Request failed (${response.status}).`);
+  }
   return response;
 }
 async function selectObject(id) {
@@ -306,6 +313,15 @@ function askAbout(ev) {
   toast(`Asking Celine about ${ev.title}`, 1800);
 }
 document.getElementById('voice-toggle').onclick = () => setVoice(!voiceOn);
+// P: parts mode for the selected model, or off if it is on.
+let partsModeId = null;
+async function toggleParts() {
+  const target = partsModeId ? null : selectedId;
+  if (!partsModeId && !target) { toast("Select a model first — pinch it or tap its label — then press P", 3000); return; }
+  try {
+    await api('/api/board/parts', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: target})});
+  } catch (error) { toast(error.message, 5000); }
+}
 addEventListener('message', ev => {
   const frame = document.querySelector('#partner-panel iframe');
   if (ev.origin !== location.origin || !frame || ev.source !== frame.contentWindow) return;
@@ -329,6 +345,10 @@ function handleBoardEvents(events) {
     // stops speaking and goes on listening.
     else if (ev.type === "summon" || ev.type === "listen") voiceFromGesture();
     else if (ev.type === "tapped") askAbout(ev);
+    else if (ev.type === "parts_mode") toast(ev.on ? `Parts mode: pinch a part of ${ev.title} to move it, two hands to resize it, tap to ask. P to finish.`
+                                                   : `Parts mode off — ${ev.title} moves whole again`, ev.on ? 5000 : 2200);
+    else if (ev.type === "part_saved") toast(`Saved the ${ev.part} — ${ev.title} v${ev.version}. Say "undo" to go back`, 3500);
+    else if (ev.type === "part_failed") toast(`Could not save the ${ev.part}: ${ev.reason}`, 6000);
     else if (ev.type === "hush") { if (voiceOn) { tellPartner({apex: "hush"}); toast("Stopped — still listening", 1600); } }
     else if (ev.type === "selected") toast(`Selected ${ev.title}`, 1600);
   }
@@ -336,6 +356,7 @@ function handleBoardEvents(events) {
 
 function renderCards(list) {
   const seen = new Set();
+  partsModeId = (list.find(c => c.parts_mode) || {}).id || null;
   for (const c of list) {
     seen.add(c.id);
     let el = cards.get(c.id);
@@ -351,7 +372,9 @@ function renderCards(list) {
     // Only write when changed. Setting textContent every frame at 15fps forces
     // a needless relayout on every card, and with a dozen up that is visible.
     const h = el.firstElementChild, p = el.lastElementChild;
-    if (h.textContent !== c.title) h.textContent = c.title;
+    // In parts mode the label says so, and names the part in your hand.
+    const label = c.parts_mode ? `${c.title} · parts${c.part ? ' · ' + c.part.name : ''}` : c.title;
+    if (h.textContent !== label) h.textContent = label;
     if (p.textContent !== c.body) p.textContent = c.body || "";
     el.style.left = (c.x * 100) + "%";
     el.style.top = (Math.min(.91, c.y + (c.kind === 'model' ? .12 * c.scale : 0)) * 100) + "%";
@@ -359,6 +382,7 @@ function renderCards(list) {
     el.classList.toggle('model-label', c.kind === 'model');
     el.classList.toggle('selected', c.id === selectedId);
     el.classList.toggle('pointed', c.id === pointedId);
+    el.classList.toggle('parts', !!c.parts_mode);
     el.setAttribute('aria-pressed', String(c.id === selectedId));
   }
   for (const [id, el] of cards) {
@@ -449,7 +473,14 @@ function resize3D() {
   camera3.left = 0; camera3.right = 1;
   camera3.top = 0; camera3.bottom = -1;
   camera3.updateProjectionMatrix();
+  // Python picks parts by where they are drawn, which depends on the
+  // window's shape (placeModel): tell it, after the resizing settles.
+  clearTimeout(viewportTimer);
+  viewportTimer = setTimeout(() => api('/api/board/viewport', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({width: innerWidth, height: innerHeight})}).catch(() => {}), 300);
 }
+let viewportTimer = null;
 
 function fitToUnitBox(obj) {
   // Models arrive at wildly different scales — some are metres, some are
@@ -470,6 +501,41 @@ function fitToUnitBox(obj) {
   return wrap;
 }
 const MODEL_TILT = 0.35;   // radians toward you — enough to see the top face
+
+// Where a model is drawn, from its card. agent/board_parts.py makes the SAME
+// transform in Python to find which part a pinch is on, and
+// scripts/check_build3d_glb.mjs holds the two to agreement — change one,
+// change both.
+function placeModel(g, c, base, aspect) {
+  g.position.set(c.x, -c.y, 0);      // card y runs down; this camera's y runs up
+  g.userData.spin.rotation.y = c.rot || 0;
+  // `base` is the fit-to-screen factor captured at load. Multiplying by it
+  // rather than reading g.scale.x means the user's scale is applied to the
+  // ORIGINAL size every frame — reading the current scale would compound it,
+  // and the model would grow without bound while being held.
+  const k = base * (c.scale || 1);
+  // The camera spans the window's width as 1 and its height as 1, so one
+  // unit across is more pixels than one unit down on any wide window. Scaling
+  // y by the aspect makes a metre the same number of pixels both ways; before
+  // this, every model was stretched sideways by the window's shape.
+  g.scale.set(k, k * aspect, k);
+}
+
+// A part being moved or resized with your hands (agent/board.py, parts mode):
+// shown live by moving that part's node; saved as a new version on release.
+function showPart(g, part) {
+  g.traverse(o => {
+    if (o.userData?.part === undefined) return;
+    const live = part && o.userData.part === part.index;
+    const f = live ? (part.scale || 1) : 1;
+    const centre = o.userData.centre || [0, 0, 0];
+    const off = live ? (part.offset || [0, 0, 0]) : [0, 0, 0];
+    // Scaled about the part's own centre, then moved: node space is model space.
+    o.scale.setScalar(f);
+    o.position.set(centre[0] * (1 - f) + off[0], centre[1] * (1 - f) + off[1], centre[2] * (1 - f) + off[2]);
+    o.traverse(m => { if (m.isMesh && m.material?.emissive) m.material.emissive.setRGB(live ? .18 : 0, live ? .22 : 0, live ? .3 : 0); });
+  });
+}
 
 function syncModels(cards) {
   currentModels = new Map(cards.map(c => [c.id, c.src]));
@@ -503,14 +569,8 @@ function syncModels(cards) {
         });
       continue;
     }
-    const g = entry.group;
-    g.position.set(c.x, -c.y, 0);      // card y runs down; this camera's y runs up
-    g.userData.spin.rotation.y = c.rot || 0;
-    // `base` is the fit-to-screen factor captured at load. Multiplying by it
-    // rather than reading g.scale.x means the user's scale is applied to the
-    // ORIGINAL size every frame — reading the current scale would compound it,
-    // and the model would grow without bound while being held.
-    g.scale.setScalar(entry.base * (c.scale || 1));
+    placeModel(entry.group, c, entry.base, innerWidth / Math.max(1, innerHeight));
+    showPart(entry.group, c.part);
   }
   for (const [id, entry] of models) {
     if (!seen.has(id)) { scene.remove(entry.group); dispose(entry.group); models.delete(id); }
@@ -541,6 +601,7 @@ addEventListener("keydown", ev => {
   const t = ev.target;
   if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
   if (ev.key === "v" || ev.key === "V") { setVoice(!voiceOn); return; }
+  if (ev.key === "p" || ev.key === "P") { toggleParts(); return; }
   if (ev.key === "Escape" && voiceOn) { setVoice(false); return; }
   if (ev.key !== "d" && ev.key !== "D") return;
   diagEl.hidden = !diagEl.hidden;
@@ -640,7 +701,10 @@ function connect() {
     selectedId = msg.selection?.id || null;
     pointedId = msg.pointed || null;
     handleBoardEvents(msg.events);
-    document.getElementById('selection-label').textContent = msg.selection ? `Selected: ${msg.selection.title} · whole object` : 'Pinch an object or tap its label to select it.';
+    const sel = msg.selection && (msg.cards || []).find(c => c.id === msg.selection.id);
+    document.getElementById('selection-label').textContent = !msg.selection ? 'Pinch an object or tap its label to select it.'
+      : sel?.parts_mode ? `Selected: ${msg.selection.title} · parts — pinch one to move it, P to finish`
+      : `Selected: ${msg.selection.title} · whole object${sel?.kind === 'model' ? ' — P to take it apart' : ''}`;
     renderCards(msg.cards || []);
     syncModels(msg.cards || []);
     renderCursors(msg.cursors || []);

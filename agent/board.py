@@ -157,6 +157,12 @@ MIN_FLICK_SPAN_SECONDS = 0.03
 TAP_SECONDS = 0.35
 TAP_MOVE = 0.03
 
+# A part resized with two hands: how far from its size it may go in one hold.
+PART_MIN_SCALE = 0.1
+PART_MAX_SCALE = 10.0
+# How close to the first hand a second pinch must be to join it and resize.
+PART_JOIN_REACH = 0.35
+
 # Where a card summoned by voice appears, if a hand was seen this recently:
 # at the hand. Older than this and the hand is probably down — the default
 # spot is better than a stale one.
@@ -347,6 +353,14 @@ class Board:
         # card id -> [picked-up-at, hand x, hand y, furthest the hand moved]
         # while one hand holds it: what decides, on release, whether it was a tap.
         self._tap_probe: dict[str, list] = {}
+        # Parts mode (agent/board_parts.py): the one model whose parts a pinch
+        # grabs instead of the whole model, and the parts being held — keyed
+        # by card id, one part per model at a time.
+        self._parts_mode: str | None = None
+        self._part_holds: dict[str, dict] = {}
+        self._recipes: dict[str, tuple] = {}
+        # The page's width / height: where a part is drawn depends on it.
+        self._aspect = 16 / 9
         # The last place a hand was seen, for summoning a card to it.
         self._hand_seen: tuple[float, float, float] | None = None
         self._last_release_at: float = 0.0
@@ -415,6 +429,15 @@ class Board:
                 if target is not None:
                     target.x, target.y, target.scale, target.rot = state
                 what = f"moved '{op.get('title', '')}'"
+            elif kind == "reshape":
+                # A part edit: the new version AND the placement that kept the
+                # rest of the model still, undone together — the file alone
+                # would bring the old version back in the wrong place.
+                target = next((c for c in self._cards if c.id == op["id"]), None)
+                state = op["after"] if forward else op["before"]
+                if target is not None:
+                    target.src, target.x, target.y, target.scale, target.rot = state
+                what = f"changed a part of '{op.get('title', '')}'"
             elif kind == "src":
                 target = next((c for c in self._cards if c.id == op["id"]), None)
                 if target is not None:
@@ -563,6 +586,8 @@ class Board:
             self._armed_since.clear()
             self._pre_grab.clear()
             self._tap_probe.clear()
+            self._part_holds.clear()
+            self._parts_mode = None
             self._hand_state.clear()
         self._forget(ids)
         if snaps:
@@ -604,7 +629,90 @@ class Board:
 
     def cards(self) -> list[dict]:
         with self._lock:
-            return [c.as_dict() for c in self._cards]
+            out = []
+            for c in self._cards:
+                d = c.as_dict()
+                if c.id == self._parts_mode:
+                    d["parts_mode"] = True
+                hold = self._part_holds.get(c.id)
+                if hold is not None:
+                    d["part"] = self._part_preview(c, hold)
+                out.append(d)
+            return out
+
+    # --- parts mode --------------------------------------------------------
+
+    def set_viewport(self, width: float, height: float) -> float:
+        """The board page's size, which decides where parts are drawn."""
+        if not (width > 0 and height > 0):
+            raise ValueError("width and height must be positive")
+        with self._lock:
+            self._aspect = min(5.0, max(0.2, float(width) / float(height)))
+            return self._aspect
+
+    def _recipe(self, card: "Card"):
+        """(title, parts) for a build card, cached per file (versions never change)."""
+        if card.src not in self._recipes:
+            from agent import board_parts
+            self._recipes[card.src] = board_parts.recipe_for_src(card.src)
+        return self._recipes[card.src]
+
+    def set_parts_mode(self, card_id: str | None) -> dict | None:
+        """Pinches on this model grab its parts; None turns parts mode off.
+        Only a build has parts: anything else says so."""
+        with self._lock:
+            if card_id is None:
+                was, self._parts_mode = self._parts_mode, None
+                card = next((c for c in self._cards if c.id == was), None)
+                self._part_holds.clear()
+            else:
+                card = next((c for c in self._cards if c.id == card_id), None)
+                if card is None:
+                    raise ValueError("That object is no longer on the board.")
+                if card.kind != "model" or self._recipe(card) is None:
+                    raise ValueError(f"'{card.title}' wasn't built from parts, so it can only be moved whole. "
+                                     "Things made with board_build can be taken apart.")
+                self._parts_mode = card_id
+                self._selected = card_id
+        if card is not None:
+            self.emit("parts_mode", id=card.id, title=card.title, on=card_id is not None)
+        return card.as_dict() if (card is not None and card_id is not None) else None
+
+    def _part_preview(self, card: "Card", hold: dict) -> dict:
+        from agent import board_parts
+        _title, parts = self._recipe(card)
+        off = board_parts.model_delta(card.as_dict(), parts, hold["off"][0], hold["off"][1], self._aspect)
+        return {"index": hold["index"], "name": hold["name"],
+                "offset": [round(float(v), 5) for v in off], "scale": round(hold["scale"], 4)}
+
+    def _grab_part(self, card: "Card", idx, hx: float, hy: float, now: float) -> bool:
+        """In parts mode: start holding the part under the pinch, or join a
+        one-handed part hold with a second hand. False: nothing to grab."""
+        hold = self._part_holds.get(card.id)
+        if hold is not None:
+            other = hold["last"].get(hold["hands"][0]) if hold["hands"] else None
+            # A second hand joins to resize — if it is reaching for this part,
+            # near the first hand, not for something across the board.
+            near = other is not None and math.hypot(hx - other[0], hy - other[1]) <= PART_JOIN_REACH
+            if len(hold["hands"]) == 1 and idx not in hold["hands"] and near:
+                hold["hands"].append(idx)
+                hold["last"][idx] = (hx, hy)
+                hold["paired"] = True
+                return True
+            return False
+        recipe = self._recipe(card)
+        if recipe is None:
+            return False
+        from agent import board_parts
+        index = board_parts.pick(card.as_dict(), recipe[1], hx, hy, self._aspect)
+        if index is None:
+            return False
+        self._part_holds[card.id] = {
+            "index": index, "name": recipe[1][index].get("name") or f"part {index + 1}",
+            "hands": [idx], "last": {idx: (hx, hy)}, "off": [0.0, 0.0], "scale": 1.0,
+            "t0": now, "max": 0.0, "paired": False}
+        self._selected = card.id
+        return True
 
     def count(self) -> int:
         with self._lock:
@@ -713,6 +821,8 @@ class Board:
             # is missing, so this is not implied by any hand being pinched.
             if any(c.held_by for c in self._cards):
                 return False, "a card is held"
+            if self._part_holds:
+                return False, "a part is held"
             if now - self._last_release_at < SWIPE_QUIET_AFTER_RELEASE:
                 return False, "a card was just released"
         return True, ""
@@ -930,6 +1040,22 @@ class Board:
                     self._trail.pop(c.id, None)
                 c.held_by = kept
 
+            # Part holds let go the same way: a hand that opened its pinch or
+            # left for longer than the grace. An open palm cancels the edit.
+            parts_done = []
+            for cid, hold in list(self._part_holds.items()):
+                cancelled = any(i in byid and byid[i][3] for i in hold["hands"])
+                kept = [] if cancelled else [
+                    i for i in hold["hands"] if (byid[i][2] if i in byid else not gone(i))]
+                for i in hold["hands"]:
+                    if i not in kept:
+                        hold["last"].pop(i, None)
+                hold["hands"] = kept
+                if not kept:
+                    del self._part_holds[cid]
+                    self._last_release_at = now
+                    parts_done.append((cid, hold, cancelled))
+
             # Per-hand state for hands that are gone for good.
             for hid in [k for k in self._hand_last_seen if gone(k)]:
                 self._hand_last_seen.pop(hid, None)
@@ -957,6 +1083,11 @@ class Board:
                         pointing.append(cand)
                     continue
                 self._point_candidate.pop(idx, None)
+                part_hold = next((h for h in self._part_holds.values() if idx in h["hands"]), None)
+                if part_hold is not None:
+                    self._hand_state[idx] = (HandState.TRANSFORMING if len(part_hold["hands"]) == 2
+                                             else HandState.GRABBED)
+                    continue
                 holding = next((c for c in self._cards if idx in c.held_by), None)
                 if holding is not None:
                     self._hand_state[idx] = (
@@ -974,8 +1105,22 @@ class Board:
                     self._hand_state[idx] = HandState.ARMED
                     continue
                 self._armed_since.pop(idx, None)
+                # Parts mode: the model being taken apart gets first say,
+                # wherever its parts are drawn — the nose of a big rocket can
+                # be far outside GRAB_RADIUS of the model's centre. A pinch on
+                # none of its parts falls through to an ordinary grab.
+                pm = next((c for c in self._cards if c.id == self._parts_mode), None)
+                if pm is not None and not pm.held_by and self._grab_part(pm, idx, hx, hy, now):
+                    hold = self._part_holds[pm.id]
+                    self._hand_state[idx] = (HandState.TRANSFORMING if len(hold["hands"]) == 2
+                                             else HandState.GRABBED)
+                    continue
                 target = self._nearest(hx, hy, idx)
                 if target is None:
+                    self._hand_state[idx] = HandState.IDLE
+                    continue
+                if target.id in self._part_holds:
+                    # One of its parts is in someone's hand: the model stays put.
                     self._hand_state[idx] = HandState.IDLE
                     continue
                 # A second hand may join something already held — that is how a
@@ -1001,6 +1146,29 @@ class Board:
                 # over a card has been there all along.
                 card_id, _since = max(pointing, key=lambda cand: cand[1])
                 self._pointed = (card_id, now)
+
+            # Held parts follow the hands, incrementally, so a hand joining or
+            # leaving never makes the part jump. One hand moves it; two move it
+            # by their midpoint and resize it by their spread.
+            for hold in self._part_holds.values():
+                seen = [(i, byid[i]) for i in hold["hands"] if i in byid]
+                if len(hold["hands"]) == 1 and seen:
+                    i, h = seen[0]
+                    lx, ly = hold["last"].get(i, (h[0], h[1]))
+                    hold["off"][0] += h[0] - lx
+                    hold["off"][1] += h[1] - ly
+                elif len(hold["hands"]) == 2 and len(seen) == 2:
+                    (i, a), (j, b) = seen
+                    la, lb = hold["last"].get(i, (a[0], a[1])), hold["last"].get(j, (b[0], b[1]))
+                    hold["off"][0] += (a[0] + b[0] - la[0] - lb[0]) / 2
+                    hold["off"][1] += (a[1] + b[1] - la[1] - lb[1]) / 2
+                    was = math.hypot(la[0] - lb[0], la[1] - lb[1])
+                    span = math.hypot(a[0] - b[0], a[1] - b[1])
+                    if was > 1e-6 and span > 1e-6:
+                        hold["scale"] = min(PART_MAX_SCALE, max(PART_MIN_SCALE, hold["scale"] * span / was))
+                for i, h in seen:
+                    hold["last"][i] = (h[0], h[1])
+                hold["max"] = max(hold["max"], math.hypot(*hold["off"]))
 
             for c in self._cards:
                 if len(c.held_by) == 1:
@@ -1032,6 +1200,9 @@ class Board:
                     if all(i in byid for i in c.held_by):
                         self._two_handed(c, byid)
 
+        for cid, hold, cancelled in parts_done:
+            self._finish_part(cid, hold, cancelled, now)
+
         # Outside the lock, and only for cards a hand just let go of — the
         # whole point of committing on release rather than per frame.
         for c, pre, thrown, tapped in released:
@@ -1057,6 +1228,48 @@ class Board:
             if pre is not None and tuple(pre) != after:
                 self._record({"kind": "transform", "id": c.id, "title": c.title,
                               "before": tuple(pre), "after": after})
+
+    def _finish_part(self, card_id: str, hold: dict, cancelled: bool, now: float) -> None:
+        """A part was let go of: a cancel drops the edit, a tap asks about the
+        part, anything else is saved as the build's next version."""
+        with self._lock:
+            card = next((c for c in self._cards if c.id == card_id), None)
+        if card is None or cancelled:
+            return
+        recipe = self._recipe(card)
+        if recipe is None:
+            return
+        title, parts = recipe
+        if (not hold["paired"] and now - hold["t0"] <= TAP_SECONDS and hold["max"] <= TAP_MOVE):
+            with self._lock:
+                self._pointed = (card.id, now)
+            self.emit("tapped", id=card.id, title=f"{hold['name']} of the {card.title}",
+                      object_kind="part", part=hold["index"])
+            return
+        if hold["max"] <= TAP_MOVE and abs(hold["scale"] - 1.0) < 0.02:
+            return                                   # held still and let go: nothing changed
+        from agent import board_parts, build3d
+        before = card.as_dict()
+        offset = board_parts.model_delta(before, parts, hold["off"][0], hold["off"][1], self._aspect)
+        new_parts = board_parts.edited(parts, hold["index"], offset, hold["scale"])
+        try:
+            built = build3d.build(title, new_parts)
+        except build3d.BuildError as e:
+            self.emit("part_failed", title=card.title, part=hold["name"], reason=str(e))
+            return
+        place = board_parts.compensate(before, parts, new_parts, self._aspect)
+        with self._lock:
+            old = (card.src, card.x, card.y, card.scale, card.rot)
+            card.src = built["src"]
+            card.x = min(1.0, max(0.0, place["x"]))
+            card.y = min(1.0, max(0.0, place["y"]))
+            card.scale = min(MAX_SCALE, max(MIN_SCALE, place["scale"]))
+            new = (card.src, card.x, card.y, card.scale, card.rot)
+        self._write(card)
+        self._record({"kind": "reshape", "id": card.id, "title": card.title,
+                      "before": old, "after": new})
+        self.emit("part_saved", id=card.id, title=card.title, part=hold["name"],
+                  version=built["version"])
 
     def _two_handed(self, card: Card, hands) -> None:
         """Scale and rotate from the span and angle between two hands."""

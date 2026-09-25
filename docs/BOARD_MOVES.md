@@ -13,6 +13,7 @@ happen.
 | **"Make this blue" / "make this bigger"** | Point (or select), then say it — in *Talk to Apex*, by voice, or from the resident | Apex acts on the card you pointed at |
 | **Throw away** | Grab, flick toward an edge, let go while moving | Gone. Say **"undo"** to bring it back home |
 | **Next / previous** | Open-hand swipe right / left | Steps the selection through your cards |
+| **Take it apart** | Select a model you built, press **P** (or say *"let me move its parts"*) | Its label turns gold: now a pinch grabs one **part** — the front one under your fingers. One hand moves it, two resize it, a tap asks about it. Let go and it's saved as the next version; the rest of the model stays exactly where it was. Open palm cancels. **P** again (or *"done with the parts"*) to finish |
 | **Tap to ask** | Quick pinch on an object and let go without moving it (under about a third of a second) | Celine tells you about it out loud — Voice comes on if it was off. It becomes "this", so the next thing you say is about it too. A tap never moves it and leaves nothing for undo |
 | **Talk to Celine** | Press **🎙 Voice** or **V** — or, after one click or key on the page, swipe up or pinch-and-hold in empty space | She listens hands-free in a small strip in the corner; the board stays free. She knows what you point at and hold |
 | **Hush her** | Open-hand swipe down, or just talk over her | She stops speaking and keeps listening |
@@ -52,6 +53,18 @@ turn it, flick to throw it away.
 - **Honest limits:** these are models built from simple shapes — a
   recognisable rocket, not a sculpted one. How good a build looks depends on
   the AI model describing it; nobody has rated that on your machine yet.
+
+**Taking a build apart:** see *Take it apart* in the table above. Only
+things built with words have parts. A model dropped into the props folder,
+or one exported from Blender, moves whole. Each saved edit is a new version,
+and **undo** goes back one edit, file and position together.
+
+**Also fixed while building parts:** models were stretched sideways by the
+window's shape. The 3D view spans the window's width as 1 and its height as
+1, so on a 16:9 screen a 1:3 rocket body was drawn about 1:1.8. The same
+check now also verifies true proportions on a wide window, and that Python's
+idea of where each part is drawn (used to pick the part under your fingers)
+matches what three.js draws.
 
 **Fixed while building this:** every 3D model on the board, including
 Blender ones, used to be drawn upside down and inside out. The board's camera

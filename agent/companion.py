@@ -20,6 +20,7 @@ DISCUSS_TOOLS = frozenset({
     # Each changes only the board and each is undoable. board_clear is left
     # out — one sentence misheard should not empty the board.
     "board_present", "board_model", "board_transform", "board_undo", "board_redo",
+    "board_parts",
 })
 
 
