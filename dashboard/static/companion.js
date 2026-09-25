@@ -89,9 +89,12 @@
   async function request(path, opts = {}) {
     const response = await fetch(path, {...opts, headers: {...headers(), ...opts.headers}});
     if (response.status === 401) {
-      if (pip) pip.close();
-      if (!$('login').open) $('login').showModal();
-      throw new Error('Enter your Apex dashboard token to continue.');
+      // Marked, not recognised by its wording: callers that must tell "sign
+      // in" from any other failure check `auth`, and a dialog that cannot
+      // open must not turn this into some other error.
+      const exc = new Error('Enter your Apex dashboard token to continue.'); exc.auth = true;
+      try { if (pip) pip.close(); if (!$('login').open) $('login').showModal(); } catch (_) {}
+      throw exc;
     }
     if (!response.ok) {
       let detail = `Request failed (${response.status}).`;
@@ -139,7 +142,7 @@
       // "Apex default voice", nothing speaks, and nothing said why — Celine
       // simply looked like she did not exist. A quiet note says what to start.
       // Not before login: a 401 is "sign in", not "start a server".
-      const signIn = /token/i.test(exc?.message || '');
+      const signIn = exc?.auth === true;
       $('voice-note').textContent = 'Voice server not reachable. For Celine, close Apex and start '
         + 'Start-Apex-Celine.cmd (or open the Voicebox app), then reload this page.';
       $('voice-note').hidden = signIn || $('voice').value !== 'voicebox';
