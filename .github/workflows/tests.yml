@@ -59,6 +59,8 @@ jobs:
           node scripts/check_voice_mode_ui.cjs
           node scripts/check_barge_in_ui.cjs
           node scripts/check_build3d_glb.mjs
+          node scripts/check_board_voice_ui.cjs
+          node scripts/check_companion_in_board_ui.cjs
           node scripts/check_relay_phone_ui.cjs
           node scripts/check_speech_queue.cjs
           node scripts/check_handsfree_ui.cjs

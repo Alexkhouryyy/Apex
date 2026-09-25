@@ -887,6 +887,14 @@ class HandTracker(threading.Thread):
         rows.sort(key=lambda row: row[0])
         return [c for _h, c, _d in rows], [d for _h, _c, d in rows]
 
+    def _board_voice(self, action: str) -> None:
+        try:
+            sent = board_voice_event(action)
+            if sent:
+                self.log.add("gesture", f"board voice: {sent}")
+        except Exception as e:
+            print(f"[HandTrack] board voice event failed: {e}")
+
     def _board_gesture(self, gesture: str, action: str) -> None:
         if not getattr(config, "BOARD_ENABLED", False):
             return
@@ -936,6 +944,11 @@ class HandTracker(threading.Thread):
                 self.recognizer.refund(gesture)
                 self.log.add("gesture", f"{gesture} -> {action}: ignored ({blocked})")
                 return
+        if action in ("stop", "listen", "wake"):
+            # The board's Voice (Celine in the partner panel) hears these too:
+            # stop -> she stops speaking; listen/wake -> she starts listening.
+            # The main voice loop's handler below still runs as before.
+            self._board_voice(action)
         if action and action.startswith("board:"):
             # Board gestures are handled HERE, not through on_gesture. That
             # hook is only ever set by app/resident.py, so in `main.py --text`
@@ -948,6 +961,19 @@ class HandTracker(threading.Thread):
                 self.on_gesture(gesture, action)
             except Exception as e:
                 print(f"[HandTrack] gesture handler error: {e}")
+
+
+def board_voice_event(action: str, board=None) -> str:
+    """Tell an open /board page about a voice gesture: "hush" for stop,
+    "listen" for listen or wake. Returns what was sent, for the log."""
+    if not getattr(config, "BOARD_ENABLED", False):
+        return ""
+    if board is None:
+        from agent.board import get_board
+        board = get_board()
+    kind = "hush" if action == "stop" else "listen"
+    board.emit(kind)
+    return kind
 
 
 # What each board action does. Named rather than inlined so the allowlist in

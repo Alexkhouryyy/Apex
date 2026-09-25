@@ -134,9 +134,14 @@ assert.equal(whyNot(hand({pinched: true, ratio: .4}), grabOf({pinched: true, sta
 {
   const dom2 = new JSDOM(
     '<div id="toast"></div><aside id="partner-panel" hidden><iframe data-src="/companion"></iframe></aside>' +
-    '<button id="partner-toggle" aria-expanded="false"></button>', {runScripts: 'outside-only'});
+    '<button id="partner-toggle" aria-expanded="false"></button><button id="voice-toggle" aria-pressed="false"></button>',
+    {runScripts: 'outside-only'});
   const w2 = dom2.window;
-  w2.eval(`let toastTimer = null;\n${grab('toast')}\n${grab('openPartner')}\n${grab('handleBoardEvents')}\n` +
+  // Before any click or key on the page, the browser would block the mic
+  // and speaker: summon must open the panel and say what to do.
+  Object.defineProperty(w2.navigator, 'userActivation', {value: {hasBeenActive: false}});
+  w2.eval(`let toastTimer = null; let voiceOn = false, partnerReady = false, partnerQueue = [];\n${grab('toast')}\n${grab('openPartner')}\n` +
+          `${grab('tellPartner')}\n${grab('setVoice')}\n${grab('voiceFromGesture')}\n${grab('handleBoardEvents')}\n` +
           `globalThis._h = handleBoardEvents;`);
   const doc = w2.document;
 
@@ -149,10 +154,11 @@ assert.equal(whyNot(hand({pinched: true, ratio: .4}), grabOf({pinched: true, sta
   assert.ok(doc.getElementById('partner-panel').hidden);
   w2._h([{seq: 2, type: 'summon'}]);
   assert.ok(!doc.getElementById('partner-panel').hidden, 'swipe-up did not summon Apex');
-  // Summon opens the panel; nothing starts the microphone, so the page must
-  // not say it is listening.
+  // Summon opens the panel; with no click or key yet nothing CAN start the
+  // microphone, so the page must not say it is listening — it says what to do.
   assert.doesNotMatch(doc.getElementById('toast').textContent, /listening/i);
-  assert.match(doc.getElementById('toast').textContent, /tap the mic/);
+  assert.match(doc.getElementById('toast').textContent, /press V once/);
+  assert.equal(doc.getElementById('voice-toggle').getAttribute('aria-pressed'), 'false');
   assert.equal(doc.getElementById('partner-toggle').getAttribute('aria-expanded'), 'true');
   w2._h([{seq: 3, type: 'summon'}]);
   assert.ok(!doc.getElementById('partner-panel').hidden,

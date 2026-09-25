@@ -92,6 +92,24 @@
     // error, the page closing — also ends the talk-only view.
     leaveVoiceMode();
   }
+  // --- Inside the board (/board's partner panel) ----------------------------
+  // The board turns voice on and off, and hushes her on a swipe down, by
+  // message; this page says when it is ready and when voice changes. Only
+  // its own parent, on the same origin, is listened to.
+  const embedded = window.parent !== window;
+  function toParent(msg) { if (embedded) window.parent.postMessage(msg, location.origin); }
+  window.addEventListener('message', event => {
+    if (event.origin !== location.origin || event.source !== window.parent) return;
+    const m = event.data || {};
+    if (m.apex === 'voice') {
+      if (m.on) enterVoiceMode().catch(exc => { leaveVoiceMode(); error(exc.message); });
+      else if (voiceMode) stop();
+    } else if (m.apex === 'hush') {
+      // Stop talking, keep listening: a turn still being written is cut too.
+      if (active) { active.stopped = true; request(`/api/companion/cancel/${active.id}`, {method: 'POST'}).catch(() => {}); }
+      stopSpeech();
+    }
+  });
   // --- Voice mode: talk only, with Celine -----------------------------------
   // The same companion with the chat hidden: a big orb, the last exchange as
   // captions, hands-free listening and Celine's voice. Nothing about the turn
@@ -102,6 +120,7 @@
     error();
     voiceMode = {voice: $('voice').value, profile: $('voicebox-profile').value, spoken: $('spoken').checked};
     root.dataset.view = 'voice'; $('voice-mode').setAttribute('aria-pressed', 'true'); $('voice-exit').hidden = false;
+    toParent({apex: 'voice-state', on: true});
     $('voice').value = 'voicebox';
     await loadVoiceboxProfiles();
     probeStreaming();
@@ -120,6 +139,7 @@
     if (!voiceMode) return;
     const was = voiceMode; voiceMode = null;
     delete root.dataset.view; $('voice-mode').setAttribute('aria-pressed', 'false'); $('voice-exit').hidden = true;
+    toParent({apex: 'voice-state', on: false});
     $('voice').value = was.voice; $('voicebox-profile').value = was.profile; $('spoken').checked = was.spoken;
     loadVoiceboxProfiles(); probeStreaming();
   }
@@ -837,6 +857,7 @@
     loadVoiceboxProfiles();
     probeStreaming();
     lookLoop();
+    toParent({apex: 'ready'});
     if (drive) {
       await refreshJobs();
       if (pendingRemote) send(pendingRemote.message || 'Reconnected task', false, pendingRemote);
@@ -867,6 +888,7 @@
     root.querySelector('footer').firstChild.textContent = 'Tasks run on your Apex host. ';
   }
   if (workspace) {
+    root.dataset.workspace = workspace;
     root.querySelector('h1').textContent = 'Let’s shape it together.';
     $('screen-status').textContent = 'Your selected board object is attached to each message.';
   }

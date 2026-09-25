@@ -110,6 +110,9 @@
   .card.model-label h3 {margin:0}
   #partner-panel {position:fixed;right:12px;top:88px;bottom:36px;width:min(440px,45vw);z-index:6;background:#08111c;border:1px solid #45617c;border-radius:14px;overflow:hidden}
   #partner-panel iframe {width:100%;height:100%;border:0}
+  /* Voice on: a strip in the corner, so the board stays free for your hands. */
+  #partner-panel.voice {top:auto;height:180px;width:min(380px,70vw)}
+  #voice-toggle[aria-pressed=true] {background:#174f48;border-color:#5adac1;color:#bafbed}
   #diag {position:fixed;right:12px;bottom:56px;z-index:40;width:310px;
          background:rgba(6,14,18,.93);border:1px solid #17313a;border-radius:10px;
          color:#cfe9e2;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -150,8 +153,8 @@
   <div class="diag-head">what the tracker sees <button id="diag-close" aria-label="Hide">×</button></div>
   <div id="diag-body">waiting for a frame…</div>
 </div>
-<nav id="board-bar"><a href="/">APEX</a><span id="selection-label" role="status">Pinch an object or tap its label to select it.</span><button id="clear-selection">Deselect</button><button id="partner-toggle" aria-expanded="false">Talk to Apex</button><select id="exports" aria-label="Download a manufacturing export"><option value="">Manufacturing exports…</option></select><button id="refresh-exports">Refresh exports</button></nav>
-<aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; display-capture"></iframe></aside>
+<nav id="board-bar"><a href="/">APEX</a><span id="selection-label" role="status">Pinch an object or tap its label to select it.</span><button id="clear-selection">Deselect</button><button id="voice-toggle" aria-pressed="false" title="Talk with Celine while you use your hands (V). Swipe down stops her; swipe up or pinch-and-hold starts listening.">🎙 Voice</button><button id="partner-toggle" aria-expanded="false">Talk to Apex</button><select id="exports" aria-label="Download a manufacturing export"><option value="">Manufacturing exports…</option></select><button id="refresh-exports">Refresh exports</button></nav>
+<aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; autoplay; display-capture"></iframe></aside>
 
 <script type="module">
 "use strict";
@@ -209,6 +212,9 @@ async function selectObject(id) {
 }
 document.getElementById('clear-selection').onclick = () => selectObject(null);
 document.getElementById('partner-toggle').onclick = event => {
+  // With voice on, this means "show me the whole conversation": voice off,
+  // the full panel stays.
+  if (voiceOn) { setVoice(false); return; }
   const panel = document.getElementById('partner-panel'); panel.hidden = !panel.hidden;
   event.target.setAttribute('aria-expanded', String(!panel.hidden));
   const frame = panel.querySelector('iframe'); if (!frame.src) frame.src = frame.dataset.src;
@@ -254,12 +260,60 @@ function openPartner() {
   if (!frame.src) frame.src = frame.dataset.src;
   document.getElementById('partner-toggle').setAttribute('aria-expanded', 'true');
 }
+// --- Voice on the board ---------------------------------------------------
+// The partner panel IS the companion (/companion?workspace=board), which
+// already sends what you point at and hold with every message. Voice turns
+// on its talk-only mode — hands-free, Celine, interrupt by talking — shrunk
+// to a strip, by message rather than by reaching into its page.
+let voiceOn = false, partnerReady = false, partnerQueue = [];
+function tellPartner(msg) {
+  const frame = document.querySelector('#partner-panel iframe');
+  if (!partnerReady || !frame.contentWindow) { partnerQueue.push(msg); return; }
+  frame.contentWindow.postMessage(msg, location.origin);
+}
+function setVoice(on) {
+  const panel = document.getElementById('partner-panel');
+  if (on) openPartner();
+  panel.classList.toggle('voice', on);
+  if (on !== voiceOn) tellPartner({apex: "voice", on});
+  voiceOn = on;
+  document.getElementById('voice-toggle').setAttribute('aria-pressed', String(on));
+}
+function voiceFromGesture() {
+  if (voiceOn) return;
+  // A browser lets a page use the speaker only after you have clicked or
+  // pressed a key on it once. A gesture seen by the camera is neither.
+  if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+    openPartner();
+    toast("Click the board or press V once, so the browser lets Celine listen and speak", 5000);
+    return;
+  }
+  setVoice(true); toast("Listening — talk to Celine", 1800);
+}
+document.getElementById('voice-toggle').onclick = () => setVoice(!voiceOn);
+addEventListener('message', ev => {
+  const frame = document.querySelector('#partner-panel iframe');
+  if (ev.origin !== location.origin || !frame || ev.source !== frame.contentWindow) return;
+  const m = ev.data || {};
+  if (m.apex === "ready") {
+    partnerReady = true;
+    const queued = partnerQueue; partnerQueue = [];
+    for (const q of queued) tellPartner(q);
+  } else if (m.apex === "voice-state") {
+    // She can leave on her own — Esc inside, no microphone, no voice server.
+    voiceOn = Boolean(m.on);
+    document.getElementById('partner-panel').classList.toggle('voice', voiceOn);
+    document.getElementById('voice-toggle').setAttribute('aria-pressed', String(voiceOn));
+  }
+});
+
 function handleBoardEvents(events) {
   for (const ev of events || []) {
     if (ev.type === "thrown") toast(`Threw away ${ev.title} — say "undo" to bring it back`);
-    // Opens the panel; it does not start the microphone. Saying "listening"
-    // here promised something nothing did.
-    else if (ev.type === "summon") { openPartner(); toast("Apex is open — tap the mic to talk"); }
+    // Swipe up, pinch-and-hold or a wave: start talking. Swipe down: she
+    // stops speaking and goes on listening.
+    else if (ev.type === "summon" || ev.type === "listen") voiceFromGesture();
+    else if (ev.type === "hush") { if (voiceOn) { tellPartner({apex: "hush"}); toast("Stopped — still listening", 1600); } }
     else if (ev.type === "selected") toast(`Selected ${ev.title}`, 1600);
   }
 }
@@ -468,9 +522,11 @@ const diagEl = document.getElementById("diag");
 if (new URLSearchParams(location.search).get("diag") === "1") diagEl.hidden = false;
 document.getElementById("diag-close").onclick = () => { diagEl.hidden = true; };
 addEventListener("keydown", ev => {
-  if (ev.key !== "d" && ev.key !== "D") return;
   const t = ev.target;
   if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (ev.key === "v" || ev.key === "V") { setVoice(!voiceOn); return; }
+  if (ev.key === "Escape" && voiceOn) { setVoice(false); return; }
+  if (ev.key !== "d" && ev.key !== "D") return;
   diagEl.hidden = !diagEl.hidden;
 });
 

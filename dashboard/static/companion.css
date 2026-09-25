@@ -12,3 +12,11 @@
 #companion[data-view=voice] .message.user{background:none;padding:0;color:#91a7bb}
 #companion[data-view=voice] .message .text{font-size:17px}
 #companion[data-view=voice] .message.user .text{font-size:13px}
+/* Voice mode inside the board: a strip, so the board stays free for your hands. */
+#companion[data-workspace=board][data-view=voice]{padding:10px 14px;gap:6px;min-height:0;height:100dvh}
+#companion[data-workspace=board][data-view=voice]>header{display:none}
+#companion[data-workspace=board][data-view=voice] .presence{flex-direction:row;text-align:left;padding:0;gap:14px}
+#companion[data-workspace=board][data-view=voice] .orb{width:54px;height:54px}
+#companion[data-workspace=board][data-view=voice] #status{font-size:13px;margin:0 0 6px}
+#companion[data-workspace=board][data-view=voice] #messages{text-align:left;padding:0;gap:6px;overflow:auto}
+#companion[data-workspace=board][data-view=voice] .message .text{font-size:13px}

@@ -13,8 +13,24 @@ happen.
 | **"Make this blue" / "make this bigger"** | Point (or select), then say it — in *Talk to Apex*, by voice, or from the resident | Apex acts on the card you pointed at |
 | **Throw away** | Grab, flick toward an edge, let go while moving | Gone. Say **"undo"** to bring it back home |
 | **Next / previous** | Open-hand swipe right / left | Steps the selection through your cards |
-| **Summon Apex** | Open-hand swipe up | Opens the Apex panel. It does **not** start the mic — tap it to talk |
+| **Talk to Celine** | Press **🎙 Voice** or **V** — or, after one click or key on the page, swipe up or pinch-and-hold in empty space | She listens hands-free in a small strip in the corner; the board stays free. She knows what you point at and hold |
+| **Hush her** | Open-hand swipe down, or just talk over her | She stops speaking and keeps listening |
+| **Stop talking** | **V** or **Esc** again (or **Talk to Apex** for the whole conversation) | Voice off |
 | **Show me …** | "Show me my calendar" with a hand up | The card appears **at your hand** |
+
+## Talk while your hands are busy
+
+**🎙 Voice** on the board bar (or **V**) turns the partner panel into Celine,
+hands-free, shrunk to a strip in the corner. Every message carries what you
+are pointing at and what is selected, so *"make this bigger"*, *"turn it
+round"*, *"put it next to the rocket"* and *"undo that"* act on the board.
+Celine can build, show, move, resize, turn and undo on the board, but not
+clear it (one misheard sentence shouldn't empty it).
+
+- The browser only lets a page use the microphone and speaker after you have
+  **clicked or pressed a key on it once**. A gesture the camera sees doesn't
+  count. Before that, a swipe up shows a note asking for one click or V.
+- Headphones, as for Voice mode: see `docs/CELINE.md`.
 
 ## Build with words, shape with hands
 

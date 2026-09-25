@@ -170,6 +170,51 @@ class TestTheBoardVetoes:
         assert t.recognizer._emit(["wave"], 100.2) == ["wave"]
 
 
+class TestTheBoardsVoiceHearsGestures:
+    """/board's Voice (Celine in the partner panel) is driven by the same
+    gestures as the main voice loop: swipe down hushes her, pinch-and-hold
+    starts her. Both still reach the main loop's handler as before."""
+
+    def _events(self, b):
+        return [e["type"] for e in b.events_since(0)]
+
+    def test_swipe_down_hushes_the_board_and_still_stops_the_main_loop(self, tracker_on_board):
+        t, b, calls = tracker_on_board
+        t._dispatch("swipe_down")
+        assert "hush" in self._events(b)
+        assert calls == [("swipe_down", "stop")]
+
+    def test_pinch_hold_starts_listening_on_the_board(self, tracker_on_board):
+        t, b, calls = tracker_on_board
+        t._dispatch("pinch_hold")
+        assert "listen" in self._events(b)
+        assert calls == [("pinch_hold", "listen")]
+
+    def test_a_vetoed_gesture_tells_the_board_nothing(self, tracker_on_board):
+        t, b, calls = tracker_on_board
+        c = b.add("card", "Held")
+        c.x, c.y = 0.5, 0.5
+        b.apply_hands([(0.5, 0.5, True, False)], now=100.0)
+        b.apply_hands([(0.5, 0.5, True, False)], now=100.0 + ARM_DWELL_SECONDS + 0.01)
+        t._dispatch("pinch_hold")                    # holding a card still
+        assert "listen" not in self._events(b)
+
+    def test_board_off_sends_nothing(self, tracker_on_board, monkeypatch):
+        t, b, calls = tracker_on_board
+        monkeypatch.setattr(config, "BOARD_ENABLED", False, raising=False)
+        t._dispatch("swipe_down")
+        assert "hush" not in self._events(b)
+
+
+class TestCelineCanWorkTheBoardByVoice:
+    def test_reversible_board_tools_are_allowed_in_discuss(self):
+        from agent import companion
+        for tool in ("board_present", "board_model", "board_transform", "board_undo", "board_redo", "board_build"):
+            assert tool in companion.DISCUSS_TOOLS
+        # One misheard sentence must not empty the board.
+        assert "board_clear" not in companion.DISCUSS_TOOLS
+
+
 class TestStopMeansTheReply:
 
     class _Streamer:
