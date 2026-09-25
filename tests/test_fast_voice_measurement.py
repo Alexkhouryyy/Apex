@@ -48,3 +48,14 @@ def test_generation_error_closes_player():
 def test_empty_generation_is_error():
     with pytest.raises(RuntimeError, match='no audio'):
         module.measure(iter([]))
+
+
+def test_transformers_is_pinned_to_a_version_that_loads_celine():
+    """transformers 5.17.0 crashes qwen-tts-hf 0.1.1.post1 on load
+    ("'MimiConfig' object has no attribute 'rope_theta'"), found on the
+    user's laptop and reproduced here on 5.17.0, not on 5.16.1. The pin must
+    stay, and the setup marker must be newer than the install that got 5.17."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "scripts" / "test_fast_qwen.py").read_text()
+    assert "transformers==5.16.1" in src
+    assert "apex-fast-setup-v2.json" in src and "apex-fast-setup-v1.json" not in src

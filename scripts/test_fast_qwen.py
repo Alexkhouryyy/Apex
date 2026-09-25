@@ -19,18 +19,28 @@ def setup():
                 raise RuntimeError('Close Voicebox and the Apex/Qwen launcher first to free GPU memory.')
     if not python.exists():
         subprocess.run([sys.executable, '-m', 'venv', str(env)], check=True)
-    marker = env / 'apex-fast-setup-v1.json'
+    # v2: pins transformers==5.16.1. Bumped so an existing v1 install (which
+    # got 5.17.0) runs the pip step again and is corrected; everything is in
+    # pip's cache by then, so only transformers changes.
+    marker = env / 'apex-fast-setup-v2.json'
     if not marker.exists():
         print('Installing a separate GPU environment. This needs several GB of disk space.', flush=True)
         pip = [str(python), '-m', 'pip', '--isolated', 'install', '--timeout', '120', '--retries', '5']
         subprocess.run(pip + ['torch==2.9.1', 'torchaudio==2.9.1', '--index-url',
                              'https://download.pytorch.org/whl/cu128'], check=True)
         constraints = env / 'apex-constraints.txt'
-        constraints.write_text('torch==2.9.1\ntorchaudio==2.9.1\n', encoding='utf-8')
+        # transformers 5.17.0 breaks qwen-tts-hf 0.1.1.post1: its weight
+        # initialiser now looks up the shared "default" RoPE function before
+        # the module's own, qwen-tts-hf replaces that shared function with one
+        # that reads config.rope_theta, and Mimi's config has no rope_theta —
+        # "'MimiConfig' object has no attribute 'rope_theta'" on load. 5.16.1
+        # uses Mimi's own function. Reproduced on both versions before pinning.
+        constraints.write_text('torch==2.9.1\ntorchaudio==2.9.1\ntransformers==5.16.1\n',
+                               encoding='utf-8')
         subprocess.run(pip + ['faster-qwen3-tts==0.4.0', 'sounddevice', 'soundfile',
                              '-c', str(constraints), '--index-url', 'https://pypi.org/simple'], check=True)
         subprocess.run([str(python), '-m', 'pip', 'check'], check=True)
-        marker.write_text('{"setup": 1}', encoding='utf-8')
+        marker.write_text('{"setup": 2}', encoding='utf-8')
     subprocess.run([str(python), str(Path(__file__).resolve()), '--run'], check=True)
 
 
