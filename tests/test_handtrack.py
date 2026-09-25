@@ -338,6 +338,27 @@ class TestLatestJpeg:
         out = t.latest_jpeg()
         assert out is not None and out[:2] == b"\xff\xd8", "not a real JPEG"
 
+    @pytest.mark.parametrize("mirror", [True, False])
+    def test_the_picture_is_mirrored_exactly_when_the_hands_are(self, monkeypatch, mirror):
+        # A hand at the RIGHT of the raw camera frame is on the user's LEFT.
+        # Mirrored hands put its ring on the left of the board, so the picture
+        # behind it must show it on the left too, or everything feels reversed.
+        import cv2
+        import numpy as np
+        monkeypatch.setattr(config, "HANDTRACK_MIRROR", mirror, raising=False)
+        t = self._tracker()
+        frame = np.zeros((40, 80, 3), dtype=np.uint8)
+        frame[:, 60:] = 255                          # bright on the raw frame's right
+        t._latest_frame, t._latest_ts = frame, __import__("time").time()
+        img = cv2.imdecode(np.frombuffer(t.latest_jpeg(), np.uint8), cv2.IMREAD_GRAYSCALE)
+        left, right = img[:, :20].mean(), img[:, 60:].mean()
+        assert (left > right) == mirror
+        # The ring agrees: a raw x of 0.9 lands at 0.1 when mirrored.
+        lms = [type("P", (), {"x": 0.9, "y": 0.5, "z": 0.0})() for _ in range(21)]
+        cur = handtrack.landmarks_to_cursor(lms, mirror=mirror)
+        assert (cur[0] < 0.5) == mirror
+        assert t.latest_frame()[:, 60:].mean() == 255, "the camera tool keeps the raw frame"
+
     def test_no_frame_yet_returns_none_quietly(self):
         """Nothing has been captured — not a failure, just not there yet."""
         t = self._tracker()

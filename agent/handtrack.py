@@ -612,6 +612,13 @@ class HandTracker(threading.Thread):
             h, w = frame.shape[:2]
             if w > max_width:
                 frame = cv2.resize(frame, (max_width, int(h * max_width / w)))
+            # The hands are mirrored into selfie space (HANDTRACK_MIRROR), so
+            # the picture behind them must be too. It went out raw: move your
+            # hand left and the ring went left while your image went right —
+            # "everything is in reverse". Only the picture sent to the board
+            # is flipped; latest_frame() (the camera tool) stays as captured.
+            if getattr(config, "HANDTRACK_MIRROR", True):
+                frame = cv2.flip(frame, 1)
             ok, buf = cv2.imencode(".jpg", frame,
                                    [int(cv2.IMWRITE_JPEG_QUALITY), quality])
             if not ok:
