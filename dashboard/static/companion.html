@@ -6,8 +6,8 @@
   <link rel="icon" href="/static/icons/favicon-64.png">
   <link rel="stylesheet" href="/static/companion.css">
   <script src="/static/handsfree.js" defer></script>
-  <script src="/static/speech_queue.js?v=live-speech-1" defer></script>
-  <script src="/static/companion.js?v=live-speech-1" defer></script>
+  <script src="/static/speech_queue.js?v=first-phrase-1" defer></script>
+  <script src="/static/companion.js?v=first-phrase-1" defer></script>
 </head>
 <body>
 <main id="companion">
@@ -21,6 +21,7 @@
     <button id="review" disabled>Look at this</button>
     <label class="toggle"><input id="spoken" type="checkbox" checked> Speak replies</label>
     <label class="toggle" title="Start speaking at the first finished sentence instead of after the whole reply"><input id="stream-speech" type="checkbox" checked> Speak as it writes</label>
+    <label class="toggle" title="With Speak as it writes: begin a long first sentence at its first pause (a comma), so the first sound comes sooner. Turn off if the break sounds wrong in your voice."><input id="first-phrase" type="checkbox" checked> Start on the first phrase</label>
   </div>
   <div class="context"><span id="screen-status">Screen off · nothing attached</span><button id="new">New chat</button></div>
   <details id="preview-panel" hidden><summary>Shared screen preview</summary><video id="preview" autoplay muted playsinline></video><p>One snapshot is sent with each message. Stop sharing to stop new snapshots.</p></details>

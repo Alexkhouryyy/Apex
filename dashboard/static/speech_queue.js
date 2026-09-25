@@ -2,6 +2,19 @@
    `run` speaks a finished reply; `live` speaks one as it streams in. */
 (function (root) {
   'use strict';
+  // A full stop after one of these, or after a single capital (an initial,
+  // "J. Smith"), does not end a sentence: "with Dr. Lee" was read as "with
+  // Dr." … "Lee", a clip boundary in the middle of a name.
+  const ABBREV = new Set(['mr', 'mrs', 'ms', 'dr', 'prof', 'st', 'jr', 'sr', 'vs', 'etc', 'eg', 'ie',
+    'no', 'approx', 'dept', 'inc', 'ltd', 'co', 'mt', 'fig', 'jan', 'feb', 'mar', 'apr', 'jun',
+    'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec']);
+  function notAnEnd(text, index, mark) {
+    if (mark[0] !== '.') return false;                 // ! and ? always end one
+    const word = /([A-Za-z][A-Za-z.]*)$/.exec(text.slice(0, index));
+    if (!word) return false;
+    const w = word[1].replace(/\./g, '');
+    return /^[A-Z]$/.test(word[1]) || ABBREV.has(w.toLowerCase());
+  }
   function chunks(text, limit = 180) {
     const clean = String(text).replace(/```[\s\S]*?```/g, ' Code is shown on screen. ')
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*#`]/g, '').replace(/\s+/g, ' ').trim();
@@ -14,7 +27,7 @@
     while ((m = re.exec(clean))) {
       const stop = m.index + m[0].length;
       const piece = clean.slice(from, stop).trim();
-      if (/^(\d+|[A-Za-z])[.)]?$/.test(piece)) continue;
+      if (/^(\d+|[A-Za-z])[.)]?$/.test(piece) || notAnEnd(clean, m.index, m[0])) continue;
       if (piece) sentences.push(piece);
       from = stop;
     }
@@ -74,15 +87,42 @@
       const stop = m.index + m[0].length;
       const piece = masked.slice(from, stop).trim();
       if (!piece || /^(\d+|[A-Za-z])[.)]?$/.test(piece)) continue;
+      if (m[0][0] !== '\n' && notAnEnd(masked, m.index, m[0])) continue;
       end = stop; from = stop;
     }
     if (end < 0) return {ready: [], rest: buffer};
     return {ready: chunks(safe.slice(0, end)), rest: safe.slice(end) + held};
   }
 
-  function live(generate, play) {
+  // The first phrase of a reply, if it is worth starting on before the first
+  // sentence ends: a clause of at least MIN_CLAUSE characters ending at , ; :
+  // or a dash followed by a space — and only when the sentence it opens is
+  // long (over LONG_SENTENCE, or not finished yet), because splitting a short
+  // sentence buys nothing and costs a break in the voice.
+  const MIN_CLAUSE = 20, LONG_SENTENCE = 60;
+  function firstClause(buffer) {
+    let safe = buffer;
+    const fence = buffer.indexOf('```');
+    if (fence >= 0) safe = buffer.slice(0, fence);   // nothing is split near code
+    const ends = /[.!?]+["”’')]?(?=\s)|\n/g;
+    let sentence = null, e;
+    while ((e = ends.exec(safe))) { if (e[0][0] === '\n' || !notAnEnd(safe, e.index, e[0])) { sentence = e; break; } }
+    if (sentence && sentence.index + sentence[0].length <= LONG_SENTENCE) return null;
+    const limit = sentence ? sentence.index : safe.length;
+    const re = /(?:[,;:]|\s[—–-])(?=\s)/g;
+    let m;
+    while ((m = re.exec(safe)) && m.index < limit) {
+      const stop = m.index + m[0].length;
+      if (safe.slice(0, stop).trim().length < MIN_CLAUSE) continue;
+      const part = chunks(safe.slice(0, stop));
+      return part.length ? {ready: part, rest: buffer.slice(stop)} : null;
+    }
+    return null;
+  }
+
+  function live(generate, play, {firstPhrase = false} = {}) {
     const parts = [];
-    let buffer = '', ended = false, cancelled = false, waiters = [];
+    let buffer = '', ended = false, cancelled = false, waiters = [], started = false;
     const wake = () => { const w = waiters; waiters = []; w.forEach(f => f()); };
     const until = cond => new Promise(r => {
       const check = () => (cond() ? r() : waiters.push(check)); check(); });
@@ -127,8 +167,14 @@
       push(text) {
         if (ended || cancelled) return;
         buffer += text;
+        // Only the very first section is ever a phrase: that is the one the
+        // listener is waiting on. After it, whole sentences sound better.
+        if (firstPhrase && !started) {
+          const clause = firstClause(buffer);
+          if (clause) { buffer = clause.rest; parts.push(...clause.ready); started = true; wake(); }
+        }
         const got = take(buffer); buffer = got.rest;
-        if (got.ready.length) { parts.push(...got.ready); wake(); }
+        if (got.ready.length) { parts.push(...got.ready); started = true; wake(); }
       },
       // `tail` is text the stream never carried (an error reply, a fallback):
       // it has to be spoken too, or that turn is silent.
@@ -143,7 +189,7 @@
     };
   }
 
-  const api = {chunks, run, take, live};
+  const api = {chunks, run, take, live, firstClause};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ApexSpeechQueue = api;
 })(globalThis);

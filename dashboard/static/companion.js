@@ -138,6 +138,8 @@
   $('voicebox-profile').addEventListener('change', () => localStorage.setItem('apex.voicebox.profile', $('voicebox-profile').value));
   $('stream-speech').checked = localStorage.getItem('apex.speech.stream') !== '0';
   $('stream-speech').addEventListener('change', () => localStorage.setItem('apex.speech.stream', $('stream-speech').checked ? '1' : '0'));
+  $('first-phrase').checked = localStorage.getItem('apex.speech.firstPhrase') !== '0';
+  $('first-phrase').addEventListener('change', () => localStorage.setItem('apex.speech.firstPhrase', $('first-phrase').checked ? '1' : '0'));
   $('voice').addEventListener('change', loadVoiceboxProfiles);
   // Fired here for the tokenless-localhost case, and again from boot() after a
   // token is accepted. Without the second call the very first load of a
@@ -199,7 +201,8 @@
     hands?.pause(); speechBusy = true; speechDraining = true; controls();
     const epoch = speechEpoch;
     const {generate, play} = voiceFns(epoch);
-    live = {epoch, q: window.ApexSpeechQueue.live(generate, play)};
+    live = {epoch, q: window.ApexSpeechQueue.live(generate, play,
+      {firstPhrase: $('first-phrase').checked})};
     return live;
   }
   async function finishLiveSpeech(handle) {

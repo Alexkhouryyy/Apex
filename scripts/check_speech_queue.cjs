@@ -7,6 +7,9 @@ const tick = () => new Promise(r=>setImmediate(r));
   assert.deepEqual(chunks('It costs 3.5 dollars. Fine.'), ['It costs 3.5 dollars.', 'Fine.'],
     'a decimal point is not the end of a sentence');
   assert.deepEqual(chunks('1. Buy milk. 2. Call Sam.'), ['1. Buy milk.', '2. Call Sam.']);
+  assert.deepEqual(chunks('Ask Dr. Lee and J. Smith, e.g. on Tuesday. Done.'),
+    ['Ask Dr. Lee and J. Smith, e.g. on Tuesday.', 'Done.'], 'titles and initials do not end a sentence');
+  assert.deepEqual(chunks('Really? Yes! Fine.'), ['Really?', 'Yes!', 'Fine.']);
   assert.ok(chunks('word '.repeat(200)).every(x=>x.length<=180));
   assert.ok(!chunks('Here is code. ```secret()``` Done.').join(' ').includes('secret'));
   const first = defer(), second = defer(), playback = defer();
@@ -30,6 +33,7 @@ const tick = () => new Promise(r=>setImmediate(r));
   assert.deepEqual(take('It costs 3.'), {ready: [], rest: 'It costs 3.'},
     'a full stop with nothing after it may be "3.5" still arriving');
   assert.deepEqual(take('It costs 3.5 dollars. Next').ready, ['It costs 3.5 dollars.']);
+  assert.deepEqual(take('See Dr. Lee'), {ready: [], rest: 'See Dr. Lee'}, 'streaming must not split a title');
   assert.deepEqual(take('1. Buy milk\n2. Call').ready, ['1. Buy milk'],
     'a bare list marker is not a sentence; a line break ends a list item');
   const fence = take('Run this. ```x = 1. y = 2. ');
@@ -82,7 +86,44 @@ const tick = () => new Promise(r=>setImmediate(r));
   await assert.rejects(async () => { const q = live(async () => 1, async () => { throw Error('autoplay'); });
     q.push('Hi. '); q.end(); await q.done; }, /autoplay/);
 
+  // --- the first phrase: start the voice before the first sentence ends ----
+  const {firstClause} = require('../dashboard/static/speech_queue.js');
+  const opening = 'Your dentist appointment is on Tuesday, at three in the afternoon with Dr. Lee';
+  assert.deepEqual(firstClause(opening).ready, ['Your dentist appointment is on Tuesday,'],
+    'a long opening sentence is started at its first phrase');
+  assert.equal(firstClause('Sure, it is on Tuesday at three with the usual dentist in town. '), null,
+    '"Sure," is too short to say on its own');
+  assert.equal(firstClause('It is Tuesday, at three. More.'), null,
+    'a short first sentence is not split — nothing to gain, and a break in the voice');
+  assert.deepEqual(firstClause('There are three things to know here - the build, the tests and the relay. ').ready,
+    ['There are three things to know here -']);
+  assert.equal(firstClause('Run this: ```x = compute(a, b, c, d, e, f, g)```'), null, 'never near code');
+  assert.equal(firstClause('Still writing the first sentence and no pause in it yet'), null);
+  {
+    // Only the first section is a phrase; everything after is whole sentences.
+    const gens = [];
+    const q = live(async t => { gens.push(t); return t; }, async () => {}, {firstPhrase: true});
+    q.push('Your dentist appointment is on Tuesday, at three');
+    await tick(); await tick();
+    assert.deepEqual(gens, ['Your dentist appointment is on Tuesday,'],
+      'the first phrase must go before its sentence has finished');
+    q.push(' in the afternoon, with Dr. Lee, who moved offices last spring. Bring your card, the new one. ');
+    q.end(); await q.done;
+    assert.deepEqual(gens, ['Your dentist appointment is on Tuesday,',
+      'at three in the afternoon, with Dr. Lee, who moved offices last spring.',
+      'Bring your card, the new one.']);
+  }
+  {
+    // Off by default: the same text, whole sentences only.
+    const gens = [];
+    const q = live(async t => { gens.push(t); return t; }, async () => {});
+    q.push('Your dentist appointment is on Tuesday, at three in the afternoon. ');
+    q.end(); await q.done;
+    assert.deepEqual(gens, ['Your dentist appointment is on Tuesday, at three in the afternoon.']);
+  }
+
   console.log('PASS: sentence bounds, early playback, single prefetch, stop/drain, synthesis and playback failures; '
     + 'live: first sentence before the reply ends, decimals/lists/code held correctly, order, one in flight, '
-    + 'one ahead, tail spoken, cancel drains, failures surface.');
+    + 'one ahead, tail spoken, cancel drains, failures surface; first phrase: long openings start at a clause, '
+    + 'short ones and code are never split, only the first section.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

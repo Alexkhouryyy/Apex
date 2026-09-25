@@ -118,17 +118,26 @@ mode the turn used, so `python -m agent.voice_timing` prints the two side by
 side — **before and after are measured on your laptop, not asserted.**
 
 Measured with the real page code and timing instrument against *simulated*
-delays (`scripts/measure_live_speech.cjs` — the delays are printed with the
-result; they are not your hardware):
+delays, the model streaming word by word (`scripts/measure_live_speech.cjs` —
+the delays are printed with the result; they are not your hardware):
 
-| Turn | First sound, whole reply | As it writes |
-|---|---|---|
-| Short answer (2 sentences) | 4.6 s | 3.1 s |
-| Long answer (6 sentences) | 7.4 s | 3.1 s |
-| Tool call mid-reply | 11.5 s | 3.1 s |
+| Turn | Whole reply | As it writes | + first phrase |
+|---|---|---|---|
+| Short answer (2 sentences) | 4.0 s | 3.4 s | 3.4 s |
+| Long answer (6 sentences) | 5.5 s | 3.5 s | 3.5 s |
+| Tool call mid-reply | 10.5 s | 3.3 s | 3.3 s |
+| Long first sentence | 6.8 s | 6.5 s | 3.6 s |
+
+**Start on the first phrase (built 2026-09-25)** is the last column: a long
+first sentence goes to the voice at its first pause (a comma, colon or dash,
+at least 20 characters in), so neither the text nor the synthesis waits for
+the whole sentence. Short sentences are never split, only the first section
+of a reply is, and never near code. It is its own setting — the break is a
+pause in the voice, and whether that sounds right in Celine's voice is for
+your ear, not a test.
 
 What it removes is everything that grows with the reply: writing time and
-tool calls. What is left — 3.1 s in that simulation — is transcription, the
+tool calls. What is left — about 3.4 s in that simulation — is transcription, the
 model's first token, and synthesising the first section, and **that is the
 next target.** One behaviour change to know about: on a tool-call turn, what
 Apex says before the tool ("Let me check your calendar.") is now spoken too;
@@ -136,7 +145,7 @@ the screen still shows only the final reply.
 
 **Work:**
 1. ~~Instrument the whole turn end to end~~ — done.
-2. ~~Speak as it writes~~ — done; measure it: 10 turns with the setting off,
+2. ~~Speak as it writes~~ and ~~start on the first phrase~~ — done; measure it: 10 turns with the setting off,
    10 on, then `python -m agent.voice_timing`.
 3. First-section synthesis: your `Test-Apex-Fast-Voice.cmd` benchmark says
    whether streaming Qwen can reach 0.4 s on your GPU; the local Qwen server

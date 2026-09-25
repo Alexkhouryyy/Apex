@@ -138,6 +138,24 @@ const ORDER = ['stt_done', 'first_token', 'reply_done', 'tts_start', 'tts_ready'
   assert.equal(speakCalls, atStop, 'sections were still requested after Stop');
   chatScript = null;
 
+  // "Start on the first phrase": on, a long first sentence goes to the voice
+  // at its first pause; off, it waits for the whole sentence.
+  for (const phrase of [true, false]) {
+    await sleep(300);
+    $('first-phrase').checked = phrase;
+    chatScript = [[0, {type: 'start', thread_id: 1}],
+      [20, {type: 'token', text: 'Your dentist appointment is on Tuesday, '}],
+      [200, {type: 'token', text: 'at three in the afternoon with Dr. Lee at the new office. '}],
+      [10, {type: 'done', text: 'Your dentist appointment is on Tuesday, at three in the afternoon with Dr. Lee at the new office.'}]];
+    const from = spokenText.length;
+    await spokenTurn(true);
+    assert.equal(spokenText[from], phrase ? 'Your dentist appointment is on Tuesday,'
+      : 'Your dentist appointment is on Tuesday, at three in the afternoon with Dr. Lee at the new office.',
+      `first section with first-phrase ${phrase ? 'on' : 'off'}`);
+  }
+  $('first-phrase').checked = true;
+  chatScript = null;
+
   // A reply that never streamed (an error, a fallback) must still be spoken
   // with the setting on — otherwise that turn is silent.
   await sleep(300);

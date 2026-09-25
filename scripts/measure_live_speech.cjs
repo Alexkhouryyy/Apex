@@ -1,4 +1,4 @@
-// Before/after for "Speak as it writes", measured with the real companion code
+// Before/after for "Speak as it writes" and "Start on the first phrase", measured with the real companion code
 // and the real Pillar 1 timing instrument, against SIMULATED delays.
 //
 //   NODE_PATH=<jsdom> node scripts/measure_live_speech.cjs
@@ -17,7 +17,7 @@ const SCALE = 20;
 const DELAYS = {
   transcribe: 600,          // ms, local Whisper on a short utterance
   firstToken: 900,          // ms, model time to first token
-  perSentence: 700,         // ms, model writing one sentence
+  perWord: 60,              // ms, model writing one word (~17 words/s)
   toolCall: 6000,           // ms, one tool call mid-reply
   ttsBase: 800, ttsPerChar: 25,   // ms, synthesising one section (local, non-streaming)
 };
@@ -28,16 +28,24 @@ const SCENARIOS = {
     'It is the gate for everything else.']},
   'tool call mid-reply': {pre: ['Let me check your calendar.'], tool: true,
     sentences: ['You have the dentist on Tuesday at three.', 'Nothing else that day.']},
+  'long first sentence': {sentences: ['Your dentist appointment is on Tuesday, at three in the afternoon, '
+    + 'with Dr. Lee at the new office on Main Street.', 'Bring your insurance card.']},
+};
+const MODES = {
+  'whole reply': {stream: false, phrase: false},
+  'as it writes': {stream: true, phrase: false},
+  '+ first phrase': {stream: true, phrase: true},
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms / SCALE));
 
-async function measure(scenario, streamOn) {
+async function measure(scenario, mode) {
   const dom = new JSDOM(fs.readFileSync(base + 'companion.html', 'utf8'),
     {url: 'http://localhost:7860/companion', runScripts: 'outside-only'});
   const w = dom.window, $ = id => w.document.getElementById(id);
   w.TextDecoder = TextDecoder;
   w.localStorage.setItem('apex_token', 'tok');
-  w.localStorage.setItem('apex.speech.stream', streamOn ? '1' : '0');
+  w.localStorage.setItem('apex.speech.stream', mode.stream ? '1' : '0');
+  w.localStorage.setItem('apex.speech.firstPhrase', mode.phrase ? '1' : '0');
   w.speechSynthesis = {cancel() {}, speak() {}};
   w.SpeechSynthesisUtterance = class {};
   w.URL.createObjectURL = () => 'blob:x'; w.URL.revokeObjectURL = () => {};
@@ -60,9 +68,13 @@ async function measure(scenario, streamOn) {
         const send = o => c.enqueue(new TextEncoder().encode(JSON.stringify(o) + '\n'));
         send({type: 'start', thread_id: 1});
         await sleep(DELAYS.firstToken);
-        for (const s of scenario.pre || []) { send({type: 'token', text: s + ' '}); await sleep(DELAYS.perSentence); }
+        // Word by word, as a model streams — a whole sentence at once would
+        // hide exactly what starting on the first phrase is for.
+        const write = async text => { for (const word of text.split(' ')) {
+          send({type: 'token', text: word + ' '}); await sleep(DELAYS.perWord); } };
+        for (const s of scenario.pre || []) await write(s);
         if (scenario.tool) { send({type: 'tool', phase: 'start', name: 'calendar'}); await sleep(DELAYS.toolCall); }
-        for (const s of scenario.sentences) { send({type: 'token', text: s + ' '}); await sleep(DELAYS.perSentence); }
+        for (const s of scenario.sentences) await write(s);
         send({type: 'done', text: scenario.sentences.join(' ')}); c.close();
       }}));
     }
@@ -87,11 +99,12 @@ async function measure(scenario, streamOn) {
 (async () => {
   const f = ms => (ms / 1000).toFixed(1).padStart(5) + 's';
   console.log('Simulated delays (real time):', JSON.stringify(DELAYS));
-  console.log('\n  scenario                         first sound: whole reply   as it writes   earlier by');
+  console.log('\n  first sound after you stop talking');
+  console.log('  ' + 'scenario'.padEnd(30) + Object.keys(MODES).map(k => k.padStart(16)).join(''));
   for (const [name, sc] of Object.entries(SCENARIOS)) {
-    const off = await measure(sc, false), on = await measure(sc, true);
-    console.log(`  ${name.padEnd(33)}${f(off.first_sound).padStart(21)}${f(on.first_sound).padStart(15)}`
-      + `${f(off.first_sound - on.first_sound).padStart(13)}`);
+    const row = [];
+    for (const mode of Object.values(MODES)) row.push((await measure(sc, mode)).first_sound);
+    console.log('  ' + name.padEnd(30) + row.map(v => f(v).padStart(16)).join(''));
   }
   console.log('\nNot your laptop: these delays are made up to show the shape of the change. '
     + 'Your real before/after: python -m agent.voice_timing');
