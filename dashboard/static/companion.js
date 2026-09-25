@@ -395,7 +395,14 @@
       if (!automatic && !$('message').value) $('message').value = text;
     } finally {
       active = null;
-      if (speaking && !turn.stopped && live === speaking) { state('speaking', 'Speaking · Stop ends playback'); speaking.q.end(); }
+      if (speaking && !turn.stopped && live === speaking) {
+        // Say which half you are waiting on. The reply is written; if no audio
+        // is playing yet, the wait is the VOICE — "thinking" here read as the
+        // brain being stuck, when it was the voice still generating.
+        if (audio) state('speaking', 'Speaking · Stop ends playback');
+        else state('thinking', 'Reply written · waiting for the voice to generate…');
+        speaking.q.end();
+      }
       else state('', pendingRemote ? 'Connection interrupted · task outcome not confirmed.' : turn.stopped ? 'Stopped. Ready for your next instruction.' : 'Ready when you are.');
       controls();
     }

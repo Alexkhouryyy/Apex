@@ -166,6 +166,24 @@ const ORDER = ['stt_done', 'first_token', 'reply_done', 'tts_start', 'tts_ready'
     'a reply that was never streamed was not spoken');
   chatScript = null;
 
+  await sleep(300);
+  // The wait after the reply is written is the VOICE, and the status says so
+  // rather than "thinking" — which read as the brain being stuck.
+  {
+    let seen = '';
+    const slowSpeak = w.fetch;
+    w.fetch = async (path, opts) => {
+      if (path === '/api/speak') { await sleep(400); seen = $('status').textContent; }
+      return slowSpeak(path, opts);
+    };
+    $('stream-speech').checked = true;
+    chatScript = [[0, {type: 'start', thread_id: 1}], [10, {type: 'token', text: 'Hi'}],
+      [10, {type: 'done', text: 'Hi'}]];
+    await spokenTurn(true);
+    w.fetch = slowSpeak; chatScript = null;
+    assert.match(seen, /waiting for the voice/, `status while the voice generates was "${seen}"`);
+  }
+
   // A TYPED message is not a voice turn and must not post a timing record.
   const n = posted.length;
   $('message').value = 'typed';
