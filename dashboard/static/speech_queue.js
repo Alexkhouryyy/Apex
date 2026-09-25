@@ -120,7 +120,16 @@
     return null;
   }
 
-  function live(generate, play, {firstPhrase = false} = {}) {
+  // `coalesce` (characters; 0 = off): after the first section, take every
+  // sentence waiting at that moment as ONE section, up to that many
+  // characters. For a streaming voice each section costs a fixed start-up
+  // (about a second on the laptop) and only one can generate at a time, so
+  // every boundary is a pause; fewer, longer sections mean fewer pauses. The
+  // first section stays alone — it is the one the listener is waiting on.
+  // `beforeTake` (optional async): awaited before each section is taken from
+  // the waiting sentences — e.g. "the GPU is free". Taking first and waiting
+  // after would merge only what was waiting when the PREVIOUS section went.
+  function live(generate, play, {firstPhrase = false, coalesce = 0, beforeTake = null} = {}) {
     const parts = [];
     let buffer = '', ended = false, cancelled = false, waiters = [], started = false;
     const wake = () => { const w = waiters; waiters = []; w.forEach(f => f()); };
@@ -137,7 +146,11 @@
         if (cancelled || (!parts.length && ended)) break;
         await until(() => cancelled || ready.length === 0);
         if (cancelled) break;
-        const text = parts.shift();
+        if (beforeTake) { await beforeTake(); if (cancelled) break; }
+        let text = parts.shift();
+        if (coalesce > 0 && i > 0) {
+          while (parts.length && text.length + 1 + parts[0].length <= coalesce) text += ' ' + parts.shift();
+        }
         inFlight = true;
         const result = await Promise.resolve().then(() => generate(text, i++))
           .then(value => ({value}), error => ({error}));

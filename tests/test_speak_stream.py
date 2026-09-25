@@ -144,3 +144,16 @@ def test_bad_requests(apex, body):
     with pytest.raises(urllib.error.HTTPError) as e:
         speak(base, body)
     assert e.value.code == 400
+
+
+def test_the_page_can_ask_before_the_first_reply(apex):
+    """GET tells the page whether to plan for streaming (no comma split,
+    merged sections) before it has spoken a word."""
+    base, mp = apex
+    voice_at(mp, FakeVoice())
+    data = json.loads(urllib.request.urlopen(base + "/api/speak/stream", timeout=3).read())
+    assert data == {"streaming": True, "sample_rate": 24000}
+    import config
+    mp.setattr(config, "VOICEBOX_URL", f"http://127.0.0.1:{_port()}", raising=False)
+    data = json.loads(urllib.request.urlopen(base + "/api/speak/stream", timeout=3).read())
+    assert data == {"streaming": False, "sample_rate": None}

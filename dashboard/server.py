@@ -1909,6 +1909,17 @@ async def transcribe_endpoint(file: UploadFile = File(...)):
 
 
 # --- Voice: local Voicebox or explicitly selected OpenAI TTS ---
+@app.get("/api/speak/stream")
+async def speak_stream_supported():
+    """Whether the voice server streams, so the page can plan for it before
+    the first reply — the comma split and one-section-per-sentence exist for
+    a voice that cannot, and cost a pause each with one that can."""
+    from voice import voicebox
+    health = await voicebox.streaming_supported()
+    return {"streaming": health is not None,
+            "sample_rate": int(health["sample_rate"]) if health else None}
+
+
 @app.post("/api/speak/stream")
 async def speak_stream_endpoint(request: Request):
     """Celine's audio as it is made: raw 16-bit mono PCM, sample rate in

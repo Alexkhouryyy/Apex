@@ -25,8 +25,9 @@ w.Audio = class { play() { setTimeout(() => { this.onplaying?.(); setTimeout(() 
 // scheduled when.
 const t0 = performance.now();
 const scheduled = [], stoppedSources = [];
+const contexts = [];
 w.AudioContext = class {
-  constructor() { this.state = 'running'; this.destination = {}; }
+  constructor(opts = {}) { this.state = 'running'; this.destination = {}; this.sampleRate = opts.sampleRate || 48000; contexts.push(this); }
   get currentTime() { return (performance.now() - t0) / 1000; }
   resume() { return Promise.resolve(); }
   createBuffer(ch, length, rate) { const d = new Float32Array(length);
@@ -53,7 +54,7 @@ let streamMode = 'stream';            // 'stream' | '404'
 const log = [];                       // request order, with times
 const received = {};                  // section -> time its stream finished sending
 const posted = [];
-let chatScript = null;
+let chatScript = null, sectionNo = 0;
 w.fetch = async (path, opts = {}) => {
   const now = performance.now() - t0;
   if (path === '/api/status') return Response.json({agent_ready: true});
@@ -65,11 +66,16 @@ w.fetch = async (path, opts = {}) => {
       for (const [d, o] of chatScript) { await sleep(d); c.enqueue(new TextEncoder().encode(JSON.stringify(o) + '\n')); }
       c.close(); }}));
   }
+  if (path === '/api/speak/stream' && (opts.method || 'GET') === 'GET')
+    return Response.json(streamMode === '404' ? {streaming: false} : {streaming: true, sample_rate: RATE});
   if (path === '/api/speak/stream') {
     const text = JSON.parse(opts.body).text;
     log.push({kind: 'stream', text, at: now});
     if (streamMode === '404') return Response.json({error: 'no streaming'}, {status: 404});
-    const pieces = pcmPieces(4);
+    // Each section a different level, so the log can tell which section a
+    // scheduled block belongs to.
+    sectionNo += 1;
+    const pieces = pcmPieces(4, 4096 * sectionNo);
     return new Response(new ReadableStream({async start(c) {
       for (const p of pieces) { await sleep(15); c.enqueue(p); }
       received[text] = performance.now() - t0; c.close(); }}),
@@ -106,20 +112,23 @@ const TWO = [[0, {type: 'start', thread_id: 1}], [10, {type: 'token', text: 'Fir
     'the first piece must be handed to the speakers before the stream finished arriving');
   assert.ok(typeof st.first_sound === 'number' && st.first_sound < st.reply_done + 400);
 
-  // 2. Pieces play back to back, with no gap and no overlap, and a sample
-  //    split across two reads comes out intact.
-  // 4 x 0.1 s = 19200 bytes, arriving as 3001-byte pieces -> 7 per section.
-  const PER_SECTION = Math.ceil(19200 / 3001);
-  assert.equal(scheduled.length, 2 * PER_SECTION);
-  const firstSection = scheduled.slice(0, PER_SECTION);
-  assert.ok(Math.abs(firstSection.reduce((a, p) => a + p.dur, 0) - 0.4) < 1e-6,
+  // 2. The context runs at the voice's own rate (no per-piece resampling —
+  //    the crackle heard on the laptop), blocks meet sample-exactly, and a
+  //    sample split across two reads comes out intact.
+  assert.equal(contexts.at(-1).sampleRate, RATE, 'audio must play at the voice rate, not the device rate');
+  const firstSection = scheduled.filter(b => Math.abs(b.first - 0.125) < 1e-4);
+  assert.ok(firstSection.length >= 2 && firstSection.length < 7,
+    `network pieces must be glued into fewer blocks (got ${firstSection.length})`);
+  assert.ok(Math.abs(firstSection.reduce((a, p) => a + p.dur, 0) - 0.4) < 1e-9,
     'a section must play exactly as much audio as was sent');
   for (let i = 1; i < firstSection.length; i++) {
-    const prevEnd = firstSection[i - 1].at + firstSection[i - 1].dur;
-    assert.ok(Math.abs(firstSection[i].at - prevEnd) < 1e-6,
-      `piece ${i} starts at ${firstSection[i].at}, previous ends at ${prevEnd}`);
+    const prevEnd = Math.round((firstSection[i - 1].at + firstSection[i - 1].dur) * RATE);
+    assert.equal(Math.round(firstSection[i].at * RATE), prevEnd, `block ${i} does not meet the previous one exactly`);
+    assert.ok(Math.abs(firstSection[i].at * RATE - Math.round(firstSection[i].at * RATE)) < 1e-6,
+      'blocks must start on whole sample frames');
   }
-  assert.ok(scheduled.every(s => Math.abs(s.first - 0.25) < 1e-4), 'a sample split across reads was garbled');
+  assert.ok(scheduled.every(s => [0.125, 0.25].some(v => Math.abs(s.first - v) < 1e-4)),
+    'a sample split across reads was garbled');
 
   // 3. One synthesis at a time: section 2 is requested only after section 1
   //    has been fully received.
@@ -143,7 +152,25 @@ const TWO = [[0, {type: 'start', thread_id: 1}], [10, {type: 'token', text: 'Fir
   const again = await turn(TWO);
   assert.ok(typeof again.first_sound === 'number', 'the turn after a Stop did not speak — deadlocked?');
 
-  // 5. A voice server that cannot stream: fall back once, then stay on /api/speak.
+  // 5. While streaming, sections are merged and the comma split is off —
+  //    every boundary costs a pause (heard on the laptop as long pauses
+  //    between a comma and the rest of the sentence).
+  {
+    $('first-phrase').checked = true;
+    const from = log.filter(l => l.kind === 'stream').length;
+    await turn([[0, {type: 'start', thread_id: 1}],
+      [10, {type: 'token', text: 'Your dentist appointment is on Tuesday, at three in the afternoon with Dr. Lee. '}],
+      [10, {type: 'token', text: 'Bring your card. '}], [5, {type: 'token', text: 'Arrive early. '}],
+      [5, {type: 'token', text: 'Parking is behind the building. '}],
+      [10, {type: 'done', text: 'Parking is behind the building.'}]]);
+    const asked = log.filter(l => l.kind === 'stream').slice(from).map(l => l.text);
+    assert.equal(asked[0], 'Your dentist appointment is on Tuesday, at three in the afternoon with Dr. Lee.',
+      'no comma split while streaming');
+    assert.deepEqual(asked.slice(1), ['Bring your card. Arrive early. Parking is behind the building.'],
+      `the rest must go as one section, got ${JSON.stringify(asked.slice(1))}`);
+  }
+
+  // 6. A voice server that cannot stream: fall back once, then stay on /api/speak.
   streamMode = '404';
   const wavBefore = log.filter(l => l.kind === 'wav').length, streamBefore = log.filter(l => l.kind === 'stream').length;
   await turn(TWO);

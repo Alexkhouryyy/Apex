@@ -58,6 +58,17 @@
   // the previous stream to be fully RECEIVED (not played), so it is generated
   // while the previous one plays — never alongside it.
   let gpuFree = Promise.resolve();
+  // Longest section sent to a streaming voice: long enough that a reply is a
+  // few sections, not one per sentence; well under the server's 4000.
+  const STREAM_SECTION_CHARS = 1500;
+  function merge(parts, limit) {
+    const out = [];
+    for (const p of parts) {
+      if (out.length && out.at(-1).length + 1 + p.length <= limit) out[out.length - 1] += ' ' + p;
+      else out.push(p);
+    }
+    return out;
+  }
   // Streams opened but not yet played to the end. Stop closes them all: an
   // abandoned stream would otherwise never be marked received, and the next
   // reply would wait on `gpuFree` forever.
@@ -169,6 +180,13 @@
   $('first-phrase').checked = localStorage.getItem('apex.speech.firstPhrase') !== '0';
   $('first-phrase').addEventListener('change', () => localStorage.setItem('apex.speech.firstPhrase', $('first-phrase').checked ? '1' : '0'));
   $('voice').addEventListener('change', loadVoiceboxProfiles);
+  async function probeStreaming() {
+    try {
+      const data = await (await request('/api/speak/stream')).json();
+      streamOk = data.streaming === true ? true : false;
+    } catch (_) { streamOk = null; }      // unknown: the first reply finds out
+  }
+  $('voice').addEventListener('change', probeStreaming);
   // Fired here for the tokenless-localhost case, and again from boot() after a
   // token is accepted. Without the second call the very first load of a
   // token-protected dashboard fetches this list BEFORE the login dialog is
@@ -187,10 +205,19 @@
   // this plays it the same way: each piece scheduled right after the last.
   // `null` until tried; `false` once the voice server has said it cannot
   // stream (404), after which this page uses /api/speak for the session.
-  function audioContext() {
+  // At Celine's own sample rate (24 kHz), not the device's (usually 48 kHz).
+  // Otherwise every small piece is resampled on its own, and each seam
+  // between two independently resampled pieces can click — the crackle
+  // heard on the laptop. One context at the source rate is resampled once,
+  // continuously, on its way to the speakers.
+  function audioContext(rate) {
     const Ctor = window.AudioContext || window.webkitAudioContext;
     if (!Ctor) return null;
-    audioCtx = audioCtx || new Ctor();
+    if (audioCtx && audioCtx.sampleRate !== rate) { audioCtx.close?.(); audioCtx = null; }
+    if (!audioCtx) {
+      try { audioCtx = new Ctor({sampleRate: rate}); }
+      catch (_) { audioCtx = new Ctor(); }       // a browser that cannot: resampled, still plays
+    }
     return audioCtx;
   }
   async function openStream(section, engine, profile) {
@@ -223,10 +250,17 @@
   }
   function playPcm(handle, epoch) {
     return new Promise((resolve, reject) => {
-      const ctx = audioContext();
+      const ctx = audioContext(handle.rate);
       if (!ctx) { handle.received(); reject(new Error('This browser cannot play streamed audio.')); return; }
       const sources = [];
-      let nextAt = 0, carry = null, stopped = false, first = true;
+      // Scheduled in whole sample frames when the context runs at the source
+      // rate, so consecutive pieces meet exactly — no float drift at seams.
+      let nextFrame = 0, carry = null, stopped = false, first = true, pending = [], pendingLen = 0;
+      const exact = ctx.sampleRate === handle.rate;
+      // Network pieces are glued into blocks of at least this many samples
+      // (0.1 s) before playing: fewer seams. The first block goes as soon as
+      // it arrives — that one is the wait the listener hears.
+      const MIN_BLOCK = Math.round(handle.rate * 0.1);
       // A little lead before the first piece absorbs small delivery jitter:
       // the voice is generated only slightly faster than it plays.
       const LEAD = 0.12;
@@ -240,24 +274,36 @@
       };
       const pseudo = {pause: stop};
       audio = pseudo; endPlayback = stop;
-      const schedule = bytes => {
-        if (carry) { const joined = new Uint8Array(carry.length + bytes.length);
-          joined.set(carry); joined.set(bytes, carry.length); bytes = joined; carry = null; }
-        if (bytes.length % 2) { carry = bytes.slice(-1); bytes = bytes.slice(0, -1); }
-        if (!bytes.length) return;
-        const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length / 2);
-        const buffer = ctx.createBuffer(1, pcm.length, handle.rate);
+      const emit = () => {
+        if (!pendingLen) return;
+        const buffer = ctx.createBuffer(1, pendingLen, handle.rate);
         const channel = buffer.getChannelData(0);
-        for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
+        let o = 0;
+        for (const pcm of pending) { for (let i = 0; i < pcm.length; i++) channel[o++] = pcm[i] / 32768; }
+        pending = []; pendingLen = 0;
         const src = ctx.createBufferSource(); src.buffer = buffer; src.connect(ctx.destination);
-        const at = Math.max(ctx.currentTime + (first ? LEAD : 0), nextAt);
+        const rate = exact ? handle.rate : ctx.sampleRate;
+        const earliest = Math.ceil((ctx.currentTime + (first ? LEAD : 0.01)) * rate);
+        // Late (the voice fell behind): start now rather than in the past.
+        if (nextFrame < earliest) nextFrame = earliest;
+        const at = nextFrame / rate;
         src.start(at); sources.push(src);
-        nextAt = at + buffer.duration;
+        nextFrame += exact ? buffer.length : Math.round(buffer.duration * rate);
         if (first) {
           first = false;
           setTimeout(() => { if (!stopped) mark('first_sound'); }, Math.max(0, (at - ctx.currentTime) * 1000));
           state('speaking', 'Speaking · Stop ends playback'); controls();
         }
+      };
+      const schedule = bytes => {
+        if (carry) { const joined = new Uint8Array(carry.length + bytes.length);
+          joined.set(carry); joined.set(bytes, carry.length); bytes = joined; carry = null; }
+        if (bytes.length % 2) { carry = bytes.slice(-1); bytes = bytes.slice(0, -1); }
+        if (!bytes.length) return;
+        // A copy: the reader may reuse the underlying buffer.
+        const pcm = new Int16Array(bytes.slice().buffer);
+        pending.push(pcm); pendingLen += pcm.length;
+        if (first || pendingLen >= MIN_BLOCK) emit();
       };
       (async () => {
         try {
@@ -271,9 +317,11 @@
           }
           handle.received();
           if (stopped) return;
+          emit();                                   // whatever is left
           if (first) throw new Error('The voice server sent no audio.');
+          const endsAt = nextFrame / (exact ? handle.rate : ctx.sampleRate);
           setTimeout(() => { if (!stopped) { stopped = true; if (audio === pseudo) { audio = null; endPlayback = null; } resolve(); } },
-            Math.max(0, (nextAt - ctx.currentTime) * 1000));
+            Math.max(0, (endsAt - ctx.currentTime) * 1000));
         } catch (exc) {
           stopped = true; handle.received();
           if (audio === pseudo) { audio = null; endPlayback = null; }
@@ -337,8 +385,16 @@
     hands?.pause(); speechBusy = true; speechDraining = true; controls();
     const epoch = speechEpoch;
     const {generate, play} = voiceFns(epoch);
+    // Streaming Celine starts within about a second whatever the section's
+    // length, and every section boundary costs a pause (one generation at a
+    // time, a second to start each). So when streaming: no comma split, and
+    // after the first sentence, everything written so far as one section.
+    const streaming = streamOk === true && $('voice').value === 'voicebox';
     live = {epoch, q: window.ApexSpeechQueue.live(generate, play,
-      {firstPhrase: $('first-phrase').checked})};
+      {firstPhrase: $('first-phrase').checked && !streaming, coalesce: streaming ? STREAM_SECTION_CHARS : 0,
+       // Merge what has been written by the time the GPU is free, not by the
+       // time the previous section was sent.
+       beforeTake: streaming ? () => gpuFree : null})};
     return live;
   }
   async function finishLiveSpeech(handle) {
@@ -358,7 +414,9 @@
         state('thinking', 'Preparing voice · the first section will play as soon as it is ready…'); controls();
         const {generate, play} = voiceFns(epoch);
         try {
-          await window.ApexSpeechQueue.run(window.ApexSpeechQueue.chunks(text), generate, play,
+          let sections = window.ApexSpeechQueue.chunks(text);
+          if (streamOk === true && $('voice').value === 'voicebox') sections = merge(sections, STREAM_SECTION_CHARS);
+          await window.ApexSpeechQueue.run(sections, generate, play,
             () => epoch !== speechEpoch);
         } catch (exc) {
           if (epoch === speechEpoch) error(exc.message);
@@ -661,6 +719,7 @@
     }
     state('', status.agent_ready === false ? 'Apex agent is not connected yet. Start Apex, then try a message.' : 'Ready when you are.'); controls();
     loadVoiceboxProfiles();
+    probeStreaming();
     if (drive) {
       await refreshJobs();
       if (pendingRemote) send(pendingRemote.message || 'Reconnected task', false, pendingRemote);

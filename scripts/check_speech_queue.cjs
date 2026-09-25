@@ -122,6 +122,39 @@ const tick = () => new Promise(r=>setImmediate(r));
     assert.deepEqual(gens, ['Your dentist appointment is on Tuesday, at three in the afternoon.']);
   }
 
+  {
+    // coalesce: the first section alone, then everything waiting as one.
+    const gens = [], g = {};
+    const q = live(t => { gens.push(t); g[t] = defer(); return g[t].promise; }, async () => {}, {coalesce: 60});
+    q.push('One. '); await tick();
+    q.push('Two. Three. Four. '); await tick();
+    assert.deepEqual(gens, ['One.'], 'the first section goes alone, straight away');
+    g['One.'].resolve('a'); await tick(); await tick();
+    assert.deepEqual(gens, ['One.', 'Two. Three. Four.'], 'what waited goes as ONE section');
+    q.push('A sentence long enough to go past the limit on its own merits here. Five. ');
+    g['Two. Three. Four.'].resolve('b'); await tick(); await tick();
+    assert.equal(gens.length, 3);
+    assert.ok(gens[2].length <= 70 && !gens[2].includes('Five'), 'the limit holds');
+    q.end(); g[gens[2]].resolve('c'); await tick(); await tick();
+    assert.equal(gens.at(-1), 'Five.');
+    g['Five.'].resolve('d'); await q.done;
+  }
+
+  {
+    // beforeTake: merging happens after the wait, so what arrived meanwhile joins.
+    const gens = []; let open = defer();
+    const q = live(async t => { gens.push(t); return t; }, async () => {},
+      {coalesce: 200, beforeTake: () => open.promise});
+    open.resolve();
+    q.push('One. '); await tick(); await tick();
+    open = defer();
+    q.push('Two. '); await tick();
+    q.push('Three. '); await tick();              // arrives while the "GPU" is busy
+    open.resolve(); await tick(); await tick();
+    q.end(); await q.done;
+    assert.deepEqual(gens, ['One.', 'Two. Three.'], 'what arrived during the wait must be merged');
+  }
+
   console.log('PASS: sentence bounds, early playback, single prefetch, stop/drain, synthesis and playback failures; '
     + 'live: first sentence before the reply ends, decimals/lists/code held correctly, order, one in flight, '
     + 'one ahead, tail spoken, cancel drains, failures surface; first phrase: long openings start at a clause, '
