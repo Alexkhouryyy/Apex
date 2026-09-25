@@ -163,6 +163,12 @@ async def companion_chat(request: Request, durable: bool = False):
         if durable and body.get("screen_image"):
             raise ValueError("Remote tasks accept text or transcribed speech; use the companion for screen snapshots.")
         agent_message = companion.CHECKIN_PROMPT if proactive else workspace_message(body, message.strip())
+        # Speaking in Celine's voice means speaking AS Celine (agent/celine.py).
+        voice, voice_profile = body.get("voice"), body.get("voice_profile")
+        if not (voice is None or isinstance(voice, str)) or not (voice_profile is None or isinstance(voice_profile, str)):
+            raise ValueError("Invalid voice selection.")
+        from agent import celine as _celine
+        persona = "celine" if _celine.wanted(voice, voice_profile) else None
         thread_id = body.get("thread_id")
         if thread_id is not None:
             if type(thread_id) is not int or thread_id < 1:
@@ -235,7 +241,7 @@ async def companion_chat(request: Request, durable: bool = False):
                 agent_message, include_screenshot=False, streamer=Streamer(),
                 channel_id=channel_id, cancel_event=cancel,
                 companion_mode=mode, screen_image=body.get("screen_image"),
-                max_iterations=1 if proactive else None,
+                max_iterations=1 if proactive else None, persona=persona,
             )
             if cancel.is_set():
                 response = (response or "") + "\n[Interrupted; any completed actions remain in effect.]"

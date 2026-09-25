@@ -38,7 +38,7 @@ def test_image_dimensions_are_bounded():
 def agent(monkeypatch, test_db):
     monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "test-key")
     a = core.AgentCore()
-    monkeypatch.setattr(a, "_effective_system_prompt", lambda: [{"type": "text", "text": "base"}])
+    monkeypatch.setattr(a, "_effective_system_prompt", lambda persona=None: [{"type": "text", "text": "base"}])
     monkeypatch.setattr(a, "_all_tools", lambda: [{"name": name} for name in ["bash", "screenshot", "recall"]])
     monkeypatch.setattr(a, "_maybe_autocreate_skill", lambda *args: None)
     monkeypatch.setattr(core._budget, "check", lambda: None)

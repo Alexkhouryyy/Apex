@@ -551,7 +551,9 @@
       } else {
       const response = await request('/api/companion/chat', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({message: text, thread_id: threadId, turn_id: turn.id,
-          screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace, proactive: automatic})});
+          screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace, proactive: automatic,
+          // Which voice will speak the reply: in Celine's voice, Apex answers as Celine.
+          voice: $('voice').value, voice_profile: $('voicebox-profile').value})});
       const reader = response.body.getReader(), decoder = new TextDecoder(); let pending = '';
       try {
         while (true) {

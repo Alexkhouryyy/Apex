@@ -3036,14 +3036,19 @@ class AgentCore:
             # A failure here must not silently empty the toolbox.
             return self._mcp_tools
 
-    def _effective_system_prompt(self) -> list[dict]:
+    def _effective_system_prompt(self, persona: str | None = None) -> list[dict]:
         blocks: list[dict] = []
-        # Jarvis persona — prepended so character rules take highest priority
+        # Persona — prepended so character rules take highest priority. Celine
+        # (agent/celine.py) replaces JARVIS when her voice is speaking.
         try:
-            from agent.persona import get_persona_prefix
-            persona = get_persona_prefix()
-            if persona:
-                blocks.append({"type": "text", "text": persona})
+            if persona == "celine":
+                from agent import celine
+                blocks.append({"type": "text", "text": celine.persona_block()})
+            else:
+                from agent.persona import get_persona_prefix
+                prefix = get_persona_prefix()
+                if prefix:
+                    blocks.append({"type": "text", "text": prefix})
         except Exception:
             pass
         blocks.append({"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}})
@@ -3192,7 +3197,7 @@ class AgentCore:
                  if cost else "."))
         return text
 
-    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None) -> str:
+    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None, persona: str | None = None) -> str:
         """Run a full agent turn. Returns the final text response.
 
         If `streamer` is provided (a StreamingSpeaker), text deltas are fed to it
@@ -3213,10 +3218,19 @@ class AgentCore:
                 return "[turn interrupted]"
             memory.maybe_summarize(self.anthropic)
 
+            # Long-term memory for companion turns (they start with an empty
+            # channel memory) — read once per turn, fresh every turn.
+            memory_note = (companion.memory_block(user_text)
+                           if companion_mode in ("discuss", "work") else "")
+
             def turn_system():
-                blocks = self._effective_system_prompt()
+                blocks = self._effective_system_prompt(persona)
+                if memory_note:
+                    blocks = blocks + [{"type": "text", "text": memory_note}]
                 if companion_mode:
-                    blocks = blocks + [{"type": "text", "text": companion.prompt(companion_mode, bool(screen_b64))}]
+                    blocks = blocks + [{"type": "text", "text": companion.prompt(
+                        companion_mode, bool(screen_b64),
+                        name="Celine" if persona == "celine" else "Apex")}]
                 return blocks
 
             # Build user message content
