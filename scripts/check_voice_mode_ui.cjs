@@ -54,7 +54,7 @@ const esc = () => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: 
 
 (async () => {
   await sleep(80);
-  assert.match(html, /companion\.js\?v=barge-in-1/, 'bump the cache-bust so browsers load the new page');
+  assert.match(html, /companion\.js\?v=live-screen-1/, 'bump the cache-bust so browsers load the new page');
   assert.match(css, /#companion\[data-view=voice\]>:not\(header\):not\(\.presence\):not\(#messages\):not\(#error\)\{display:none\}/,
     'voice mode must hide the chat chrome but keep the orb, captions and errors');
   assert.equal($('voice-exit').hidden, true, 'the exit button is only for voice mode');

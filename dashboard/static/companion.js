@@ -154,6 +154,7 @@
   function leaveVoiceMode() {
     if (!voiceMode) return;
     const was = voiceMode; voiceMode = null;
+    endLive();
     delete root.dataset.view; $('voice-mode').setAttribute('aria-pressed', 'false'); $('voice-exit').hidden = true;
     toParent({apex: 'voice-state', on: false});
     $('voice').value = was.voice; $('voicebox-profile').value = was.profile; $('spoken').checked = was.spoken;
@@ -580,7 +581,10 @@
     if (!automatic) lastInteraction=Date.now();
     stopSpeech(); error();
     let image = null;
-    if (!look) { try { image = snapshot(); } catch (exc) { error(exc.message); return; } }
+    // A live screen turn's picture is taken by the server as the words
+    // arrive; the browser sends none of its own.
+    const liveTurn = Boolean(liveScreen) && !look && !automatic && !recovery;
+    if (!look && !liveTurn) { try { image = snapshot(); } catch (exc) { error(exc.message); return; } }
     const turn = {id: recovery?.turn_id || crypto.randomUUID(), stopped: false, done: false, text: '', automatic};
     active = turn; controls(); state('thinking', automatic ? 'Checking in on your screen…' : 'Thinking with you…');
     if (!automatic && !recovery) { bubble('user', text); $('message').value = ''; }
@@ -631,6 +635,7 @@
       const response = await request('/api/companion/chat', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({message: text, thread_id: threadId, turn_id: turn.id,
           screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace, proactive: automatic,
+          ...(liveTurn ? {look_live: true} : {}),
           // Which voice will speak the reply: in Celine's voice, Apex answers as Celine.
           voice: $('voice').value, voice_profile: $('voicebox-profile').value,
           ...(look ? {look_id: look.seq} : {})})});
@@ -863,7 +868,36 @@
     if (busy()) { error('Celine is still working on a reply — press Ctrl+Alt+T again when it is done.'); return; }
     enterVoiceMode().catch(exc => { leaveVoiceMode(); error(exc.message); });
   }
+  // --- Live screen: Ctrl+Alt+C starts a session, not a single look -------
+  // Voice mode, in Work mode (so she can act: open pages, click, type), and
+  // every turn carries a picture of the screen taken the moment you spoke.
+  // Ctrl+Alt+C again, Esc or Stop ends it.
+  let liveScreen = null;          // {mode}: what to put back afterwards
+  async function startLive() {
+    if (liveScreen) return true;
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+      error('Click anywhere on this page once so Celine can listen and speak — then Ctrl+Alt+C starts a live session. This time she answers once.');
+      return false;
+    }
+    if (!voiceMode) { entering = enterVoiceMode(); await entering.catch(() => {}); }
+    if (!voiceMode) return false;                  // no mic or no voice: one answer only
+    liveScreen = {mode: $('mode').value};
+    $('mode').value = 'work'; $('mode').onchange();
+    root.dataset.live = '1';
+    $('voice-exit').textContent = '● Live screen · Stop · Esc';
+    return true;
+  }
+  function endLive() {
+    if (!liveScreen) return;
+    $('mode').value = liveScreen.mode; $('mode').onchange();
+    liveScreen = null;
+    delete root.dataset.live;
+    $('voice-exit').textContent = 'Stop · Esc';
+  }
   async function answerLook(item) {
+    // Pressed again during a session: that ends it. ("Hey Celly" inside a
+    // session is a question, not an off switch.)
+    if (liveScreen && item.source === 'hotkey') { stop(); return; }
     // It was asked for right now: whatever Celine was saying gives way.
     stopSpeech();
     // Stopping speech finishes asynchronously; send() refuses while any of
@@ -871,6 +905,7 @@
     const busy = () => active || recorder || speechBusy || speechDraining;
     for (let i = 0; i < 600 && busy(); i++) await new Promise(r => setTimeout(r, 100));
     if (busy()) { error('Celine was busy and could not look — press the hotkey again.'); return; }
+    await startLive();
     await send(item.question || LOOK_DEFAULT, false, null, Boolean(hands?.enabled), {seq: item.seq});
   }
   async function boot() {

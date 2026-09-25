@@ -75,6 +75,32 @@ To save something, just tell her, for example *"remember that my dentist is
 Tuesday at 3pm"*. She saves it with the `remember` tool, including in Discuss
 mode. A memory saved in one turn is available in the next.
 
+## Live screen: Ctrl+Alt+C, and talk about what you're doing
+
+Press **Ctrl+Alt+C** and Celine looks at your screen and answers. Then she
+**keeps going**: she listens hands-free, and **every time you speak she sees
+your screen as it is at that moment**. Talk through your code while you
+type, or a game of chess while you play it. Press **Ctrl+Alt+C** again (or
+**Esc**) to end it. While it's on, the orb has a red ring and the button
+says **● Live screen**.
+
+- **She can act, not just look.** A live session runs in Work mode, so *"open
+  YouTube and find a video on the Sicilian"*, *"google this error"* or *"go to
+  the VLC download page"* happen. Pages open in **your own browser**, where
+  you're signed in. She can also click, type and press keys on the screen.
+- **What she won't do on her own:** risky actions (pressing Enter on a form,
+  submitting, buying, deleting files, running code) need a yes, and a yes can
+  only be given in the Apex console window, not by voice from the companion
+  yet. From the companion they are **refused**, and she says so. So she can
+  open a download page but won't press the button that buys or submits
+  something.
+- *"Hey Celly, …"* during a session asks a question about the screen; it does
+  not end the session.
+- **Cost and privacy:** every spoken turn sends a screenshot to your AI
+  provider, a few thousand tokens each. End the session when you're done.
+- She sees the screen **when you speak**, not continuously. She won't
+  interrupt you when your opponent moves; ask her.
+
 ## Look now: Ctrl+Alt+C or "Hey Celly"
 
 > **Fixed 2026-09-25:** until this date Ctrl+Alt+C never actually bound.

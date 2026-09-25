@@ -20,3 +20,6 @@
 #companion[data-workspace=board][data-view=voice] #status{font-size:13px;margin:0 0 6px}
 #companion[data-workspace=board][data-view=voice] #messages{text-align:left;padding:0;gap:6px;overflow:auto}
 #companion[data-workspace=board][data-view=voice] .message .text{font-size:13px}
+/* Live screen: she is seeing your screen on every turn. */
+#companion[data-live] .orb{box-shadow:0 0 0 3px #ff5a5a99,0 0 34px #ff5a5a44}
+#companion[data-live] #voice-exit{border-color:#ff7a7a;color:#ffd0d0}

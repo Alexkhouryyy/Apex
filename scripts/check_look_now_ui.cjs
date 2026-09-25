@@ -102,7 +102,48 @@ w.eval(fs.readFileSync(base + 'companion.js', 'utf8'));
   assert.equal(root.dataset.view, undefined, 'pressed again, it stops');
   assert.equal(chats.length, chatsBefore, 'a talk press is not a question to answer');
 
-  console.log('PASS: Ctrl+Alt+T toggles Voice mode (after one click on the page, with a clear message before); look requests start from now, become turns that use the server capture (no browser image), '
+  // 4. Ctrl+Alt+C is a live SESSION: Voice mode, Work mode (she can act),
+  //    and every later turn asks the server for a fresh picture of the screen.
+  slowReply = false;              // short replies from here: each turn finishes speaking quickly
+  await sleep(200);
+  $('mode').value = 'discuss';
+  const n4 = chats.length;
+  pending.push({seq: 12, kind: 'look', source: 'hotkey', question: '', ts: 6});
+  for (let i = 0; i < 300 && chats.length === n4; i++) await sleep(10);
+  assert.equal(root.dataset.view, 'voice', 'a live session is a voice session');
+  assert.equal(root.dataset.live, '1'); assert.match($('voice-exit').textContent, /Live screen/);
+  assert.equal(chats.at(-1).look_id, 12, 'the first turn uses the capture the hotkey took');
+  assert.equal(chats.at(-1).mode, 'work', 'live sessions can act on the computer');
+  for (let i = 0; i < 200 && (root.classList.contains('speaking') || root.classList.contains('thinking')); i++) await sleep(10);
+  await sleep(100);
+  $('message').value = 'and now what should I play?';
+  $('composer').dispatchEvent(new w.Event('submit'));
+  for (let i = 0; i < 200 && chats.length === n4 + 1; i++) await sleep(10);
+  const later = chats.at(-1);
+  assert.equal(later.look_live, true, 'every turn in a session gets a fresh screen');
+  assert.equal(later.screen_image, null, 'taken by the server, not sent by the browser');
+  assert.equal(later.look_id, undefined);
+  // "Hey Celly, ..." inside a session asks; it does not end the session.
+  await sleep(150);
+  pending.push({seq: 13, kind: 'look', source: 'wake', question: 'is that a good move?', ts: 7});
+  for (let i = 0; i < 300 && chats.at(-1).message !== 'is that a good move?'; i++) await sleep(10);
+  assert.equal(chats.at(-1).message, 'is that a good move?'); assert.equal(root.dataset.live, '1');
+  // Ctrl+Alt+C again ends it and puts Discuss back.
+  await sleep(150);
+  const n5 = chats.length;
+  pending.push({seq: 14, kind: 'look', source: 'hotkey', question: '', ts: 8});
+  for (let i = 0; i < 300 && root.dataset.live; i++) await sleep(10);
+  assert.equal(root.dataset.live, undefined); assert.equal(root.dataset.view, undefined);
+  assert.equal($('mode').value, 'discuss', 'the mode from before the session comes back');
+  assert.equal(chats.length, n5, 'the ending press is not a question');
+  // Outside a session, an ordinary turn asks for no live screen.
+  $('message').value = 'plain question';
+  $('composer').dispatchEvent(new w.Event('submit'));
+  for (let i = 0; i < 200 && chats.length === n5; i++) await sleep(10);
+  assert.equal(chats.at(-1).look_live, undefined);
+
+  console.log('PASS: Ctrl+Alt+C starts a live screen session (voice, Work mode, a fresh server capture every turn, "Hey Celly" asks inside it, '
+    + 'pressed again it ends and restores the mode); Ctrl+Alt+T toggles Voice mode (after one click on the page, with a clear message before); look requests start from now, become turns that use the server capture (no browser image), '
     + 'carry the spoken question when there is one, and cut off speech already in progress.');
   dom.window.close();
   process.exit(0);

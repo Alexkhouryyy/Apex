@@ -209,6 +209,18 @@ async def companion_chat(request: Request, durable: bool = False):
             if image is None:
                 raise ValueError("That screen capture has expired or was already used. Press the hotkey again.")
             body["screen_image"], screen_origin = image, "host"
+        # Live screen (Ctrl+Alt+C held on): every turn sees the laptop's
+        # screen as it is NOW — captured here, when the words arrive, never
+        # sent by the browser. The chess move just played, the line just typed.
+        if body.get("look_live") is not None:
+            if body["look_live"] is not True or body.get("screen_image") or look_id is not None or durable:
+                raise ValueError("Invalid live screen request.")
+            from agent import look_now
+            try:
+                image = await asyncio.get_running_loop().run_in_executor(None, look_now.capture)
+            except Exception as exc:
+                raise ValueError(f"Could not see the screen ({type(exc).__name__}). Is Apex running on this laptop's desktop?") from exc
+            body["screen_image"], screen_origin = image, "host"
         companion.prompt(mode, bool(body.get("screen_image")))
         companion.validate_screen_image(body.get("screen_image"))
         if durable and body.get("screen_image"):

@@ -196,6 +196,69 @@ class TestTheRoutes:
         assert bad.status_code == 400
 
 
+    def test_a_live_turn_sees_the_screen_as_it_is_now(self, client, monkeypatch):
+        c, fake = client
+        shots = []
+        monkeypatch.setattr(look_now, "capture", lambda: shots.append(1) or jpeg((80, 50)))
+        for n in (1, 2):
+            r = c.post("/api/companion/chat", json={"message": f"move {n}?", "mode": "work",
+                                                    "turn_id": f"live-turn-aaaaaaaaaa{n}", "look_live": True})
+            assert r.status_code == 200
+        assert len(shots) == 2, "one fresh capture per turn, taken when the words arrive"
+        for _msg, kwargs in fake.calls:
+            assert kwargs["screen_image"] == jpeg((80, 50)) and kwargs["screen_origin"] == "host"
+
+    @pytest.mark.parametrize("extra", [
+        {"look_live": "yes"},
+        {"look_live": True, "look_id": 1},
+        {"look_live": True, "screen_image": "data:image/jpeg;base64,AAAA"},
+    ])
+    def test_a_live_turn_is_only_ever_the_servers_own_capture(self, client, monkeypatch, extra):
+        c, fake = client
+        monkeypatch.setattr(look_now, "capture", jpeg)
+        look_now.request("hotkey", image=jpeg())
+        r = c.post("/api/companion/chat", json={"message": "hi", "mode": "work",
+                                                "turn_id": "live-turn-bbbbbbbbbbbb", **extra})
+        assert r.status_code == 400 and not fake.calls
+
+    def test_no_screen_says_why(self, client, monkeypatch):
+        c, fake = client
+        def broken():
+            raise OSError("no display")
+        monkeypatch.setattr(look_now, "capture", broken)
+        r = c.post("/api/companion/chat", json={"message": "hi", "mode": "work",
+                                                "turn_id": "live-turn-cccccccccccc", "look_live": True})
+        assert r.status_code == 400 and "Could not see the screen" in r.json()["detail"]
+
+
+class TestOpenUrl:
+    @pytest.fixture
+    def opened(self, monkeypatch):
+        import webbrowser
+        seen = []
+        monkeypatch.setattr(webbrowser, "open", lambda url, new=0: seen.append(url) or True)
+        return seen
+
+    def test_a_web_page_opens_in_the_users_browser(self, opened):
+        from agent import core
+        out = core._execute_tool("open_url", {"url": "https://www.youtube.com/results?search_query=sicilian+defence"})
+        assert opened == ["https://www.youtube.com/results?search_query=sicilian+defence"]
+        assert "www.youtube.com" in out
+
+    @pytest.mark.parametrize("url", [
+        "file:///C:/Windows/System32/calc.exe", "javascript:alert(1)", "ms-settings:privacy",
+        "C:\\Windows\\notepad.exe", "https://example.com/a\nb", "http://", "ftp://example.com/x",
+    ])
+    def test_nothing_but_web_pages(self, opened, url):
+        from agent import core
+        assert core._execute_tool("open_url", {"url": url}).startswith("Not opened")
+        assert opened == []
+
+    def test_it_is_a_work_tool_not_a_discuss_tool(self):
+        from agent import companion
+        assert "open_url" not in companion.DISCUSS_TOOLS
+
+
 def test_the_model_is_told_whose_screen_it_is(monkeypatch, test_db):
     from types import SimpleNamespace
     from agent import core, schema, telemetry
@@ -215,7 +278,7 @@ def test_the_model_is_told_whose_screen_it_is(monkeypatch, test_db):
     monkeypatch.setattr(telemetry, "create", create)
     a.run("look", channel_id="companion:31", companion_mode="discuss", screen_image=jpeg(), screen_origin="host")
     texts = " ".join(x.get("text", "") for x in seen["content"] if x["type"] == "text")
-    assert "captured the moment they asked you to look" in texts
+    assert "captured the moment they spoke to you" in texts
     assert "not the Apex host screen" not in texts
 
 

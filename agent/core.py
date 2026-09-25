@@ -1079,6 +1079,23 @@ TOOLS = [
         },
     },
     {
+        "name": "open_url",
+        "description": (
+            "Open a web page in the user's OWN default browser, on their screen, "
+            "where they are already signed in — 'open YouTube', 'google how to "
+            "castle', 'go to the download page for VLC'. For a search, build the "
+            "search URL: https://www.google.com/search?q=... or "
+            "https://www.youtube.com/results?search_query=... (URL-encode the "
+            "words). Only http and https. Use browser_goto instead when YOU need "
+            "to read or fill the page yourself."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"url": {"type": "string", "description": "An http(s) URL."}},
+            "required": ["url"],
+        },
+    },
+    {
         "name": "browser_goto",
         "description": "Open a URL in a real Chromium browser. The browser persists across calls so you can navigate, click, fill forms.",
         "input_schema": {
@@ -2529,6 +2546,23 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
         elif name == "forget":
             return longterm.forget(inputs["memory_id"])
 
+        elif name == "open_url":
+            from urllib.parse import urlsplit
+            url = str(inputs.get("url") or "").strip()
+            parts = urlsplit(url)
+            # Web pages only: a file:// or custom-scheme URL handed to the OS
+            # opener can run a program, which is not what "open a page" means.
+            if parts.scheme not in ("http", "https") or not parts.netloc or len(url) > 2000 \
+                    or any(ch in url for ch in "\r\n\t"):
+                return f"Not opened — '{url[:80]}' is not an http(s) web address."
+            import webbrowser
+            try:
+                opened = webbrowser.open(url, new=2)
+            except Exception as e:
+                return f"Could not open the browser: {type(e).__name__}: {e}"
+            return (f"Opened {parts.netloc} in the user's browser." if opened else
+                    "No browser could be opened on this machine.")
+
         elif name == "browser_goto":
             return browser.goto(inputs["url"], headless=inputs.get("headless", False))
         elif name == "browser_click":
@@ -3369,8 +3403,10 @@ class AgentCore:
                 user_content.extend([
                     {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": screen_b64}},
                     {"type": "text", "text": (
-                        "[The user's own screen on the Apex host, captured the moment they asked you "
-                        "to look (hotkey or wake phrase). It is what they are doing right now.]"
+                        "[The user's own screen on the Apex host, captured the moment they spoke to you "
+                        "(the look hotkey, the wake phrase, or a live screen session, where every turn is "
+                        "captured fresh). It is what they are doing right now — earlier screenshots in "
+                        "this conversation are older.]"
                         if screen_origin == "host" else
                         "[Browser-shared screen snapshot, captured for this turn; not the Apex host screen.]")},
                 ])
