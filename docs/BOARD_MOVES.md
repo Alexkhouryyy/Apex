@@ -4,6 +4,20 @@ Open `http://127.0.0.1:7860/board`. Press **D** (or add `?diag=1`) for the
 live readout, which shows what the tracker sees and why a move did or did not
 happen.
 
+**The instructions are on the board itself**, in the **HANDS** panel on the
+left: every move, a line saying what to do right now, and a **pinch meter**
+for your hand. **H** (or **? Help**) hides and shows it, and it remembers.
+
+**If it grabs when you don't pinch, or things follow a relaxed hand:** press
+**Calibrate your pinch** in that panel. On screen it asks for three poses,
+three seconds each: hand **open**, hand **relaxed** (the way it rests) and a
+real **pinch**. It sets where a pinch starts and ends from your own hand,
+uses it at once, and saves it to `.env`. If the poses can't be told apart,
+it says why and changes nothing. The meter shows the number that decides:
+the blue bar is the gap between thumb and index, yellow is where a pinch
+starts, and pink is where it lets go. A resting hand whose bar sits left of
+yellow is the problem, made visible.
+
 | Move | How | What happens |
 |---|---|---|
 | **Grab** | Pinch thumb to index on a card and hold a beat | It follows your hand |

@@ -2278,6 +2278,14 @@ async def board_prop(rel: str):
     return FileResponse(str(path), media_type=_props.media_type(path))
 
 
+def _pinch_calibration_status() -> dict:
+    try:
+        from agent import pinch_calibration
+        return pinch_calibration.status()
+    except Exception:
+        return {"phase": "idle"}
+
+
 @app.websocket("/ws/board")
 async def ws_board(ws: WebSocket):
     """Stream cursors, cards and the camera backdrop to the board.
@@ -2334,6 +2342,8 @@ async def ws_board(ws: WebSocket):
                 "grabs": [],
                 "pointed": (board.pointed() or {}).get("id"),
                 "events": [],
+                # The pinch calibration's prompts, shown on the board itself.
+                "calibration": _pinch_calibration_status(),
             }
             fresh = board.events_since(seen_event)
             if fresh:

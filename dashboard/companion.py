@@ -124,6 +124,27 @@ async def parts_mode(request: Request):
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/api/board/calibrate")
+async def calibrate_pinch(request: Request):
+    """Start (or cancel) calibrating the pinch to the user's hand. The board
+    shows the prompts from the status it receives on /ws/board."""
+    _check_origin(request)
+    from agent import handtrack, pinch_calibration
+    try:
+        body = await _small_json(request)
+        action = body.get("action")
+        if action == "cancel":
+            return pinch_calibration.cancel()
+        if action != "start":
+            raise ValueError("action must be start or cancel")
+        tracker = handtrack.active_tracker()
+        if tracker is None:
+            raise ValueError("Hand tracking is off — set HANDTRACK_ENABLED=true in .env and restart Apex.")
+        return pinch_calibration.start(tracker.latest_hands)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/api/board/viewport")
 async def board_viewport(request: Request):
     """The board page's size: where a model's parts are drawn depends on it."""

@@ -114,6 +114,31 @@
   /* Voice on: a strip in the corner, so the board stays free for your hands. */
   #partner-panel.voice {top:auto;height:180px;width:min(380px,70vw)}
   #voice-toggle[aria-pressed=true] {background:#174f48;border-color:#5adac1;color:#bafbed}
+  /* The instructions, in front of you while you use it. H hides them. */
+  #hud {position:fixed;left:16px;top:92px;z-index:30;width:300px;max-height:calc(100vh - 150px);overflow:auto;
+    background:#0b1726e0;border:1px solid var(--edge);border-radius:14px;padding:12px 14px;font-size:13px;line-height:1.45}
+  #hud h2 {font-size:13px;letter-spacing:.12em;margin:0 0 8px;display:flex;justify-content:space-between;align-items:center}
+  #hud h2 button {background:none;border:0;color:var(--ink);cursor:pointer;font-size:12px;opacity:.7}
+  #hud .now {background:#12304a;border-radius:9px;padding:7px 9px;margin-bottom:9px;font-weight:600}
+  #hud .meter {height:10px;border-radius:6px;background:#1c2b3c;position:relative;margin:4px 0 2px;overflow:hidden}
+  #hud .meter i {position:absolute;left:0;top:0;bottom:0;background:#6ea8ff;border-radius:6px}
+  #hud .meter b {position:absolute;top:-2px;bottom:-2px;width:2px;background:#ffd166}
+  #hud .meter b.rel {background:#ff8fa3}
+  #hud .pinch-state {font-size:12px;opacity:.85}
+  #hud .pinch-state.on {color:#7aebc7;opacity:1;font-weight:700}
+  #hud dl {display:grid;grid-template-columns:118px 1fr;gap:2px 8px;margin:8px 0;font-size:12px}
+  #hud dt {font-weight:600;white-space:nowrap}
+  #hud dd {margin:0;opacity:.85}
+  #hud .keys {opacity:.7;font-size:12px}
+  #hud button.calibrate {margin-top:6px;width:100%;padding:8px;border-radius:9px;border:1px solid #6ea8ff;background:#14325a;color:var(--ink);cursor:pointer}
+  #hud-toggle[aria-pressed=true] {background:#174f48;border-color:#5adac1;color:#bafbed}
+  #calib {position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:#05070cd0;text-align:center;gap:14px;padding:24px}
+  #calib[hidden] {display:none}
+  #calib h1 {font-size:30px;max-width:720px}
+  #calib .big {font-size:64px;font-weight:700}
+  #calib p {max-width:620px;opacity:.85}
+  #calib button {padding:10px 18px;border-radius:10px;border:1px solid var(--edge);background:#14325a;color:var(--ink);cursor:pointer;font-size:15px}
   #diag {position:fixed;right:12px;bottom:56px;z-index:40;width:310px;
          background:rgba(6,14,18,.93);border:1px solid #17313a;border-radius:10px;
          color:#cfe9e2;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -154,7 +179,35 @@
   <div class="diag-head">what the tracker sees <button id="diag-close" aria-label="Hide">×</button></div>
   <div id="diag-body">waiting for a frame…</div>
 </div>
-<nav id="board-bar"><a href="/">APEX</a><span id="selection-label" role="status">Pinch an object or tap its label to select it.</span><button id="clear-selection">Deselect</button><button id="voice-toggle" aria-pressed="false" title="Talk with Celine while you use your hands (V). Swipe down stops her; swipe up or pinch-and-hold starts listening.">🎙 Voice</button><button id="partner-toggle" aria-expanded="false">Talk to Apex</button><select id="exports" aria-label="Download a manufacturing export"><option value="">Manufacturing exports…</option></select><button id="refresh-exports">Refresh exports</button></nav>
+<aside id="hud" aria-label="How to use the board">
+  <h2>HANDS <button id="hud-close" title="Hide these instructions (H)">Hide · H</button></h2>
+  <div class="now" id="hud-now">Hold a hand up in front of the camera.</div>
+  <div id="hud-pinch">
+    <div class="meter" title="Your pinch: blue is the gap between thumb and index. Under the yellow line = pinching; it lets go above the pink one."><i id="hud-bar"></i><b id="hud-enter"></b><b class="rel" id="hud-release"></b></div>
+    <div class="pinch-state" id="hud-state">no hand</div>
+  </div>
+  <button class="calibrate" id="calibrate">Grabbing when you don't pinch? Calibrate your pinch</button>
+  <dl id="hud-moves">
+    <dt>Pinch &amp; hold</dt><dd>grab — it follows your hand</dd>
+    <dt>Let go</dt><dd>open your fingers — it stays there</dd>
+    <dt>Two hands</dt><dd>pinch both, pull apart = bigger, twist = turn</dd>
+    <dt>Quick tap</dt><dd>pinch, let go, don't move — Celine explains it</dd>
+    <dt>Open hand over it</dt><dd>points at it — "make <i>this</i> blue"</dd>
+    <dt>Flick to an edge</dt><dd>throw away ("undo" = back)</dd>
+    <dt>Open palm, still</dt><dd>cancel — back where it was</dd>
+    <dt>Swipe up / down</dt><dd>talk to Celine / hush her</dd>
+    <dt>Swipe left/right</dt><dd>select previous / next</dd>
+  </dl>
+  <div class="keys"><b>V</b> voice · <b>P</b> move one part · <b>D</b> readout · <b>H</b> hide this<br>Say <i>"build me a …"</i>, <i>"undo"</i>, <i>"make it bigger"</i>.</div>
+</aside>
+<div id="calib" hidden role="dialog" aria-live="assertive">
+  <p id="calib-step"></p>
+  <h1 id="calib-prompt"></h1>
+  <div class="big" id="calib-left"></div>
+  <p id="calib-note"></p>
+  <div><button id="calib-action">Cancel</button></div>
+</div>
+<nav id="board-bar"><a href="/">APEX</a><span id="selection-label" role="status">Pinch an object or tap its label to select it.</span><button id="clear-selection">Deselect</button><button id="hud-toggle" aria-pressed="true" title="Show or hide the instructions (H)">? Help</button><button id="voice-toggle" aria-pressed="false" title="Talk with Celine while you use your hands (V). Swipe down stops her; swipe up or pinch-and-hold starts listening.">🎙 Voice</button><button id="partner-toggle" aria-expanded="false">Talk to Apex</button><select id="exports" aria-label="Download a manufacturing export"><option value="">Manufacturing exports…</option></select><button id="refresh-exports">Refresh exports</button></nav>
 <aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; autoplay; display-capture"></iframe></aside>
 
 <script type="module">
@@ -337,6 +390,92 @@ addEventListener('message', ev => {
     document.getElementById('voice-toggle').setAttribute('aria-pressed', String(voiceOn));
   }
 });
+
+// --- The instructions, in front of you (H hides them) -----------------------
+let hudHidden = false;
+try { hudHidden = localStorage.getItem('apex.board.hud') === 'hidden'; } catch (_) {}
+function setHud(show) {
+  hudHidden = !show;
+  document.getElementById('hud').hidden = hudHidden;
+  document.getElementById('hud-toggle').setAttribute('aria-pressed', String(!hudHidden));
+  try { localStorage.setItem('apex.board.hud', hudHidden ? 'hidden' : 'shown'); } catch (_) {}
+}
+setHud(!hudHidden);
+document.getElementById('hud-close').onclick = () => setHud(false);
+document.getElementById('hud-toggle').onclick = () => setHud(hudHidden);
+
+// What to do right now, in one line — the part of the instructions that
+// matters this second.
+function hudNow(msg) {
+  const cards = msg.cards || [], hands = msg.hands || [];
+  const held = cards.find(c => c.held), parts = cards.find(c => c.parts_mode);
+  if (!msg.tracking) return 'Hand tracking is off — HANDTRACK_ENABLED=true and BOARD_ENABLED=true in .env, then restart Apex.';
+  if (msg.board_enabled === false) return 'The board is off — set BOARD_ENABLED=true in .env and restart Apex.';
+  if (!hands.length) return 'Hold a hand up in front of the camera.';
+  if (parts && parts.part) return `Moving the ${parts.part.name} — let go to save, open palm to cancel.`;
+  if (parts) return `Parts mode on ${parts.title}: pinch a part to move it. P to finish.`;
+  if (held && held.hands === 2) return `Resizing ${held.title} — pull apart / together, twist to turn.`;
+  if (held) return `Holding ${held.title} — move it, open your fingers to let go, flick to throw.`;
+  if (!cards.length) return 'Nothing here yet — press V and say "build me a rocket".';
+  if (hands.some(h => h.pinched)) return 'Pinched — move onto an object to grab it.';
+  return 'Pinch an object to grab it, or tap it quickly to ask Celine.';
+}
+function renderHud(msg) {
+  const now = document.getElementById('hud-now'), text = hudNow(msg);
+  if (now.textContent !== text) now.textContent = text;
+  // The pinch meter, for the first hand: the gap, and where it counts as a
+  // pinch (yellow) and where it lets go (pink). A resting hand whose bar sits
+  // left of yellow is the "grabs when I don't pinch" problem, visible.
+  const h = (msg.hands || [])[0], state = document.getElementById('hud-state');
+  const pos = v => Math.max(0, Math.min(100, (v / 1.5) * 100)) + '%';
+  if (h && h.ratio != null) {
+    document.getElementById('hud-bar').style.width = pos(h.ratio);
+    document.getElementById('hud-enter').style.left = pos(h.threshold);
+    document.getElementById('hud-release').style.left = pos(h.release);
+    state.textContent = h.pinched ? `PINCHED · ${h.ratio.toFixed(2)} (lets go above ${h.release.toFixed(2)})`
+                                  : `open · ${h.ratio.toFixed(2)} (pinch below ${h.threshold.toFixed(2)})`;
+    state.classList.toggle('on', !!h.pinched);
+  } else {
+    document.getElementById('hud-bar').style.width = '0';
+    state.textContent = msg.tracking ? 'no hand' : 'tracking off';
+    state.classList.remove('on');
+  }
+  renderCalibration(msg.calibration || {phase: 'idle'});
+}
+
+// --- Calibrate the pinch to your hand, prompted on screen -------------------
+let calibShownDone = null;
+function renderCalibration(c) {
+  const box = document.getElementById('calib'), action = document.getElementById('calib-action');
+  if (c.phase === 'idle') { box.hidden = true; return; }
+  if (c.phase === 'done' && calibShownDone === 'closed') { box.hidden = true; return; }
+  box.hidden = false;
+  const set = (id, t) => { const el = document.getElementById(id); if (el.textContent !== t) el.textContent = t; };
+  if (c.phase === 'ready' || c.phase === 'recording') {
+    calibShownDone = null;
+    set('calib-step', `Step ${c.step} of ${c.steps} · ${c.phase === 'ready' ? 'get ready' : 'recording — hold still'}`);
+    set('calib-prompt', c.prompt || '');
+    set('calib-left', `${Math.ceil(c.left || 0)}`);
+    set('calib-note', c.phase === 'recording' ? `${c.samples || 0} readings` : 'Keep your hand in view of the camera.');
+    action.textContent = 'Cancel'; action.dataset.act = 'cancel';
+  } else if (c.phase === 'done') {
+    set('calib-step', c.ok ? 'Done' : 'Could not calibrate');
+    set('calib-prompt', c.ok ? `Pinch now starts below ${c.enter} and lets go above ${c.release}.` : 'Nothing was changed.');
+    set('calib-left', c.ok ? '✓' : '×');
+    set('calib-note', `${c.reason || ''}${c.ok ? ' — ' + (c.saved === 'saved' ? 'saved, and in use now.' : c.saved) : ''}`);
+    action.textContent = c.ok ? 'Close' : 'Close'; action.dataset.act = 'close';
+  }
+}
+async function calibrate(act) {
+  try {
+    await api('/api/board/calibrate', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: act})});
+  } catch (error) { toast(error.message, 6000); }
+}
+document.getElementById('calibrate').onclick = () => { calibShownDone = null; calibrate('start'); };
+document.getElementById('calib-action').onclick = ev => {
+  if (ev.target.dataset.act === 'cancel') calibrate('cancel');
+  else { calibShownDone = 'closed'; document.getElementById('calib').hidden = true; }
+};
 
 function handleBoardEvents(events) {
   for (const ev of events || []) {
@@ -602,6 +741,7 @@ addEventListener("keydown", ev => {
   if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
   if (ev.key === "v" || ev.key === "V") { setVoice(!voiceOn); return; }
   if (ev.key === "p" || ev.key === "P") { toggleParts(); return; }
+  if (ev.key === "h" || ev.key === "H") { setHud(hudHidden); return; }
   if (ev.key === "Escape" && voiceOn) { setVoice(false); return; }
   if (ev.key !== "d" && ev.key !== "D") return;
   diagEl.hidden = !diagEl.hidden;
@@ -706,6 +846,7 @@ function connect() {
       : sel?.parts_mode ? `Selected: ${msg.selection.title} · parts — pinch one to move it, P to finish`
       : `Selected: ${msg.selection.title} · whole object${sel?.kind === 'model' ? ' — P to take it apart' : ''}`;
     renderCards(msg.cards || []);
+    renderHud(msg);
     syncModels(msg.cards || []);
     renderCursors(msg.cursors || []);
     if (!diagEl.hidden) renderDiag(msg);
