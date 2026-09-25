@@ -108,6 +108,23 @@ class TestTheGuidedRun:
         assert st["phase"] == "done" and not st["ok"]
         assert config.HANDTRACK_PINCH_RATIO == 0.70 and not (tmp_path / ".env").exists()
 
+    def test_a_3d_run_is_recorded_as_calibrated_for_3d(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_MEASURE", "", raising=False)
+        t = {"now": 0.0}
+        def hands():
+            st = pc.status()
+            lo, hi = {"open": (0.95, 1.3), "relaxed": (0.55, 0.65), "pinch": (0.1, 0.25)}.get(st.get("pose"), (1, 1))
+            return [{"ratio": random.uniform(lo, hi) if st.get("phase") == "recording" else 0.05, "measure": "3d"}]
+        pc.start(hands, sleep=lambda s: t.__setitem__("now", t["now"] + s), clock=lambda: t["now"],
+                 env_path=tmp_path / ".env", background=False)
+        assert pc.status()["measure"] == "3d" and config.HANDTRACK_PINCH_MEASURE == "3d"
+        assert "HANDTRACK_PINCH_MEASURE=3d" in (tmp_path / ".env").read_text()
+
+    def test_a_run_with_any_flat_readings_is_not_called_3d(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_MEASURE", "", raising=False)
+        self.run(tmp_path, {"open": (0.95, 1.3), "relaxed": (0.55, 0.65), "pinch": (0.1, 0.25)})
+        assert pc.status()["measure"] == "2d"
+
     def test_cancel_stops_it(self):
         pc.start(lambda: [], sleep=lambda s: None, clock=lambda: 0.0, background=True)
         assert pc.cancel()["phase"] == "idle"

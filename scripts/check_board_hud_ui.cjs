@@ -71,6 +71,13 @@ function open(stored) {
   assert.match($('hud-state').textContent, /open · 1.05 \(pinch below 0.70\)/);
   assert.ok(!$('hud-state').classList.contains('on'));
 
+  // 3b. Not calibrated for the 3D pinch yet: the button says so, loudly.
+  frame({hands: [hand(1.05, false)], pinch_calibrated: false});
+  assert.match($('calibrate').textContent, /Not calibrated for your hand yet/);
+  assert.ok($('calibrate').classList.contains('urgent'));
+  frame({hands: [hand(1.05, false)], pinch_calibrated: true});
+  assert.match($('calibrate').textContent, /Calibrate your pinch/); assert.ok(!$('calibrate').classList.contains('urgent'));
+
   // 4. Calibration, prompt by prompt, on screen.
   $('calibrate').click(); await tick();
   assert.equal(JSON.stringify(posts.at(-1)), JSON.stringify({action: 'start'}));

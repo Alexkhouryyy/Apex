@@ -18,6 +18,15 @@ the blue bar is the gap between thumb and index, yellow is where a pinch
 starts, and pink is where it lets go. A resting hand whose bar sits left of
 yellow is the problem, made visible.
 
+**Pinch is measured in 3D (since 2026-09-25).** It used to be measured flat on
+the camera picture, where a hand turned side-on with the thumb *behind* the
+index finger looks like a pinch, so the board grabbed "without even fully
+pinching". The tracker now uses MediaPipe's real-space hand positions, so a
+thumb that is behind the finger is measured as centimetres away. Until you
+calibrate, 3D hands use starting values of 0.35 and 0.45 (about 3 cm and
+3.8 cm between fingertips). The **calibrate** button stays gold until you've
+calibrated with the 3D measure, so press it once.
+
 | Move | How | What happens |
 |---|---|---|
 | **Grab** | Pinch thumb to index on a card and hold a beat | It follows your hand |

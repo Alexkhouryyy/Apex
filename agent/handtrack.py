@@ -90,6 +90,18 @@ PINKY_TIP = 20
 # second, quieter answer disagreeing with the first by a quarter.
 DEFAULT_PINCH_RATIO = 0.70
 
+# The 3D measure (pinch_ratio with world landmarks) reads on a different
+# scale from the flat one those numbers were calibrated on: a thumb 4 cm
+# behind the index finger reads 0.47 in 3D, well under 0.70 — still a
+# "pinch". Until the board's calibration has measured YOUR hand in 3D
+# (HANDTRACK_PINCH_MEASURE=3d), 3D hands use these instead: about 3 cm
+# between the fingertips on an 8.5 cm palm starts a pinch, about 3.8 cm ends
+# it. Estimates from ordinary hand proportions, not a measurement of anyone —
+# calibrating replaces them. They err on the strict side because a false
+# grab drags things around; a stiff pinch only asks for a firmer one.
+PINCH_3D_ENTER = 0.35
+PINCH_3D_RELEASE = 0.45
+
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
              "hand_landmarker/float16/1/hand_landmarker.task")
 MODEL_NAME = "hand_landmarker.task"
@@ -302,27 +314,53 @@ def build_landmarker(num_hands: int = 2):
         getattr(config, "HANDTRACK_DELEGATE", "auto"), _create)
 
 
-def pinch_ratio(lms) -> Optional[float]:
+def pinch_ratio(lms, world=None) -> Optional[float]:
     """Thumb-to-index distance as a fraction of the hand's own span.
 
     Scale-invariant by construction, which is what makes one threshold work at
     arm's length and up close. Returns None if the landmarks are unusable —
     including a degenerate span, which would otherwise divide by zero and take
     the tracker thread down with it.
+
+    `world` is MediaPipe's hand_world_landmarks for the same hand: real 3D
+    positions in metres. When present the gap and span are measured in 3D.
+    Measured flat on the picture, a hand turned side-on to the camera with
+    the thumb BEHIND the index finger reads as touching — the first real use
+    of the board grabbed exactly like that, "without even fully pinching",
+    and no threshold can fix it because in 2D the two poses are the same. In
+    3D the hidden thumb is centimetres away. The flat picture also measured
+    across and down in different units (image width vs height); metres are
+    the same in every direction. Without world landmarks (older callers,
+    tests), the 2D measure is used as before.
     """
+    three_d = _usable(world)
+    pts = world if three_d else lms
     try:
-        t, i = lms[THUMB_TIP], lms[INDEX_TIP]
-        w, m = lms[WRIST], lms[MIDDLE_MCP]
+        t, i = pts[THUMB_TIP], pts[INDEX_TIP]
+        w, m = pts[WRIST], pts[MIDDLE_MCP]
     except (IndexError, TypeError):
         return None
     try:
-        gap = ((t.x - i.x) ** 2 + (t.y - i.y) ** 2) ** 0.5
-        span = ((w.x - m.x) ** 2 + (w.y - m.y) ** 2) ** 0.5
+        if three_d:
+            gap = ((t.x - i.x) ** 2 + (t.y - i.y) ** 2 + (t.z - i.z) ** 2) ** 0.5
+            span = ((w.x - m.x) ** 2 + (w.y - m.y) ** 2 + (w.z - m.z) ** 2) ** 0.5
+        else:
+            gap = ((t.x - i.x) ** 2 + (t.y - i.y) ** 2) ** 0.5
+            span = ((w.x - m.x) ** 2 + (w.y - m.y) ** 2) ** 0.5
     except (AttributeError, TypeError):
         return None
     if span <= 1e-6:
         return None
     return gap / span
+
+
+def _usable(world) -> bool:
+    """Whether a world-landmark list has the four points pinch_ratio needs, in 3D."""
+    try:
+        return world is not None and len(world) > max(THUMB_TIP, INDEX_TIP, WRIST, MIDDLE_MCP) and all(
+            hasattr(world[k], "z") for k in (THUMB_TIP, INDEX_TIP, WRIST, MIDDLE_MCP))
+    except TypeError:
+        return False
 
 
 def is_open_palm(lms) -> Optional[bool]:
@@ -852,6 +890,7 @@ class HandTracker(threading.Thread):
             self._ids = HandIdentities()
 
         raw = list(result.hand_landmarks or [])
+        worlds = list(getattr(result, "hand_world_landmarks", None) or [])
         found = []
         for idx, lms in enumerate(raw):
             cur = landmarks_to_cursor(lms, mirror=mirror)
@@ -861,8 +900,12 @@ class HandTracker(threading.Thread):
 
         rows = []
         for (idx, lms, cur), hid in zip(found, ids):
-            r = pinch_ratio(lms)
-            pinched = self._latch.update(hid, r, enter, release)
+            world = worlds[idx] if idx < len(worlds) else None
+            r = pinch_ratio(lms, world)
+            e, rl = enter, release
+            if _usable(world) and getattr(config, "HANDTRACK_PINCH_MEASURE", "") != "3d":
+                e, rl = PINCH_3D_ENTER, PINCH_3D_RELEASE
+            pinched = self._latch.update(hid, r, e, rl)
             label = _handedness_label(result, idx) or "?"
             cur = (cur[0], cur[1], pinched, cur[3], hid)
             # Measured once and kept, not measured once and printed. The ratio
@@ -874,8 +917,9 @@ class HandTracker(threading.Thread):
                 "id": hid, "label": label,
                 "x": round(cur[0], 4), "y": round(cur[1], 4),
                 "ratio": round(r, 4) if r is not None else None,
-                "threshold": round(enter, 4),
-                "release": round(release, 4),
+                "measure": "3d" if _usable(world) else "2d",
+                "threshold": round(e, 4),
+                "release": round(rl, 4),
                 "pinched": bool(pinched),
                 "open_palm": bool(cur[3]),
             }

@@ -412,3 +412,66 @@ def test_the_calibrator_places_release_between_entry_and_the_open_hand():
     open_samples = [0.83, 0.85, 0.9, 0.95, 1.0] * 6
     release = cal.recommend_release(0.70, open_samples)
     assert 0.70 < release < 0.83
+
+
+# --------------------------------------------------------------------------
+# Side-on hands: the 3D measure (hand_world_landmarks)
+# --------------------------------------------------------------------------
+
+class TestSideOnHandsAreNotPinches:
+    """First real use of the board: a hand turned side-on to the camera, index
+    pointing across, thumb BEHIND it — not touching — grabbed like a pinch.
+    Flat on the picture the two tips overlap; in 3D the thumb is 4 cm away."""
+
+    @staticmethod
+    def world(gap_cm: float, depth_cm: float):
+        """Metric 3D landmarks: 8.5 cm palm span, thumb `gap_cm` across and
+        `depth_cm` behind the index tip."""
+        pts = [SimpleNamespace(x=0.0, y=0.0, z=0.0) for _ in range(21)]
+        pts[ht.WRIST] = SimpleNamespace(x=0.0, y=0.085, z=0.0)
+        pts[ht.MIDDLE_MCP] = SimpleNamespace(x=0.0, y=0.0, z=0.0)
+        pts[ht.INDEX_TIP] = SimpleNamespace(x=0.05, y=0.0, z=0.0)
+        pts[ht.THUMB_TIP] = SimpleNamespace(x=0.05 + gap_cm / 100, y=0.0, z=depth_cm / 100)
+        return pts
+
+    def test_the_hidden_thumb_is_measured_in_depth(self):
+        flat = hand(0.05)                                   # tips overlap in the picture
+        assert ht.pinch_ratio(flat) < 0.1                   # the old measure: "pinched"
+        assert ht.pinch_ratio(flat, self.world(0.3, 4.0)) > 0.45   # 4 cm behind: not
+
+    def test_a_real_pinch_is_still_a_pinch(self):
+        assert ht.pinch_ratio(hand(0.05), self.world(0.5, 0.3)) < 0.15
+
+    def test_the_tracker_uses_the_3d_measure_when_mediapipe_gives_it(self):
+        t = tracker()
+        result = frame(hand(0.05))
+        result.hand_world_landmarks = [self.world(0.3, 4.0)]
+        cursors, details = t._read_hands(result, now=10.0)
+        assert cursors[0][2] is False, "a side-on hand with the thumb behind must not pinch"
+        assert details[0]["measure"] == "3d"
+        result.hand_world_landmarks = [self.world(0.4, 0.2)]
+        cursors, details = t._read_hands(result, now=10.1)
+        assert cursors[0][2] is True
+
+    def test_without_world_landmarks_it_is_the_flat_measure_as_before(self):
+        t = tracker()
+        cursors, details = t._read_hands(frame(hand(0.40)), now=20.0)
+        assert cursors[0][2] is True and details[0]["measure"] == "2d"
+
+    def test_unusable_world_landmarks_fall_back(self):
+        assert ht.pinch_ratio(hand(0.30), [SimpleNamespace(x=0, y=0)] * 21) == pytest.approx(0.30)
+        assert ht.pinch_ratio(hand(0.30), [None] * 3) == pytest.approx(0.30)
+
+    def test_a_3d_calibration_replaces_the_3d_starting_values(self, monkeypatch):
+        # 0.47 (thumb 4 cm behind): not a pinch at the 3D start of 0.35 —
+        # but a hand calibrated at 0.50 in 3D says it is, and it is theirs.
+        t = tracker()
+        result = frame(hand(0.05))
+        result.hand_world_landmarks = [self.world(0.3, 4.0)]
+        assert t._read_hands(result, now=30.0)[0][0][2] is False
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_MEASURE", "3d", raising=False)
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_RATIO", 0.50)
+        monkeypatch.setattr(config, "HANDTRACK_PINCH_RELEASE_RATIO", 0.60)
+        t2 = tracker()
+        cursors, details = t2._read_hands(result, now=31.0)
+        assert cursors[0][2] is True and details[0]["threshold"] == 0.5

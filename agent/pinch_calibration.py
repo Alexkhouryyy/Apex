@@ -72,12 +72,15 @@ def compute(samples: dict) -> dict:
 
 def apply(result: dict, env_path: Path = ENV_PATH) -> str:
     """Use it now and keep it: config (read by the tracker every frame) and .env."""
+    measure = result.get("measure", "3d")
     config.HANDTRACK_PINCH_RATIO = result["enter"]
     config.HANDTRACK_PINCH_RELEASE_RATIO = result["release"]
+    config.HANDTRACK_PINCH_MEASURE = measure
     try:
         from scripts.set_env_key import set_key
         set_key(env_path, "HANDTRACK_PINCH_RATIO", str(result["enter"]))
         set_key(env_path, "HANDTRACK_PINCH_RELEASE_RATIO", str(result["release"]))
+        set_key(env_path, "HANDTRACK_PINCH_MEASURE", measure)
         return "saved"
     except Exception as e:
         return f"in use now, but not saved to .env ({type(e).__name__}: {e})"
@@ -86,6 +89,7 @@ def apply(result: dict, env_path: Path = ENV_PATH) -> str:
 def _run(read_hands: Callable[[], list], sleep: Callable[[float], None], clock: Callable[[], float],
          env_path: Path) -> None:
     samples: dict = {}
+    measures: set = set()
     for i, (pose, prompt) in enumerate(POSES):
         # Get ready: the prompt shows before anything is recorded, so the
         # moment of changing pose never lands in either pile.
@@ -101,12 +105,16 @@ def _run(read_hands: Callable[[], list], sleep: Callable[[float], None], clock: 
         while clock() < end:
             if _cancel.is_set():
                 _set(phase="idle"); return
-            got += [h["ratio"] for h in read_hands() if h.get("ratio") is not None]
+            seen = [h for h in read_hands() if h.get("ratio") is not None]
+            got += [h["ratio"] for h in seen]
+            measures.update(h.get("measure", "2d") for h in seen)
             _set(phase="recording", pose=pose, step=i + 1, steps=len(POSES), prompt=prompt,
                  left=round(end - clock(), 1), samples=len(got))
             sleep(1.0 / SAMPLE_HZ)
         samples[pose] = got
     result = compute(samples)
+    # Only a run measured entirely in 3D counts as calibrated for it.
+    result["measure"] = "3d" if measures == {"3d"} else "2d"
     if result["ok"]:
         result["saved"] = apply(result, env_path)
     _set(phase="done", **result)

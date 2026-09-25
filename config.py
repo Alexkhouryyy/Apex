@@ -529,6 +529,12 @@ HANDTRACK_PINCH_RATIO = float(os.getenv("HANDTRACK_PINCH_RATIO", "0.70"))
 # writes both. Set it equal to HANDTRACK_PINCH_RATIO to turn hysteresis off.
 _release = os.getenv("HANDTRACK_PINCH_RELEASE_RATIO", "").strip()
 HANDTRACK_PINCH_RELEASE_RATIO = float(_release) if _release else None
+# Which measure the two numbers above were calibrated with. The pinch is now
+# measured in 3D (agent/handtrack.pinch_ratio) — a side-on hand no longer
+# reads as pinched — and numbers from the old flat measure are only roughly
+# comparable. The board's calibration writes "3d"; until then the board asks
+# you to calibrate.
+HANDTRACK_PINCH_MEASURE = os.getenv("HANDTRACK_PINCH_MEASURE", "").strip().lower()
 HANDTRACK_DEBUG = os.getenv("HANDTRACK_DEBUG", "false").lower() in {"1", "true", "yes"}
 # The webcam is exclusive: while Apex holds it, no video call can open it. This
 # is how long `release_camera` hands it back before tracking resumes on its own,

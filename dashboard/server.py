@@ -2344,6 +2344,9 @@ async def ws_board(ws: WebSocket):
                 "events": [],
                 # The pinch calibration's prompts, shown on the board itself.
                 "calibration": _pinch_calibration_status(),
+                # Calibrated with the 3D measure the tracker now uses? If
+                # not, the board asks for it before anything else.
+                "pinch_calibrated": getattr(config, "HANDTRACK_PINCH_MEASURE", "") == "3d",
             }
             fresh = board.events_since(seen_event)
             if fresh:

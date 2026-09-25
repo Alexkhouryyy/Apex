@@ -224,9 +224,11 @@ def collect(landmarker, cap, mp, seconds: float, frame_no: int,
                          data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         result = landmarker.detect_for_video(image, frame_no * 50)
         hands = result.hand_landmarks or []
+        worlds = list(getattr(result, "hand_world_landmarks", None) or [])
         hands_seen += len(hands)
-        for lms in hands:
-            r = handtrack.pinch_ratio(lms)
+        for k, lms in enumerate(hands):
+            # The same 3D measure the tracker uses, or the numbers would not match.
+            r = handtrack.pinch_ratio(lms, worlds[k] if k < len(worlds) else None)
             if r is not None:
                 samples.append(r)
         if preview:
