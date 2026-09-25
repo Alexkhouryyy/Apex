@@ -933,6 +933,11 @@ class HandTracker(threading.Thread):
         result = self._landmarker.detect_for_video(
             image, int(self._frame_no * self.interval * 1000))
 
+        try:
+            from agent import gesture_recorder
+            gesture_recorder.observe(result, now)      # no-op unless recording
+        except Exception as e:
+            print(f"[HandTrack] gesture recording failed: {e}")
         cursors, details = self._read_hands(result, now)
 
         # The board reads the SAME cursor list the recognizer does, rather than

@@ -145,6 +145,26 @@ async def calibrate_pinch(request: Request):
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/api/board/record")
+async def record_gestures(request: Request):
+    """Start (or cancel) recording the user's gestures on cue — hand joints
+    only, no picture (agent/gesture_recorder.py)."""
+    _check_origin(request)
+    from agent import gesture_recorder, handtrack
+    try:
+        body = await _small_json(request)
+        action = body.get("action")
+        if action == "cancel":
+            return gesture_recorder.cancel()
+        if action != "start":
+            raise ValueError("action must be start or cancel")
+        if handtrack.active_tracker() is None:
+            raise ValueError("Hand tracking is off — set HANDTRACK_ENABLED=true in .env and restart Apex.")
+        return gesture_recorder.start()
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/api/board/viewport")
 async def board_viewport(request: Request):
     """The board page's size: where a model's parts are drawn depends on it."""

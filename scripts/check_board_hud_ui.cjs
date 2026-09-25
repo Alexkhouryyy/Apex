@@ -117,6 +117,19 @@ function open(stored) {
   frame({calibration: {phase: 'done', ok: false, reason: 'These cannot be separated: overlap'}});
   assert.equal($('calib').hidden, false); assert.match($('calib-prompt').textContent, /Nothing was changed/);
 
+  // 5. Record my gestures: the button asks, the prompts run, the file is named.
+  assert.match($('record').textContent, /Record my gestures/);
+  frame({calibration: {phase: 'idle'}, recording: {phase: 'recording', step: 3, steps: 18, prompt: 'Make a FIST', left: 2.2, frames: 40}});
+  assert.equal($('calib').hidden, false);
+  assert.match($('calib-step').textContent, /Gesture 3 of 18 · go/);
+  assert.equal($('calib-prompt').textContent, 'Make a FIST');
+  assert.match($('calib-note').textContent, /no picture is saved/);
+  frame({calibration: {phase: 'idle'}, recording: {phase: 'done', path: 'C:/Users/me/Apex/recordings/gestures-1.json.gz', size_kb: 480, frames: 2100, missing: ['side_on']}});
+  assert.match($('calib-note').textContent, /gestures-1\.json\.gz \(480 KB, 2100 frames\) — no hand was seen during: side_on/);
+  $('calib-action').click();
+  frame({calibration: {phase: 'idle'}, recording: {phase: 'done', path: 'x', size_kb: 1, frames: 1, missing: []}});
+  assert.equal($('calib').hidden, true, 'closed stays closed');
+
   console.log('PASS: the instructions are shown by default and H / Help hide them (remembered); the "now" line follows what you are doing; '
     + 'the pinch meter shows the deciding number; calibration runs prompt by prompt on screen, can be cancelled, and shows its result.');
   w.close(); process.exit(0);

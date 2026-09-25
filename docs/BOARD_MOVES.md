@@ -12,6 +12,21 @@ recordings show they work: flick to throw (`BOARD_THROW_ENABLED=true`),
 swipe left/right, wave and pinch-and-hold (add them to
 `HANDTRACK_GESTURE_ACTIONS`). A fist is never a grab.
 
+**Record my gestures (tuning to your hand).** In the HANDS panel, **Record
+my gestures for tuning** runs about two minutes of on-screen prompts: open,
+relaxed, fist, side-on, pinch, taps, a grab, two hands, open palm, swipes, and
+a stretch of ordinary movement that must not grab. It saves **only the hand
+joint positions, no picture**, to `recordings/gestures-<time>.json.gz` in the
+Apex folder. Then run
+
+    .venv\Scripts\python -m tools.replay_gestures recordings\gestures-<time>.json.gz
+
+It plays the recording back through the real tracker, board and gesture
+recogniser with the current settings, and prints, per gesture, whether it
+did what was asked (OK / WRONG), plus the pinch threshold your recording
+supports. Paste that output, or send the file itself, and the settings get
+tuned on your hand instead of estimated.
+
 **The instructions are on the board itself**, in the **HANDS** panel on the
 left: every move, a line saying what to do right now, and a **pinch meter**
 for your hand. **H** (or **? Help**) hides and shows it, and it remembers.

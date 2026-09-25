@@ -188,6 +188,7 @@
     <div class="pinch-state" id="hud-state">no hand</div>
   </div>
   <button class="calibrate" id="calibrate">Grabbing when you don't pinch? Calibrate your pinch</button>
+  <button class="calibrate" id="record" title="About two minutes of prompts. Saves only your hand's joint positions — no picture — to a file in the Apex folder, so the gestures can be tuned to your hand.">Record my gestures for tuning (2 min)</button>
   <dl id="hud-moves">
     <dt>Pinch &amp; hold</dt><dd>grab — it follows your hand</dd>
     <dt>Let go</dt><dd>open your fingers — it stays there</dd>
@@ -444,6 +445,7 @@ function renderHud(msg) {
     state.classList.remove('on');
   }
   renderCalibration(msg.calibration || {phase: 'idle'});
+  if ((msg.calibration || {}).phase === 'idle' || !msg.calibration) renderRecording(msg.recording || {phase: 'idle'});
   // Only the moves that are switched on are listed; the rest are named as off.
   if (msg.moves) {
     const off = [];
@@ -489,6 +491,35 @@ function renderCalibration(c) {
     action.textContent = c.ok ? 'Close' : 'Close'; action.dataset.act = 'close';
   }
 }
+// --- Record my gestures: prompts on screen, joints saved, no picture ------
+let recordingClosed = false;
+function renderRecording(r) {
+  const box = document.getElementById('calib'), action = document.getElementById('calib-action');
+  const set = (id, t) => { const el = document.getElementById(id); if (el.textContent !== t) el.textContent = t; };
+  if (r.phase === 'idle' || (r.phase === 'done' && recordingClosed)) { if (box.dataset.owner === 'record') box.hidden = true; return; }
+  box.hidden = false; box.dataset.owner = 'record';
+  if (r.phase === 'ready' || r.phase === 'recording') {
+    recordingClosed = false;
+    set('calib-step', `Gesture ${r.step} of ${r.steps} · ${r.phase === 'ready' ? 'get ready' : 'go'}`);
+    set('calib-prompt', r.prompt || '');
+    set('calib-left', `${Math.ceil(r.left || 0)}`);
+    set('calib-note', 'Recording your hand joints only — no picture is saved.');
+    action.textContent = 'Cancel'; action.dataset.act = 'record-cancel';
+  } else if (r.phase === 'done') {
+    set('calib-step', 'Recorded');
+    set('calib-prompt', 'Send this file to be tuned on:');
+    set('calib-left', '✓');
+    set('calib-note', `${r.path} (${r.size_kb} KB, ${r.frames} frames)` +
+      (r.missing && r.missing.length ? ` — no hand was seen during: ${r.missing.join(', ')}` : ''));
+    action.textContent = 'Close'; action.dataset.act = 'record-close';
+  }
+}
+document.getElementById('record').onclick = async () => {
+  recordingClosed = false;
+  try { await api('/api/board/record', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'start'})}); }
+  catch (error) { toast(error.message, 6000); }
+};
+
 async function calibrate(act) {
   try {
     await api('/api/board/calibrate', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: act})});
@@ -496,7 +527,10 @@ async function calibrate(act) {
 }
 document.getElementById('calibrate').onclick = () => { calibShownDone = null; calibrate('start'); };
 document.getElementById('calib-action').onclick = ev => {
-  if (ev.target.dataset.act === 'cancel') calibrate('cancel');
+  const act = ev.target.dataset.act;
+  if (act === 'record-cancel') { api('/api/board/record', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'cancel'})}).catch(() => {}); return; }
+  if (act === 'record-close') { recordingClosed = true; document.getElementById('calib').hidden = true; return; }
+  if (act === 'cancel') calibrate('cancel');
   else { calibShownDone = 'closed'; document.getElementById('calib').hidden = true; }
 };
 
