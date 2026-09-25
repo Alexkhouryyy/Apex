@@ -2278,6 +2278,13 @@ async def board_prop(rel: str):
     return FileResponse(str(path), media_type=_props.media_type(path))
 
 
+def _board_moves() -> dict:
+    mapped = {e.split(":", 1)[0] for e in (getattr(config, "HANDTRACK_GESTURE_ACTIONS", []) or []) if ":" in e}
+    return {"throw": bool(getattr(config, "BOARD_THROW_ENABLED", False)),
+            "swipe_up": "swipe_up" in mapped, "swipe_down": "swipe_down" in mapped,
+            "swipe_left_right": "swipe_left" in mapped or "swipe_right" in mapped}
+
+
 def _pinch_calibration_status() -> dict:
     try:
         from agent import pinch_calibration
@@ -2347,6 +2354,8 @@ async def ws_board(ws: WebSocket):
                 # Calibrated with the 3D measure the tracker now uses? If
                 # not, the board asks for it before anything else.
                 "pinch_calibrated": getattr(config, "HANDTRACK_PINCH_MEASURE", "") == "3d",
+                # Which moves are on, so the instructions list only those.
+                "moves": _board_moves(),
             }
             fresh = board.events_since(seen_event)
             if fresh:

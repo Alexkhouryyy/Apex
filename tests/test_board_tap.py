@@ -103,7 +103,9 @@ class TestNotATap:
         b.apply_hands([(.49, .5, False, False, 0), (.51, .5, False, False, 1)], now=COMMIT + .1)
         assert taps(b) == []
 
-    def test_a_throw_is_a_throw(self, board):
+    def test_a_throw_is_a_throw(self, board, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "BOARD_THROW_ENABLED", True, raising=False)
         b, c = board
         frames = [(0, .5, .5, True, False), (COMMIT, .5, .5, True, False)]
         t, x = COMMIT, .5

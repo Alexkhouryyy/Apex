@@ -57,7 +57,9 @@ function open(stored) {
   frame({hands: [hand(1.1, false)]}); assert.match($('hud-now').textContent, /build me a rocket/);
   const rocket = {id: 'r', kind: 'model', title: 'Rocket', body: '', x: .5, y: .5, scale: 1, rot: 0};
   frame({hands: [hand(0.3, true)], cards: [{...rocket, held: true, hands: 1}]});
-  assert.match($('hud-now').textContent, /Holding Rocket — move it, open your fingers to let go/);
+  assert.match($('hud-now').textContent, /Holding Rocket — move it, open your fingers to let go\.$/);
+  frame({hands: [hand(0.3, true)], cards: [{...rocket, held: true, hands: 1}], moves: {throw: true}});
+  assert.match($('hud-now').textContent, /let go, flick to throw\./);
   frame({hands: [hand(0.3, true)], cards: [{...rocket, held: true, hands: 2}]});
   assert.match($('hud-now').textContent, /Resizing Rocket/);
   frame({hands: [hand(0.3, true)], cards: [{...rocket, parts_mode: true, part: {name: 'nose', index: 1}}]});
@@ -73,6 +75,16 @@ function open(stored) {
 
   frame({hands: [{...hand(0.2, false), fist: true}], cards: [rocket]});
   assert.equal($('hud-state').textContent, 'fist · not a grab');
+
+  // Only the moves that are on are listed; the rest are named as off.
+  frame({moves: {throw: false, swipe_up: true, swipe_down: true, swipe_left_right: false}});
+  const shown = [...w.document.querySelectorAll('#hud-moves dt')].filter(d => !d.hidden).map(d => d.textContent);
+  assert.ok(!shown.includes('Flick to an edge') && !shown.includes('Swipe left/right'), 'switched-off moves must not be listed');
+  assert.ok(shown.includes('Pinch & hold') && shown.includes('Swipe up / down'));
+  assert.match($('hud-off').textContent, /Off for now \(they misfired\): flick to throw, swipe left\/right/);
+  frame({moves: {throw: true, swipe_up: true, swipe_down: true, swipe_left_right: true}});
+  assert.equal($('hud-off').hidden, true);
+  assert.ok([...w.document.querySelectorAll('#hud-moves dt')].every(d => !d.hidden));
 
   // 3b. Not calibrated for the 3D pinch yet: the button says so, loudly.
   frame({hands: [hand(1.05, false)], pinch_calibrated: false});

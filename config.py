@@ -548,11 +548,13 @@ HANDTRACK_GESTURE_COOLDOWN_SECONDS = float(os.getenv("HANDTRACK_GESTURE_COOLDOWN
 # Known actions: wake, listen, stop.
 HANDTRACK_GESTURE_ACTIONS = [e.strip() for e in os.getenv(
     "HANDTRACK_GESTURE_ACTIONS",
-    "wave:wake,pinch_hold:listen,swipe_down:stop,"
-    # Board gestures work in every mode, not only resident. Swipes are
-    # refused while a card is held or was just released, so a drag or a
-    # flick is never read as one.
-    "swipe_up:board:summon,swipe_left:board:prev,swipe_right:board:next"
+    # Only the two swipes are on by default (2026-09-25). On a real hand the
+    # rest misfired more than they worked, and a gesture that half works is
+    # worse than none. wave:wake, pinch_hold:listen and swipe_left/right
+    # (board:prev / board:next) still exist — add them back here or in .env
+    # once the gesture recordings show they fire reliably. Swipes are refused
+    # while a card is held or was just released.
+    "swipe_down:stop,swipe_up:board:summon"
 ).split(",") if e.strip()]
 
 # Which MediaPipe delegate the hand tracker runs on: auto | gpu | cpu.
@@ -596,6 +598,10 @@ BOARD_ENABLED = os.getenv("BOARD_ENABLED", "false").lower() in {"1", "true", "ye
 # Frames per second for the board's video backdrop. The picture has to come from
 # Python because it holds the camera exclusively; 15 is smooth enough behind
 # cards and a third of the bandwidth of 45.
+# Flick a held object toward an edge to throw it away. Off by default: it
+# deletes on a misfire, and a fast drag looked like a throw on a real hand.
+# "undo" brings a thrown object back. Turn on with BOARD_THROW_ENABLED=true.
+BOARD_THROW_ENABLED = os.getenv("BOARD_THROW_ENABLED", "false").lower() in {"1", "true", "yes"}
 BOARD_FPS = float(os.getenv("BOARD_FPS", "30"))   # the page glides between updates as well
 
 # Voice-driven 3D creation — "Apex, create a red cube, 50 millimetres wide."

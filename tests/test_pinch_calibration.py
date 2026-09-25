@@ -19,6 +19,9 @@ def clean(monkeypatch):
     pc.reset()
     monkeypatch.setattr(config, "HANDTRACK_PINCH_RATIO", 0.70, raising=False)
     monkeypatch.setattr(config, "HANDTRACK_PINCH_RELEASE_RATIO", None, raising=False)
+    # apply() sets the measure too: restore it, or every test after this file
+    # sees a hand "calibrated in 3D" (found as order-dependent failures).
+    monkeypatch.setattr(config, "HANDTRACK_PINCH_MEASURE", "", raising=False)
     yield
     pc.reset()
 

@@ -213,6 +213,13 @@ class TestTheFlickDecision:
 
 
 class TestThrowingACardAway:
+    """Throwing is opt-in since 2026-09-25 (BOARD_THROW_ENABLED): these test
+    it switched on; TestThrowingIsOffByDefault tests it off."""
+
+    @pytest.fixture(autouse=True)
+    def throw_on(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "BOARD_THROW_ENABLED", True, raising=False)
 
     def test_a_flick_off_the_edge_removes_it(self, db):
         b = Board()
@@ -402,11 +409,19 @@ class TestSwipes:
         b = Board()
         assert "unknown board action" in run_board_action("board:dance", b)
 
-    def test_board_swipes_are_mapped_by_default(self):
-        from agent import gestures
-        assert gestures.gesture_action("swipe_up") == "board:summon"
-        assert gestures.gesture_action("swipe_left") == "board:prev"
-        assert gestures.gesture_action("swipe_right") == "board:next"
+    def test_only_the_reliable_swipes_are_on_by_default(self):
+        """2026-09-25: on a real hand most gestures misfired. Only swipe up
+        (talk to Celine) and swipe down (hush) are on until the gesture
+        recordings show the rest fire reliably."""
+        # Read from config.py's source, not the attribute: the attribute is
+        # whatever the developer's own .env says.
+        import pathlib, re
+        import config
+        src = pathlib.Path(config.__file__).read_text(encoding="utf-8")
+        block = src[src.index('HANDTRACK_GESTURE_ACTIONS = '):]
+        block = block[:block.index(').split(",")')]
+        shipped = "".join(re.findall(r'^\s*"([^"]*)"', block, re.M)[1:])
+        assert sorted(e for e in shipped.split(",") if e) == ["swipe_down:stop", "swipe_up:board:summon"]
 
     def test_board_gestures_act_without_resident_mode(self, db, monkeypatch):
         """on_gesture is only ever wired by app/resident.py. In main.py --text
@@ -422,6 +437,7 @@ class TestSwipes:
         t = ht.HandTracker.__new__(ht.HandTracker)
         t._lock = threading.Lock()
         t.on_gesture = None
+        monkeypatch.setattr(config, "HANDTRACK_GESTURE_ACTIONS", ["swipe_right:board:next"], raising=False)
         logged = []
         t.log = type("L", (), {"add": lambda self, k, v: logged.append(v)})()
         t._dispatch("swipe_right")
@@ -585,3 +601,16 @@ class TestPointingReachesEveryTurn:
         assert out["pointed"]["id"] == target.id
         assert "seconds_ago" in out["pointed"]
         assert "prefer it when it is recent" in out["note"]
+
+
+class TestThrowingIsOffByDefault:
+    def test_a_flick_is_an_ordinary_let_go(self, db, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "BOARD_THROW_ENABLED", False, raising=False)
+        b = Board()
+        c = card_at(b, "Keep me", 0.6, 0.5)
+        t = grab(b, 0.6, 0.5, 100.0)
+        t = drag(b, [(0.7, 0.5), (0.82, 0.5), (0.94, 0.5)], t)
+        b.apply_hands([(0.99, 0.5, False, False)], now=t)
+        assert c.id in [x["id"] for x in b.cards()], "with throwing off, a fast release keeps the card"
+        assert not [e for e in b.events_since(0) if e["type"] == "thrown"]

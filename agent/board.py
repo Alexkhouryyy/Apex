@@ -965,6 +965,8 @@ class Board:
         than racing the dwell timer against real elapsed time.
         """
         now = now if now is not None else time.time()
+        import config as _config
+        throw_on = bool(getattr(_config, "BOARD_THROW_ENABLED", False))
         hands = self.read_cursors(cursors)
         byid = {h[4]: h for h in hands}
         # Recorded AFTER normalisation, so the readout explains the hands the
@@ -1004,7 +1006,10 @@ class Board:
                     h = byid.get(c.held_by[0])
                     if h is not None:
                         self._trail[c.id].append((now, h[0], h[1]))
-                flung = len(c.held_by) == 1 and is_flick(self._trail.get(c.id))
+                # Throwing is opt-in (config.BOARD_THROW_ENABLED): off, a fast
+                # release is an ordinary let-go.
+                flung = (throw_on and len(c.held_by) == 1
+                         and is_flick(self._trail.get(c.id)))
                 cancelled = any(i in byid and byid[i][3] for i in c.held_by)
                 # A hand that opens WHILE flinging is finishing a throw, not
                 # asking to cancel — and it is thrown, because the release

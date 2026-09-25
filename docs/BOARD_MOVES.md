@@ -4,6 +4,14 @@ Open `http://127.0.0.1:7860/board`. Press **D** (or add `?diag=1`) for the
 live readout, which shows what the tracker sees and why a move did or did not
 happen.
 
+**Five moves are on (2026-09-25):** pinch to grab, two hands to resize and
+turn, a quick tap to ask Celine, an open palm to cancel, and swipe up or down
+to talk to Celine or hush her. Pointing with an open hand still marks
+"this". The rest misfired on a real hand and are **off** until the gesture
+recordings show they work: flick to throw (`BOARD_THROW_ENABLED=true`),
+swipe left/right, wave and pinch-and-hold (add them to
+`HANDTRACK_GESTURE_ACTIONS`). A fist is never a grab.
+
 **The instructions are on the board itself**, in the **HANDS** panel on the
 left: every move, a line saying what to do right now, and a **pinch meter**
 for your hand. **H** (or **? Help**) hides and shows it, and it remembers.
@@ -34,8 +42,8 @@ calibrated with the 3D measure, so press it once.
 | **Cancel** | Open your palm and hold it still while holding | The card goes back where it was |
 | **Point** | Open hand held over a card for a moment (0.3 s) | Amber dashed ring — this is what "this" means |
 | **"Make this blue" / "make this bigger"** | Point (or select), then say it — in *Talk to Apex*, by voice, or from the resident | Apex acts on the card you pointed at |
-| **Throw away** | Grab, flick toward an edge, let go while moving | Gone. Say **"undo"** to bring it back home |
-| **Next / previous** | Open-hand swipe right / left | Steps the selection through your cards |
+| *(off by default)* **Throw away** | Grab, flick toward an edge, let go while moving | Gone. Say **"undo"** to bring it back home |
+| *(off by default)* **Next / previous** | Open-hand swipe right / left | Steps the selection through your cards |
 | **Take it apart** | Select a model you built, press **P** (or say *"let me move its parts"*) | Its label turns gold: now a pinch grabs one **part** — the front one under your fingers. One hand moves it, two resize it, a tap asks about it. Let go and it's saved as the next version; the rest of the model stays exactly where it was. Open palm cancels. **P** again (or *"done with the parts"*) to finish |
 | **Tap to ask** | Quick pinch on an object and let go without moving it (under about a third of a second) | Celine tells you about it out loud — Voice comes on if it was off. It becomes "this", so the next thing you say is about it too. A tap never moves it and leaves nothing for undo |
 | **Talk to Celine** | Press **🎙 Voice** or **V** — or, after one click or key on the page, swipe up or pinch-and-hold in empty space | She listens hands-free in a small strip in the corner; the board stays free. She knows what you point at and hold |

@@ -194,11 +194,12 @@
     <dt>Two hands</dt><dd>pinch both, pull apart = bigger, twist = turn</dd>
     <dt>Quick tap</dt><dd>pinch, let go, don't move — Celine explains it</dd>
     <dt>Open hand over it</dt><dd>points at it — "make <i>this</i> blue"</dd>
-    <dt>Flick to an edge</dt><dd>throw away ("undo" = back)</dd>
+    <dt data-move="throw">Flick to an edge</dt><dd data-move="throw">throw away ("undo" = back)</dd>
     <dt>Open palm, still</dt><dd>cancel — back where it was</dd>
-    <dt>Swipe up / down</dt><dd>talk to Celine / hush her</dd>
-    <dt>Swipe left/right</dt><dd>select previous / next</dd>
+    <dt data-move="swipe_up">Swipe up / down</dt><dd data-move="swipe_up">talk to Celine / hush her</dd>
+    <dt data-move="swipe_left_right">Swipe left/right</dt><dd data-move="swipe_left_right">select previous / next</dd>
   </dl>
+  <div class="keys" id="hud-off" hidden></div>
   <div class="keys"><b>V</b> voice · <b>P</b> move one part · <b>D</b> readout · <b>H</b> hide this<br>Say <i>"build me a …"</i>, <i>"undo"</i>, <i>"make it bigger"</i>.</div>
 </aside>
 <div id="calib" hidden role="dialog" aria-live="assertive">
@@ -416,7 +417,7 @@ function hudNow(msg) {
   if (parts && parts.part) return `Moving the ${parts.part.name} — let go to save, open palm to cancel.`;
   if (parts) return `Parts mode on ${parts.title}: pinch a part to move it. P to finish.`;
   if (held && held.hands === 2) return `Resizing ${held.title} — pull apart / together, twist to turn.`;
-  if (held) return `Holding ${held.title} — move it, open your fingers to let go, flick to throw.`;
+  if (held) return `Holding ${held.title} — move it, open your fingers to let go${msg.moves?.throw ? ', flick to throw' : ''}.`;
   if (!cards.length) return 'Nothing here yet — press V and say "build me a rocket".';
   if (hands.some(h => h.pinched)) return 'Pinched — move onto an object to grab it.';
   return 'Pinch an object to grab it, or tap it quickly to ask Celine.';
@@ -443,6 +444,19 @@ function renderHud(msg) {
     state.classList.remove('on');
   }
   renderCalibration(msg.calibration || {phase: 'idle'});
+  // Only the moves that are switched on are listed; the rest are named as off.
+  if (msg.moves) {
+    const off = [];
+    for (const [move, on] of Object.entries(msg.moves)) {
+      document.querySelectorAll(`#hud [data-move="${move}"]`).forEach(el => { el.hidden = !on; });
+      if (!on && move === 'throw') off.push('flick to throw');
+      if (!on && move === 'swipe_left_right') off.push('swipe left/right');
+    }
+    const note = document.getElementById('hud-off');
+    const text = off.length ? `Off for now (they misfired): ${off.join(', ')}.` : '';
+    if (note.textContent !== text) note.textContent = text;
+    note.hidden = !text;
+  }
   // Not calibrated for the 3D pinch yet: the button says so, loudly.
   const btn = document.getElementById('calibrate');
   const label = msg.pinch_calibrated === false
