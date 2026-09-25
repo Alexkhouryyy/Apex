@@ -475,3 +475,74 @@ class TestSideOnHandsAreNotPinches:
         t2 = tracker()
         cursors, details = t2._read_hands(result, now=31.0)
         assert cursors[0][2] is True and details[0]["threshold"] == 0.5
+
+
+# --------------------------------------------------------------------------
+# A fist is not a pinch
+# --------------------------------------------------------------------------
+
+def shaped_hand(index_tip, thumb_tip, others_curled=False):
+    """(image landmarks, world landmarks) for a right hand, palm to camera, in
+    metres: 9 cm palm, knuckles across the top; z negative is toward camera."""
+    P = lambda x, y, z=0.0: SimpleNamespace(x=x, y=y, z=z)
+    world = [P(0, 0) for _ in range(21)]
+    world[ht.WRIST] = P(0.0, 0.0)
+    world[ht.INDEX_MCP] = P(0.03, 0.085)
+    world[ht.MIDDLE_MCP] = P(0.005, 0.09)
+    world[14] = P(-0.015, 0.085)                          # ring MCP (unused)
+    world[ht.PINKY_MCP] = P(-0.035, 0.075)
+    world[ht.INDEX_PIP] = P(0.035, 0.12, -0.01)
+    world[ht.INDEX_TIP] = P(*index_tip)
+    world[ht.THUMB_TIP] = P(*thumb_tip)
+    for tip, pip, extended in ((ht.MIDDLE_TIP, ht.MIDDLE_PIP, (0.005, 0.17)),
+                               (ht.RING_TIP, ht.RING_PIP, (-0.015, 0.16)),
+                               (ht.PINKY_TIP, ht.PINKY_PIP, (-0.035, 0.14))):
+        world[pip] = P(extended[0], 0.115, -0.01)
+        world[tip] = P(extended[0], 0.06, -0.02) if others_curled else P(*extended)
+    # The picture: the same hand, flat, placed mid-frame (y down in images).
+    image = [P(0.5 + w.x, 0.6 - w.y) for w in world]
+    return image, world
+
+
+class TestAFistIsNotAPinch:
+    FIST = dict(index_tip=(0.02, 0.05, -0.02), thumb_tip=(0.02, 0.06, -0.035), others_curled=True)
+    PINCH = dict(index_tip=(0.045, 0.12, -0.04), thumb_tip=(0.04, 0.115, -0.04))
+
+    def test_the_fist_reads_as_a_tight_pinch_by_gap_alone(self):
+        img, world = shaped_hand(**self.FIST)
+        assert ht.pinch_ratio(img, world) < ht.PINCH_3D_ENTER, "the reason a fist used to grab"
+
+    def test_a_fist_is_recognised_and_never_pinches(self):
+        img, world = shaped_hand(**self.FIST)
+        assert ht.is_fist(img, world)
+        t = tracker()
+        r = frame(img); r.hand_world_landmarks = [world]
+        cursors, details = t._read_hands(r, now=40.0)
+        assert cursors[0][2] is False and details[0]["fist"] is True
+
+    def test_a_real_pinch_is_still_a_pinch(self):
+        img, world = shaped_hand(**self.PINCH)
+        assert not ht.is_fist(img, world)
+        t = tracker()
+        r = frame(img); r.hand_world_landmarks = [world]
+        assert t._read_hands(r, now=41.0)[0][0][2] is True
+
+    def test_a_pinch_with_the_other_fingers_curled_is_still_a_pinch(self):
+        img, world = shaped_hand(index_tip=(0.04, 0.1, -0.045), thumb_tip=(0.037, 0.097, -0.045), others_curled=True)
+        assert not ht.is_fist(img, world)
+        t = tracker()
+        r = frame(img); r.hand_world_landmarks = [world]
+        assert t._read_hands(r, now=42.0)[0][0][2] is True
+
+    def test_closing_into_a_fist_lets_go(self):
+        t = tracker()
+        img, world = shaped_hand(**self.PINCH)
+        r = frame(img); r.hand_world_landmarks = [world]
+        assert t._read_hands(r, now=43.0)[0][0][2] is True
+        img, world = shaped_hand(**self.FIST)
+        r = frame(img); r.hand_world_landmarks = [world]
+        assert t._read_hands(r, now=43.05)[0][0][2] is False
+
+    def test_unusable_or_flat_palms_are_not_called_fists(self):
+        assert not ht.is_fist(hand(0.05))                       # synthetic: no palm width
+        assert not ht.is_fist([SimpleNamespace(x=0, y=0)] * 3)

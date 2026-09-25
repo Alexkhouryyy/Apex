@@ -433,8 +433,9 @@ function renderHud(msg) {
     document.getElementById('hud-bar').style.width = pos(h.ratio);
     document.getElementById('hud-enter').style.left = pos(h.threshold);
     document.getElementById('hud-release').style.left = pos(h.release);
-    state.textContent = h.pinched ? `PINCHED · ${h.ratio.toFixed(2)} (lets go above ${h.release.toFixed(2)})`
-                                  : `open · ${h.ratio.toFixed(2)} (pinch below ${h.threshold.toFixed(2)})`;
+    state.textContent = h.fist ? 'fist · not a grab'
+      : h.pinched ? `PINCHED · ${h.ratio.toFixed(2)} (lets go above ${h.release.toFixed(2)})`
+      : `open · ${h.ratio.toFixed(2)} (pinch below ${h.threshold.toFixed(2)})`;
     state.classList.toggle('on', !!h.pinched);
   } else {
     document.getElementById('hud-bar').style.width = '0';

@@ -77,6 +77,8 @@ RING_PIP = 14
 RING_TIP = 16
 PINKY_PIP = 18
 PINKY_TIP = 20
+INDEX_MCP = 5
+PINKY_MCP = 17
 
 # Pinch is the ratio of thumb-to-index distance against the hand's own span
 # (wrist to middle knuckle), NOT a pixel distance. A hand near the camera is
@@ -361,6 +363,47 @@ def _usable(world) -> bool:
             hasattr(world[k], "z") for k in (THUMB_TIP, INDEX_TIP, WRIST, MIDDLE_MCP))
     except TypeError:
         return False
+
+
+# A fist is not a pinch. In a fist the thumb rests on the curled index finger,
+# which reads as a closed pinch — and the first real use of the board grabbed
+# on a fist. What tells them apart is where the INDEX TIP goes: tucked into
+# the palm in a fist, out in front meeting the thumb in a pinch. (A "finger
+# curled" test does not work: in an ordinary pinch the index bends too.)
+# The index tip closer to the palm's centre than this fraction of the palm
+# length means a fist. An estimate from hand proportions — the gesture
+# recordings (agent/gesture_recorder.py) are what will set it properly.
+FIST_INDEX_TO_PALM = 0.55
+
+
+def is_fist(lms, world=None) -> bool:
+    """Whether the hand is a fist: the index fingertip tucked into the palm.
+
+    Measured in 3D (world landmarks, metres) when available, like pinch_ratio,
+    else flat on the picture. The palm's centre is the middle of the wrist and
+    the index and pinky base knuckles. False when the landmarks are unusable:
+    "couldn't tell" must not veto a pinch.
+    """
+    pts = world if _usable(world) else lms
+    three_d = pts is world
+    try:
+        need = (WRIST, INDEX_MCP, PINKY_MCP, MIDDLE_MCP, INDEX_TIP)
+        p = {k: pts[k] for k in need}
+        coords = {k: (v.x, v.y, getattr(v, "z", 0.0) if three_d else 0.0) for k, v in p.items()}
+    except (IndexError, TypeError, AttributeError):
+        return False
+    cx = [sum(coords[k][i] for k in (WRIST, INDEX_MCP, PINKY_MCP)) / 3 for i in range(3)]
+    def dist(a, b):
+        return sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
+    span = dist(coords[WRIST], coords[MIDDLE_MCP])
+    if span <= 1e-6:
+        return False
+    # A palm with no width (the index and pinky knuckles on top of each other)
+    # is not a real hand's geometry — a hand seen exactly edge-on, or bad
+    # landmarks. Its "centre" means nothing, so it is not called a fist.
+    if dist(coords[INDEX_MCP], coords[PINKY_MCP]) < 0.3 * span:
+        return False
+    return dist(coords[INDEX_TIP], cx) / span < FIST_INDEX_TO_PALM
 
 
 def is_open_palm(lms) -> Optional[bool]:
@@ -905,7 +948,11 @@ class HandTracker(threading.Thread):
             e, rl = enter, release
             if _usable(world) and getattr(config, "HANDTRACK_PINCH_MEASURE", "") != "3d":
                 e, rl = PINCH_3D_ENTER, PINCH_3D_RELEASE
-            pinched = self._latch.update(hid, r, e, rl)
+            fist = is_fist(lms, world)
+            # A fist lets go of anything held and never starts a pinch: fed
+            # to the latch as a wide-open hand, not as "unknown" (which would
+            # keep whatever state it had).
+            pinched = self._latch.update(hid, (rl + 1.0) if fist else r, e, rl)
             label = _handedness_label(result, idx) or "?"
             cur = (cur[0], cur[1], pinched, cur[3], hid)
             # Measured once and kept, not measured once and printed. The ratio
@@ -922,6 +969,7 @@ class HandTracker(threading.Thread):
                 "release": round(rl, 4),
                 "pinched": bool(pinched),
                 "open_palm": bool(cur[3]),
+                "fist": bool(fist),
             }
             rows.append((hid, cur, detail))
             if getattr(config, "HANDTRACK_DEBUG", False):

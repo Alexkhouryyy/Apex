@@ -71,6 +71,9 @@ function open(stored) {
   assert.match($('hud-state').textContent, /open · 1.05 \(pinch below 0.70\)/);
   assert.ok(!$('hud-state').classList.contains('on'));
 
+  frame({hands: [{...hand(0.2, false), fist: true}], cards: [rocket]});
+  assert.equal($('hud-state').textContent, 'fist · not a grab');
+
   // 3b. Not calibrated for the 3D pinch yet: the button says so, loudly.
   frame({hands: [hand(1.05, false)], pinch_calibrated: false});
   assert.match($('calibrate').textContent, /Not calibrated for your hand yet/);
