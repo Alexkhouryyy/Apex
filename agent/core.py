@@ -556,6 +556,49 @@ TOOLS = [
         },
     },
     {
+        "name": "board_build",
+        "description": (
+            "Build a 3D object out of parts and put it on Apex's glass board, "
+            "where the user picks it up with one hand and scales or turns it "
+            "with two — 'build me a rocket', 'make a chair', 'show me a water "
+            "molecule'. No Blender needed. Compose the object from simple "
+            "parts (box, sphere, cylinder, cone, torus): each has a size "
+            "[width, height, depth] in centimetres, a centre 'at' [x, y, z] in "
+            "centimetres with Y up and the object standing on y=0, an optional "
+            "'rotate' [x, y, z] in degrees and a colour. Use real-world sizes "
+            "and enough parts to be recognisable (usually 5-40). To change "
+            "something already built, call again with the SAME title and the "
+            "complete revised parts list: it becomes a new version and the old "
+            "one is kept. action 'show' returns the current parts of a build."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "What it is called — the same title revises it."},
+                "action": {"type": "string", "enum": ["build", "show"], "default": "build"},
+                "parts": {
+                    "type": "array",
+                    "description": "The parts (for build). At most 80.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "shape": {"type": "string", "enum": ["box", "sphere", "cylinder", "cone", "torus"]},
+                            "size": {"type": "array", "items": {"type": "number"},
+                                     "description": "[width, height, depth] cm. Torus: height is the tube thickness."},
+                            "at": {"type": "array", "items": {"type": "number"}, "description": "Centre [x, y, z] cm, Y up."},
+                            "rotate": {"type": "array", "items": {"type": "number"}, "description": "Degrees about X, Y, Z. Optional."},
+                            "color": {"type": "string", "description": "A plain name (red, white, metallic_blue…) or '#rrggbb'."},
+                            "metal": {"type": "boolean", "description": "Metallic finish. Optional."},
+                            "name": {"type": "string", "description": "What the part is, e.g. 'left fin'. Optional."},
+                        },
+                        "required": ["shape", "size"],
+                    },
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "board_create",
         "description": (
             "Create a real, measured 3D object with Blender and put it on Apex's "
@@ -2106,6 +2149,42 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             card = get_board().add("model", inputs.get("title") or src.rsplit("/", 1)[-1],
                                    src=src)
             out = f"'{card.title}' is on the board — grab it with one hand, two to scale."
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name == "board_build":
+            from agent import build3d as _b3
+            from agent.board import get_board
+            title = " ".join(str(inputs.get("title") or "").split())
+            if not title:
+                return "board_build needs a title — what is it called?"
+            if (inputs.get("action") or "build") == "show":
+                parts = _b3.recipe(title)
+                if parts is None:
+                    return f"Nothing built called '{title}'. board_history lists what exists."
+                return f"'{title}' — current parts:\n" + json.dumps(parts)
+            try:
+                r = _b3.build(title, inputs.get("parts"))
+            except _b3.BuildError as e:
+                return f"Not built — {e}. Nothing was saved; fix that and call again."
+            board = get_board()
+            updated = False
+            for c in board.cards():
+                if c["kind"] == "model" and c["title"].lower() == title.lower():
+                    updated = board.set_src(c["id"], r["src"]) or updated
+            w, h, d = r["extent_cm"]
+            size = f"{w:g} x {h:g} x {d:g} cm"
+            if updated:
+                out = f"'{title}' rebuilt from {r['parts']} parts ({size}) — v{r['version']}; v{r['parent']} is kept."
+            else:
+                # Built to the hand, like "show me": it appears where you reach.
+                anchor = board.hand_anchor()
+                place = {"x": anchor[0], "y": anchor[1]} if anchor else {}
+                board.add("model", title, src=r["src"], **place)
+                where = " at your hand" if anchor else ""
+                ver = f" (v{r['version']}; v{r['parent']} is kept)" if r["revised"] else ""
+                out = (f"'{title}' built from {r['parts']} parts ({size}){ver} and on the board{where} — "
+                       f"pinch to grab it, two hands to resize and turn it.")
             _broadcast_live_event("board", out)
             return out
 

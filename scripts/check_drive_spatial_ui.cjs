@@ -66,7 +66,7 @@ async function spatial() {
     sub() {return this;}
   }
   class Group {
-    constructor(){this.position=new Vector();this.scale=new Vector(1,1,1);this.rotation={};this.children=[];}
+    constructor(){this.position=new Vector();this.scale=new Vector(1,1,1);this.rotation={};this.children=[];this.userData={};}
     add(child){this.children.push(child);}
     remove(child){this.children=this.children.filter(x=>x!==child);}
     traverse(fn){fn(this);this.children.forEach(child=>child.traverse?.(fn));}

@@ -350,7 +350,12 @@ function init3D() {
     // Orthographic, sized 0..1 in both axes, so a model's position is the SAME
     // window fraction a card's is. A perspective camera would need every
     // coordinate converted and the two layers would drift apart on resize.
-    camera3 = new THREE.OrthographicCamera(0, 1, 0, 1, -100, 100);
+    // Y UP, as three.js and glTF expect: 0 at the top edge, -1 at the bottom,
+    // so a card's y (0 top, 1 bottom) is -y here. It used to be top 0,
+    // bottom 1 — a mirrored projection: every model stood on its head, and
+    // since three.js cannot see a mirror in the camera, it culled the
+    // outside of each model and drew its inside.
+    camera3 = new THREE.OrthographicCamera(0, 1, 0, -1, -100, 100);
     camera3.position.z = 10;
     scene.add(new THREE.AmbientLight(0xffffff, 1.4));
     const key = new THREE.DirectionalLight(0xbcd8ff, 2.2);
@@ -372,7 +377,7 @@ function resize3D() {
   // the cursor stream arrives from Python. Without this a model tracks your
   // hand upside down while the card next to it does not.
   camera3.left = 0; camera3.right = 1;
-  camera3.top = 0; camera3.bottom = 1;
+  camera3.top = 0; camera3.bottom = -1;
   camera3.updateProjectionMatrix();
 }
 
@@ -385,11 +390,16 @@ function fitToUnitBox(obj) {
   const centre = box.getCenter(new THREE.Vector3());
   const largest = Math.max(size.x, size.y, size.z) || 1;
   obj.position.sub(centre);
-  const wrap = new THREE.Group();
-  wrap.add(obj);
+  // A small tilt so the top shows — straight on, a cube is a square — and
+  // the two-hand twist turns it about its own up, inside the tilt.
+  const spin = new THREE.Group(); spin.add(obj);
+  const tilt = new THREE.Group(); tilt.add(spin); tilt.rotation.x = MODEL_TILT;
+  const wrap = new THREE.Group(); wrap.add(tilt);
   wrap.scale.setScalar(0.18 / largest);
+  wrap.userData.spin = spin;
   return wrap;
 }
+const MODEL_TILT = 0.35;   // radians toward you — enough to see the top face
 
 function syncModels(cards) {
   currentModels = new Map(cards.map(c => [c.id, c.src]));
@@ -424,8 +434,8 @@ function syncModels(cards) {
       continue;
     }
     const g = entry.group;
-    g.position.set(c.x, c.y, 0);
-    g.rotation.y = c.rot || 0;
+    g.position.set(c.x, -c.y, 0);      // card y runs down; this camera's y runs up
+    g.userData.spin.rotation.y = c.rot || 0;
     // `base` is the fit-to-screen factor captured at load. Multiplying by it
     // rather than reading g.scale.x means the user's scale is applied to the
     // ORIGINAL size every frame — reading the current scale would compound it,

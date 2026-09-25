@@ -16,6 +16,32 @@ happen.
 | **Summon Apex** | Open-hand swipe up | Opens the Apex panel. It does **not** start the mic — tap it to talk |
 | **Show me …** | "Show me my calendar" with a hand up | The card appears **at your hand** |
 
+## Build with words, shape with hands
+
+Say what you want — *"build me a rocket"*, *"make a chair"*, *"show me a
+water molecule"* — to Apex, to Celine, or in *Talk to Apex* on the board. Apex
+composes it from simple parts (boxes, spheres, cylinders, cones, rings) at
+real-world size, and it appears **at your hand** if one is up. Then it is an
+object like any other: pinch to grab, both hands to make it bigger, smaller or
+turn it, flick to throw it away.
+
+- **Change it by saying so:** *"make the fins blue"*, *"make it taller"*,
+  *"add a window"*. Each change is a new version (v2, v3…) and every earlier
+  one is kept in `~/.apex/props/created/<name>/`.
+- **No Blender, nothing to install.** The file is a standard `.glb` in real
+  metres, so it opens in Blender, Windows 3D Viewer or any web viewer at its
+  true size. (`board_create` still makes a single measured primitive through
+  Blender, for manufacturing.)
+- **Honest limits:** these are models built from simple shapes — a
+  recognisable rocket, not a sculpted one. How good a build looks depends on
+  the AI model describing it; nobody has rated that on your machine yet.
+
+**Fixed while building this:** every 3D model on the board, including
+Blender ones, used to be drawn upside down and inside out. The board's camera
+was mirrored, so models stood on their heads and three.js hid their outside
+faces. `scripts/check_build3d_glb.mjs` now loads a model with the board's own
+loader and camera, and fails if it comes out upside down or inside out.
+
 ## The rules that stop these fighting each other
 
 - **Swipes never fire while you're pinching or holding.** Dragging a card fast
