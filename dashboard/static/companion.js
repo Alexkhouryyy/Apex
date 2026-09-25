@@ -641,6 +641,28 @@
     else resumeHands();
     timingFinish();
   }
+  // --- Talking over her (Pillar 1: "cut it off by talking, stops in 0.3 s") --
+  let barged = null;             // {said}: the reply you talked over, to spot echo
+  function interrupt(onset) {
+    const last = [...$('messages').querySelectorAll('.message.agent .text')].at(-1);
+    barged = {said: last?.textContent || ''};
+    if (active) {
+      active.stopped = true;
+      request(`/api/companion/cancel/${active.id}`, {method: 'POST'}).catch(() => {});
+    }
+    stopSpeech();
+    const ms = performance.now() - onset;
+    $('voice-timing').textContent = `Interrupted: stopped ${(ms / 1000).toFixed(2)}s after you started talking`;
+    $('voice-timing').hidden = false;
+    state('listening', 'Listening · go ahead');
+  }
+  // Whether a transcript is mostly words she was saying: echo, not the user.
+  function soundsLike(heard, said) {
+    const words = t => (t.toLowerCase().match(/[a-z0-9']{3,}/g) || []);
+    const h = words(heard), s = new Set(words(said));
+    if (h.length < 3 || !s.size) return false;
+    return h.filter(w => s.has(w)).length / h.length >= 0.7;
+  }
   async function stop() {
     disableHands(); $('check-in').checked=false;
     stopSpeech();
@@ -706,6 +728,9 @@
     if (!window.ApexHandsFree) { $('hands-free').checked=false; error('Reload the companion to load hands-free controls.'); return; }
     hands = new window.ApexHandsFree({
       threshold: () => Number($('mic-threshold').value),
+      // Talking over a reply — while it is written or spoken — stops it.
+      bargeWatch: () => $('barge-in').checked && Boolean(active || speechBusy || speechDraining),
+      onBarge: interrupt,
       onState: text => {
         if (text === 'ready') { resumeHands(); return; }
         if (!active && !speechBusy) state(text.startsWith('Listening') ? 'listening' : 'thinking', text);
@@ -720,7 +745,20 @@
         handsRequest=new AbortController();
         const text=await transcribeBlob(blob,handsRequest.signal);
         if (!hands.enabled || hands.epoch!==epoch) return;
-        if (text.trim()) { $('message').value=text; await send(text, false, null, true); }
+        const cut = barged; barged = null;
+        if (cut && soundsLike(text, cut.said)) {
+          // Her own voice through the speakers, not you: say so, send nothing.
+          timing = null;
+          error('That interruption sounded like Celine\'s own voice from the speakers. Use headphones, or turn off "Interrupt by talking".');
+          return;
+        }
+        // The interrupted reply may still be winding down (a stop in flight,
+        // the last voice section being received); send() refuses until then.
+        const busy = () => active || speechBusy || speechDraining;
+        for (let i = 0; i < 150 && busy(); i++) await new Promise(r => setTimeout(r, 100));
+        // Not awaited: the microphone counts as busy until this returns, and
+        // it must be free to hear you talk over the reply this starts.
+        if (text.trim()) { $('message').value=text; send(text, false, null, true); }
         else timing = null;
       }
     });

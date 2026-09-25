@@ -78,6 +78,16 @@ reply, **median ≤ 1.5 s, 90th percentile ≤ 2.5 s**, over 20 real turns on th
 Windows laptop, with Celine's voice. And you can cut it off mid-sentence by
 talking or swiping down, and it stops within 0.3 s.
 
+**Cutting it off by talking (built 2026-09-25):** with hands-free on, the
+paused microphone still measures your level while Apex thinks or speaks.
+Speech at three times the normal threshold for 0.2 s stops the reply,
+cancels a turn that is still being written, and sends what you say next.
+Simulated detection-to-stop: **0.25 s** worst case
+(`scripts/check_barge_in_ui.cjs`). **Not yet measured on the laptop**: each
+interruption shows its real time under the message box. Echo of Celine's own
+words is recognised and dropped, but through speakers she can still cut
+herself off; headphones are the supported setup (`docs/CELINE.md`).
+
 **Why first:** Apex is voice-first, and today a Celine reply can take
 *minutes*. No board move matters while talking to it is slow. It is also the
 thing you feel every single day.

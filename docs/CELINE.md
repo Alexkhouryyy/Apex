@@ -30,8 +30,22 @@ come out.
 Voice mode doesn't open when it can't work. If there's no microphone, or
 Celine's voice server isn't running, the page says why and stays as it was.
 
-Use headphones. Otherwise the microphone can pick up her voice, or game audio,
-and treat it as you speaking.
+**Talk over her to interrupt.** Start speaking while she's talking, or while
+she's still working out her answer, and she stops. What you say is sent as
+your next message. The simulated check measures 0.25 s from the start of your
+voice to her stopping (the plan's limit is 0.3 s). On your laptop it hasn't
+been measured yet: the line under the message box shows the real number each
+time.
+
+- A short noise (a cough, a door) doesn't interrupt. It takes 0.2 s of voice
+  at three times the microphone's normal threshold.
+- **Use headphones.** Through speakers her own voice reaches the microphone.
+  The browser's echo cancellation removes most of it, but not always all. If
+  the words it heard are mostly the ones she was saying, it's treated as her
+  echo: nothing is sent and the page says so. She has already stopped by then,
+  though, so without headphones she can cut herself off. If that happens, turn
+  off **Interrupt by talking** in settings, or set microphone sensitivity to
+  *Low*.
 
 ## Memory
 

@@ -38,6 +38,7 @@ w.eval(fs.readFileSync(path.join(base,'speech_queue.js'),'utf8'));w.eval(fs.read
  advance(8100,0);await tick();assert.equal(uploads,0); // silence stays local
  advance(500,.05);advance(1300,0);await tick();await tick();
  assert.equal(uploads,1);assert.equal(chats,1);assert.equal(utterance.text,'Hello Alex');
+ $('barge-in').checked=false; // this step is the echo pause itself; talking over her is check_barge_in_ui
  const oldUploads=uploads;advance(3000,.2);await tick();assert.equal(uploads,oldUploads); // no echo turns
  utterance.onend();await new Promise(r=>setTimeout(r,450));
  assert.equal(recorders.at(-1).state,'recording');assert.equal(micRequests,1);
