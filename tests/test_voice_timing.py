@@ -135,3 +135,54 @@ class TestTheEndpoints:
 def test_the_table_is_created_at_boot():
     from agent import schema
     assert "voice_timing" in schema.INIT_MODULES
+
+
+class TestBeforeAndAfter:
+    """"Speak as it writes" is judged by measurement: each turn records which
+    mode it used, and the report puts the two side by side."""
+
+    def _turn(self, first_sound, streamed):
+        t = turn(first_sound)
+        t["streamed"] = streamed
+        return t
+
+    def test_the_mode_is_stored_and_filtered(self, db):
+        vt.record(self._turn(9000, False))
+        vt.record(self._turn(3000, True))
+        vt.record(turn(5000))                          # an old client: unknown
+        assert [t["streamed"] for t in vt.recent()] == [None, True, False]
+        assert [t["stages"]["first_sound"] for t in vt.recent(streamed=True)] == [3000]
+        assert [t["stages"]["first_sound"] for t in vt.recent(streamed=False)] == [9000]
+
+    def test_only_a_real_boolean_counts(self, db):
+        vt.record({"mode": "tap", "streamed": "yes", "stages": {"first_sound": 1}})
+        assert vt.recent()[0]["streamed"] is None
+
+    def test_the_report_compares_the_two_modes(self, db):
+        for _ in range(3):
+            vt.record(self._turn(9000, False))
+            vt.record(self._turn(3000, True))
+        text = vt.report()
+        assert "Before / after" in text
+        assert "First sound earlier by 6.00s with it on." in text
+
+    def test_a_regression_is_called_later_not_hidden(self, db):
+        vt.record(self._turn(2000, False))
+        vt.record(self._turn(5000, True))
+        assert "First sound LATER by 3.00s" in vt.report()
+
+    def test_no_comparison_until_both_modes_have_turns(self, db):
+        vt.record(self._turn(3000, True))
+        assert "Before / after" not in vt.report()
+
+    def test_a_table_from_before_this_change_gains_the_column(self, db):
+        from agent import longterm
+        with longterm._conn() as c:
+            c.execute("DROP TABLE IF EXISTS voice_timing")
+            c.execute("CREATE TABLE voice_timing (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                      " ts REAL NOT NULL, mode TEXT NOT NULL, voice TEXT NOT NULL DEFAULT '',"
+                      " stages TEXT NOT NULL)")
+            c.execute("INSERT INTO voice_timing (ts, mode, stages) VALUES (1, 'tap',"
+                      " '{\"first_sound\": 4000}')")
+        vt.record(self._turn(2000, True))
+        assert [t["streamed"] for t in vt.recent()] == [True, None]

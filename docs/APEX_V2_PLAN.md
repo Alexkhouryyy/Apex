@@ -111,14 +111,38 @@ calls included, so "first sound" can never be earlier than "whole reply
 written". And hands-free waits 1.2 s of silence before sending. The numbers
 will say how much each of those costs.
 
+**Speak as it writes (built 2026-09-25).** The companion now sends each
+sentence to the voice as soon as it is complete, instead of after the whole
+reply. It is a setting (on by default), and every timing record says which
+mode the turn used, so `python -m agent.voice_timing` prints the two side by
+side — **before and after are measured on your laptop, not asserted.**
+
+Measured with the real page code and timing instrument against *simulated*
+delays (`scripts/measure_live_speech.cjs` — the delays are printed with the
+result; they are not your hardware):
+
+| Turn | First sound, whole reply | As it writes |
+|---|---|---|
+| Short answer (2 sentences) | 4.6 s | 3.1 s |
+| Long answer (6 sentences) | 7.4 s | 3.1 s |
+| Tool call mid-reply | 11.5 s | 3.1 s |
+
+What it removes is everything that grows with the reply: writing time and
+tool calls. What is left — 3.1 s in that simulation — is transcription, the
+model's first token, and synthesising the first section, and **that is the
+next target.** One behaviour change to know about: on a tool-call turn, what
+Apex says before the tool ("Let me check your calendar.") is now spoken too;
+the screen still shows only the final reply.
+
 **Work:**
-1. ~~Instrument the whole turn end to end~~ — done; measure 20 turns *before*
-   changing anything. Your `Test-Apex-Fast-Voice.cmd` benchmark measures the
-   TTS stage alone; its `first_chunk_seconds` tells us whether streaming Qwen
-   can meet 0.4 s on your GPU.
-2. Stream TTS by sentence into playback (the companion already queues
-   sentences; the local Qwen server does not stream yet).
-3. Barge-in that works with speakers, not only headphones.
+1. ~~Instrument the whole turn end to end~~ — done.
+2. ~~Speak as it writes~~ — done; measure it: 10 turns with the setting off,
+   10 on, then `python -m agent.voice_timing`.
+3. First-section synthesis: your `Test-Apex-Fast-Voice.cmd` benchmark says
+   whether streaming Qwen can reach 0.4 s on your GPU; the local Qwen server
+   does not stream yet.
+4. Hands-free waits 1.2 s of silence before sending — the next fixed cost.
+5. Barge-in that works with speakers, not only headphones.
 
 ### Pillar 2 — "I work with my hands, it works on the board"
 

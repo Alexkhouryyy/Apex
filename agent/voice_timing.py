@@ -56,6 +56,12 @@ def init_db() -> None:
                 voice TEXT NOT NULL DEFAULT '',
                 stages TEXT NOT NULL
             )""")
+        # Whether the reply was spoken as it was written (companion setting
+        # "Speak as it writes") — the before/after the report compares. Added
+        # after the table first shipped, so a migration.
+        cols = {r[1] for r in c.execute("PRAGMA table_info(voice_timing)")}
+        if "streamed" not in cols:
+            c.execute("ALTER TABLE voice_timing ADD COLUMN streamed INTEGER")
 
 
 def _clean_ms(v) -> Optional[float]:
@@ -82,24 +88,31 @@ def record(turn: dict) -> dict:
     stages = {k: v for k, v in stages.items() if v is not None}
     if not stages:
         raise ValueError("No usable stage timings.")
+    streamed = turn.get("streamed")
+    streamed = None if streamed is None else (1 if streamed is True else 0 if streamed is False else None)
     init_db()
     from agent import longterm
     with longterm._conn() as c:
-        c.execute("INSERT INTO voice_timing (ts, mode, voice, stages) VALUES (?,?,?,?)",
-                  (time.time(), mode, voice, json.dumps(stages)))
+        c.execute("INSERT INTO voice_timing (ts, mode, voice, stages, streamed)"
+                  " VALUES (?,?,?,?,?)",
+                  (time.time(), mode, voice, json.dumps(stages), streamed))
         c.execute("DELETE FROM voice_timing WHERE id NOT IN "
                   "(SELECT id FROM voice_timing ORDER BY id DESC LIMIT ?)", (KEEP,))
     return stages
 
 
-def recent(limit: int = 20) -> list[dict]:
+def recent(limit: int = 20, streamed: Optional[bool] = None) -> list[dict]:
+    """The last `limit` turns — of one mode only when `streamed` is given."""
     init_db()
     from agent import longterm
+    where, args = "", [int(limit)]
+    if streamed is not None:
+        where, args = "WHERE streamed = ? ", [1 if streamed else 0, int(limit)]
     with longterm._conn() as c:
-        rows = c.execute("SELECT ts, mode, voice, stages FROM voice_timing "
-                         "ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
-    return [{"ts": r[0], "mode": r[1], "voice": r[2], "stages": json.loads(r[3])}
-            for r in rows]
+        rows = c.execute("SELECT ts, mode, voice, stages, streamed FROM voice_timing "
+                         + where + "ORDER BY id DESC LIMIT ?", args).fetchall()
+    return [{"ts": r[0], "mode": r[1], "voice": r[2], "stages": json.loads(r[3]),
+             "streamed": None if r[4] is None else bool(r[4])} for r in rows]
 
 
 def _pct(values: list, p: float) -> Optional[float]:
@@ -111,11 +124,11 @@ def _pct(values: list, p: float) -> Optional[float]:
     return s[k]
 
 
-def summary(limit: int = 20) -> dict:
+def summary(limit: int = 20, streamed: Optional[bool] = None) -> dict:
     """Median and 90th percentile per stage over the last `limit` turns, and
     whether Pillar 1's check passes. `verdict` is three-state: too few turns
     to judge is `unknown`, never `pass`."""
-    turns = recent(limit)
+    turns = recent(limit, streamed)
     out: dict = {"turns": len(turns), "stages": {}}
     for k in STAGES + SERVER:
         vals = [t["stages"][k] for t in turns if k in t["stages"]]
@@ -140,20 +153,36 @@ def _fmt(ms) -> str:
     return "  —  " if ms is None else f"{ms / 1000:5.2f}s"
 
 
-def report(limit: int = 20) -> str:
-    s = summary(limit)
-    lines = [f"Voice turns measured: {s['turns']} (most recent {limit})",
-             "", "  stage (since you stopped talking)   median    p90    n"]
-    labels = {
+LABELS = {
         "stt_done": "transcript back", "first_token": "first word of reply",
         "reply_done": "whole reply written", "tts_start": "voice requested",
         "tts_ready": "first audio received", "first_sound": "FIRST SOUND",
         "stt_server": "  (server: speech-to-text)", "tts_server": "  (server: first voice section)",
-    }
+}
+
+
+def report(limit: int = 20) -> str:
+    """The Pillar 1 table — and, once both modes have turns, before and after
+    "Speak as it writes" side by side, so the change is a measured number."""
+    s = summary(limit)
+    lines = [f"Voice turns measured: {s['turns']} (most recent {limit})",
+             "", "  stage (since you stopped talking)   median    p90    n"]
     for k in STAGES + SERVER:
         st = s["stages"][k]
-        lines.append(f"  {labels[k]:<34}{_fmt(st['median'])} {_fmt(st['p90'])} {st['n']:>4}")
+        lines.append(f"  {LABELS[k]:<34}{_fmt(st['median'])} {_fmt(st['p90'])} {st['n']:>4}")
     lines += ["", f"Pillar 1: {s['verdict'].upper()} — {s['why']}"]
+    before, after = summary(limit, streamed=False), summary(limit, streamed=True)
+    if before["turns"] and after["turns"]:
+        lines += ["", "  Before / after \"Speak as it writes\" (median, turns counted):",
+                  f"  {'':<34}{'whole reply':>12}{'as it writes':>14}"]
+        for k in ("reply_done", "tts_ready", "first_sound"):
+            b, a = before["stages"][k], after["stages"][k]
+            lines.append(f"  {LABELS[k]:<34}{_fmt(b['median']):>12}{_fmt(a['median']):>14}")
+        lines.append(f"  {'turns':<34}{before['turns']:>12}{after['turns']:>14}")
+        b, a = before["stages"]["first_sound"]["median"], after["stages"]["first_sound"]["median"]
+        if b and a:
+            lines.append(f"  First sound {'earlier' if a < b else 'LATER'} by "
+                         f"{abs(b - a) / 1000:.2f}s with it on.")
     return "\n".join(lines)
 
 

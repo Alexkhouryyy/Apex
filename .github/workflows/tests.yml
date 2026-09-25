@@ -55,6 +55,9 @@ jobs:
           node scripts/check_drive_spatial_ui.cjs
           node scripts/check_voice_timing_ui.cjs
           node scripts/check_relay_phone_ui.cjs
+          node scripts/check_speech_queue.cjs
+          node scripts/check_handsfree_ui.cjs
+          node scripts/check_team_ui.cjs
 
       - name: Structural audits (informational — never fails the build)
         env:

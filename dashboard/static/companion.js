@@ -32,7 +32,7 @@
     $('voice-timing').textContent = timingLine(t.stages); $('voice-timing').hidden = false;
     try {
       await request('/api/companion/timing', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mode: t.mode, voice: $('voice').value, stages: t.stages})});
+        body: JSON.stringify({mode: t.mode, voice: $('voice').value, streamed: Boolean(t.streamed), stages: t.stages})});
     } catch (_) { /* Measurement must never break a turn. */ }
   }
   const drive = location.pathname === '/drive';
@@ -111,6 +111,7 @@
   function scroll() { $('messages').scrollTop = $('messages').scrollHeight; }
   function stopSpeech() {
     speechEpoch++; speechBusy=false;
+    live?.q.cancel();
     // Let an in-flight local generation finish; aborting HTTP does not stop GPU work.
     endPlayback?.(); endPlayback = null;
     window.speechSynthesis?.cancel();
@@ -135,6 +136,8 @@
     }
   }
   $('voicebox-profile').addEventListener('change', () => localStorage.setItem('apex.voicebox.profile', $('voicebox-profile').value));
+  $('stream-speech').checked = localStorage.getItem('apex.speech.stream') !== '0';
+  $('stream-speech').addEventListener('change', () => localStorage.setItem('apex.speech.stream', $('stream-speech').checked ? '1' : '0'));
   $('voice').addEventListener('change', loadVoiceboxProfiles);
   // Fired here for the tokenless-localhost case, and again from boot() after a
   // token is accepted. Without the second call the very first load of a
@@ -144,6 +147,66 @@
   // they happen to reload. The old comment said "retry when voice changes",
   // but Voicebox is already the DEFAULT voice, so that change never happens.
   loadVoiceboxProfiles();
+  // One voice, two ways to feed it: `speak` with a finished reply, and
+  // `startLiveSpeech` with one still being written. Same synthesis, same
+  // playback, same timing marks — so the before/after comparison measures the
+  // feeding, not two different players.
+  function voiceFns(epoch) {
+    const engine = $('voice').value, profile = $('voicebox-profile').value;
+    const generate = async section => {
+      mark('tts_start');
+      const response = await request('/api/speak', {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: section, engine, profile})});
+      const blob = await response.blob();
+      mark('tts_ready'); serverTiming(response, 'tts', 'tts_server');
+      return blob;
+    };
+    const play = blob => new Promise((resolve, reject) => {
+      if (epoch !== speechEpoch) { resolve(); return; }
+      audioUrl = URL.createObjectURL(blob); audio = new Audio(audioUrl);
+      const current = audio, url = audioUrl;
+      const done = exc => {
+        current.onended = current.onerror = null;
+        if (audio === current) { audio = null; audioUrl = null; endPlayback = null; }
+        URL.revokeObjectURL(url);
+        if (exc) reject(exc); else resolve();
+      };
+      endPlayback = () => { current.pause(); done(); };
+      current.onended = () => done();
+      current.onplaying = () => mark('first_sound');
+      current.onerror = () => done(new Error('Audio playback failed. Your reply remains on screen.'));
+      state('speaking', 'Speaking · Stop ends playback'); controls();
+      current.play().catch(exc => done(new Error(exc.name === 'NotAllowedError'
+        ? 'Your browser blocked audio. Allow sound for this site, then send a short message.' : exc.message)));
+    });
+    return {generate, play};
+  }
+  function afterSpeech(epoch) {
+    speechDraining = false;
+    if (epoch === speechEpoch) stopSpeech();
+    else { if (!active && !recorder) state('', 'Stopped. Ready for your next message.'); resumeHands(); controls(); }
+  }
+  // Whether this turn's reply can be spoken while it is written: a spoken,
+  // synthesised voice, the setting on, and a turn the user asked for (a
+  // proactive check-in may turn out to be NOTHING_TO_ADD, which must not be
+  // half-said first).
+  function canSpeakLive(automatic) {
+    return !automatic && !drive && $('spoken').checked && $('stream-speech').checked
+      && ['openai', 'voicebox'].includes($('voice').value);
+  }
+  let live = null;
+  function startLiveSpeech() {
+    hands?.pause(); speechBusy = true; speechDraining = true; controls();
+    const epoch = speechEpoch;
+    const {generate, play} = voiceFns(epoch);
+    live = {epoch, q: window.ApexSpeechQueue.live(generate, play)};
+    return live;
+  }
+  async function finishLiveSpeech(handle) {
+    try { await handle.q.done; }
+    catch (exc) { if (handle.epoch === speechEpoch) error(exc.message); }
+    finally { if (live === handle) live = null; afterSpeech(handle.epoch); }
+  }
   async function speak(text) {
     stopSpeech();
     if (!$('spoken').checked || !text) { resumeHands(); return; }
@@ -154,42 +217,14 @@
       if (['openai', 'voicebox'].includes($('voice').value)) {
         speechDraining = true;
         state('thinking', 'Preparing voice · the first section will play as soon as it is ready…'); controls();
-        const engine = $('voice').value, profile = $('voicebox-profile').value;
-        const generate = async section => {
-          mark('tts_start');
-          const response = await request('/api/speak', {method: 'POST',
-            headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: section, engine, profile})});
-          const blob = await response.blob();
-          mark('tts_ready'); serverTiming(response, 'tts', 'tts_server');
-          return blob;
-        };
-        const play = blob => new Promise((resolve, reject) => {
-          if (epoch !== speechEpoch) { resolve(); return; }
-          audioUrl = URL.createObjectURL(blob); audio = new Audio(audioUrl);
-          const current = audio, url = audioUrl;
-          const done = exc => {
-            current.onended = current.onerror = null;
-            if (audio === current) { audio = null; audioUrl = null; endPlayback = null; }
-            URL.revokeObjectURL(url);
-            if (exc) reject(exc); else resolve();
-          };
-          endPlayback = () => { current.pause(); done(); };
-          current.onended = () => done();
-          current.onplaying = () => mark('first_sound');
-          current.onerror = () => done(new Error('Audio playback failed. Your reply remains on screen.'));
-          state('speaking', 'Speaking · Stop ends playback'); controls();
-          current.play().catch(exc => done(new Error(exc.name === 'NotAllowedError'
-            ? 'Your browser blocked audio. Allow sound for this site, then send a short message.' : exc.message)));
-        });
+        const {generate, play} = voiceFns(epoch);
         try {
           await window.ApexSpeechQueue.run(window.ApexSpeechQueue.chunks(text), generate, play,
             () => epoch !== speechEpoch);
         } catch (exc) {
           if (epoch === speechEpoch) error(exc.message);
         } finally {
-          speechDraining = false;
-          if (epoch === speechEpoch) finish();
-          else { if (!active && !recorder) state('', 'Stopped. Ready for your next message.'); resumeHands(); controls(); }
+          afterSpeech(epoch);
         }
       } else {
         if (!window.speechSynthesis) throw new Error('Device speech is unavailable. Choose OpenAI voice or read the reply.');
@@ -274,6 +309,11 @@
     active = turn; controls(); state('thinking', automatic ? 'Checking in on your screen…' : 'Thinking with you…');
     if (!automatic && !recovery) { bubble('user', text); $('message').value = ''; }
     const output = bubble('agent', automatic ? 'Checking your shared screen…' : 'Thinking…');
+    // Speak as it writes: sections go to the voice as soon as a sentence is
+    // complete, instead of after the whole reply (tool calls included).
+    const speaking = canSpeakLive(automatic) ? startLiveSpeech() : null;
+    if (timing) timing.streamed = Boolean(speaking);
+    let streamed = '';
     function event(item) {
       if (item.type === 'start') {
         threadId = item.thread_id; localStorage.setItem('apex_companion_thread', String(threadId));
@@ -283,6 +323,7 @@
       } else if (item.type === 'token' && !turn.stopped) {
         mark('first_token');
         turn.text += item.text; if (!automatic) output.content.textContent = turn.text;
+        streamed += item.text; speaking?.q.push(item.text);
       } else if (item.type === 'tool') {
         let detail = document.createElement('details');
         let summary = document.createElement('summary');
@@ -293,6 +334,13 @@
       } else if (item.type === 'done') {
         mark('reply_done');
         turn.done = true; turn.stopped = turn.stopped || item.interrupted; turn.text = item.text;
+        if (speaking) {
+          // A reply that never streamed (an error, a fallback) is spoken whole;
+          // one that did has already been fed, token by token.
+          const final = (item.text || '').trim();
+          if (turn.stopped) speaking.q.cancel();
+          else speaking.q.end(final && !streamed.includes(final) ? final : '');
+        }
         output.content.textContent = item.text;
         if (automatic && item.text.trim() === 'NOTHING_TO_ADD') output.wrapper.remove();
       } else if (item.type === 'error') { throw new Error(item.text); }
@@ -330,10 +378,16 @@
       // Do not silently lose a message on a failed request.
       if (!automatic && !$('message').value) $('message').value = text;
     } finally {
-      active = null; state('', pendingRemote ? 'Connection interrupted · task outcome not confirmed.' : turn.stopped ? 'Stopped. Ready for your next instruction.' : 'Ready when you are.'); controls();
+      active = null;
+      if (speaking && !turn.stopped && live === speaking) { state('speaking', 'Speaking · Stop ends playback'); speaking.q.end(); }
+      else state('', pendingRemote ? 'Connection interrupted · task outcome not confirmed.' : turn.stopped ? 'Stopped. Ready for your next instruction.' : 'Ready when you are.');
+      controls();
     }
     if (automatic && /^\[Safety\]/.test(turn.text)) $('check-in').checked=false;
-    if (!turn.stopped && turn.text.trim() !== 'NOTHING_TO_ADD') await speak(turn.text);
+    if (speaking) {
+      if (turn.stopped) speaking.q.cancel();
+      await finishLiveSpeech(speaking);
+    } else if (!turn.stopped && turn.text.trim() !== 'NOTHING_TO_ADD') await speak(turn.text);
     else resumeHands();
     timingFinish();
   }

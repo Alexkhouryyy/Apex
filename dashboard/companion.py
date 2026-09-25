@@ -348,4 +348,6 @@ async def record_voice_timing(request: Request):
 async def voice_timing_summary(limit: int = 20):
     from agent import voice_timing
     limit = max(1, min(200, int(limit)))
-    return {'summary': voice_timing.summary(limit), 'turns': voice_timing.recent(limit)}
+    return {'summary': voice_timing.summary(limit), 'turns': voice_timing.recent(limit),
+            'before': voice_timing.summary(limit, streamed=False),
+            'after': voice_timing.summary(limit, streamed=True)}
