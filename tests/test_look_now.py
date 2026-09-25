@@ -83,6 +83,80 @@ class TestTheQueue:
         assert companion.validate_screen_image(url), "a 4K screen must be scaled to fit"
 
 
+class TestOnePageAnswers:
+    """With the companion tab and the board both open, both pages poll. A
+    press used to reach both: two answers, and the second one's capture was
+    already used, so it showed an error."""
+
+    def test_a_request_goes_to_one_page_only(self):
+        look_now.request("hotkey", image=jpeg())
+        first = look_now.wait(0, timeout=1)
+        second = look_now.wait(0, timeout=0.2)
+        assert first["seq"] == 1 and second is None
+
+    def test_two_waiting_pages_get_one_each_press(self):
+        got = []
+        threads = [threading.Thread(target=lambda: got.append(look_now.wait(0, timeout=1.5))) for _ in range(2)]
+        for t in threads:
+            t.start()
+        time.sleep(0.2)
+        look_now.request("hotkey", image=jpeg())
+        for t in threads:
+            t.join(3)
+        assert sorted(i is not None for i in got) == [False, True]
+
+
+class TestTheTalkHotkey:
+
+    def test_talk_captures_nothing_and_says_what_it_is(self, monkeypatch):
+        monkeypatch.setattr(look_now, "capture", lambda: pytest.fail("talk must not capture the screen"))
+        look_now.request("hotkey", kind="talk")
+        item = look_now.wait(0, timeout=1)
+        assert item["kind"] == "talk" and look_now.image_for(item["seq"]) is None
+
+    def test_look_items_say_so(self):
+        look_now.request("hotkey", image=jpeg())
+        assert look_now.wait(0, timeout=1)["kind"] == "look"
+
+    def test_default_is_ctrl_alt_space(self):
+        assert config.CELINE_TALK_HOTKEY == "<ctrl>+<alt>+<space>"
+
+
+class TestStartBindsTheRealHotkeys:
+    """start() through the REAL app.hotkey class, with only pynput faked.
+    It imported a class that did not exist, and the error was caught and
+    printed: Ctrl+Alt+C never bound on any machine, and no test ran start()."""
+
+    @pytest.fixture
+    def pynput(self, monkeypatch):
+        import sys, types
+        bound = {}
+        class GlobalHotKeys:
+            def __init__(self, bindings):
+                bound.update(bindings)
+            def start(self):
+                pass
+        keyboard = types.ModuleType("pynput.keyboard"); keyboard.GlobalHotKeys = GlobalHotKeys
+        pkg = types.ModuleType("pynput"); pkg.keyboard = keyboard
+        monkeypatch.setitem(sys.modules, "pynput", pkg)
+        monkeypatch.setitem(sys.modules, "pynput.keyboard", keyboard)
+        return bound
+
+    def test_both_hotkeys_bind_and_do_their_jobs(self, pynput, monkeypatch):
+        monkeypatch.setattr(look_now, "capture", jpeg)
+        started = look_now.start("<ctrl>+<alt>+c", None, talk_hotkey="<ctrl>+<alt>+<space>")
+        assert started == ["look <ctrl>+<alt>+c", "talk <ctrl>+<alt>+<space>"]
+        assert set(pynput) == {"<ctrl>+<alt>+c", "<ctrl>+<alt>+<space>"}
+        pynput["<ctrl>+<alt>+<space>"]()
+        pynput["<ctrl>+<alt>+c"]()
+        kinds = [look_now.wait(0, timeout=1)["kind"], look_now.wait(0, timeout=1)["kind"]]
+        assert kinds == ["talk", "look"]
+
+    def test_an_empty_hotkey_is_off(self, pynput):
+        assert look_now.start("", None, talk_hotkey="<ctrl>+<alt>+<space>") == ["talk <ctrl>+<alt>+<space>"]
+        assert set(pynput) == {"<ctrl>+<alt>+<space>"}
+
+
 class TestTheRoutes:
 
     @pytest.fixture

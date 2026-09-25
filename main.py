@@ -461,10 +461,11 @@ def main():
         from agent import look_now as _look_now
         _started = _look_now.start(
             getattr(config, "CELINE_HOTKEY", ""),
-            getattr(config, "CELINE_WAKE_PHRASES", []) if getattr(config, "CELINE_WAKE_ENABLED", False) else None)
+            getattr(config, "CELINE_WAKE_PHRASES", []) if getattr(config, "CELINE_WAKE_ENABLED", False) else None,
+            talk_hotkey=getattr(config, "CELINE_TALK_HOTKEY", ""))
         if _started:
-            print(f"[Celine] Look now: {' and '.join(_started)} — she looks at your screen and helps "
-                  f"(answers in the companion page).")
+            print(f"[Celine] {', '.join(_started)} — look: she sees your screen and helps; "
+                  f"talk: Voice mode on/off. Both answer in the companion page.")
 
     # TUI mode: hand off to the terminal UI, which owns the input loop.
     if args.tui:

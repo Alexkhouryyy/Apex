@@ -47,6 +47,22 @@ time.
   off **Interrupt by talking** in settings, or set microphone sensitivity to
   *Low*.
 
+## Talk from anywhere: Ctrl+Alt+Space
+
+Press **Ctrl+Alt+Space** in any window and Voice mode starts in the open
+companion page: she listens hands-free. Press it again to stop. If she's in
+the middle of a reply, the press cuts her off and she listens.
+
+- The companion page must be open, the same as for Ctrl+Alt+C.
+- **Click that page once** after opening it. A key pressed in another window
+  doesn't count as using the page, and the browser keeps the mic and sound
+  shut until the page has been clicked. Until then the page tells you to
+  click it.
+- With the companion tab and the board both open, each press goes to one of
+  them, not both.
+- Change the key with `CELINE_TALK_HOTKEY` in `.env`, or leave it empty to
+  turn it off.
+
 ## Memory
 
 Each companion turn includes what Apex remembers: the most recent memories,
@@ -59,6 +75,12 @@ Tuesday at 3pm"*. She saves it with the `remember` tool, including in Discuss
 mode. A memory saved in one turn is available in the next.
 
 ## Look now: Ctrl+Alt+C or "Hey Celly"
+
+> **Fixed 2026-09-25:** until this date Ctrl+Alt+C never actually bound.
+> The code asked for a hotkey class that doesn't exist, and the console
+> printed "Hotkeys not available" instead. The tests had replaced that part
+> with a stand-in, so they didn't catch it. They now go through the real
+> class.
 
 Wherever you are on the laptop, press **Ctrl+Alt+C**. Apex captures the screen
 the mouse is on at that moment, and Celine says what she sees and suggests the

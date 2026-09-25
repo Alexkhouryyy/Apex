@@ -368,6 +368,9 @@ SCREEN_HOTKEY = os.getenv("SCREEN_HOTKEY", "")           # e.g. "<ctrl>+<shift>+
 # Look now (agent/look_now.py): Celine looks at your screen and helps. The
 # hotkey is on whenever the dashboard is; set it empty to turn it off.
 CELINE_HOTKEY = os.getenv("CELINE_HOTKEY", "<ctrl>+<alt>+c")
+# Talk (agent/look_now.py): start or stop Voice mode in the open companion
+# page from anywhere on the laptop. Empty turns it off.
+CELINE_TALK_HOTKEY = os.getenv("CELINE_TALK_HOTKEY", "<ctrl>+<alt>+<space>")
 # The wake phrase keeps the microphone open and runs a small speech model all
 # the time, so it is off unless asked for — the Celine launchers turn it on.
 # The variants are how Whisper actually hears "Hey Celly".

@@ -11,6 +11,13 @@ the question. With none, the question is DEFAULT_QUESTION.
 
 The companion page speaks the answer, so it has to be open: if no page has
 asked for work recently, the request says so rather than vanishing.
+
+The same channel carries the talk hotkey (CELINE_TALK_HOTKEY, default
+Ctrl+Alt+Space): no capture, just "start or stop Voice mode" for the open page.
+
+Each request goes to ONE page. With the companion tab and the board (whose
+panel is also the companion) both open, every page used to receive every
+press: both answered, and the second found its capture already used.
 """
 from __future__ import annotations
 
@@ -27,7 +34,7 @@ KEEP_SECONDS = 120          # a capture nobody used is dropped after this
 PAGE_FRESH_SECONDS = 40     # a page that polled this recently is listening
 
 _cond = threading.Condition()
-_items: list[dict] = []     # {seq, ts, source, question, image}
+_items: list[dict] = []     # {seq, ts, kind, source, question, image, claimed}
 _seq = 0
 _last_poll = 0.0
 
@@ -82,23 +89,25 @@ def page_listening(now: Optional[float] = None) -> bool:
 
 
 def request(source: str, question: str = "", image: Optional[str] = None,
-            now: Optional[float] = None) -> dict:
-    """Capture the screen and queue it for the companion page. Returns the
-    item without its image, plus whether a page is there to take it."""
+            now: Optional[float] = None, kind: str = "look") -> dict:
+    """Queue a request for the companion page: "look" captures the screen
+    (unless `image` is given), "talk" toggles Voice mode and captures nothing.
+    Returns the item without its image, plus whether a page is there to take it."""
     global _seq
     now = now if now is not None else time.time()
-    image = image if image is not None else capture()
+    if kind == "look" and image is None:
+        image = capture()
     with _cond:
         _seq += 1
-        item = {"seq": _seq, "ts": now, "source": source,
-                "question": (question or "").strip()[:2000], "image": image}
+        item = {"seq": _seq, "ts": now, "kind": kind, "source": source,
+                "question": (question or "").strip()[:2000], "image": image, "claimed": False}
         _items[:] = [i for i in _items if now - i["ts"] < KEEP_SECONDS][-4:] + [item]
         _cond.notify_all()
     return {**_public(item), "page_listening": page_listening(now)}
 
 
 def _public(item: dict) -> dict:
-    return {k: item[k] for k in ("seq", "ts", "source", "question")}
+    return {k: item[k] for k in ("seq", "ts", "kind", "source", "question")}
 
 
 def wait(after: int, timeout: float = 25.0) -> Optional[dict]:
@@ -109,8 +118,10 @@ def wait(after: int, timeout: float = 25.0) -> Optional[dict]:
     with _cond:
         while True:
             _last_poll = time.time()
-            fresh = [i for i in _items if i["seq"] > after and _last_poll - i["ts"] < KEEP_SECONDS]
+            fresh = [i for i in _items if i["seq"] > after and not i["claimed"]
+                     and _last_poll - i["ts"] < KEEP_SECONDS]
             if fresh:
+                fresh[0]["claimed"] = True        # one page answers, not every open one
                 return _public(fresh[0])
             left = deadline - time.time()
             if left <= 0:
@@ -161,6 +172,15 @@ def on_hotkey() -> None:
         print(f"[Celine] Could not capture the screen: {type(e).__name__}: {e}", flush=True)
 
 
+def on_talk_hotkey() -> None:
+    r = request("hotkey", kind="talk")
+    if r["page_listening"]:
+        print("[Celine] Talk hotkey: Voice mode on/off in the companion page.", flush=True)
+    else:
+        print("[Celine] Talk hotkey pressed, but no companion page is open. Open "
+              "http://127.0.0.1:7860/companion, click it once, and press it again.", flush=True)
+
+
 def make_wake_handler(phrases: list[str]):
     def on_wake(transcript: str = "") -> None:
         try:
@@ -170,19 +190,29 @@ def make_wake_handler(phrases: list[str]):
     return on_wake
 
 
-def start(hotkey: str = "", wake_phrases: Optional[list[str]] = None) -> list[str]:
-    """Bind the hotkey and start the wake listener. Returns what started, in
-    words, for the console."""
+def start(hotkey: str = "", wake_phrases: Optional[list[str]] = None,
+          talk_hotkey: str = "") -> list[str]:
+    """Bind the hotkeys and start the wake listener. Returns what started, in
+    words, for the console.
+
+    This used to import a `HotkeyManager` that app/hotkey.py never had: the
+    ImportError was caught and printed, and Ctrl+Alt+C never bound on anyone's
+    machine. tests/test_look_now.py now runs this through the real class."""
     started = []
-    if hotkey:
+    bindings = {k: fn for k, fn in ((hotkey, on_hotkey), (talk_hotkey, on_talk_hotkey)) if k}
+    if bindings:
         try:
-            from app.hotkey import HotkeyManager
-            mgr = HotkeyManager()
-            mgr.bind(hotkey, on_hotkey)
-            if mgr.start():
-                started.append(f"hotkey {hotkey}")
+            from app.hotkey import GlobalHotkeys
+            keys = GlobalHotkeys()
+            for combo, fn in bindings.items():
+                keys.bind(combo, fn)
+            if keys.start():
+                if hotkey:
+                    started.append(f"look {hotkey}")
+                if talk_hotkey:
+                    started.append(f"talk {talk_hotkey}")
         except Exception as e:
-            print(f"[Celine] Hotkey not available: {e}", flush=True)
+            print(f"[Celine] Hotkeys not available: {e}", flush=True)
     if wake_phrases:
         try:
             from voice.wake import WakeWordListener

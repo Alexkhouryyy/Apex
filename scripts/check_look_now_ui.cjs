@@ -19,6 +19,10 @@ w.Audio = class {
   play() { plays++; setTimeout(() => { this.onplaying?.(); this.t = setTimeout(() => this.onended?.(), slowReply ? 2000 : 20); }, 1); return Promise.resolve(); }
   pause() { pauses++; clearTimeout(this.t); } };
 w.URL.createObjectURL = () => 'blob:x'; w.URL.revokeObjectURL = () => {};
+let listening = 0, activated = false;
+w.ApexHandsFree = class { constructor(o){this.o=o;this.enabled=false;this.epoch=0;} async start(){listening++;this.enabled=true;}
+  stop(){this.enabled=false;} resume(){} pause(){} get busy(){return false;} };
+Object.defineProperty(w.navigator, 'userActivation', {value: {get hasBeenActive() { return activated; }}});
 
 const polls = [], chats = [];
 let pending = [];            // look items the "server" will hand out, in order
@@ -79,7 +83,26 @@ w.eval(fs.readFileSync(base + 'companion.js', 'utf8'));
   assert.equal(chats[2].look_id, 8);
   assert.ok(pauses > pausesBefore, 'the speech in progress must be stopped for the new request');
 
-  console.log('PASS: look requests start from now, become turns that use the server capture (no browser image), '
+  // 3. Ctrl+Alt+Space (a "talk" item): Voice mode on, and off on the next
+  //    press — but not before one click on the page, which the browser
+  //    needs before it opens the mic and sound; it says so instead.
+  await sleep(300);
+  const root = w.document.getElementById('companion');
+  const chatsBefore = chats.length;
+  pending.push({seq: 9, kind: 'talk', source: 'hotkey', question: '', ts: 3});
+  for (let i = 0; i < 100 && !$('error').textContent; i++) await sleep(10);
+  assert.match($('error').textContent, /Click anywhere on this page once/);
+  assert.equal(root.dataset.view, undefined); assert.equal(listening, 0);
+  activated = true;
+  pending.push({seq: 10, kind: 'talk', source: 'hotkey', question: '', ts: 4});
+  for (let i = 0; i < 200 && root.dataset.view !== 'voice'; i++) await sleep(10);
+  assert.equal(root.dataset.view, 'voice', 'the talk hotkey must start Voice mode'); assert.equal(listening, 1);
+  pending.push({seq: 11, kind: 'talk', source: 'hotkey', question: '', ts: 5});
+  for (let i = 0; i < 200 && root.dataset.view === 'voice'; i++) await sleep(10);
+  assert.equal(root.dataset.view, undefined, 'pressed again, it stops');
+  assert.equal(chats.length, chatsBefore, 'a talk press is not a question to answer');
+
+  console.log('PASS: Ctrl+Alt+Space toggles Voice mode (after one click on the page, with a clear message before); look requests start from now, become turns that use the server capture (no browser image), '
     + 'carry the spoken question when there is one, and cut off speech already in progress.');
   dom.window.close();
   process.exit(0);

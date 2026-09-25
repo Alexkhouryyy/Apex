@@ -839,11 +839,29 @@
         lookAfter = data.seq;
         // Not awaited: while Celine answers one, the next press must still be
         // heard — answerLook cuts off whatever she is saying.
-        if (data.item) answerLook(data.item);
+        if (data.item?.kind === 'talk') talkHotkey();
+        else if (data.item) answerLook(data.item);
       } catch (_) {
         await new Promise(r => setTimeout(r, 3000));     // server restarting, or signed out
       }
     }
+  }
+  // Ctrl+Alt+Space from anywhere: Voice mode on, or off if it is on.
+  async function talkHotkey() {
+    if (voiceMode) { stop(); return; }
+    // A key pressed in another window is not a click on this page: until the
+    // page has had one, the browser keeps its microphone and sound shut.
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+      error('Click anywhere on this page once, then press Ctrl+Alt+Space again — the browser needs one click before Celine can listen and speak.');
+      return;
+    }
+    // Still saying an earlier reply? The press means "listen to me now":
+    // she stops, rather than the press being refused until she finishes.
+    stopSpeech();
+    const busy = () => active || recorder || speechBusy || speechDraining;
+    for (let i = 0; i < 100 && busy(); i++) await new Promise(r => setTimeout(r, 100));
+    if (busy()) { error('Celine is still working on a reply — press Ctrl+Alt+Space again when it is done.'); return; }
+    enterVoiceMode().catch(exc => { leaveVoiceMode(); error(exc.message); });
   }
   async function answerLook(item) {
     // It was asked for right now: whatever Celine was saying gives way.
