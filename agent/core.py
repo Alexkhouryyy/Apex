@@ -3197,7 +3197,7 @@ class AgentCore:
                  if cost else "."))
         return text
 
-    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None, persona: str | None = None) -> str:
+    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None, persona: str | None = None, screen_origin: str = "browser") -> str:
         """Run a full agent turn. Returns the final text response.
 
         If `streamer` is provided (a StreamingSpeaker), text deltas are fed to it
@@ -3242,7 +3242,11 @@ class AgentCore:
             if screen_b64:
                 user_content.extend([
                     {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": screen_b64}},
-                    {"type": "text", "text": "[Browser-shared screen snapshot, captured for this turn; not the Apex host screen.]"},
+                    {"type": "text", "text": (
+                        "[The user's own screen on the Apex host, captured the moment they asked you "
+                        "to look (hotkey or wake phrase). It is what they are doing right now.]"
+                        if screen_origin == "host" else
+                        "[Browser-shared screen snapshot, captured for this turn; not the Apex host screen.]")},
                 ])
             if include_screenshot and not companion_mode and not screen_b64:
                 try:

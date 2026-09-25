@@ -12,6 +12,22 @@ import urllib.error
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _dotenv_keys():
+    try:
+        from dotenv import dotenv_values
+        return set(dotenv_values(ROOT / '.env'))
+    except Exception:
+        return set()
+
+
+def apply_wake_default(env, dotenv_keys=None):
+    """CELINE_WAKE_ENABLED=true unless the environment or .env already says."""
+    keys = _dotenv_keys() if dotenv_keys is None else dotenv_keys
+    if 'CELINE_WAKE_ENABLED' not in env and 'CELINE_WAKE_ENABLED' not in keys:
+        env['CELINE_WAKE_ENABLED'] = 'true'
+    return env
+
+
 def port_in_use(port):
     with socket.socket() as sock:
         sock.settimeout(1)
@@ -61,6 +77,12 @@ def main(argv=None):
             raise RuntimeError('Qwen startup timed out after 15 minutes.')
         env = os.environ.copy()
         env.update(TTS_ENGINE='voicebox', VOICEBOX_URL='http://127.0.0.1:17494', VOICEBOX_PROFILE='celine')
+        # "Hey Celly" — Celine looks at your screen and helps (agent/look_now.py).
+        # On by default for this launcher, but a CELINE_WAKE_ENABLED already in
+        # the environment or in .env wins: load_dotenv() never overrides a
+        # variable that is already set, so setting it here unconditionally
+        # would have made .env powerless to turn it off.
+        apply_wake_default(env)
         print('\nCeline connected. Open http://127.0.0.1:7860/companion once Apex is ready.\n', flush=True)
         agent = subprocess.Popen([sys.executable, str(ROOT / 'main.py'), '--text'], cwd=ROOT, env=env)
         while agent.poll() is None:

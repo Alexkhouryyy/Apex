@@ -158,6 +158,18 @@ async def companion_chat(request: Request, durable: bool = False):
             raise ValueError("Enter a message of 1–20,000 characters.")
         if not isinstance(turn_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{16,80}", turn_id):
             raise ValueError("Invalid turn identifier.")
+        # Look now: the page refers to a screen the server captured on the
+        # hotkey or wake phrase; the image itself never went to the browser.
+        screen_origin = "browser"
+        look_id = body.get("look_id")
+        if look_id is not None:
+            if type(look_id) is not int or body.get("screen_image") or durable:
+                raise ValueError("Invalid look request.")
+            from agent import look_now
+            image = look_now.image_for(look_id)
+            if image is None:
+                raise ValueError("That screen capture has expired or was already used. Press the hotkey again.")
+            body["screen_image"], screen_origin = image, "host"
         companion.prompt(mode, bool(body.get("screen_image")))
         companion.validate_screen_image(body.get("screen_image"))
         if durable and body.get("screen_image"):
@@ -242,6 +254,7 @@ async def companion_chat(request: Request, durable: bool = False):
                 channel_id=channel_id, cancel_event=cancel,
                 companion_mode=mode, screen_image=body.get("screen_image"),
                 max_iterations=1 if proactive else None, persona=persona,
+                screen_origin=screen_origin,
             )
             if cancel.is_set():
                 response = (response or "") + "\n[Interrupted; any completed actions remain in effect.]"
@@ -332,6 +345,19 @@ async def transcribe_browser(request: Request):
     took = (time.perf_counter() - started) * 1000
     return JSONResponse({'text': result},
                         headers={'Server-Timing': f'stt;dur={took:.1f}'})
+
+
+@router.get('/api/companion/look')
+async def look_requests(after: int = 0):
+    """Long-poll for the hotkey / "Hey Celly" (agent/look_now.py). Returns the
+    first request newer than `after` — never the image, which stays on the
+    server — or {"item": null} after about 25 s. `seq` is the current number,
+    so a page that just opened starts from now and does not replay old ones."""
+    from agent import look_now
+    if after < 0:
+        after = look_now.latest_seq()
+    item = await asyncio.get_running_loop().run_in_executor(None, look_now.wait, after, 25.0)
+    return {"item": item, "seq": look_now.latest_seq()}
 
 
 @router.post('/api/companion/timing')

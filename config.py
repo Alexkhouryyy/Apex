@@ -365,6 +365,17 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 JARVIS_PERSONA_ENABLED = os.getenv("JARVIS_PERSONA_ENABLED", "true").lower() in {"1", "true", "yes"}
 APP_CONTEXT_ENABLED = os.getenv("APP_CONTEXT_ENABLED", "true").lower() in {"1", "true", "yes"}
 SCREEN_HOTKEY = os.getenv("SCREEN_HOTKEY", "")           # e.g. "<ctrl>+<shift>+s"
+# Look now (agent/look_now.py): Celine looks at your screen and helps. The
+# hotkey is on whenever the dashboard is; set it empty to turn it off.
+CELINE_HOTKEY = os.getenv("CELINE_HOTKEY", "<ctrl>+<alt>+c")
+# The wake phrase keeps the microphone open and runs a small speech model all
+# the time, so it is off unless asked for — the Celine launchers turn it on.
+# The variants are how Whisper actually hears "Hey Celly".
+CELINE_WAKE_ENABLED = os.getenv("CELINE_WAKE_ENABLED", "false").lower() in {"1", "true", "yes"}
+CELINE_WAKE_PHRASES = [p.strip().lower() for p in os.getenv(
+    "CELINE_WAKE_PHRASES",
+    "hey celly,hey celli,hey cely,hey selly,hey shelly,hey kelly,hey chelly,hey celine,hey seline",
+).split(",") if p.strip()]
 DESKTOP_SHELL_HOTKEY = os.getenv("DESKTOP_SHELL_HOTKEY", "<ctrl>+<shift>+\\")
 ORB_ENABLED = os.getenv("ORB_ENABLED", "false").lower() in {"1", "true", "yes"}
 PROFILE_DIGEST_ENABLED = os.getenv("PROFILE_DIGEST_ENABLED", "true").lower() in {"1", "true", "yes"}

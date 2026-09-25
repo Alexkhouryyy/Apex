@@ -492,7 +492,9 @@
       await new Promise(resolve => setTimeout(resolve, 1200));
     }
   }
-  async function send(text, automatic = false, recovery = null, fromHands = false) {
+  // `look`: a hotkey / "Hey Celly" request (agent/look_now.py) — the server
+  // attaches the screen it captured; no browser share is sent with it.
+  async function send(text, automatic = false, recovery = null, fromHands = false, look = null) {
     if (speechBusy || speechDraining || active || recorder || (hands?.busy && !fromHands) || (pendingRemote && !recovery) || !text.trim()) { timing = null; return; }
     // Only the send that a transcript triggered is a voice turn; a typed
     // message or a proactive check-in must not inherit a stale clock.
@@ -500,8 +502,8 @@
     hands?.pause();
     if (!automatic) lastInteraction=Date.now();
     stopSpeech(); error();
-    let image;
-    try { image = snapshot(); } catch (exc) { error(exc.message); return; }
+    let image = null;
+    if (!look) { try { image = snapshot(); } catch (exc) { error(exc.message); return; } }
     const turn = {id: recovery?.turn_id || crypto.randomUUID(), stopped: false, done: false, text: '', automatic};
     active = turn; controls(); state('thinking', automatic ? 'Checking in on your screen…' : 'Thinking with you…');
     if (!automatic && !recovery) { bubble('user', text); $('message').value = ''; }
@@ -553,7 +555,8 @@
         body: JSON.stringify({message: text, thread_id: threadId, turn_id: turn.id,
           screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace, proactive: automatic,
           // Which voice will speak the reply: in Celine's voice, Apex answers as Celine.
-          voice: $('voice').value, voice_profile: $('voicebox-profile').value})});
+          voice: $('voice').value, voice_profile: $('voicebox-profile').value,
+          ...(look ? {look_id: look.seq} : {})})});
       const reader = response.body.getReader(), decoder = new TextDecoder(); let pending = '';
       try {
         while (true) {
@@ -705,6 +708,35 @@
       pip.addEventListener('pagehide', () => { document.body.prepend(root); pip = null; $('float').textContent = 'Float ↗'; }, {once: true});
     } catch (exc) { error(exc.message); }
   };
+  // --- Look now: Ctrl+Alt+C / "Hey Celly" on the laptop ---------------------
+  // The server captures the screen; this page is what answers, out loud.
+  const LOOK_DEFAULT = 'Look at my screen right now and help me with what I\'m doing.';
+  let lookAfter = -1, looking = false;
+  async function lookLoop() {
+    if (looking || drive) return;
+    looking = true;
+    while (true) {
+      try {
+        const data = await (await request(`/api/companion/look?after=${lookAfter}`)).json();
+        lookAfter = data.seq;
+        // Not awaited: while Celine answers one, the next press must still be
+        // heard — answerLook cuts off whatever she is saying.
+        if (data.item) answerLook(data.item);
+      } catch (_) {
+        await new Promise(r => setTimeout(r, 3000));     // server restarting, or signed out
+      }
+    }
+  }
+  async function answerLook(item) {
+    // It was asked for right now: whatever Celine was saying gives way.
+    stopSpeech();
+    // Stopping speech finishes asynchronously; send() refuses while any of
+    // this is still true, and would drop the request without a word.
+    const busy = () => active || recorder || speechBusy || speechDraining;
+    for (let i = 0; i < 600 && busy(); i++) await new Promise(r => setTimeout(r, 100));
+    if (busy()) { error('Celine was busy and could not look — press the hotkey again.'); return; }
+    await send(item.question || LOOK_DEFAULT, false, null, Boolean(hands?.enabled), {seq: item.seq});
+  }
   async function boot() {
     const status = await (await request('/api/status')).json();
     if ($('login').open) $('login').close();
@@ -722,6 +754,7 @@
     state('', status.agent_ready === false ? 'Apex agent is not connected yet. Start Apex, then try a message.' : 'Ready when you are.'); controls();
     loadVoiceboxProfiles();
     probeStreaming();
+    lookLoop();
     if (drive) {
       await refreshJobs();
       if (pendingRemote) send(pendingRemote.message || 'Reconnected task', false, pendingRemote);

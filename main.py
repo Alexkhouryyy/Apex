@@ -454,6 +454,18 @@ def main():
     if monitor is not None:
         monitor.start()
 
+    # Look now: Ctrl+Alt+C / "Hey Celly" -> Celine looks at the screen and
+    # helps, through the open companion page (agent/look_now.py). Needs the
+    # dashboard, because that page is what answers.
+    if getattr(config, "DASHBOARD_ENABLED", True):
+        from agent import look_now as _look_now
+        _started = _look_now.start(
+            getattr(config, "CELINE_HOTKEY", ""),
+            getattr(config, "CELINE_WAKE_PHRASES", []) if getattr(config, "CELINE_WAKE_ENABLED", False) else None)
+        if _started:
+            print(f"[Celine] Look now: {' and '.join(_started)} — she looks at your screen and helps "
+                  f"(answers in the companion page).")
+
     # TUI mode: hand off to the terminal UI, which owns the input loop.
     if args.tui:
         from tui.app import run_tui
