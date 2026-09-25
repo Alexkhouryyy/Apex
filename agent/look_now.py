@@ -13,7 +13,7 @@ The companion page speaks the answer, so it has to be open: if no page has
 asked for work recently, the request says so rather than vanishing.
 
 The same channel carries the talk hotkey (CELINE_TALK_HOTKEY, default
-Ctrl+Alt+Space): no capture, just "start or stop Voice mode" for the open page.
+Ctrl+Alt+T): no capture, just "start or stop Voice mode" for the open page.
 
 Each request goes to ONE page. With the companion tab and the board (whose
 panel is also the companion) both open, every page used to receive every

@@ -83,7 +83,7 @@ w.eval(fs.readFileSync(base + 'companion.js', 'utf8'));
   assert.equal(chats[2].look_id, 8);
   assert.ok(pauses > pausesBefore, 'the speech in progress must be stopped for the new request');
 
-  // 3. Ctrl+Alt+Space (a "talk" item): Voice mode on, and off on the next
+  // 3. Ctrl+Alt+T (a "talk" item): Voice mode on, and off on the next
   //    press — but not before one click on the page, which the browser
   //    needs before it opens the mic and sound; it says so instead.
   await sleep(300);
@@ -102,7 +102,7 @@ w.eval(fs.readFileSync(base + 'companion.js', 'utf8'));
   assert.equal(root.dataset.view, undefined, 'pressed again, it stops');
   assert.equal(chats.length, chatsBefore, 'a talk press is not a question to answer');
 
-  console.log('PASS: Ctrl+Alt+Space toggles Voice mode (after one click on the page, with a clear message before); look requests start from now, become turns that use the server capture (no browser image), '
+  console.log('PASS: Ctrl+Alt+T toggles Voice mode (after one click on the page, with a clear message before); look requests start from now, become turns that use the server capture (no browser image), '
     + 'carry the spoken question when there is one, and cut off speech already in progress.');
   dom.window.close();
   process.exit(0);

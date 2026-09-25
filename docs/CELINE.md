@@ -47,9 +47,9 @@ time.
   off **Interrupt by talking** in settings, or set microphone sensitivity to
   *Low*.
 
-## Talk from anywhere: Ctrl+Alt+Space
+## Talk from anywhere: Ctrl+Alt+T
 
-Press **Ctrl+Alt+Space** in any window and Voice mode starts in the open
+Press **Ctrl+Alt+T** in any window and Voice mode starts in the open
 companion page: she listens hands-free. Press it again to stop. If she's in
 the middle of a reply, the press cuts her off and she listens.
 
@@ -61,7 +61,8 @@ the middle of a reply, the press cuts her off and she listens.
 - With the companion tab and the board both open, each press goes to one of
   them, not both.
 - Change the key with `CELINE_TALK_HOTKEY` in `.env`, or leave it empty to
-  turn it off.
+  turn it off. (It was Ctrl+Alt+Space for a day: the Claude desktop app uses
+  that on Windows and opened on top instead.)
 
 ## Memory
 

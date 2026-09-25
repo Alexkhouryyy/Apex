@@ -119,7 +119,7 @@ class TestTheTalkHotkey:
         assert look_now.wait(0, timeout=1)["kind"] == "look"
 
     def test_default_is_ctrl_alt_space(self):
-        assert config.CELINE_TALK_HOTKEY == "<ctrl>+<alt>+<space>"
+        assert config.CELINE_TALK_HOTKEY == "<ctrl>+<alt>+t"
 
 
 class TestStartBindsTheRealHotkeys:
@@ -144,17 +144,17 @@ class TestStartBindsTheRealHotkeys:
 
     def test_both_hotkeys_bind_and_do_their_jobs(self, pynput, monkeypatch):
         monkeypatch.setattr(look_now, "capture", jpeg)
-        started = look_now.start("<ctrl>+<alt>+c", None, talk_hotkey="<ctrl>+<alt>+<space>")
-        assert started == ["look <ctrl>+<alt>+c", "talk <ctrl>+<alt>+<space>"]
-        assert set(pynput) == {"<ctrl>+<alt>+c", "<ctrl>+<alt>+<space>"}
-        pynput["<ctrl>+<alt>+<space>"]()
+        started = look_now.start("<ctrl>+<alt>+c", None, talk_hotkey="<ctrl>+<alt>+t")
+        assert started == ["look <ctrl>+<alt>+c", "talk <ctrl>+<alt>+t"]
+        assert set(pynput) == {"<ctrl>+<alt>+c", "<ctrl>+<alt>+t"}
+        pynput["<ctrl>+<alt>+t"]()
         pynput["<ctrl>+<alt>+c"]()
         kinds = [look_now.wait(0, timeout=1)["kind"], look_now.wait(0, timeout=1)["kind"]]
         assert kinds == ["talk", "look"]
 
     def test_an_empty_hotkey_is_off(self, pynput):
-        assert look_now.start("", None, talk_hotkey="<ctrl>+<alt>+<space>") == ["talk <ctrl>+<alt>+<space>"]
-        assert set(pynput) == {"<ctrl>+<alt>+<space>"}
+        assert look_now.start("", None, talk_hotkey="<ctrl>+<alt>+t") == ["talk <ctrl>+<alt>+t"]
+        assert set(pynput) == {"<ctrl>+<alt>+t"}
 
 
 class TestTheRoutes:
