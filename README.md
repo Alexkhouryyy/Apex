@@ -22,6 +22,8 @@ Generating hypotheses that could be wrong, and recording what happened:
 **[docs/GENESIS.md](docs/GENESIS.md)**.
 What your hands can do on the board — grab, point, throw, swipe, summon:
 **[docs/BOARD_MOVES.md](docs/BOARD_MOVES.md)**.
+The checks only you can run — voice timing, the relay, the pinch — and what to send back:
+**[docs/PROVE_IT.md](docs/PROVE_IT.md)**.
 Your phone asks Apex while the laptop is shut — deploying the relay, from zero:
 **[docs/RELAY_DEPLOY.md](docs/RELAY_DEPLOY.md)**.
 Where Apex goes next — the v2 mission (ownership, invention, trust) and its proofs:
