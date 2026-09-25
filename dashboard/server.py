@@ -19,7 +19,7 @@ from typing import Optional
 import httpx
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
@@ -1909,6 +1909,69 @@ async def transcribe_endpoint(file: UploadFile = File(...)):
 
 
 # --- Voice: local Voicebox or explicitly selected OpenAI TTS ---
+@app.post("/api/speak/stream")
+async def speak_stream_endpoint(request: Request):
+    """Celine's audio as it is made: raw 16-bit mono PCM, sample rate in
+    X-Sample-Rate. 404 when the voice server behind VOICEBOX_URL cannot
+    stream, which tells the page to use /api/speak instead.
+
+    /api/speak waited for the whole section: 19.8 s for 2.1 s of speech on the
+    original server. The fast server's first audio arrives in about a second,
+    and this passes it on the moment it does.
+    """
+    from dashboard.companion import _check_origin
+    from voice import voicebox
+    _check_origin(request)
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > 24000:
+            return JSONResponse({"error": "Speech request too large"}, status_code=413)
+    try:
+        body = json.loads(raw)
+        profile = body.get("profile", "")
+        if body.get("engine", "voicebox") != "voicebox" or not isinstance(profile, str) or len(profile) > 200:
+            raise ValueError()
+        payload = voicebox.pcm_request(body.get("text", ""), profile)
+    except (ValueError, AttributeError, TypeError):
+        return JSONResponse({"error": "Invalid speech request"}, status_code=400)
+    health = await voicebox.streaming_supported()
+    if health is None:
+        return JSONResponse({"error": "The voice server does not stream; use /api/speak."},
+                            status_code=404)
+    client = httpx.AsyncClient(base_url=voicebox.base_url(), trust_env=False,
+                               timeout=httpx.Timeout(300, connect=5))
+    try:
+        upstream = await client.send(client.build_request("POST", "/generate/pcm", json=payload),
+                                     stream=True)
+    except Exception as exc:
+        await client.aclose()
+        return JSONResponse({"error": f"Voice server unreachable: {type(exc).__name__}"},
+                            status_code=503)
+    if upstream.status_code != 200:
+        detail = (await upstream.aread())[:500].decode("utf-8", "replace")
+        await upstream.aclose(); await client.aclose()
+        try:
+            detail = json.loads(detail).get("detail", detail)
+        except Exception:
+            pass
+        return JSONResponse({"error": f"Voice server {upstream.status_code}: {detail}"},
+                            status_code=upstream.status_code if upstream.status_code in (400, 409) else 503)
+
+    async def relay():
+        try:
+            async for piece in upstream.aiter_raw():
+                if piece:
+                    yield piece
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(relay(), media_type="application/octet-stream", headers={
+        "X-Sample-Rate": upstream.headers.get("x-sample-rate", str(health["sample_rate"])),
+        "X-Audio-Format": "pcm_s16le", "Cache-Control": "no-store"})
+
+
 @app.post("/api/speak")
 async def speak_endpoint(request: Request):
     from dashboard.companion import _check_origin

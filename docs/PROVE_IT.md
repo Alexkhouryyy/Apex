@@ -25,6 +25,9 @@ not, reload again.
 
 ## 1. Voice — Pillar 1 (about 15 minutes)
 
+Start Apex with **`Start-Apex-Celine-Fast.cmd`** (streamed Celine — see
+`docs/LOCAL_QWEN.md`) and wait for `CELINE READY (streaming)`.
+
 **Before:** untick **Speak as it writes**. Tap **Talk** and ask Celine 10
 ordinary questions — a mix of short ones ("what's the time"), long ones
 ("explain how the relay works") and one that needs a tool ("what's on my

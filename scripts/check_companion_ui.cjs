@@ -15,6 +15,8 @@ w.fetch=async(path,opts={})=>{
  if(path==='/api/status')return Response.json({});
  if(path.startsWith('/api/chat/threads'))return Response.json({messages:[]});
  if(path.startsWith('/api/companion/transcribe'))return new Promise(r=>{transcribeResolve=r;});
+ // A voice server that cannot stream: Apex answers the stream route with 404.
+ if(path==='/api/speak/stream')return Response.json({error:'no streaming'},{status:404});
  if(path==='/api/speak')return new Promise(r=>{ttsResolve=r;});
  if(path.includes('/cancel/'))return Response.json({cancel_requested:true});
  if(path==='/api/companion/chat'){

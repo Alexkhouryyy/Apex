@@ -28,15 +28,22 @@ def stop(process):
             process.wait()
 
 
-def main():
-    qwen_python = Path.home() / 'apex-qwen-env' / 'Scripts' / 'python.exe'
+def main(argv=None):
+    # --fast: the streaming engine (scripts/qwen_fast_server.py) in the
+    # environment Test-Apex-Fast-Voice.cmd installs. First audio in about a
+    # second instead of the whole section first; measured on the laptop.
+    fast = '--fast' in (sys.argv[1:] if argv is None else argv)
+    env_name, server = (('apex-qwen-fast-env', 'scripts/qwen_fast_server.py') if fast
+                        else ('apex-qwen-env', 'scripts/qwen_server.py'))
+    qwen_python = Path.home() / env_name / 'Scripts' / 'python.exe'
     if not qwen_python.is_file():
-        raise RuntimeError(f'Qwen environment missing: {qwen_python}')
+        hint = ' Run Test-Apex-Fast-Voice.cmd once to install it.' if fast else ''
+        raise RuntimeError(f'Qwen environment missing: {qwen_python}.{hint}')
     if port_in_use(17494) or port_in_use(7860):
         raise RuntimeError('Close existing Apex/Qwen servers first (ports 7860 and 17494).')
     voice = agent = None
     try:
-        voice = subprocess.Popen([str(qwen_python), '-u', str(ROOT / 'scripts/qwen_server.py')], cwd=ROOT)
+        voice = subprocess.Popen([str(qwen_python), '-u', str(ROOT / server)], cwd=ROOT)
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         deadline = time.monotonic() + 900
         while time.monotonic() < deadline:

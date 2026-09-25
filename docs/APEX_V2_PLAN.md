@@ -147,9 +147,13 @@ the screen still shows only the final reply.
 1. ~~Instrument the whole turn end to end~~ — done.
 2. ~~Speak as it writes~~ and ~~start on the first phrase~~ — done; measure it: 10 turns with the setting off,
    10 on, then `python -m agent.voice_timing`.
-3. First-section synthesis: your `Test-Apex-Fast-Voice.cmd` benchmark says
-   whether streaming Qwen can reach 0.4 s on your GPU; the local Qwen server
-   does not stream yet.
+3. ~~First-section synthesis~~ — measured and built 2026-09-25. On the
+   laptop's RTX 4070 the original Celine server took **19.8 s to make 2.1 s**
+   of speech (9.5x slower than real time). The faster engine, once warm:
+   **first audio in 0.94–0.99 s, real-time factor ~0.9**. Streamed end to end
+   now (`scripts/qwen_fast_server.py` → `/api/speak/stream` → Web Audio in the
+   companion), started with `Start-Apex-Celine-Fast.cmd`. The margin is small;
+   the real Pillar 1 number still comes from 20 turns.
 4. Hands-free waits 1.2 s of silence before sending — the next fixed cost.
 5. Barge-in that works with speakers, not only headphones.
 

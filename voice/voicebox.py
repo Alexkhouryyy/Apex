@@ -162,3 +162,32 @@ async def synthesize(text, profile_id=''):
         raise ValueError('Voicebox is unavailable or timed out. Keep Voicebox open on the Apex laptop and check its model status.') from exc
     finally:
         _gate.release()
+
+
+# ── Streaming (scripts/qwen_fast_server.py) ──────────────────────────────────
+#
+# The fast Celine server sends audio as it is generated from /generate/pcm and
+# says so in /health. Anything else behind VOICEBOX_URL — the original Celine
+# server, the Voicebox app — does not, and callers fall back to synthesize().
+
+async def streaming_supported() -> dict | None:
+    """The voice server's health if it streams PCM, else None. Never raises:
+    'cannot tell' is answered as 'no', and the caller falls back."""
+    try:
+        async with httpx.AsyncClient(base_url=base_url(), trust_env=False,
+                                     timeout=httpx.Timeout(3, connect=2)) as c:
+            r = await c.get('/health')
+            health = r.json() if r.status_code == 200 else {}
+    except Exception:
+        return None
+    if health.get('streaming') is True and int(health.get('sample_rate') or 0) > 0:
+        return health
+    return None
+
+
+def pcm_request(text: str, profile_id: str = '') -> dict:
+    """The JSON body for /generate/pcm; validated like synthesize()."""
+    if not isinstance(text, str) or not text.strip() or len(text) > 4000:
+        raise ValueError('Speech must contain 1–4000 characters.')
+    profile = profile_id or config.VOICEBOX_PROFILE or 'celine'
+    return {'text': text.strip(), 'profile_id': profile, 'engine': 'qwen', 'language': 'en'}

@@ -57,6 +57,8 @@ w.fetch = async (path, opts = {}) => {
     return Response.json({text: 'hello apex'}, {headers: {'Server-Timing': 'stt;dur=40.5'}});
   }
   if (path === '/api/companion/chat') return new Response(stream(chatScript || REPLY));
+  // A voice server that cannot stream: Apex answers the stream route with 404.
+  if (path === '/api/speak/stream') return Response.json({error: 'no streaming'}, {status: 404});
   if (path === '/api/speak') {
     speakCalls++; spokenText.push(JSON.parse(opts.body).text);
     await sleep(40);

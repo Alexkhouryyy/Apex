@@ -1,5 +1,31 @@
 # Celine voice without Voicebox
 
+## Fast, streamed Celine (use this)
+
+Measured on the RTX 4070 laptop: the original server below made each whole
+section before returning a byte — **19.8 s for 2.1 s of speech**. The faster
+engine streams: **first audio in 0.94–0.99 s** once warm, generated slightly
+faster than it plays (real-time factor ~0.9).
+
+1. Run `Test-Apex-Fast-Voice.cmd` once. It installs the engine into
+   `%USERPROFILE%\apex-qwen-fast-env` (your working setup is untouched) and
+   plays three test sentences.
+2. From then on start Apex with **`Start-Apex-Celine-Fast.cmd`**. The first
+   start after a reboot warms the GPU up for a minute or two before it says
+   `CELINE READY (streaming)`; after that each section starts in about a second.
+3. In the companion (`Ctrl+F5` once), choose Local Qwen and CELINE as before.
+
+`scripts/qwen_fast_server.py` serves the same routes plus `/generate/pcm`,
+which sends 16-bit PCM as it is generated. Apex relays it at
+`/api/speak/stream`, and the companion plays each piece as it arrives. With a
+voice server that cannot stream (this original one, or the Voicebox app),
+`/api/speak/stream` answers 404 and the page uses `/api/speak` as before.
+
+The margin is small: at a real-time factor of ~0.9 Celine is made only just
+faster than she speaks, so a GPU busy with something else can cause short gaps.
+
+## Original (whole sections)
+
 The direct Qwen service uses the already installed Windows environment at
 `%USERPROFILE%\apex-qwen-env` and reference `%USERPROFILE%\Downloads\celine.ogg`.
 It requires CUDA PyTorch and qwen-tts. Alex verified GPU inference and the clone

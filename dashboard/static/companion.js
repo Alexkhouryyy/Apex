@@ -52,6 +52,20 @@
   let recordingTimer = null, pip = null, recordingEpoch = 0;
   let speechBusy = false, hands = null, handsRequest = null, resumeTimer = null;
   let lastInteraction = Date.now(), lastCheck = Date.now();
+  let streamOk = null;
+  let audioCtx = null;
+  // One synthesis at a time on the GPU: the next section's request waits for
+  // the previous stream to be fully RECEIVED (not played), so it is generated
+  // while the previous one plays — never alongside it.
+  let gpuFree = Promise.resolve();
+  // Streams opened but not yet played to the end. Stop closes them all: an
+  // abandoned stream would otherwise never be marked received, and the next
+  // reply would wait on `gpuFree` forever.
+  const openStreams = new Set();
+  function closeStreams() {
+    for (const h of openStreams) { h.reader.cancel().catch(() => {}); h.received(); }
+    openStreams.clear();
+  }
   function resumeHands() {
     clearTimeout(resumeTimer);
     resumeTimer=setTimeout(() => {
@@ -115,6 +129,7 @@
   function stopSpeech() {
     speechEpoch++; speechBusy=false;
     live?.q.cancel();
+    closeStreams();
     // Let an in-flight local generation finish; aborting HTTP does not stop GPU work.
     endPlayback?.(); endPlayback = null;
     window.speechSynthesis?.cancel();
@@ -166,9 +181,117 @@
   // `startLiveSpeech` with one still being written. Same synthesis, same
   // playback, same timing marks — so the before/after comparison measures the
   // feeding, not two different players.
+  // --- Streamed voice (scripts/qwen_fast_server.py) --------------------------
+  // /api/speak returns a section only once it is fully generated; with the
+  // fast Celine server, /api/speak/stream returns raw PCM as it is made, and
+  // this plays it the same way: each piece scheduled right after the last.
+  // `null` until tried; `false` once the voice server has said it cannot
+  // stream (404), after which this page uses /api/speak for the session.
+  function audioContext() {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    audioCtx = audioCtx || new Ctor();
+    return audioCtx;
+  }
+  async function openStream(section, engine, profile) {
+    let response;
+    // 409: the GPU is still finishing a section that was stopped — stopping
+    // the request does not stop the GPU. Wait for it rather than fail.
+    for (let tries = 0; ; tries++) {
+      response = await fetch('/api/speak/stream', {method: 'POST',
+        headers: {...headers(), 'Content-Type': 'application/json'},
+        body: JSON.stringify({text: section, engine, profile})});
+      if (response.status !== 409 || tries >= 100) break;
+      await new Promise(r => setTimeout(r, 300));
+    }
+    if (response.status === 404) { streamOk = false; return null; }
+    if (!response.ok || !response.body) {
+      // 401 and every other failure go through request(), which already
+      // knows how to ask for the token and word the error.
+      await request('/api/speak/stream', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: section, engine, profile})});
+      throw new Error('The voice stream failed to start.');
+    }
+    streamOk = true;
+    const rate = Number(response.headers.get('X-Sample-Rate')) || 24000;
+    let resolveDone;
+    const done = new Promise(r => { resolveDone = r; });
+    const handle = {kind: 'pcm', rate, reader: response.body.getReader(), done,
+      received() { openStreams.delete(handle); resolveDone(); }};
+    openStreams.add(handle);
+    return handle;
+  }
+  function playPcm(handle, epoch) {
+    return new Promise((resolve, reject) => {
+      const ctx = audioContext();
+      if (!ctx) { handle.received(); reject(new Error('This browser cannot play streamed audio.')); return; }
+      const sources = [];
+      let nextAt = 0, carry = null, stopped = false, first = true;
+      // A little lead before the first piece absorbs small delivery jitter:
+      // the voice is generated only slightly faster than it plays.
+      const LEAD = 0.12;
+      const stop = () => {
+        stopped = true;
+        for (const src of sources) { try { src.stop(); } catch (_) {} }
+        handle.reader.cancel().catch(() => {});
+        handle.received();
+        if (audio === pseudo) { audio = null; endPlayback = null; }
+        resolve();
+      };
+      const pseudo = {pause: stop};
+      audio = pseudo; endPlayback = stop;
+      const schedule = bytes => {
+        if (carry) { const joined = new Uint8Array(carry.length + bytes.length);
+          joined.set(carry); joined.set(bytes, carry.length); bytes = joined; carry = null; }
+        if (bytes.length % 2) { carry = bytes.slice(-1); bytes = bytes.slice(0, -1); }
+        if (!bytes.length) return;
+        const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length / 2);
+        const buffer = ctx.createBuffer(1, pcm.length, handle.rate);
+        const channel = buffer.getChannelData(0);
+        for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
+        const src = ctx.createBufferSource(); src.buffer = buffer; src.connect(ctx.destination);
+        const at = Math.max(ctx.currentTime + (first ? LEAD : 0), nextAt);
+        src.start(at); sources.push(src);
+        nextAt = at + buffer.duration;
+        if (first) {
+          first = false;
+          setTimeout(() => { if (!stopped) mark('first_sound'); }, Math.max(0, (at - ctx.currentTime) * 1000));
+          state('speaking', 'Speaking · Stop ends playback'); controls();
+        }
+      };
+      (async () => {
+        try {
+          if (ctx.state === 'suspended') await ctx.resume();
+          if (ctx.state !== 'running') throw new Error('Your browser blocked audio. Allow sound for this site, then send a short message.');
+          while (!stopped) {
+            const {value, done} = await handle.reader.read();
+            if (done) break;
+            if (epoch !== speechEpoch) { stop(); return; }
+            if (value && value.length) { if (first) mark('tts_ready'); schedule(value); }
+          }
+          handle.received();
+          if (stopped) return;
+          if (first) throw new Error('The voice server sent no audio.');
+          setTimeout(() => { if (!stopped) { stopped = true; if (audio === pseudo) { audio = null; endPlayback = null; } resolve(); } },
+            Math.max(0, (nextAt - ctx.currentTime) * 1000));
+        } catch (exc) {
+          stopped = true; handle.received();
+          if (audio === pseudo) { audio = null; endPlayback = null; }
+          reject(exc);
+        }
+      })();
+    });
+  }
   function voiceFns(epoch) {
     const engine = $('voice').value, profile = $('voicebox-profile').value;
     const generate = async section => {
+      if (engine === 'voicebox' && streamOk !== false) {
+        const previous = gpuFree;
+        await previous;
+        mark('tts_start');
+        const handle = await openStream(section, engine, profile);
+        if (handle) { gpuFree = handle.done; return handle; }
+      }
       mark('tts_start');
       const response = await request('/api/speak', {method: 'POST',
         headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: section, engine, profile})});
@@ -176,7 +299,7 @@
       mark('tts_ready'); serverTiming(response, 'tts', 'tts_server');
       return blob;
     };
-    const play = blob => new Promise((resolve, reject) => {
+    const play = blob => blob && blob.kind === 'pcm' ? playPcm(blob, epoch) : new Promise((resolve, reject) => {
       if (epoch !== speechEpoch) { resolve(); return; }
       audioUrl = URL.createObjectURL(blob); audio = new Audio(audioUrl);
       const current = audio, url = audioUrl;
