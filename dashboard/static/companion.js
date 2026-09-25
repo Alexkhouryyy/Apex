@@ -128,11 +128,21 @@
       select.replaceChildren(new Option('Apex default voice', ''));
       for (const p of data.profiles) select.add(new Option(p.name, p.id));
       if ([...select.options].some(o => o.value === chosen)) select.value = chosen;
-    } catch (_) {
-      // Silent on purpose: Voicebox may simply not be open yet, and an error
-      // banner on every page load would train the user to ignore the banner.
-      // The list is refreshed from boot() once a token exists, and again
-      // whenever the Voice dropdown changes.
+      $('voice-note').hidden = true;
+    } catch (exc) {
+      // No banner on purpose: Voicebox may simply not be open yet, and an
+      // error banner on every page load would train the user to ignore the
+      // banner. The list is refreshed from boot() once a token exists, and
+      // again whenever the Voice dropdown changes.
+      //
+      // But not silent either. With no voice server the picker shows only
+      // "Apex default voice", nothing speaks, and nothing said why — Celine
+      // simply looked like she did not exist. A quiet note says what to start.
+      // Not before login: a 401 is "sign in", not "start a server".
+      const signIn = /token/i.test(exc?.message || '');
+      $('voice-note').textContent = 'Voice server not reachable. For Celine, close Apex and start '
+        + 'Start-Apex-Celine.cmd (or open the Voicebox app), then reload this page.';
+      $('voice-note').hidden = signIn || $('voice').value !== 'voicebox';
     }
   }
   $('voicebox-profile').addEventListener('change', () => localStorage.setItem('apex.voicebox.profile', $('voicebox-profile').value));

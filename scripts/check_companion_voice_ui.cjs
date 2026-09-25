@@ -22,12 +22,14 @@ w.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
 // so a fetch made before the login dialog is answered gets a 401.
 const PROFILES = {profiles: [{id: 'celine', name: 'Celine'},
                              {id: 'p-ryan', name: 'Apex Qwen Local'}]};
-let profileFetches = 0;
+let profileFetches = 0, voiceServerDown = false;
 w.fetch = async (path, opts = {}) => {
   const authed = Boolean(opts.headers && opts.headers.Authorization);
   if (path === '/api/voicebox/profiles') {
     profileFetches++;
-    return authed ? Response.json(PROFILES) : new Response('', {status: 401});
+    if (!authed) return new Response('', {status: 401});
+    return voiceServerDown ? Response.json({error: 'Keep Voicebox open on the Apex laptop.'}, {status: 503})
+      : Response.json(PROFILES);
   }
   if (!authed) return new Response('', {status: 401});
   if (path === '/api/status') return Response.json({agent_ready: true});
@@ -47,6 +49,7 @@ w.eval(fs.readFileSync(base + 'companion.js', 'utf8'));
   assert.deepEqual([...$('voicebox-profile').options].map(o => o.value), [''],
     'before authenticating there is nothing but the default');
   assert.ok(!$('error').hidden, 'the 401 should surface while unauthenticated');
+  assert.ok($('voice-note').hidden, 'before sign-in the answer is "sign in", not "start a voice server"');
 
   // Log in, exactly as a user does.
   w.localStorage.setItem('apex_token', 'whowantstobeking');
@@ -81,6 +84,17 @@ w.eval(fs.readFileSync(base + 'companion.js', 'utf8'));
 
   // Local Qwen is the default voice, which is why regression 1 was invisible.
   assert.equal($('voice').value, 'voicebox');
+  assert.ok($('voice-note').hidden, 'a reachable voice server must not show the note');
+
+  // No voice server (Apex started with Apex.bat, not Start-Apex-Celine.cmd):
+  // the picker has only the default, so say what to start instead of nothing.
+  // Found on real hardware: Celine "was not there" and nothing said why.
+  voiceServerDown = true;
+  $('voice').dispatchEvent(new w.Event('change'));
+  await tick(); await tick();
+  assert.ok(!$('voice-note').hidden, 'an unreachable voice server must be named, not silent');
+  assert.match($('voice-note').textContent, /Start-Apex-Celine\.cmd/);
+  assert.ok($('error').hidden, 'still no red banner for it');
 
   console.log('PASS: profile list refetched after login, cloned voice offered, '
     + 'stale token banner cleared, profile choice remembered.');

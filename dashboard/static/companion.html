@@ -6,8 +6,8 @@
   <link rel="icon" href="/static/icons/favicon-64.png">
   <link rel="stylesheet" href="/static/companion.css">
   <script src="/static/handsfree.js" defer></script>
-  <script src="/static/speech_queue.js?v=first-phrase-1" defer></script>
-  <script src="/static/companion.js?v=first-phrase-1" defer></script>
+  <script src="/static/speech_queue.js?v=voice-note-1" defer></script>
+  <script src="/static/companion.js?v=voice-note-1" defer></script>
 </head>
 <body>
 <main id="companion">
@@ -28,6 +28,7 @@
   <div class="settings">
     <label>Mode <select id="mode"><option value="discuss">Discuss</option><option value="work">Work</option></select></label>
     <label>Qwen profile <select id="voicebox-profile"><option value="">Apex default voice</option></select></label>
+    <span class="hint" id="voice-note" role="status" hidden></span>
     <label>Voice <select id="voice"><option value="voicebox">Local Qwen</option><option value="browser">Device voice</option><option value="openai">OpenAI voice</option></select></label>
     <label class="toggle"><input id="hands-free" type="checkbox"> Hands-free conversation</label>
     <label class="toggle"><input id="check-in" type="checkbox"> Proactive comments</label>
