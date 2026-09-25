@@ -132,3 +132,25 @@ def test_apex_bat_no_longer_truncates_env():
     offenders = [ln.strip() for ln in code if '>".env"' in ln or ">.env" in ln]
     assert not offenders, f"Apex.bat truncates .env again: {offenders}"
     assert "set_env_key.py" in bat
+
+
+def test_apex_bat_accepts_a_deepseek_key():
+    """A DeepSeek install was asked for an Anthropic key on every fresh copy,
+    and an empty answer failed with "[X] Could not write .env". Static checks:
+    there is no cmd.exe in CI, so the branches are asserted, not executed."""
+    bat = (Path(__file__).resolve().parent.parent / "Apex.bat").read_text(errors="replace")
+    check = [l for l in bat.splitlines() if "set \"NEEDKEY=1\"" in l and "findstr /b" in l]
+    assert check and 'DEEPSEEK_API_KEY=.' in check[0] and 'ANTHROPIC_API_KEY=' in check[0], \
+        "the key check must accept a DeepSeek key as well as an Anthropic one"
+    assert "set_env_key.py DEEPSEEK_API_KEY" in bat
+    assert "set_env_key.py AGENT_MODEL deepseek-flash" in bat
+    # An empty paste asks again instead of failing.
+    assert 'if "!APIKEY!"=="" (' in bat and "goto :ask_key" in bat
+
+
+def test_batch_files_reach_windows_with_crlf():
+    """cmd.exe misreads labels, and so `goto`, in LF-only batch files — and a
+    GitHub ZIP or a clone without autocrlf would hand it LF."""
+    attrs = (Path(__file__).resolve().parent.parent / ".gitattributes").read_text()
+    for pattern in ("*.bat text eol=crlf", "*.cmd text eol=crlf"):
+        assert pattern in attrs

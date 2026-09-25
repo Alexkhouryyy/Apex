@@ -1,0 +1,6 @@
+# Windows batch files must reach Windows with CRLF line endings. cmd.exe
+# misreads labels (and so `goto`) in LF-only batch files, and a ZIP download
+# or a clone without autocrlf would otherwise hand it exactly that.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.bat.example text eol=crlf

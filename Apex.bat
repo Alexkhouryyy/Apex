@@ -72,22 +72,49 @@ if not exist ".venv\.apex_ready" (
 
 REM ---- 4. Make sure an Anthropic API key is configured ----
 set "NEEDKEY="
+REM A model key of ANY provider Apex runs on counts: an Anthropic line (even
+REM empty - the Claude subscription path uses that), or a non-empty DeepSeek
+REM key. This used to demand an Anthropic key only, so a DeepSeek install was
+REM asked for one on every fresh copy, and an empty answer just failed.
 if not exist ".env" set "NEEDKEY=1"
 if exist ".env" (
     findstr /c:"your_key_here" ".env" >nul 2>&1 && set "NEEDKEY=1"
-    findstr /b /c:"ANTHROPIC_API_KEY=" ".env" >nul 2>&1 || set "NEEDKEY=1"
+    findstr /b /r /c:"ANTHROPIC_API_KEY=" /c:"DEEPSEEK_API_KEY=." ".env" >nul 2>&1 || set "NEEDKEY=1"
 )
 if defined NEEDKEY (
-    echo   Apex needs your Anthropic API key. This is asked once.
-    echo   Get one at https://console.anthropic.com/settings/keys
+    echo   Apex needs a model key. This is asked once.
+    echo     1  DeepSeek   - https://platform.deepseek.com/api_keys
+    echo     2  Anthropic  - https://console.anthropic.com/settings/keys
     echo.
+)
+:ask_provider
+if defined NEEDKEY (
+    set "PROVIDER="
+    set /p "PROVIDER=  Which one do you use? Type 1 or 2 and press Enter: "
+    if not "!PROVIDER!"=="1" if not "!PROVIDER!"=="2" (
+        echo   Type 1 for DeepSeek or 2 for Anthropic.
+        goto :ask_provider
+    )
+)
+:ask_key
+if defined NEEDKEY (
+    set "APIKEY="
     set /p "APIKEY=  Paste your key here and press Enter: "
-    REM Set just this one line. This used to be `>".env" echo KEY=value`, and a
-    REM single `>` truncates the file — anyone with a leftover placeholder on
+    if "!APIKEY!"=="" (
+        echo   Nothing was pasted. Right-click in this window to paste, then press Enter.
+        goto :ask_key
+    )
+    REM Set just the lines needed. This used to be `>".env" echo KEY=value`, and
+    REM a single `>` truncates the file - anyone with a leftover placeholder on
     REM another line lost DASHBOARD_TOKEN, VAPID_PRIVATE_KEY and their channel
     REM tokens. The VAPID private key cannot be regenerated without breaking
     REM every existing push subscription.
-    "%VPY%" scripts\set_env_key.py ANTHROPIC_API_KEY "!APIKEY!"
+    if "!PROVIDER!"=="1" (
+        "%VPY%" scripts\set_env_key.py DEEPSEEK_API_KEY "!APIKEY!"
+        if not errorlevel 1 "%VPY%" scripts\set_env_key.py AGENT_MODEL deepseek-flash
+    ) else (
+        "%VPY%" scripts\set_env_key.py ANTHROPIC_API_KEY "!APIKEY!"
+    )
     if errorlevel 1 (
         echo   [X] Could not write .env - check the errors above.
         echo.
