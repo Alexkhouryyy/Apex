@@ -146,6 +146,17 @@ FLICK_PROJECT_SECONDS = 0.2
 TRAIL_SECONDS = 0.4
 MIN_FLICK_SPAN_SECONDS = 0.03
 
+# A TAP is a pinch on an object let go of quickly without moving it: "tell me
+# about this". Told apart from the other things a pinch does by what it is
+# NOT — a grab moves the object (more than TAP_MOVE), a hold lasts (more than
+# TAP_SECONDS from pick-up), a throw is fast, and two hands are a transform.
+# Timed from the moment the grab commits, i.e. after ARM_DWELL_SECONDS, so a
+# whole tap is a pinch of roughly 0.15-0.45 s. First guesses, like the flick
+# values: a missed tap costs a second tap; a false one costs an answer you
+# did not ask for, so both are on the strict side.
+TAP_SECONDS = 0.35
+TAP_MOVE = 0.03
+
 # Where a card summoned by voice appears, if a hand was seen this recently:
 # at the hand. Older than this and the hand is probably down — the default
 # spot is better than a stale one.
@@ -333,6 +344,9 @@ class Board:
         self._last_frame_at: float | None = None
         # Recent hand positions of a card held by ONE hand, for the flick.
         self._trail: dict[str, list] = {}
+        # card id -> [picked-up-at, hand x, hand y, furthest the hand moved]
+        # while one hand holds it: what decides, on release, whether it was a tap.
+        self._tap_probe: dict[str, list] = {}
         # The last place a hand was seen, for summoning a card to it.
         self._hand_seen: tuple[float, float, float] | None = None
         self._last_release_at: float = 0.0
@@ -548,6 +562,7 @@ class Board:
             self._pair_ref.clear()
             self._armed_since.clear()
             self._pre_grab.clear()
+            self._tap_probe.clear()
             self._hand_state.clear()
         self._forget(ids)
         if snaps:
@@ -899,6 +914,9 @@ class Board:
                     self._pair_ref.pop(c.id, None)
                 if not kept:
                     pre = self._pre_grab.pop(c.id, None)
+                    probe = self._tap_probe.pop(c.id, None)
+                    tapped = bool(c.held_by and probe and not cancelled and not flung
+                                  and now - probe[0] <= TAP_SECONDS and probe[3] <= TAP_MOVE)
                     if c.held_by:
                         # Held a moment ago, held by nothing now: this is the
                         # commit point. A cancel lands here too — it reverted
@@ -907,7 +925,7 @@ class Board:
                         # a hand out of the camera's view lands here too, once
                         # the grace runs out, and is the most natural throw
                         # there is.
-                        released.append((c, pre, flung))
+                        released.append((c, pre, flung, tapped))
                         self._last_release_at = now
                     self._trail.pop(c.id, None)
                 c.held_by = kept
@@ -971,9 +989,11 @@ class Board:
                         self._pre_grab[target.id] = (
                             target.x, target.y, target.scale, target.rot)
                         self._trail[target.id] = [(now, hx, hy)]
+                        self._tap_probe[target.id] = [now, hx, hy, 0.0]
                         self._hand_state[idx] = HandState.GRABBED
                     else:
                         self._pair_ref.pop(target.id, None)
+                        self._tap_probe.pop(target.id, None)   # two hands: not a tap
                         self._hand_state[idx] = HandState.TRANSFORMING
             if pointing:
                 # Two open hands over cards: the one that arrived at its card
@@ -995,6 +1015,9 @@ class Board:
                     cutoff = now - TRAIL_SECONDS
                     while len(trail) > 2 and trail[0][0] < cutoff:
                         trail.pop(0)
+                    probe = self._tap_probe.get(c.id)
+                    if probe is not None:
+                        probe[3] = max(probe[3], math.hypot(hx - probe[1], hy - probe[2]))
                     ox, oy = self._grab_offset.get(c.held_by[0], (0.0, 0.0))
                     c.x = min(1.0, max(0.0, hx + ox))
                     c.y = min(1.0, max(0.0, hy + oy))
@@ -1011,9 +1034,20 @@ class Board:
 
         # Outside the lock, and only for cards a hand just let go of — the
         # whole point of committing on release rather than per frame.
-        for c, pre, thrown in released:
+        for c, pre, thrown, tapped in released:
             if thrown:
                 self._throw(c, pre)
+                continue
+            if tapped:
+                # Put back exactly — a tap must not nudge it — with nothing
+                # for undo to spend a step on, and "this" now means it.
+                if pre is not None:
+                    c.x, c.y, c.scale, c.rot = pre
+                with self._lock:
+                    self._pointed = (c.id, now)
+                    self._selected = c.id
+                self._write(c)
+                self.emit("tapped", id=c.id, title=c.title, object_kind=c.kind)
                 continue
             self._write(c)
             after = (c.x, c.y, c.scale, c.rot)

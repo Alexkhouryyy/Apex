@@ -66,6 +66,11 @@ w.eval(code);
 
   // 5. A gesture before any click or key: the browser would block the
   //    speaker, so it says what to do instead of failing silently.
+  const before5 = sent.length;
+  sockets[0].onmessage({data: JSON.stringify({cards: [], selection: null, cursors: [], tracking: true,
+    events: [{type: 'tapped', id: 'r1', title: 'Rocket'}]})});
+  assert.equal(sent.length, before5, 'a tap before any click must not ask');
+  assert.match($('toast').textContent, /tap it again/);
   gesture('summon');
   assert.equal(button.getAttribute('aria-pressed'), 'false');
   assert.match($('toast').textContent, /press V once/);
@@ -84,12 +89,24 @@ w.eval(code);
   input.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'v', bubbles: true}));
   assert.equal(button.getAttribute('aria-pressed'), 'true', 'a v typed into a field is a letter, not a command');
 
-  // 7. "Talk to Apex" with voice on: the whole conversation, voice off.
+  // 7. Tap to ask. Voice off + activated: Voice comes on, then the ask.
+  key('Escape'); assert.equal(button.getAttribute('aria-pressed'), 'false');
+  const tapped = {type: 'tapped', id: 'r1', title: 'Rocket'};
+  sockets[0].onmessage({data: JSON.stringify({cards: [], selection: null, cursors: [], tracking: true, events: [tapped]})});
+  assert.equal(button.getAttribute('aria-pressed'), 'true', 'a tap turns Voice on');
+  same(sent.slice(-2), [{apex: 'voice', on: true}, {apex: 'ask', id: 'r1', title: 'Rocket'}], 'voice first, then the question');
+  assert.match($('toast').textContent, /Asking Celine about Rocket/);
+  // Voice already on: just the ask.
+  const k = sent.length;
+  sockets[0].onmessage({data: JSON.stringify({cards: [], selection: null, cursors: [], tracking: true, events: [tapped]})});
+  same(sent.slice(k), [{apex: 'ask', id: 'r1', title: 'Rocket'}]);
+
+  // 8. "Talk to Apex" with voice on: the whole conversation, voice off.
   $('partner-toggle').click();
   assert.equal(button.getAttribute('aria-pressed'), 'false'); assert.equal(panel.hidden, false);
   assert.ok(!panel.classList.contains('voice'));
 
-  console.log('PASS: board voice opens Celine as a strip once the companion is ready, swipe down hushes her, swipe up / pinch-hold start her '
+  console.log('PASS: tap to ask turns Voice on then asks about the object (or says to click first); board voice opens Celine as a strip once the companion is ready, swipe down hushes her, swipe up / pinch-hold start her '
     + '(after one click or key, with a toast before), V and Esc toggle, she can leave by herself, and only the partner frame is listened to.');
   w.close(); process.exit(0);
 })().catch(e => { console.error(e); w.close(); process.exit(1); });

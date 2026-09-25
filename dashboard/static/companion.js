@@ -102,14 +102,30 @@
     if (event.origin !== location.origin || event.source !== window.parent) return;
     const m = event.data || {};
     if (m.apex === 'voice') {
-      if (m.on) enterVoiceMode().catch(exc => { leaveVoiceMode(); error(exc.message); });
+      if (m.on) entering = enterVoiceMode().catch(exc => { leaveVoiceMode(); error(exc.message); });
       else if (voiceMode) stop();
+    } else if (m.apex === 'ask') {
+      askAbout(m);
     } else if (m.apex === 'hush') {
       // Stop talking, keep listening: a turn still being written is cut too.
       if (active) { active.stopped = true; request(`/api/companion/cancel/${active.id}`, {method: 'POST'}).catch(() => {}); }
       stopSpeech();
     }
   });
+  // Tap to ask: the board says which object was tapped. The server already
+  // knows it as "this" (the tap marks it pointed and selected), so the
+  // question names it only so the transcript reads as what happened.
+  let entering = null;
+  async function askAbout(m) {
+    if (entering) await entering;          // voice was just turned on for this tap
+    const title = String(m.title || 'this').replace(/["\n\r]/g, ' ').slice(0, 80);
+    stopSpeech();
+    const busy = () => active || recorder || speechBusy || speechDraining;
+    for (let i = 0; i < 600 && busy(); i++) await new Promise(r => setTimeout(r, 100));
+    if (busy()) { error('Celine was busy — tap it again.'); return; }
+    await send(`Tell me about this — the "${title}" I just tapped on the board. Keep it short.`,
+      false, null, Boolean(hands?.enabled));
+  }
   // --- Voice mode: talk only, with Celine -----------------------------------
   // The same companion with the chat hidden: a big orb, the last exchange as
   // captions, hands-free listening and Celine's voice. Nothing about the turn

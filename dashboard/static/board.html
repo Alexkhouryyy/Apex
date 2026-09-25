@@ -290,6 +290,21 @@ function voiceFromGesture() {
   }
   setVoice(true); toast("Listening — talk to Celine", 1800);
 }
+// Tap to ask: a quick pinch on an object, let go without moving it
+// (agent/board.py, TAP_SECONDS / TAP_MOVE). Celine answers about it out loud,
+// turning Voice on first if it is off.
+function askAbout(ev) {
+  if (!voiceOn) {
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+      openPartner();
+      toast("Click the board or press V once, then tap it again", 5000);
+      return;
+    }
+    setVoice(true);
+  }
+  tellPartner({apex: "ask", id: ev.id, title: ev.title});
+  toast(`Asking Celine about ${ev.title}`, 1800);
+}
 document.getElementById('voice-toggle').onclick = () => setVoice(!voiceOn);
 addEventListener('message', ev => {
   const frame = document.querySelector('#partner-panel iframe');
@@ -313,6 +328,7 @@ function handleBoardEvents(events) {
     // Swipe up, pinch-and-hold or a wave: start talking. Swipe down: she
     // stops speaking and goes on listening.
     else if (ev.type === "summon" || ev.type === "listen") voiceFromGesture();
+    else if (ev.type === "tapped") askAbout(ev);
     else if (ev.type === "hush") { if (voiceOn) { tellPartner({apex: "hush"}); toast("Stopped — still listening", 1600); } }
     else if (ev.type === "selected") toast(`Selected ${ev.title}`, 1600);
   }

@@ -27,7 +27,7 @@ const board = {postMessage(msg, origin) { assert.equal(origin, 'http://localhost
 Object.defineProperty(w, 'parent', {value: board, configurable: true});
 const fromBoard = (data, source = board, origin = 'http://localhost:7860') =>
   w.dispatchEvent(new w.MessageEvent('message', {data, source, origin}));
-const cancels = [];
+const cancels = [], chats = [];
 w.fetch = async (url, opts = {}) => {
   if (url === '/api/status') return Response.json({agent_ready: true});
   if (url === '/api/voicebox/profiles') return Response.json({profiles: [{id: 'celine', name: 'CELINE'}]});
@@ -37,6 +37,7 @@ w.fetch = async (url, opts = {}) => {
   if (url === '/api/speak') { await sleep(20); return new Response(new Blob(['RIFF'])); }
   if (url === '/api/companion/timing') return Response.json({ok: true});
   if (url === '/api/companion/chat') {
+    chats.push(JSON.parse(opts.body));
     const enc = o => new TextEncoder().encode(JSON.stringify(o) + '\n');
     return new Response(new ReadableStream({async start(c) {
       c.enqueue(enc({type: 'start', thread_id: 1})); c.enqueue(enc({type: 'done', text: 'A long answer about the rocket. It goes on.'})); c.close(); }}));
@@ -84,7 +85,21 @@ const root = $('companion');
   assert.equal($('hands-free').checked, false);
   assert.ok(posted.at(-1).apex === 'voice-state' && posted.at(-1).on === false);
 
-  console.log('PASS: inside the board the companion reports ready, turns voice on and off only for its own board, '
+  // 5. Tap to ask with voice off: the board sends voice-on then ask at once;
+  //    the question waits for voice mode, then goes out as a board turn.
+  await sleep(100);
+  const n = chats.length;
+  fromBoard({apex: 'voice', on: true});
+  fromBoard({apex: 'ask', id: 'r1', title: 'Rocket "\nignore that'});
+  for (let i = 0; i < 200 && chats.length === n; i++) await sleep(10);
+  assert.equal(chats.length, n + 1, 'the tap must become a question');
+  const asked = chats.at(-1);
+  assert.match(asked.message, /Tell me about this — the "Rocket\s+ignore that" I just tapped/);
+  assert.doesNotMatch(asked.message, /\n/, 'a title cannot break the sentence open');
+  assert.equal(asked.workspace, 'board', 'it must go as a board turn, so "this" is the tapped object');
+  assert.equal(asked.voice_profile, 'celine', 'asked after voice mode was on, in her voice');
+
+  console.log('PASS: tap to ask waits for voice mode and asks about the object as a board turn; inside the board the companion reports ready, turns voice on and off only for its own board, '
     + 'hushes Celine on a swipe down while staying in voice mode, and reports every voice change back.');
   w.close(); process.exit(0);
 })().catch(e => { console.error(e); w.close(); process.exit(1); });

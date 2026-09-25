@@ -13,6 +13,7 @@ happen.
 | **"Make this blue" / "make this bigger"** | Point (or select), then say it — in *Talk to Apex*, by voice, or from the resident | Apex acts on the card you pointed at |
 | **Throw away** | Grab, flick toward an edge, let go while moving | Gone. Say **"undo"** to bring it back home |
 | **Next / previous** | Open-hand swipe right / left | Steps the selection through your cards |
+| **Tap to ask** | Quick pinch on an object and let go without moving it (under about a third of a second) | Celine tells you about it out loud — Voice comes on if it was off. It becomes "this", so the next thing you say is about it too. A tap never moves it and leaves nothing for undo |
 | **Talk to Celine** | Press **🎙 Voice** or **V** — or, after one click or key on the page, swipe up or pinch-and-hold in empty space | She listens hands-free in a small strip in the corner; the board stays free. She knows what you point at and hold |
 | **Hush her** | Open-hand swipe down, or just talk over her | She stops speaking and keeps listening |
 | **Stop talking** | **V** or **Esc** again (or **Talk to Apex** for the whole conversation) | Voice off |
@@ -99,6 +100,11 @@ loader and camera, and fails if it comes out upside down or inside out.
   in that direction is not silently dropped.
 
 ## Tuning
+
+A tap is `TAP_SECONDS` (0.35 s from pick-up) and `TAP_MOVE` (0.03 of the
+board's width) in `agent/board.py`. Like the flick values they are first
+guesses nobody has measured. If putting something down in place makes her
+talk, lower `TAP_SECONDS`. If your taps turn into tiny moves, raise `TAP_MOVE`.
 
 These first values have not been measured on anyone's hand yet. If throws
 misfire, change them in `agent/board.py` (they are named and commented):
