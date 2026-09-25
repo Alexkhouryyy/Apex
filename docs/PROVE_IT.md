@@ -50,6 +50,25 @@ Then:
 
 ---
 
+## 1b. Celine — Voice mode and Look now (5 minutes)
+
+Details: `docs/CELINE.md`. With `Start-Apex-Celine-Fast.cmd` running and the
+companion open:
+
+1. Press **Voice mode**. Ask *"what's your name?"*, then *"remember that my
+   favourite colour is green"*, then *"what's my favourite colour?"*
+2. Press **Esc**. The chat comes back.
+3. Open any window (code, a web page) and press **Ctrl+Alt+C**. Then say
+   *"Hey Celly, what am I looking at?"*
+
+**Send back:**
+- what she answered to her name;
+- whether she remembered the colour;
+- whether Ctrl+Alt+C and "Hey Celly" each worked. If "Hey Celly" did
+  nothing, paste the Apex console lines from that moment.
+
+---
+
 ## 2. The relay — gate G2 (about 30 minutes, once)
 
 Follow `docs/RELAY_DEPLOY.md` Parts A to C on your cloud server. Then:

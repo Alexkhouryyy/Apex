@@ -6,15 +6,15 @@
   <link rel="icon" href="/static/icons/favicon-64.png">
   <link rel="stylesheet" href="/static/companion.css">
   <script src="/static/handsfree.js" defer></script>
-  <script src="/static/speech_queue.js?v=look-now-1" defer></script>
-  <script src="/static/companion.js?v=look-now-1" defer></script>
+  <script src="/static/speech_queue.js?v=voice-mode-1" defer></script>
+  <script src="/static/companion.js?v=voice-mode-1" defer></script>
 </head>
 <body>
 <main id="companion">
-  <header class="pywebview-drag-region"><a href="/" aria-label="Open Apex dashboard" class="brand">APEX<span>COMPANION</span></a><nav><a href="/board">Workspace</a> · <a href="/drive">Car</a> · <button id="float" title="Keep the companion above your other windows">Float ↗</button></nav></header>
+  <header class="pywebview-drag-region"><a href="/" aria-label="Open Apex dashboard" class="brand">APEX<span>COMPANION</span></a><nav><button id="voice-mode" aria-pressed="false" title="Talk only, with Celine. Stop or Esc to leave.">Voice mode</button> · <a href="/board">Workspace</a> · <a href="/drive">Car</a> · <button id="float" title="Keep the companion above your other windows">Float ↗</button></nav></header>
   <section class="presence" aria-label="Companion status">
     <div class="orb" aria-hidden="true"><div></div></div>
-    <div><p class="eyebrow">LET’S THINK IT THROUGH</p><h1>Right here with you.</h1><p id="status" role="status">Connecting to Apex…</p></div>
+    <div><p class="eyebrow">LET’S THINK IT THROUGH</p><h1>Right here with you.</h1><p id="status" role="status">Connecting to Apex…</p><button id="voice-exit" type="button" hidden>Stop · Esc</button></div>
   </section>
   <div class="toolbar">
     <button id="share" aria-pressed="false">Share screen</button>

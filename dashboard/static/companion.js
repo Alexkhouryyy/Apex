@@ -88,6 +88,40 @@
     clearTimeout(resumeTimer); handsRequest?.abort(); handsRequest=null;
     hands?.stop(); $('hands-free').checked=false;
     $('mic-note').textContent='Tap to record, tap to send'; controls();
+    // Voice mode IS hands-free: whatever turned listening off — Stop, Esc, an
+    // error, the page closing — also ends the talk-only view.
+    leaveVoiceMode();
+  }
+  // --- Voice mode: talk only, with Celine -----------------------------------
+  // The same companion with the chat hidden: a big orb, the last exchange as
+  // captions, hands-free listening and Celine's voice. Nothing about the turn
+  // itself changes, so it has Celine's persona, memory and look-now as-is.
+  let voiceMode = null;          // the settings to put back on the way out
+  async function enterVoiceMode() {
+    if (voiceMode) return;
+    error();
+    voiceMode = {voice: $('voice').value, profile: $('voicebox-profile').value, spoken: $('spoken').checked};
+    root.dataset.view = 'voice'; $('voice-mode').setAttribute('aria-pressed', 'true'); $('voice-exit').hidden = false;
+    $('voice').value = 'voicebox';
+    await loadVoiceboxProfiles();
+    probeStreaming();
+    const celine = [...$('voicebox-profile').options].find(o => [o.value, o.text].some(v => v.trim().toLowerCase() === 'celine'));
+    if (celine) $('voicebox-profile').value = celine.value;
+    if (!voiceMode) return;                        // left while the profiles loaded
+    if (!$('voice-note').hidden) { const why = $('voice-note').textContent; leaveVoiceMode(); error(why); return; }
+    $('spoken').checked = true;
+    $('hands-free').checked = true;
+    await $('hands-free').onchange();
+    // Refused (a turn still running) or no microphone: the reason is already
+    // on screen, and a talk-only view that cannot hear must not stay open.
+    if (!$('hands-free').checked) leaveVoiceMode();
+  }
+  function leaveVoiceMode() {
+    if (!voiceMode) return;
+    const was = voiceMode; voiceMode = null;
+    delete root.dataset.view; $('voice-mode').setAttribute('aria-pressed', 'false'); $('voice-exit').hidden = true;
+    $('voice').value = was.voice; $('voicebox-profile').value = was.profile; $('spoken').checked = was.spoken;
+    loadVoiceboxProfiles(); probeStreaming();
   }
   async function transcribeBlob(blob, signal) {
     const response=await request('/api/companion/transcribe?engine='+$('stt-engine').value,
@@ -128,10 +162,17 @@
     }
     return response;
   }
+  // In Celine's voice the replies are hers (agent/celine.py), so they are
+  // labelled hers — when the profile picked says so; the default profile may
+  // be Celine too, but only the server knows that.
+  function speaker() {
+    const o = $('voicebox-profile').selectedOptions?.[0];
+    return $('voice').value === 'voicebox' && o && [o.value, o.text].some(v => v.trim().toLowerCase() === 'celine') ? 'CELINE' : 'APEX';
+  }
   function bubble(role, text) {
     $('welcome').remove();
     const wrapper = document.createElement('article'); wrapper.className = `message ${role}`;
-    const label = document.createElement('div'); label.className = 'role'; label.textContent = role === 'user' ? 'YOU' : 'APEX';
+    const label = document.createElement('div'); label.className = 'role'; label.textContent = role === 'user' ? 'YOU' : speaker();
     const content = document.createElement('div'); content.className = 'text'; content.textContent = text;
     wrapper.append(label, content); $('messages').append(wrapper); scroll();
     return {wrapper, content};
@@ -616,6 +657,9 @@
     }
   }
   $('stop').onclick = stop;
+  $('voice-exit').onclick = stop;
+  $('voice-mode').onclick = () => { if (voiceMode) stop(); else enterVoiceMode().catch(exc => { leaveVoiceMode(); error(exc.message); }); };
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && voiceMode && !$('login').open) { event.preventDefault(); stop(); } });
   $('spoken').onchange = () => { if (!$('spoken').checked) stopSpeech(); };
   $('composer').onsubmit = event => { event.preventDefault(); send($('message').value); };
   $('message').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); send($('message').value); } };
