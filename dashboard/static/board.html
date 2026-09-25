@@ -524,8 +524,7 @@ function renderCards(list) {
     const label = c.parts_mode ? `${c.title} · parts${c.part ? ' · ' + c.part.name : ''}` : c.title;
     if (h.textContent !== label) h.textContent = label;
     if (p.textContent !== c.body) p.textContent = c.body || "";
-    el.style.left = (c.x * 100) + "%";
-    el.style.top = (Math.min(.91, c.y + (c.kind === 'model' ? .12 * c.scale : 0)) * 100) + "%";
+    aim(el, c.x * 100, Math.min(.91, c.y + (c.kind === 'model' ? .12 * c.scale : 0)) * 100);
     el.classList.toggle("held", !!c.held);
     el.classList.toggle('model-label', c.kind === 'model');
     el.classList.toggle('selected', c.id === selectedId);
@@ -549,8 +548,7 @@ function renderCursors(list) {
     const c = list[i];
     if (!c) { r.style.display = "none"; return; }
     r.style.display = "block";
-    r.style.left = (c.x * 100) + "%";
-    r.style.top = (c.y * 100) + "%";
+    aim(r, c.x * 100, c.y * 100);
     r.classList.toggle("pinched", !!c.p);
   });
 }
@@ -717,7 +715,9 @@ function syncModels(cards) {
         });
       continue;
     }
-    placeModel(entry.group, c, entry.base, innerWidth / Math.max(1, innerHeight));
+    // Where it should be; the glide loop gets it there, every screen frame.
+    entry.target = {x: c.x, y: c.y, scale: c.scale || 1, rot: c.rot || 0};
+    if (!entry.cur) entry.cur = {...entry.target};
     showPart(entry.group, c.part);
   }
   for (const [id, entry] of models) {
@@ -725,13 +725,52 @@ function syncModels(cards) {
   }
 }
 
-function draw3D() {
+// --- Glide: move every frame of the screen, not every message --------------
+// Positions arrive from Python 15-30 times a second. Placed as they arrive,
+// everything jumped from spot to spot — "clanky". Each thing now eases toward
+// its latest position on every screen frame (60+ a second). The time
+// constants are short so a held card still feels attached to the hand; the
+// tracker's One-Euro filter (agent/handtrack.py) has already taken out the
+// jitter, so this only has to fill the gaps between messages.
+const GLIDE = {ring: 0.028, card: 0.045, model: 0.045};   // seconds
+function aim(el, x, y) {
+  el._aim = [x, y];
+  if (!el._at) { el._at = [x, y]; el.style.left = x + "%"; el.style.top = y + "%"; }
+}
+function ease(cur, target, tau, dt) { return cur + (target - cur) * (1 - Math.exp(-dt / tau)); }
+function glide(dt) {
+  const move = (el, tau) => {
+    if (!el._aim) return;
+    el._at = [ease(el._at[0], el._aim[0], tau, dt), ease(el._at[1], el._aim[1], tau, dt)];
+    el.style.left = el._at[0] + "%"; el.style.top = el._at[1] + "%";
+  };
+  rings.forEach(r => move(r, GLIDE.ring));
+  cards.forEach(el => move(el, GLIDE.card));
+  const aspect = innerWidth / Math.max(1, innerHeight);
+  for (const entry of models.values()) {
+    const t = entry.target, c = entry.cur;
+    if (!t || !c) continue;
+    c.x = ease(c.x, t.x, GLIDE.model, dt); c.y = ease(c.y, t.y, GLIDE.model, dt);
+    c.scale = ease(c.scale, t.scale, GLIDE.model, dt);
+    // The short way round: from 3.1 to -3.1 radians is a small turn.
+    const turn = Math.atan2(Math.sin(t.rot - c.rot), Math.cos(t.rot - c.rot));
+    c.rot = c.rot + turn * (1 - Math.exp(-dt / GLIDE.model));
+    placeModel(entry.group, c, entry.base, aspect);
+  }
+}
+let lastFrame = 0;
+function draw3D(ts) {
+  // A tab left in the background pauses animation frames; on return the
+  // long gap makes everything land exactly where it should in one step.
+  const dt = lastFrame ? Math.min(1, Math.max(0, (ts - lastFrame) / 1000)) : 1;
+  lastFrame = ts || 0;
+  glide(dt);
   if (renderer) renderer.render(scene, camera3);
   requestAnimationFrame(draw3D);
 }
 
 const has3D = init3D();
-if (has3D) draw3D();
+requestAnimationFrame(draw3D);      // the glide runs even without 3D
 
 let lastFrameAt = 0;
 

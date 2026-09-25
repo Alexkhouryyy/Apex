@@ -803,3 +803,44 @@ class TestCameraOpenBackoff:
         t.resume()
         assert t._retry_at == 0.0
         assert t._retry_delay == handtrack.CAMERA_RETRY_FIRST
+
+
+class TestSmoothing:
+    """The One-Euro filter on hand positions: steady when still, not late when fast."""
+
+    def test_a_still_hand_stops_shivering(self):
+        import random
+        f = handtrack.OneEuro(handtrack.SMOOTH_MIN_CUTOFF, handtrack.SMOOTH_BETA)
+        r = random.Random(3)
+        raw = [0.5 + r.uniform(-0.006, 0.006) for _ in range(120)]      # MediaPipe-sized jitter
+        out = [f(x, i / 30) for i, x in enumerate(raw)]
+        spread = lambda v: max(v) - min(v)
+        assert spread(out[30:]) < spread(raw[30:]) / 2.5, "held still, the cursor must be steady"
+
+    def test_a_fast_move_is_not_left_behind(self):
+        f = handtrack.OneEuro(handtrack.SMOOTH_MIN_CUTOFF, handtrack.SMOOTH_BETA)
+        t, x = 0.0, 0.2
+        for _ in range(10):
+            f(x, t); t += 1 / 30
+        for _ in range(12):                       # 2 screen-widths a second
+            x += 2 / 30; t += 1 / 30
+            y = f(x, t)
+        assert abs(x - y) < 0.03, f"lagging {abs(x - y):.3f} of the screen behind a quick move"
+
+    def test_each_hand_is_smoothed_on_its_own(self):
+        from types import SimpleNamespace as NS
+        t = handtrack.HandTracker.__new__(handtrack.HandTracker)
+        t._lock = __import__("threading").Lock()
+        def hand(x):
+            pts = [NS(x=0.5, y=0.5) for _ in range(21)]
+            pts[handtrack.INDEX_TIP] = NS(x=x, y=0.5)
+            pts[handtrack.WRIST] = NS(x=x, y=0.7); pts[handtrack.MIDDLE_MCP] = NS(x=x, y=0.5)
+            pts[handtrack.THUMB_TIP] = NS(x=x + 0.2, y=0.5)
+            return pts
+        res = lambda *xs: NS(hand_landmarks=[hand(x) for x in xs], handedness=[])
+        for i in range(10):
+            t._read_hands(res(0.3), now=i / 30)
+        cursors, _ = t._read_hands(res(0.3, 0.8), now=10 / 30)
+        xs = sorted(c[0] for c in cursors)
+        # Mirrored: 0.8 on the camera image is 0.2 on the board.
+        assert abs(xs[0] - 0.2) < 1e-9, "a new hand starts where it is, not dragged from the other"

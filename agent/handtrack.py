@@ -514,6 +514,49 @@ def pinch_release_ratio(enter: float) -> float:
     return max(release, float(enter))
 
 
+class OneEuro:
+    """The One-Euro filter (Casiez, Roussel & Vogel, CHI 2012), for one value.
+
+    A low-pass filter whose cutoff rises with speed: a hand held still is
+    smoothed hard, which takes out MediaPipe's frame-to-frame shiver, and a
+    hand moving fast is barely smoothed, so a quick move is not left behind.
+    A fixed smoothing has to choose between shivering and lagging; this is
+    the standard answer to that for pointers. A generic published technique.
+    """
+
+    def __init__(self, min_cutoff: float, beta: float, d_cutoff: float = 1.0):
+        self.min_cutoff, self.beta, self.d_cutoff = min_cutoff, beta, d_cutoff
+        self.x = self.dx = self.t = None
+
+    @staticmethod
+    def _alpha(cutoff: float, dt: float) -> float:
+        tau = 1.0 / (2 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def __call__(self, x: float, t: float) -> float:
+        if self.t is None or t <= self.t:
+            self.x, self.dx, self.t = x, 0.0, t
+            return x
+        dt = t - self.t
+        dx = (x - self.x) / dt
+        self.dx = self.dx + self._alpha(self.d_cutoff, dt) * (dx - self.dx)
+        cutoff = self.min_cutoff + self.beta * abs(self.dx)
+        self.x = self.x + self._alpha(cutoff, dt) * (x - self.x)
+        self.t = t
+        return self.x
+
+
+# Tuning for hand positions in board fractions (0..1 of the frame), chosen
+# from a sweep at 30 frames a second: with these, a still hand's shiver drops
+# about 3x, and a hand moving two screen-widths a second trails by ~2% of the
+# screen. Lower cutoffs steady more and lag more; there is no setting that
+# does both perfectly, because shiver and slow motion look alike to any
+# filter. Estimates on synthetic jitter until the gesture recordings measure
+# a real hand. (The board's glide adds ~45 ms of easing on top.)
+SMOOTH_MIN_CUTOFF = 0.5
+SMOOTH_BETA = 5.0
+
+
 class HandIdentities:
     """Stable ids for hands across frames, by where they are.
 
@@ -941,8 +984,15 @@ class HandTracker(threading.Thread):
                 found.append((idx, lms, cur))
         ids = self._ids.assign([(cur[0], cur[1]) for _i, _l, cur in found], now)
 
+        if not hasattr(self, "_smooth"):
+            self._smooth = {}
         rows = []
         for (idx, lms, cur), hid in zip(found, ids):
+            # Smoothed per hand (by identity, so a second hand arriving never
+            # inherits the first one's filter state).
+            fx, fy = self._smooth.setdefault(hid, (OneEuro(SMOOTH_MIN_CUTOFF, SMOOTH_BETA),
+                                                   OneEuro(SMOOTH_MIN_CUTOFF, SMOOTH_BETA)))
+            cur = (fx(cur[0], now), fy(cur[1], now)) + tuple(cur[2:])
             world = worlds[idx] if idx < len(worlds) else None
             r = pinch_ratio(lms, world)
             e, rl = enter, release
@@ -980,6 +1030,9 @@ class HandTracker(threading.Thread):
         # frame reset a pinch on one missed detection, which is one of the
         # ways a held card was dropped mid-drag.
         self._latch.keep_only(self._ids.alive())
+        alive = set(self._ids.alive())
+        for gone in [h for h in self._smooth if h not in alive]:
+            del self._smooth[gone]
 
         # Oldest hand first, details reordered WITH the cursors, so the
         # readout never pairs one hand's ratio with the other's grab state.

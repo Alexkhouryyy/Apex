@@ -488,7 +488,7 @@ IOT_TRIGGER_ALLOWED_ENTITIES = [e.strip() for e in os.getenv("IOT_TRIGGER_ALLOWE
 # Hand tracking — Apex's OWN MediaPipe tracker, reading the webcam directly.
 # No browser, no second process: it keeps working when nothing else is open.
 HANDTRACK_ENABLED = os.getenv("HANDTRACK_ENABLED", "false").lower() in {"1", "true", "yes"}
-HANDTRACK_POLL_HZ = float(os.getenv("HANDTRACK_POLL_HZ", "20"))
+HANDTRACK_POLL_HZ = float(os.getenv("HANDTRACK_POLL_HZ", "30"))   # 30 since 2026-09-25: 20 felt stepped
 # Selfie space. A raw webcam frame is NOT mirrored, so without this a hand moving
 # to your right travels left in the image and swipe_right fires for a leftward
 # wave. Set false only if your camera already mirrors.
@@ -596,7 +596,7 @@ BOARD_ENABLED = os.getenv("BOARD_ENABLED", "false").lower() in {"1", "true", "ye
 # Frames per second for the board's video backdrop. The picture has to come from
 # Python because it holds the camera exclusively; 15 is smooth enough behind
 # cards and a third of the bandwidth of 45.
-BOARD_FPS = float(os.getenv("BOARD_FPS", "15"))
+BOARD_FPS = float(os.getenv("BOARD_FPS", "30"))   # the page glides between updates as well
 
 # Voice-driven 3D creation — "Apex, create a red cube, 50 millimetres wide."
 # Blender itself is not something Apex can bundle or launch: it is a real,
