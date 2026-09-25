@@ -3390,7 +3390,8 @@ class AgentCore:
                 if companion_mode:
                     blocks = blocks + [{"type": "text", "text": companion.prompt(
                         companion_mode, bool(screen_b64),
-                        name="Celine" if persona == "celine" else "Apex")}]
+                        name="Celine" if persona == "celine" else "Apex",
+                        screen_origin=screen_origin)}]
                 return blocks
 
             # Build user message content

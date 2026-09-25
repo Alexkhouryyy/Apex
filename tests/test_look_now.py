@@ -274,12 +274,21 @@ def test_the_model_is_told_whose_screen_it_is(monkeypatch, test_db):
 
     def create(*args, **kwargs):
         seen["content"] = kwargs["messages"][-1]["content"]
+        seen["system"] = " ".join(b.get("text", "") for b in kwargs.get("system") or [])
         return SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")], stop_reason="end_turn")
     monkeypatch.setattr(telemetry, "create", create)
-    a.run("look", channel_id="companion:31", companion_mode="discuss", screen_image=jpeg(), screen_origin="host")
+    a.run("look", channel_id="companion:31", companion_mode="work", screen_image=jpeg(), screen_origin="host")
     texts = " ".join(x.get("text", "") for x in seen["content"] if x["type"] == "text")
     assert "captured the moment they spoke to you" in texts
     assert "not the Apex host screen" not in texts
+    # The rules must say it too: the picture IS the screen her tools act on.
+    # Told only "can depict a different computer", Celine said her clicks
+    # could not reach the browser she was looking at.
+    assert "same screen your click, type, hotkey and scroll tools act on" in seen["system"]
+    assert "different computer" not in seen["system"]
+    a.run("look", channel_id="companion:32", companion_mode="work", screen_image=jpeg(), screen_origin="browser")
+    assert "different computer" in seen["system"]
+    assert "same screen your click" not in seen["system"]
 
 
 def test_the_launcher_turns_the_wake_phrase_on_unless_env_says_otherwise():
