@@ -10,7 +10,7 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard', 'static', '
 const tick = () => new Promise(r => setTimeout(r, 10));
 
 function open(stored) {
-  const dom = new JSDOM(html, {url: 'https://apex.example/board', runScripts: 'outside-only'});
+  const dom = new JSDOM(html, {url: 'https://apex.example/board?from=study', runScripts: 'outside-only'});
   const w = dom.window;
   w.localStorage.setItem('apex_token', 't');
   if (stored) w.localStorage.setItem('apex.board.hud', stored);
@@ -18,6 +18,7 @@ function open(stored) {
   w.confirm = () => true;
   const posts = [];
   w.fetch = async (url, opts = {}) => {
+    if(url === '/api/board/workspace' && opts.method === 'POST') posts.push(JSON.parse(opts.body));
     if (url === '/api/board/calibrate') { posts.push(JSON.parse(opts.body)); return Response.json({phase: 'ready'}); }
     return Response.json({files: [], selection: null});
   };
@@ -36,11 +37,19 @@ function open(stored) {
 }
 
 (async () => {
-  const {w, $, frame} = open();
+  const {w, $, frame, posts} = open();
   const d = w.document, requests = [];
+  frame({hands_enabled:false});
+  assert.match($('toast').textContent,/Back to workspace · hands are paused/);
+  assert.equal(new URL(w.location.href).searchParams.has('from'),false);
+  assert.equal($('hands-toggle').textContent,'Resume board hands');
+  // Returning must only explain the pause, never make an implicit API write.
+  assert.equal(posts.length,0);
+  assert.equal($('hands-toggle').getAttribute('aria-pressed'),'false');
   $('note-dialog').showModal = function () { this.open = true; };
   $('note-dialog').close = function () { this.open = false; };
   w.fetch = async (url, opts = {}) => {
+    if(url === '/api/board/workspace' && opts.method === 'POST') posts.push(JSON.parse(opts.body));
     requests.push({url, body: opts.body ? JSON.parse(opts.body) : null});
     if (url === '/api/board/workspace') {
       if (requests.at(-1).body.action === 'note') return new Response(JSON.stringify({detail: 'Storage unavailable'}), {status: 400});
@@ -56,7 +65,7 @@ function open(stored) {
   $('hands-toggle').click(); await tick();
   assert.deepEqual(requests.at(-1).body, {action:'hands',enabled:false});
   frame({cards:[note],selection:note,hands_enabled:false,cursors:[{x:.5,y:.5,p:true}]});
-  assert.equal($('hands-toggle').textContent, 'Hands paused');
+  assert.equal($('hands-toggle').textContent, 'Resume board hands');
   assert.equal(d.querySelectorAll('.ring').length, 0);
   $('focus-toggle').click(); assert.ok(d.body.classList.contains('focus-workspace'));
   assert.equal(w.localStorage.getItem('apex.workspace.focus'), 'true');

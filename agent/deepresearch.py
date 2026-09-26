@@ -398,7 +398,7 @@ def extract(run_id: int, client, limit: int = 100000, on_event=_noop) -> dict:
                     ungrounded += 1
                     continue
                 rows.append((run_id, qid, sid, claim, quote, time.time()))
-            with longterm._conn() as c:
+            with longterm._write_conn() as c:
                 if rows:
                     c.executemany(
                         "INSERT INTO research_notes "

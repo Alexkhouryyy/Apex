@@ -87,7 +87,7 @@ def record(
         return
     cost = _compute_cost(model, usage)
     try:
-        with longterm._conn() as c:
+        with longterm._write_conn() as c:
             c.execute(
                 """INSERT INTO usage_log
                    (ts, session_id, turn_index, call_site, model,

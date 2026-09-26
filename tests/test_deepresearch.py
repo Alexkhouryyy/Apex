@@ -360,3 +360,58 @@ def test_estimate_prices_a_run_before_it_starts():
     assert deep["expected_sources"] > quick["expected_sources"]
     assert deep["estimated_usd"] > quick["estimated_usd"] > 0
     assert deep["estimated_usd"] < 100, "an estimate this high would be a bug"
+
+
+def test_parallel_extraction_preserves_notes_and_usage_under_write_contention(db, monkeypatch, capsys):
+    """Slow real commits + a short SQLite timeout reproduce the CI collision.
+
+    Model calls still run concurrently; only usage/note transactions serialize.
+    """
+    import threading
+    import time
+    from contextlib import contextmanager
+    from agent import longterm
+
+    dr.plan(1, "q", 2, FakeClient())
+    with longterm._conn() as c:
+        for i in range(24):
+            c.execute("INSERT INTO research_sources (run_id,n,url,status,text) "
+                      "VALUES (1,?,?, 'read',?)", (i + 1, URLS[i], WEB[URLS[i]]))
+    original = longterm._conn
+
+    @contextmanager
+    def slow_commit():
+        with original() as c:
+            c.execute("PRAGMA busy_timeout=1")
+            yield c
+            if c.in_transaction:
+                time.sleep(.006)
+
+    monkeypatch.setattr(longterm, "_conn", slow_commit)
+    barrier = threading.Barrier(dr.EXTRACT_WORKERS)
+
+    class ParallelClient(FakeClient):
+        def create(self, **kwargs):
+            barrier.wait(timeout=5)
+            return super().create(**kwargs)
+
+    stats = dr.extract(1, ParallelClient())
+    assert stats == {"notes": 48, "ungrounded": 0, "sources": 24}
+    with original() as c:
+        assert c.execute("SELECT COUNT(*) FROM research_notes").fetchone()[0] == 48
+        assert c.execute("SELECT COUNT(*) FROM usage_log WHERE call_site='deepresearch/extract'").fetchone()[0] == 24
+        assert c.execute("SELECT COUNT(*) FROM research_sources WHERE status='extracted'").fetchone()[0] == 24
+    assert "record failed" not in capsys.readouterr().out
+
+
+def test_serialized_writer_rolls_back_and_releases_gate(db):
+    from agent import longterm
+    with pytest.raises(RuntimeError, match="cancel"):
+        with longterm._write_conn() as c:
+            c.execute("INSERT INTO research_questions (run_id,text) VALUES (1,'discard')")
+            raise RuntimeError("cancel")
+    with longterm._write_conn() as c:
+        assert c.execute("SELECT COUNT(*) FROM research_questions").fetchone()[0] == 0
+        c.execute("INSERT INTO research_questions (run_id,text) VALUES (1,'keep')")
+    with longterm._conn() as c:
+        assert c.execute("SELECT text FROM research_questions").fetchall() == [('keep',)]

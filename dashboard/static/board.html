@@ -614,6 +614,7 @@ document.getElementById('space-form').onsubmit=async e=>{
   finally{lockSpaces(false);}
 };
 let objectListKey = '';
+let returningFromStudy = new URLSearchParams(location.search).get('from') === 'study';
 function updateWorkspace(msg) {
   if(workspaceContext?.epoch&&msg.workspace?.epoch!==workspaceContext.epoch){
     if(pointerDrag)pointerDrag.el.dispatchEvent(new Event('pointercancel'));
@@ -625,7 +626,13 @@ function updateWorkspace(msg) {
   workspaceConnected = true;
   workspaceCards = msg.cards || [];
   workspaceHands = msg.hands_enabled !== false;
-  document.getElementById('hands-toggle').textContent = workspaceHands ? 'Hands on' : 'Hands paused';
+  if(returningFromStudy){
+    returningFromStudy=false;
+    const url=new URL(location.href);url.searchParams.delete('from');history.replaceState(null,'',url);
+    toast(workspaceHands?'Back to workspace · hands are on':'Back to workspace · hands are paused. Choose Resume board hands when ready.',6000);
+  }
+  document.getElementById('hands-toggle').textContent = workspaceHands ? 'Hands on' : 'Resume board hands';
+  document.getElementById('hands-toggle').title = workspaceHands ? 'Pause hand controls' : 'Hand controls are paused. Resume when ready; pause hands in any study window first.';
   document.getElementById('hands-toggle').setAttribute('aria-pressed', String(workspaceHands));
   document.getElementById('object-count').textContent = String(workspaceCards.length);
   document.getElementById('selection-tools').hidden = !selectedId;
@@ -720,6 +727,7 @@ function hudNow(msg) {
   const held = cards.find(c => c.held), parts = cards.find(c => c.parts_mode);
   if (!msg.tracking) return 'Hand tracking is off — HANDTRACK_ENABLED=true and BOARD_ENABLED=true in .env, then restart Apex.';
   if (msg.board_enabled === false) return 'The board is off — set BOARD_ENABLED=true in .env and restart Apex.';
+  if (msg.hands_enabled === false) return 'Hand controls are paused — choose Resume board hands when ready. Pause hands in any study window first.';
   if (!hands.length) return 'Hold a hand up in front of the camera.';
   if (parts && parts.part) return `Moving the ${parts.part.name} — let go to save, open palm to cancel.`;
   if (parts) return `Parts mode on ${parts.title}: pinch a part to move it. P to finish.`;
