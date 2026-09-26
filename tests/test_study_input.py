@@ -77,3 +77,20 @@ def test_hand_routes_require_auth_and_origin(monkeypatch):
         assert c.post(url,json=body,headers={'Origin':'https://other.example'}).status_code==403
         assert c.post(url,json=body).status_code==200
         body['action']='sample';assert c.post(url,json=body).json()['hands']==[]
+
+
+def test_camera_preview_is_authenticated_and_reuses_tracker(monkeypatch):
+    from types import SimpleNamespace
+    from dashboard.server import app
+    monkeypatch.setattr(config,'DASHBOARD_TOKEN','test-mirror')
+    monkeypatch.setattr(handtrack,'active_tracker',lambda:None)
+    with TestClient(app) as c:
+        assert c.get('/api/study/camera').status_code == 401
+        c.headers['Authorization']='Bearer test-mirror'
+        assert c.get('/api/study/camera').status_code == 503
+        jpeg=b'camera-preview-test'
+        monkeypatch.setattr(handtrack,'active_tracker',lambda:SimpleNamespace(latest_jpeg=lambda:jpeg))
+        r=c.get('/api/study/camera')
+        assert r.status_code == 200 and r.content == jpeg
+        assert r.headers['cache-control'] == 'no-store'
+        assert r.headers['content-type'] == 'image/jpeg'

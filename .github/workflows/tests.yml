@@ -65,6 +65,8 @@ jobs:
           node scripts/check_study_projects_ui.cjs
           node scripts/check_study_hands.cjs
           node scripts/check_study_poll.cjs
+          node scripts/check_study_mirror.cjs
+          node scripts/check_study_picking.mjs
           node scripts/check_study_diagnostics.cjs
           node scripts/check_board_parts_ui.cjs
           node scripts/check_board_hud_ui.cjs

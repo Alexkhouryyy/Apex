@@ -19,7 +19,8 @@ const flush=async()=>{for(let i=0;i<5;i++)await Promise.resolve();};
 function next(){assert.equal(timers.size,1);const [id,t]=timers.entries().next().value;timers.delete(id);now+=t.delay;t.fn();return t;}
 (async()=>{
   await ctx.start();assert.equal(requests.length,1);assert.equal(timers.size,0,'never queue overlapping requests');
-  now=4;requests[0].resolve({sequence:1});await flush();
+  now=4;requests[0].resolve({sequence:1,age_ms:3});await flush();
+  assert.equal(feeds[0].age_ms,7,'network delay contributes to input freshness');
   assert(Math.abs([...timers.values()][0].delay-(1000/30-4))<.001,'request time counts toward the 30 Hz interval');
   next();assert.equal(requests.length,2);assert.equal(timers.size,0);
   now+=50;requests[1].resolve({sequence:2});await flush();

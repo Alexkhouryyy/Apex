@@ -844,3 +844,60 @@ class TestSmoothing:
         xs = sorted(c[0] for c in cursors)
         # Mirrored: 0.8 on the camera image is 0.2 on the board.
         assert abs(xs[0] - 0.2) < 1e-9, "a new hand starts where it is, not dragged from the other"
+
+
+def test_detector_work_counts_toward_frame_budget(monkeypatch):
+    """A 12 ms detector must not turn a 30 Hz request into a 45 ms loop."""
+    clock = [100.0]
+    starts, waits = [], []
+    work = iter([.012, .050, .009])
+    t = handtrack.HandTracker(None, poll_hz=30)
+    class Stop:
+        def is_set(self): return len(waits) == 3
+        def wait(self, timeout=0): waits.append(timeout); clock[0] += timeout
+    t._stop = Stop()
+    monkeypatch.setattr(handtrack, 'available', lambda: (True, ''))
+    monkeypatch.setattr(handtrack, 'opencv_conflict', lambda: [])
+    monkeypatch.setattr(handtrack.time, 'monotonic', lambda: clock[0])
+    def tick(now): starts.append(clock[0]); clock[0] += next(work)
+    monkeypatch.setattr(t, '_tick', tick)
+    t.run()
+    assert waits == pytest.approx([1/30-.012, 0, 1/30-.009])
+    assert starts[1]-starts[0] == pytest.approx(1/30)
+    assert starts[2]-starts[1] == pytest.approx(.050)
+
+
+def test_study_freshness_includes_capture_and_inference(monkeypatch):
+    import numpy as np
+    clock = [100.0]
+    timestamps = []
+    t = handtrack.HandTracker(None)
+    class Cap:
+        def read(self): clock[0] += .010; return True, np.zeros((4,4,3), dtype=np.uint8)
+    class Detector:
+        def detect_for_video(self, image, timestamp):
+            timestamps.append(timestamp); clock[0] += .100
+            return types.SimpleNamespace(hand_landmarks=[])
+    t._cap, t._landmarker = Cap(), Detector()
+    t._mp = types.SimpleNamespace(Image=lambda **kw: kw, ImageFormat=types.SimpleNamespace(SRGB=1))
+    monkeypatch.setattr(t, '_open', lambda now: True)
+    monkeypatch.setattr(handtrack.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(config, 'BOARD_ENABLED', False)
+    monkeypatch.setattr(t.recognizer, 'feed_cursors', lambda *a: [])
+    from agent import gesture_recorder
+    monkeypatch.setattr(gesture_recorder, 'observe', lambda *a: None)
+    t._tick(200.0)
+    assert t.study_sample()['age_ms'] == 110
+    t._tick(200.1)
+    assert timestamps == [100000, 100110]
+
+
+def test_finger_feedback_matches_mirroring_and_rejects_invalid_points():
+    h = _hand(x=.3, y=.4)
+    assert handtrack.fingertip_positions(h)['index'] == [.7,.4]
+    assert handtrack.fingertip_positions(h, mirror=False)['index'] == [.3,.4]
+    h[handtrack.THUMB_TIP] = _lm(float('nan'),.5)
+    h[handtrack.PINKY_TIP] = _lm(2,.5)
+    points = handtrack.fingertip_positions(h)
+    assert 'thumb' not in points and 'pinky' not in points
+    assert handtrack.fingertip_positions(None) == {}
