@@ -265,6 +265,10 @@ def init_db() -> None:
         """)
 
 
+class ContentConflict(ValueError):
+    """An editor's content snapshot no longer matches the live card."""
+
+
 class Card:
     """One thing on the glass — a text card, an image, or a 3D model."""
 
@@ -274,10 +278,10 @@ class Card:
     def __init__(self, kind: str, title: str, body: str = "",
                  x: float = 0.5, y: float = 0.5, src: str = ""):
         self.id = uuid.uuid4().hex[:8]
-        self.kind = kind          # card | model | image
+        self.kind = kind          # card | link | model | image
         self.title = title
         self.body = body
-        self.src = src            # jail-relative prop path (models and images)
+        self.src = src            # prop path for models/images; web URL for links
         self.x, self.y = x, y
         self.scale = 1.0
         self.rot = 0.0            # radians about Y — models only
@@ -289,9 +293,16 @@ class Card:
     def as_dict(self) -> dict:
         return {"id": self.id, "kind": self.kind, "title": self.title,
                 "body": self.body, "src": self.src,
+                "content_revision": self.content_revision(),
                 "x": round(self.x, 4), "y": round(self.y, 4),
                 "scale": round(self.scale, 3), "rot": round(self.rot, 4),
                 "held": bool(self.held_by), "hands": len(self.held_by)}
+
+    def content_revision(self) -> str:
+        import hashlib
+        import json
+        content = json.dumps([self.kind, self.title, self.body, self.src], ensure_ascii=False)
+        return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
 class Board:
@@ -444,6 +455,11 @@ class Board:
                 if target is not None:
                     target.src = op["after"] if forward else op["before"]
                 what = f"changed what '{op.get('title', '')}' shows"
+            elif kind == "content":
+                target = next((c for c in self._cards if c.id == op["id"]), None)
+                if target is not None:
+                    target.title, target.body, target.src = op["after"] if forward else op["before"]
+                what = f"edited '{op.get('title', '')}'"
             else:
                 what = "did nothing"
             # Snapshot what needs writing while still holding the lock; the
@@ -499,9 +515,9 @@ class Board:
         return what
 
     # -- persistence -------------------------------------------------------
-    def _write(self, card: "Card") -> None:
-        """Upsert one card. Never raises: the board is a view, and losing its
-        durability must not take down the tracker thread that drives it."""
+    def _write(self, card: "Card", *, strict: bool = False) -> None:
+        """Upsert a card. Tracker writes are best-effort; explicit text saves
+        use strict=True so failed durability is not acknowledged as success."""
         if not self.persist:
             return
         try:
@@ -518,6 +534,8 @@ class Board:
                     (card.id, card.kind, card.title, card.body, card.src,
                      card.x, card.y, card.scale, card.rot, card.created))
         except Exception as e:
+            if strict:
+                raise RuntimeError("Could not save this item. Your draft is still open; try again.") from e
             print(f"[Board] could not save '{card.title}': {e}")
 
     def _forget(self, card_ids) -> None:
@@ -558,6 +576,65 @@ class Board:
             return len(self._cards)
 
     # -- content ----------------------------------------------------------
+    def save_text(self, kind, title, body='', src='', card_id=None, expected=None):
+        """Persist a note/link before publishing it; conflict checks ignore movement."""
+        from urllib.parse import urlsplit
+        if kind not in ('card', 'link'):
+            raise ValueError('Only notes and links can be edited here.')
+        if not isinstance(title, str) or not title.strip() or len(title) > 80:
+            raise ValueError('Give the item a title of at most 80 characters.')
+        if not isinstance(body, str) or len(body) > 600:
+            raise ValueError('Keep the note under 600 characters.')
+        if not isinstance(src, str):
+            raise ValueError('Enter a web address.')
+        src = src.strip()
+        if kind == 'link':
+            if len(src) > 2048 or any(ord(ch) <= 32 or ord(ch) == 127 for ch in src) or '\\' in src:
+                raise ValueError('Enter a valid HTTP or HTTPS address without spaces.')
+            try:
+                url = urlsplit(src)
+                valid = (url.scheme.lower() in ('http', 'https') and url.hostname
+                         and not url.username and not url.password and '@' not in url.netloc)
+                url.port  # Validate malformed port numbers too.
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ValueError('Use an HTTP or HTTPS address without embedded credentials.')
+        elif src:
+            raise ValueError('Notes cannot contain a link address; create a link instead.')
+        with self._lock:
+            target = next((c for c in self._cards if c.id == card_id), None) if card_id is not None else None
+            if card_id is not None:
+                if target is None:
+                    raise ContentConflict('This item was removed. Your draft is preserved; save a copy instead.')
+                if target.kind != kind:
+                    raise ValueError('The item type cannot be changed.')
+                if not isinstance(expected, str) or expected != target.content_revision():
+                    raise ContentConflict('This item changed in another window. Your draft is preserved; reopen it or save a copy.')
+                if target.held_by:
+                    raise ValueError('Release the item before editing it.')
+                before = [target.title, target.body, target.src]
+                candidate = self._from_snapshot(self._snapshot(target))
+            else:
+                if len(self._cards) >= self._max:
+                    raise ValueError('The workspace is full. Remove an item before adding another.')
+                before = None
+                candidate = Card(kind, title.strip(), body, .5, .45, src)
+            candidate.title, candidate.body, candidate.src = title.strip(), body, src
+            after = [candidate.title, candidate.body, candidate.src]
+            if before == after:
+                return target.as_dict()
+            # User-initiated text saves must not acknowledge a failed disk write.
+            self._write(candidate, strict=True)
+            if target:
+                target.title, target.body, target.src = after
+                self._record({'kind':'content','id':target.id,'title':target.title,'before':before,'after':after})
+            else:
+                target = candidate
+                self._cards.append(target)
+                self._record({'kind':'add','card':self._snapshot(target)})
+            return target.as_dict()
+
     def add(self, kind: str, title: str, body: str = "",
             x: float = 0.5, y: float = 0.35, src: str = "") -> Card:
         card = Card(kind, title, body, x, y, src)
