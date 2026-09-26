@@ -1,5 +1,15 @@
 {
   "id": "dc-motor",
+  "revision": "1.0",
+  "geometry_revision": "1",
+  "validation": {
+    "purpose": "Component identification and conceptual learning",
+    "geometry": "Original illustrative geometry; no manufacturer CAD",
+    "dimensions": "Not to scale; dimensions and tolerances unvalidated",
+    "materials": "Display colors only; engineering material properties unavailable",
+    "physics": "No electrical, magnetic, thermal or load simulation",
+    "review": "No independent engineering review recorded"
+  },
   "title": "Brushed DC motor",
   "subtitle": "Permanent-magnet · component study",
   "fidelity": "Educational illustration · not to scale",

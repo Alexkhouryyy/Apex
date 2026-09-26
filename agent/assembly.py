@@ -48,6 +48,29 @@ def state(sid):
         return deepcopy(_entry(sid)['state'])
 
 
+def restore(snapshot):
+    """Create an independent session from a validated saved presentation."""
+    data = model(snapshot.get('model'))
+    ids = {p['id'] for p in data['parts']}
+    selected = snapshot.get('selected')
+    hidden = snapshot.get('hidden')
+    explosion = snapshot.get('explosion')
+    if (selected is not None and selected not in ids
+            or not isinstance(hidden, list) or any(p not in ids for p in hidden)
+            or type(explosion) not in (int, float) or not 0 <= explosion <= 1
+            or any(type(snapshot.get(k)) is not bool for k in ('isolated', 'section'))
+            or snapshot['isolated'] and (selected is None or selected in hidden)):
+        raise ValueError('Saved study contains an invalid view.')
+    with _LOCK:
+        s = create(data['id'])
+        s.update({k: deepcopy(snapshot[k]) for k in
+                  ('selected', 'hidden', 'explosion', 'isolated', 'section')})
+        # Motion is deliberately paused on restore; the saved rotor angle is
+        # restored by the viewer. Undo begins with this saved view.
+        _SESSIONS[s['session_id']]['state'] = s
+        return deepcopy(s)
+
+
 def _part(value, data):
     if not isinstance(value, str):
         raise ValueError('Choose a component first.')
@@ -81,6 +104,8 @@ def apply(sid, action, part=None, amount=None):
         elif action == 'isolate':
             new['selected'] = _part(part or new['selected'], data)
             new['isolated'] = not new['isolated']
+            new['hidden'] = [p for p in new['hidden'] if p != new['selected']]
+            new['rotating'] = False
         elif action == 'hide':
             selected = _part(part or new['selected'], data)
             new['hidden'] = sorted(set(new['hidden']) | {selected})

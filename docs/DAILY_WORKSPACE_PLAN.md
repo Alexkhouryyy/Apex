@@ -24,7 +24,10 @@ recoverable actions and continuity matter more than decorative effects.
    Add visible hover/armed/grabbed states and resolve input ownership. Implement
    camera orbit, depth, axis constraints and physical versus view transforms
    together with matching picking. Preserve undo and existing assets.
-3. **Project continuity.** Named workspaces, project-linked files/notes/links,
+3. **Project continuity.** Named assembly studies now persist component notes,
+   camera and assembly view in the existing database, with explicit save state,
+   conflict detection and model-revision compatibility checks. Restart recovery
+   is verified locally. General named workspaces, project-linked files/notes/links,
    resumable layouts, version history and explicit save/error feedback. Test
    restart, backup and restore on both laptop and cloud.
 4. **Daily work integration.** Existing applications remain usable. Start with

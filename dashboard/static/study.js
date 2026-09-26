@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {setupStudyProjects} from './study-projects.js';
 const $ = id => document.getElementById(id);
 let token = '';
 try { token = localStorage.getItem('apex_token') || ''; } catch (_) {}
@@ -10,6 +11,28 @@ let scene, camera, renderer, orbit, cameraTween = null, rotorAngle = 0, amount =
 const groups = new Map(), pickables = [], raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
 const clipping = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+// Round insignificant OrbitControls drift out of the unsaved-change indicator.
+const coordinates = vector => vector.toArray().map(n=>Math.round(n*1e5)/1e5);
+const notebook = setupStudyProjects({
+  api, ready:()=>!!current,
+  capture:()=>({session_id:session, revision:current?.revision, model_hash:manifest?.model_hash,
+    view:current && {selected:current.selected,hidden:current.hidden,isolated:current.isolated,explosion:current.explosion,section:current.section,rotating:current.rotating},
+    camera:camera && {position:coordinates(camera.position),target:coordinates(orbit.target)},
+    rotor_angle:Math.min(Math.PI*2,Math.round((rotorAngle%(Math.PI*2))*1e5)/1e5)}),
+  prepareSave:async()=>{await busy;if(current?.rotating)await command('rotate');if(current?.rotating)throw new Error('Pause rotor motion before saving.');cameraTween=null;},
+  restore:async result=>{
+    clearTimeout(timer);$('close-partner').click();
+    const frame=$('study-partner').querySelector('iframe');frame.removeAttribute('src');partnerReady=false;askPending=false;
+    session=result.state.session_id;current=null;accept(result.state);
+    cameraTween=null;camera.position.fromArray(result.workspace.camera.position);orbit.target.fromArray(result.workspace.camera.target);
+    // Clear residual orbit damping before setting the saved camera again.
+    const damping=orbit.enableDamping;orbit.enableDamping=false;orbit.update();
+    camera.position.fromArray(result.workspace.camera.position);orbit.target.fromArray(result.workspace.camera.target);orbit.update();orbit.enableDamping=damping;
+    rotorAngle=result.workspace.rotor_angle;amount=targetAmount;
+    history.replaceState(null,'','/study?session='+encodeURIComponent(session));
+    status('Saved study restored · rotor motion paused');schedulePoll();
+  }
+});
 function status(text) { $('status').textContent = text; }
 async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers:{Authorization:`Bearer ${token}`, 'Content-Type':'application/json', ...options.headers}});
@@ -164,6 +187,12 @@ function accept(state){
   for(const [id,g] of groups){g.visible=!state.hidden.includes(id)&&(!state.isolated||id===state.selected);g.traverse(o=>{if(o.isMesh){o.material.emissive.setHex(id===state.selected?0x1d5c57:0);o.material.emissiveIntensity=.38;o.material.clippingPlanes=state.section?[clipping]:[];}});}
   $('study-caption').textContent='Illustrative geometry · not to scale'+(state.section?' · uncapped section':state.rotating?' · illustrative rotor motion':' · transparent housing');
   renderList();
+  notebook.selection(state.selected,selected?.name);
+}
+function schedulePoll(){
+  clearTimeout(timer);
+  async function poll(){const sid=session;try{if(!document.hidden){const s=await api('/api/study/session/'+sid);if(sid===session)accept(s);}}catch(e){if(sid!==session)return;status(e.message);if(e.status===401||e.status===404)return;}if(sid===session)timer=setTimeout(poll,500);}
+  timer=setTimeout(poll,500);
 }
 async function boot(){
   clearTimeout(timer);
@@ -175,9 +204,10 @@ async function boot(){
   if(!renderer)initScene();current=null;accept(s);
   $('part-count').textContent=String(manifest.parts.length);$('limitations').textContent=manifest.limitations;
   $('sources').replaceChildren();for(const source of manifest.sources){const a=document.createElement('a');a.href=source.url;a.textContent=source.title+' ↗';a.target='_blank';a.rel='noopener noreferrer';$('sources').append(a);}
+  $('model-revision').textContent='Model revision '+manifest.revision;
+  $('validation-list').replaceChildren();for(const [label,value] of Object.entries(manifest.validation)){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;$('validation-list').append(dt,dd);}
   status(renewed?'Previous study expired; a new assembly is open.':'Ready · select a component or take the motor apart');
-  async function poll(){try{if(!document.hidden)accept(await api('/api/study/session/'+session));}catch(e){status(e.message);if(e.status===401||e.status===404)return;}timer=setTimeout(poll,500);}
-  timer=setTimeout(poll,500);
+  await notebook.initialize(query.get('project'));schedulePoll();
 }
 $('search').oninput=renderList;
 $('explode').onclick=()=>command('explode');$('assemble').onclick=()=>command('assemble');
@@ -192,5 +222,5 @@ $('ask').onclick=askPartner;
 $('close-partner').onclick=()=>{const frame=$('study-partner').querySelector('iframe');frame.contentWindow?.postMessage({apex:'hush'},location.origin);frame.contentWindow?.postMessage({apex:'voice',on:false},location.origin);$('study-partner').hidden=true;};
 addEventListener('message',e=>{const frame=$('study-partner').querySelector('iframe');if(e.origin!==location.origin||e.source!==frame.contentWindow)return;if(e.data?.apex==='ready'){partnerReady=true;if(askPending){frame.contentWindow.postMessage({apex:'study-ask'},location.origin);askPending=false;}}});
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await api('/api/study/model/dc-motor');try{localStorage.setItem('apex_token',token);}catch(_){}$('login').close();await boot();}catch(error){$('login-error').textContent=error.message;}};
-addEventListener('keydown',e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||$('login').open)return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();command(e.shiftKey?'redo':'undo');}if(e.key==='Escape')$('close-partner').click();});
+addEventListener('keydown',e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||$('login').open||$('projects').open)return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();command(e.shiftKey?'redo':'undo');}if(e.key==='Escape')$('close-partner').click();});
 boot().catch(e=>status(e.message));
