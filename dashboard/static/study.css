@@ -11,3 +11,5 @@
 #hand-cursor{position:absolute;pointer-events:none;width:20px;height:20px;border:2px solid #a1e3d7;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 16px #8ee5d566;z-index:3}#hand-status{position:absolute;left:28px;bottom:66px;color:#a1e3d7;font-size:10px;pointer-events:none}.interaction-label{display:block;font-size:10px;color:#9cbdc5;margin:16px 0 5px}#interaction{width:100%;padding:9px;background:#14232b;border:1px solid var(--line);color:#c9e1e5;border-radius:8px}#reset-part{margin:8px 0;width:100%;font-size:10px}#interaction:focus-visible{outline:2px solid var(--accent)}@media(max-width:700px){header .brand{gap:7px;font-size:10px}header{gap:5px}header button{padding:5px 6px}}
 
 #model-choice{width:100%;margin:8px 0 12px;padding:8px;background:#14232b;color:#c9e1e5;border:1px solid var(--line);border-radius:7px;font-size:10px}
+
+#device-check dt{color:#aec9ce;margin-top:8px}#device-check dd{margin:3px 0;color:#89adb7}.diagnostics-buttons{display:flex;flex-wrap:wrap;gap:6px}.diagnostics-buttons button{font-size:10px;padding:7px}
