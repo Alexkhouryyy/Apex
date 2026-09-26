@@ -46,9 +46,9 @@ existing single-worker deployment. It does not coordinate active workspaces or
 in-memory history across multiple server workers.
 
 Model copies retain references to existing prop files rather than duplicating
-assets. Back up those files as well as the database. Motor study projects remain
-separate and can be reached through saved web links; switching boards does not
-automatically open a study or restore its camera. Camera/focus presentation
+assets. Back up those files as well as the database. Saved motor studies can now
+be linked directly from their Projects dialog and opened from the board's
+workspace menu. Switching boards does not automatically open a study. Camera/focus presentation
 preferences are still browser-wide. This increment does not add workspace
 renaming/deletion, cloud/laptop synchronization or arbitrary desktop app layouts.
 
@@ -56,6 +56,27 @@ renaming/deletion, cloud/laptop synchronization or arbitrary desktop app layouts
 its SQLite backup and reports workspace/item counts. Cloud persistence still
 requires the database on a persistent volume. Test restores with a separate
 database path, never by overwriting live data.
+
+## Connect a motor study
+
+1. In Motor study, save your notes and view through **Projects**.
+2. Choose a named workspace under **Add this study to a workspace**, then click
+   **Add to workspace**. Save unsaved changes first. Choosing a destination does
+   not switch the board's active workspace.
+3. On the board, open the workspace menu. **Studies · [workspace name]** lists
+   references for the active space. **Open study** opens a new tab and restores
+   the latest saved study, including notes, component transforms and camera.
+4. **Remove reference** removes only the workspace association. The saved study
+   remains in the study project's list and can be added again.
+
+References point to the same saved project; they are not frozen copies. A later
+study save is reflected in every linked workspace. Copying a board also copies
+its study references without duplicating the study. Duplicate additions are
+idempotent, and each space can reference up to 100 studies. A stale project version
+is rejected when adding a reference; reopen its latest saved version before
+trying again. A model-revision mismatch is displayed without opening or deleting
+the preserved project. Refresh the workspace menu to see references changed in
+another window. Database backups include these associations and study contents.
 
 ## Verification
 
@@ -66,4 +87,7 @@ held objects, storage failure, restart and an actual backup restoration.
 `scripts/check_workspace_browser.cjs` uses an isolated server and two real browser
 pages. It checks draft preservation across switching, live window updates, copied
 layouts, independent items, active-space restart and the mobile switcher, alongside
-the note/link editing flow. This does not validate physical webcam usability.
+the note/link editing flow. It also saves a real study, adds it to a workspace,
+restarts the server, reopens the study from the board with saved notes/view, and
+removes the reference without deleting the project. This does not validate
+physical webcam usability.

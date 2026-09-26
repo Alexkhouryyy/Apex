@@ -28,6 +28,9 @@ def ensure_db():
             created REAL NOT NULL, PRIMARY KEY(workspace_id,id))''')
         db.execute('''CREATE TABLE IF NOT EXISTS workspace_settings (
             key TEXT PRIMARY KEY, value TEXT NOT NULL)''')
+        db.execute('''CREATE TABLE IF NOT EXISTS workspace_studies (
+            workspace_id TEXT NOT NULL, project_id TEXT NOT NULL, created REAL NOT NULL,
+            PRIMARY KEY(workspace_id,project_id))''')
         if not db.execute("SELECT 1 FROM workspace_settings WHERE key='migrated'").fetchone():
             db.execute("INSERT INTO board_workspaces VALUES ('default','My workspace',?)", (time.time(),))
             db.execute("INSERT INTO workspace_cards SELECT 'default',id,kind,title,body,src,x,y,scale,rot,created FROM board_cards")
@@ -97,6 +100,10 @@ def create(name, copy_current, context):
             for snap in snapshots:
                 snap['id'] = uuid.uuid4().hex[:8]
                 destination._save_row(db, snap)
+            if copy_current:
+                db.execute('''INSERT INTO workspace_studies
+                    SELECT ?,project_id,? FROM workspace_studies WHERE workspace_id=?''',
+                    (workspace_id, time.time(), old.workspace_id))
         return dict(id=workspace_id, name=name.strip(), items=len(snapshots))
 
 
@@ -120,3 +127,48 @@ def switch(workspace_id, context):
         _boards[workspace_id] = target
         board._board = target
         return target.workspace_context()
+
+
+def linked_studies(workspace_id):
+    from agent import study_projects
+    ensure_db(); study_projects.ensure_db()
+    with longterm._conn() as db:
+        if not db.execute('SELECT 1 FROM board_workspaces WHERE id=?', (workspace_id,)).fetchone():
+            raise ValueError('Workspace not found.')
+        rows = db.execute('''SELECT p.id,p.name,p.version,p.model,p.model_hash,p.updated_at
+            FROM workspace_studies s JOIN study_projects p ON p.id=s.project_id
+            WHERE s.workspace_id=? ORDER BY s.created,p.id''', (workspace_id,)).fetchall()
+    result = []
+    for row in rows:
+        p = dict(zip(('id','name','version','model','model_hash','updated_at'), row))
+        try:
+            p['compatible'] = p['model_hash'] == study_projects.model_hash(p['model'])
+        except (ValueError, OSError):
+            p['compatible'] = False
+        result.append(p)
+    return result
+
+
+def link_study(workspace_id, project_id, action, version=None):
+    from agent import study_projects
+    if not isinstance(project_id, str) or action not in ('pin', 'unpin'):
+        raise ValueError('Choose a saved study and pin or unpin it.')
+    ensure_db(); study_projects.ensure_db()
+    with longterm._conn() as db:
+        db.execute('BEGIN IMMEDIATE')
+        if not db.execute('SELECT 1 FROM board_workspaces WHERE id=?', (workspace_id,)).fetchone():
+            raise ValueError('Workspace not found.')
+        if action == 'unpin':
+            db.execute('DELETE FROM workspace_studies WHERE workspace_id=? AND project_id=?', (workspace_id,project_id))
+            return
+        row = db.execute('SELECT version,model,model_hash FROM study_projects WHERE id=?', (project_id,)).fetchone()
+        if row is None:
+            raise ValueError('Saved study not found. Save the study before adding it to a workspace.')
+        if type(version) is not int or version != row[0]:
+            raise Conflict('This study changed elsewhere. Reopen the latest saved version before adding it.')
+        if row[2] != study_projects.model_hash(row[1]):
+            raise Conflict('The saved study uses a different model revision. Its data is preserved.')
+        existing = db.execute('SELECT 1 FROM workspace_studies WHERE workspace_id=? AND project_id=?', (workspace_id,project_id)).fetchone()
+        if not existing and db.execute('SELECT COUNT(*) FROM workspace_studies WHERE workspace_id=?', (workspace_id,)).fetchone()[0] >= 100:
+            raise ValueError('This workspace already has 100 studies. Remove a reference before adding another.')
+        db.execute('INSERT OR IGNORE INTO workspace_studies VALUES (?,?,?)', (workspace_id,project_id,time.time()))

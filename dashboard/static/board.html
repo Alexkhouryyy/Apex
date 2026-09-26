@@ -238,7 +238,7 @@
   <button id="partner-toggle" aria-expanded="false">Ask Céline <span aria-hidden="true">↗</span></button>
 </nav>
 <dialog id="note-dialog" aria-labelledby="note-heading"><form id="note-form"><div class="panel-heading"><h2 id="note-heading">A new thought</h2><button type="button" id="close-note" aria-label="Close note">×</button></div><label id="note-kind-label">Item type<select id="note-kind"><option value="card">Note</option><option value="link">Web link</option></select></label><label>Title<input id="note-title" required maxlength="80" placeholder="Give it a name" autocomplete="off"></label><label id="note-url-label" hidden>Web address<input id="note-url" type="url" maxlength="2048" placeholder="https://…" autocomplete="url"></label><label>Note<textarea id="note-body" maxlength="600" rows="5" placeholder="Capture an idea, a question, or your next step…"></textarea></label><p id="note-error" role="alert"></p><button type="submit" id="save-note">Add to workspace</button><button type="button" id="note-copy" hidden>Save draft in the current workspace</button><p class="muted">Links open in a separate tab only when you choose Open link. Apex does not fetch them automatically.</p></form></dialog>
-<dialog id="spaces-dialog" aria-labelledby="spaces-title"><div class="panel-heading"><h2 id="spaces-title">Your workspaces</h2><button id="close-spaces" aria-label="Close workspaces">×</button></div><p class="muted">Separate boards for your projects. All open windows on this host follow a switch. Hands pause when switching.</p><div id="spaces-list"></div><form id="space-form"><label>New workspace name<input id="space-title" maxlength="80" required autocomplete="off" placeholder="Apex development"></label><label class="copy-space"><input id="space-copy" type="checkbox">Copy this board’s items and layout</label><button id="space-create">Create and open</button></form><p id="space-message" role="status"></p><p class="muted">Stored on this Apex host. Models keep references to their files; study projects remain in Motor study. Undo history is separate for each board and lasts until restart.</p></dialog><aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; autoplay; display-capture"></iframe></aside>
+<dialog id="spaces-dialog" aria-labelledby="spaces-title"><div class="panel-heading"><h2 id="spaces-title">Your workspaces</h2><button id="close-spaces" aria-label="Close workspaces">×</button></div><p class="muted">Separate boards for your projects. All open windows on this host follow a switch. Hands pause when switching.</p><div id="spaces-list"></div><section id="space-studies"><h3 id="space-studies-title">Studies in this workspace</h3><div id="space-study-list"></div><p class="muted">Add saved studies from Motor study → Projects. References open the latest saved version in another tab.</p></section><form id="space-form"><label>New workspace name<input id="space-title" maxlength="80" required autocomplete="off" placeholder="Apex development"></label><label class="copy-space"><input id="space-copy" type="checkbox">Copy this board’s items and layout</label><button id="space-create">Create and open</button></form><p id="space-message" role="status"></p><p class="muted">Stored on this Apex host. Models keep references to their files; study projects remain in Motor study. Undo history is separate for each board and lasts until restart.</p></dialog><aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; autoplay; display-capture"></iframe></aside>
 
 <script type="module">
 "use strict";
@@ -560,6 +560,31 @@ async function listSpaces(){
     button.dataset.space=space.id;button.setAttribute('aria-pressed',String(space.id===data.active?.id));
     button.onclick=()=>openSpace(space.id);list.append(button);
   }
+  await listSpaceStudies(data.active);
+}
+async function listSpaceStudies(workspace){
+  const box=document.getElementById('space-study-list');box.replaceChildren();
+  document.getElementById('space-studies-title').textContent='Studies · '+(workspace?.name||'Current workspace');
+  if(!workspace)return;
+  try{
+    const data=await (await api('/api/board/workspaces/'+encodeURIComponent(workspace.id)+'/studies')).json();
+    if(!data.studies.length){box.textContent='No linked studies yet.';return;}
+    for(const study of data.studies){
+      const row=document.createElement('div');row.className='workspace-study';
+      const title=document.createElement('span');title.textContent=study.name+' · v'+study.version;
+      row.append(title);
+      if(study.compatible){
+        const open=document.createElement('a');open.textContent='Open study ↗';open.href='/study?project='+encodeURIComponent(study.id)+'&model='+encodeURIComponent(study.model);open.target='_blank';open.rel='noopener noreferrer';row.append(open);
+      }else{const warning=document.createElement('span');warning.textContent='Different model revision · saved data preserved';row.append(warning);}
+      const remove=document.createElement('button');remove.type='button';remove.textContent='Remove reference';
+      remove.onclick=async()=>{
+        if(spacesBusy)return;lockSpaces(true);
+        try{await api('/api/board/workspaces/'+encodeURIComponent(workspace.id)+'/studies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'unpin',project_id:study.id})});spacesMessage('Reference removed. The saved study is unchanged.');await listSpaceStudies(workspace);}
+        catch(e){spacesMessage(e.message);}finally{lockSpaces(false);}
+      };
+      row.append(remove);box.append(row);
+    }
+  }catch(e){box.textContent='Could not load studies. '+e.message;}
 }
 async function switchSpace(id){
   const data=await (await api('/api/board/workspaces',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'switch',id,context:spacesContext})})).json();

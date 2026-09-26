@@ -49,7 +49,7 @@ def backup(src: Path, dest: Path) -> dict:
         integrity = c.execute("PRAGMA integrity_check").fetchone()[0]
         counts = {}
         for table in ("memories", "turn_log", "sessions", "entities",
-                      "goals", "reflections", "study_projects", "board_workspaces", "workspace_cards"):
+                      "goals", "reflections", "study_projects", "board_workspaces", "workspace_cards", "workspace_studies"):
             try:
                 counts[table] = c.execute(
                     f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]

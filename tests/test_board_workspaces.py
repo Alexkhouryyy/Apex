@@ -115,3 +115,65 @@ def test_workspace_backup_restores_all_boards(isolated, monkeypatch):
     restored = board.get_board(); assert restored.cards()[0]['title'] == 'Second'
     spaces.switch('default', restored.workspace_context())
     assert board.get_board().cards()[0]['title'] == 'First'
+
+
+def saved_study():
+    from agent import assembly, study_projects
+    s = assembly.create()
+    body = dict(name='Motor notes', session_id=s['session_id'], session_revision=s['revision'],
+                model_hash=study_projects.model_hash(), workspace=dict(notes={'overview':'Inspect the rotor'},
+                camera=dict(position=[8,4,9],target=[0,0,0]),rotor_angle=0))
+    return study_projects.save(body), body
+
+
+def test_linked_studies_are_idempotent_versioned_references_and_copy_with_board(isolated):
+    from agent import study_projects
+    first = board.get_board(); p, body = saved_study()
+    spaces.link_study(first.workspace_id, p['id'], 'pin', p['version'])
+    spaces.link_study(first.workspace_id, p['id'], 'pin', p['version'])
+    assert len(spaces.linked_studies(first.workspace_id)) == 1
+    copied = spaces.create('Motor research', True, first.workspace_context())
+    assert spaces.linked_studies(copied['id'])[0]['id'] == p['id']
+    body.update(version=1,name='Revised motor notes'); study_projects.save(body, p['id'])
+    assert spaces.linked_studies(copied['id'])[0]['name'] == 'Revised motor notes'
+    with pytest.raises(spaces.Conflict, match='changed elsewhere'):
+        spaces.link_study(copied['id'], p['id'], 'pin', 1)
+    spaces.link_study(first.workspace_id, p['id'], 'unpin')
+    assert spaces.linked_studies(first.workspace_id) == []
+    assert len(spaces.linked_studies(copied['id'])) == 1
+    assert study_projects.open_project(p['id'])['project']['version'] == 2
+
+
+def test_linked_study_routes_auth_origin_missing_and_model_compatibility(isolated, monkeypatch):
+    from dashboard.server import app
+    from agent import study_projects
+    first = board.get_board(); p, _ = saved_study()
+    route = '/api/board/workspaces/'+first.workspace_id+'/studies'
+    with TestClient(app) as client:
+        assert client.get(route).status_code == 401
+        client.headers['Authorization'] = 'Bearer spaces-test'
+        payload = dict(action='pin',project_id=p['id'],version=p['version'])
+        assert client.post(route,json=payload,headers={'Origin':'https://other.example'}).status_code == 403
+        assert client.post(route,json={**payload,'project_id':'missing'}).status_code == 400
+        assert client.post(route,json=payload).status_code == 200
+        assert client.get(route).json()['studies'][0]['compatible']
+        assert client.get('/api/board/workspaces/missing/studies').status_code == 404
+        monkeypatch.setattr(study_projects, 'model_hash', lambda model_id='dc-motor':'changed')
+        assert not client.get(route).json()['studies'][0]['compatible']
+        assert client.post(route,json=payload).status_code == 409
+
+
+def test_backup_restores_study_references_and_study_notes(isolated, monkeypatch):
+    from pathlib import Path
+    from scripts.backup_brain import backup
+    from agent import study_projects
+    first = board.get_board(); p, _ = saved_study()
+    spaces.link_study(first.workspace_id,p['id'],'pin',1)
+    saved = isolated / 'linked-studies.db'
+    info = backup(Path(longterm.DB_PATH),saved)
+    assert info['counts']['workspace_studies'] == 1
+    monkeypatch.setattr(longterm,'DB_PATH',str(saved));board._board = None
+    active = board.get_board()
+    linked = spaces.linked_studies(active.workspace_id)
+    assert linked[0]['id'] == p['id']
+    assert study_projects.open_project(linked[0]['id'])['workspace']['notes']['overview'] == 'Inspect the rotor'

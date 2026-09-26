@@ -36,6 +36,9 @@ recoverable actions and continuity matter more than decorative effects.
    item/layout storage, per-board process-local undo, optional copies, shared
    switching, stale-window guards, last-active restart and backup restoration.
    Deployed persistence and real laptop acceptance remain to be verified.
+   Saved motor studies can be attached to a named board and reopened from its
+   workspace menu. These are references to the latest saved project; copying a
+   workspace carries its references without duplicating study contents.
    Board notes can now be edited, and web reference links can be created,
    edited and reopened explicitly. Both use board storage and content undo/redo.
    Content fingerprints reject stale editor saves while allowing independent
