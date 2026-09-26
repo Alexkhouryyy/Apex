@@ -17,8 +17,10 @@ recoverable actions and continuity matter more than decorative effects.
    [motor study](ASSEMBLY_STUDY.md) is implemented on this branch: a separate
    mouse/touch 3D view, 14 component groups, reversible exploded views,
    sourced explanations and selected-part companion context. It is educational
-   geometry, not arbitrary detailed model generation. Next add validated CAD
-   assets with assembly metadata and connect hand picking to the 3D camera.
+   geometry. A second, source CAD reference now exposes 135 mesh occurrences,
+   source hierarchy and approximate sizes. Camera-aware hand and mouse part
+   manipulation are implemented with ownership and cancellation. Independent
+   engineering review and physical-device acceptance are still pending.
    Tune against Alex's recorded gestures;
    measure false grabs, target selection, release success and perceived delay.
    Add visible hover/armed/grabbed states and resolve input ownership. Implement
@@ -72,3 +74,5 @@ Targeted Python checks: `python -m pytest tests/test_daily_workspace.py
  tests/test_board_tap.py tests/test_handtrack.py -q` (run as one command).
 UI checks: `node scripts/check_daily_workspace_ui.cjs` and existing board
 HUD/parts/voice/companion/drive checks; jsdom must be available on NODE_PATH.
+
+Release gate tracking: [FIRST_RELEASE_CHECKLIST.md](FIRST_RELEASE_CHECKLIST.md).

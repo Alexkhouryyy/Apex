@@ -1,0 +1,2593 @@
+{
+  "id": "openmotor-125",
+  "revision": "1.0",
+  "geometry_revision": "1",
+  "title": "OpenMotor 125/25",
+  "subtitle": "Source CAD \u00b7 component study",
+  "fidelity": "Source CAD \u00b7 engineering review pending",
+  "asset": "/api/study/model/openmotor-125/asset",
+  "dimensions_mm": [
+    144.1,
+    144.1,
+    53.5
+  ],
+  "limitations": "Converted from the published OpenMotor STEP assembly. CAD-kernel checks found 616 solid occurrences and no invalid solids; this is not a performance or manufacturing validation. The viewer exposes 135 named mesh occurrences, some containing multiple solids. A geometry-free Insulation node was omitted by conversion. Mesh bounds are approximate; display colors are not material properties. No simulation or independent engineering review.",
+  "validation": {
+    "purpose": "Detailed source-geometry inspection",
+    "geometry": "Published STEP converted to a tessellated view; original source included",
+    "dimensions": "Source mm; mesh bounding sizes only; no tolerance validation",
+    "materials": "Source appearance only; material properties not verified",
+    "physics": "No electrical, magnetic, thermal or load simulation",
+    "review": "616 solids passed kernel validity checks; independent engineering review pending"
+  },
+  "sources": [
+    {
+      "id": "cad",
+      "title": "OpenMotor hardware \u00b7 pinned source",
+      "url": "https://github.com/eMotres/OpenMotor-Hardware/tree/1e1e56d7cf64ea393793ca5c06189251f87b6e98",
+      "license": "CERN-OHL-W-2.0"
+    }
+  ],
+  "parts": [
+    {
+      "id": "node-2",
+      "node": 2,
+      "name": "Core:1",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Core:1"
+      ],
+      "dimensions_mm": [
+        124.93,
+        124.93,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Core:1",
+      "model_note": "CAD bounding size: 124.93 \u00d7 124.93 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-3",
+      "node": 3,
+      "name": "Tooth:1",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:1"
+      ],
+      "dimensions_mm": [
+        10.16,
+        16.24,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:1",
+      "model_note": "CAD bounding size: 10.16 \u00d7 16.24 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-4",
+      "node": 4,
+      "name": "Tooth:2",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:2"
+      ],
+      "dimensions_mm": [
+        14.02,
+        18.31,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:2",
+      "model_note": "CAD bounding size: 14.02 \u00d7 18.31 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-5",
+      "node": 5,
+      "name": "Tooth:3",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:3"
+      ],
+      "dimensions_mm": [
+        16.92,
+        19.14,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:3",
+      "model_note": "CAD bounding size: 16.92 \u00d7 19.14 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-6",
+      "node": 6,
+      "name": "Tooth:4",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:4"
+      ],
+      "dimensions_mm": [
+        18.67,
+        18.67,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:4",
+      "model_note": "CAD bounding size: 18.67 \u00d7 18.67 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-7",
+      "node": 7,
+      "name": "Tooth:5",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:5"
+      ],
+      "dimensions_mm": [
+        19.14,
+        16.92,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:5",
+      "model_note": "CAD bounding size: 19.14 \u00d7 16.92 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-8",
+      "node": 8,
+      "name": "Tooth:6",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:6"
+      ],
+      "dimensions_mm": [
+        18.31,
+        14.02,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:6",
+      "model_note": "CAD bounding size: 18.31 \u00d7 14.02 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-9",
+      "node": 9,
+      "name": "Tooth:7",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:7"
+      ],
+      "dimensions_mm": [
+        16.24,
+        10.16,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:7",
+      "model_note": "CAD bounding size: 16.24 \u00d7 10.16 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-10",
+      "node": 10,
+      "name": "Tooth:8",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:8"
+      ],
+      "dimensions_mm": [
+        18.31,
+        14.02,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:8",
+      "model_note": "CAD bounding size: 18.31 \u00d7 14.02 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-11",
+      "node": 11,
+      "name": "Tooth:9",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:9"
+      ],
+      "dimensions_mm": [
+        19.14,
+        16.92,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:9",
+      "model_note": "CAD bounding size: 19.14 \u00d7 16.92 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-12",
+      "node": 12,
+      "name": "Tooth:10",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:10"
+      ],
+      "dimensions_mm": [
+        18.67,
+        18.67,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:10",
+      "model_note": "CAD bounding size: 18.67 \u00d7 18.67 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-13",
+      "node": 13,
+      "name": "Tooth:11",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:11"
+      ],
+      "dimensions_mm": [
+        16.92,
+        19.14,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:11",
+      "model_note": "CAD bounding size: 16.92 \u00d7 19.14 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-14",
+      "node": 14,
+      "name": "Tooth:12",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:12"
+      ],
+      "dimensions_mm": [
+        14.02,
+        18.31,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:12",
+      "model_note": "CAD bounding size: 14.02 \u00d7 18.31 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-15",
+      "node": 15,
+      "name": "Tooth:13",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:13"
+      ],
+      "dimensions_mm": [
+        10.16,
+        16.24,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:13",
+      "model_note": "CAD bounding size: 10.16 \u00d7 16.24 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-16",
+      "node": 16,
+      "name": "Tooth:14",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:14"
+      ],
+      "dimensions_mm": [
+        14.02,
+        18.31,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:14",
+      "model_note": "CAD bounding size: 14.02 \u00d7 18.31 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-17",
+      "node": 17,
+      "name": "Tooth:15",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:15"
+      ],
+      "dimensions_mm": [
+        16.92,
+        19.14,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:15",
+      "model_note": "CAD bounding size: 16.92 \u00d7 19.14 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-18",
+      "node": 18,
+      "name": "Tooth:16",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:16"
+      ],
+      "dimensions_mm": [
+        18.67,
+        18.67,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:16",
+      "model_note": "CAD bounding size: 18.67 \u00d7 18.67 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-19",
+      "node": 19,
+      "name": "Tooth:17",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:17"
+      ],
+      "dimensions_mm": [
+        19.14,
+        16.92,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:17",
+      "model_note": "CAD bounding size: 19.14 \u00d7 16.92 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-20",
+      "node": 20,
+      "name": "Tooth:18",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:18"
+      ],
+      "dimensions_mm": [
+        18.31,
+        14.02,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:18",
+      "model_note": "CAD bounding size: 18.31 \u00d7 14.02 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-21",
+      "node": 21,
+      "name": "Tooth:19",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:19"
+      ],
+      "dimensions_mm": [
+        16.24,
+        10.16,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:19",
+      "model_note": "CAD bounding size: 16.24 \u00d7 10.16 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-22",
+      "node": 22,
+      "name": "Tooth:20",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:20"
+      ],
+      "dimensions_mm": [
+        18.31,
+        14.02,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:20",
+      "model_note": "CAD bounding size: 18.31 \u00d7 14.02 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-23",
+      "node": 23,
+      "name": "Tooth:21",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:21"
+      ],
+      "dimensions_mm": [
+        19.14,
+        16.92,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:21",
+      "model_note": "CAD bounding size: 19.14 \u00d7 16.92 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-24",
+      "node": 24,
+      "name": "Tooth:22",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:22"
+      ],
+      "dimensions_mm": [
+        18.67,
+        18.67,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:22",
+      "model_note": "CAD bounding size: 18.67 \u00d7 18.67 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-25",
+      "node": 25,
+      "name": "Tooth:23",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:23"
+      ],
+      "dimensions_mm": [
+        16.92,
+        19.14,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:23",
+      "model_note": "CAD bounding size: 16.92 \u00d7 19.14 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-26",
+      "node": 26,
+      "name": "Tooth:24",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Tooth:24"
+      ],
+      "dimensions_mm": [
+        14.02,
+        18.31,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Tooth:24",
+      "model_note": "CAD bounding size: 14.02 \u00d7 18.31 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-27",
+      "node": 27,
+      "name": "Ins_tooth:1",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Ins_tooth:1"
+      ],
+      "dimensions_mm": [
+        0.3,
+        9.57,
+        21.82
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Ins_tooth:1",
+      "model_note": "CAD bounding size: 0.3 \u00d7 9.57 \u00d7 21.82 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-28",
+      "node": 28,
+      "name": "Ins_core:1",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Ins_core:1"
+      ],
+      "dimensions_mm": [
+        3.35,
+        0.3,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Ins_core:1",
+      "model_note": "CAD bounding size: 3.35 \u00d7 0.3 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-29",
+      "node": 29,
+      "name": "Ins_tooth(Mirror):1",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Ins_tooth(Mirror):1"
+      ],
+      "dimensions_mm": [
+        0.3,
+        9.57,
+        21.82
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Ins_tooth(Mirror):1",
+      "model_note": "CAD bounding size: 0.3 \u00d7 9.57 \u00d7 21.82 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-30",
+      "node": 30,
+      "name": "Ins_core(Mirror):1",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Ins_core(Mirror):1"
+      ],
+      "dimensions_mm": [
+        3.45,
+        0.3,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Ins_core(Mirror):1",
+      "model_note": "CAD bounding size: 3.45 \u00d7 0.3 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-31",
+      "node": 31,
+      "name": "Insulation FR4:1",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Insulation FR4:1"
+      ],
+      "dimensions_mm": [
+        4.3,
+        11.81,
+        22.2
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Insulation FR4:1",
+      "model_note": "CAD bounding size: 4.3 \u00d7 11.81 \u00d7 22.2 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-32",
+      "node": 32,
+      "name": "Insulation_125 v7:1",
+      "group": "Stator:1",
+      "hierarchy": [
+        "Stator:1",
+        "Insulation_125 v7:1"
+      ],
+      "dimensions_mm": [
+        7.96,
+        10.73,
+        28.2
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator:1 / Insulation_125 v7:1",
+      "model_note": "CAD bounding size: 7.96 \u00d7 10.73 \u00d7 28.2 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-33",
+      "node": 33,
+      "name": "Rotor:1",
+      "group": "Assembly",
+      "hierarchy": [
+        "Rotor:1"
+      ],
+      "dimensions_mm": [
+        88.35,
+        88.35,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Rotor:1",
+      "model_note": "CAD bounding size: 88.35 \u00d7 88.35 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-35",
+      "node": 35,
+      "name": "Magnet:1",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:1"
+      ],
+      "dimensions_mm": [
+        6.9,
+        9.96,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:1",
+      "model_note": "CAD bounding size: 6.9 \u00d7 9.96 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-36",
+      "node": 36,
+      "name": "Magnet:2",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:2"
+      ],
+      "dimensions_mm": [
+        8.94,
+        11.25,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:2",
+      "model_note": "CAD bounding size: 8.94 \u00d7 11.25 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-37",
+      "node": 37,
+      "name": "Magnet:3",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:3"
+      ],
+      "dimensions_mm": [
+        10.54,
+        11.97,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:3",
+      "model_note": "CAD bounding size: 10.54 \u00d7 11.97 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-38",
+      "node": 38,
+      "name": "Magnet:4",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:4"
+      ],
+      "dimensions_mm": [
+        11.6,
+        12.09,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:4",
+      "model_note": "CAD bounding size: 11.6 \u00d7 12.09 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-39",
+      "node": 39,
+      "name": "Magnet:5",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:5"
+      ],
+      "dimensions_mm": [
+        12.09,
+        11.6,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:5",
+      "model_note": "CAD bounding size: 12.09 \u00d7 11.6 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-40",
+      "node": 40,
+      "name": "Magnet:6",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:6"
+      ],
+      "dimensions_mm": [
+        11.97,
+        10.54,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:6",
+      "model_note": "CAD bounding size: 11.97 \u00d7 10.54 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-41",
+      "node": 41,
+      "name": "Magnet:7",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:7"
+      ],
+      "dimensions_mm": [
+        11.25,
+        8.94,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:7",
+      "model_note": "CAD bounding size: 11.25 \u00d7 8.94 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-42",
+      "node": 42,
+      "name": "Magnet:8",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:8"
+      ],
+      "dimensions_mm": [
+        9.96,
+        6.9,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:8",
+      "model_note": "CAD bounding size: 9.96 \u00d7 6.9 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-43",
+      "node": 43,
+      "name": "Magnet:9",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:9"
+      ],
+      "dimensions_mm": [
+        11.25,
+        8.94,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:9",
+      "model_note": "CAD bounding size: 11.25 \u00d7 8.94 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-44",
+      "node": 44,
+      "name": "Magnet:10",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:10"
+      ],
+      "dimensions_mm": [
+        11.97,
+        10.54,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:10",
+      "model_note": "CAD bounding size: 11.97 \u00d7 10.54 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-45",
+      "node": 45,
+      "name": "Magnet:11",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:11"
+      ],
+      "dimensions_mm": [
+        12.09,
+        11.6,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:11",
+      "model_note": "CAD bounding size: 12.09 \u00d7 11.6 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-46",
+      "node": 46,
+      "name": "Magnet:12",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:12"
+      ],
+      "dimensions_mm": [
+        11.6,
+        12.09,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:12",
+      "model_note": "CAD bounding size: 11.6 \u00d7 12.09 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-47",
+      "node": 47,
+      "name": "Magnet:13",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:13"
+      ],
+      "dimensions_mm": [
+        10.54,
+        11.97,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:13",
+      "model_note": "CAD bounding size: 10.54 \u00d7 11.97 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-48",
+      "node": 48,
+      "name": "Magnet:14",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:14"
+      ],
+      "dimensions_mm": [
+        8.94,
+        11.25,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:14",
+      "model_note": "CAD bounding size: 8.94 \u00d7 11.25 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-49",
+      "node": 49,
+      "name": "Magnet:15",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:15"
+      ],
+      "dimensions_mm": [
+        6.9,
+        9.96,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:15",
+      "model_note": "CAD bounding size: 6.9 \u00d7 9.96 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-50",
+      "node": 50,
+      "name": "Magnet:16",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:16"
+      ],
+      "dimensions_mm": [
+        8.94,
+        11.25,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:16",
+      "model_note": "CAD bounding size: 8.94 \u00d7 11.25 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-51",
+      "node": 51,
+      "name": "Magnet:17",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:17"
+      ],
+      "dimensions_mm": [
+        10.54,
+        11.97,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:17",
+      "model_note": "CAD bounding size: 10.54 \u00d7 11.97 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-52",
+      "node": 52,
+      "name": "Magnet:18",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:18"
+      ],
+      "dimensions_mm": [
+        11.6,
+        12.09,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:18",
+      "model_note": "CAD bounding size: 11.6 \u00d7 12.09 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-53",
+      "node": 53,
+      "name": "Magnet:19",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:19"
+      ],
+      "dimensions_mm": [
+        12.09,
+        11.6,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:19",
+      "model_note": "CAD bounding size: 12.09 \u00d7 11.6 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-54",
+      "node": 54,
+      "name": "Magnet:20",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:20"
+      ],
+      "dimensions_mm": [
+        11.97,
+        10.54,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:20",
+      "model_note": "CAD bounding size: 11.97 \u00d7 10.54 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-55",
+      "node": 55,
+      "name": "Magnet:21",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:21"
+      ],
+      "dimensions_mm": [
+        11.25,
+        8.94,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:21",
+      "model_note": "CAD bounding size: 11.25 \u00d7 8.94 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-56",
+      "node": 56,
+      "name": "Magnet:22",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:22"
+      ],
+      "dimensions_mm": [
+        9.96,
+        6.9,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:22",
+      "model_note": "CAD bounding size: 9.96 \u00d7 6.9 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-57",
+      "node": 57,
+      "name": "Magnet:23",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:23"
+      ],
+      "dimensions_mm": [
+        11.25,
+        8.94,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:23",
+      "model_note": "CAD bounding size: 11.25 \u00d7 8.94 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-58",
+      "node": 58,
+      "name": "Magnet:24",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:24"
+      ],
+      "dimensions_mm": [
+        11.97,
+        10.54,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:24",
+      "model_note": "CAD bounding size: 11.97 \u00d7 10.54 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-59",
+      "node": 59,
+      "name": "Magnet:25",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:25"
+      ],
+      "dimensions_mm": [
+        12.09,
+        11.6,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:25",
+      "model_note": "CAD bounding size: 12.09 \u00d7 11.6 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-60",
+      "node": 60,
+      "name": "Magnet:26",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:26"
+      ],
+      "dimensions_mm": [
+        11.6,
+        12.09,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:26",
+      "model_note": "CAD bounding size: 11.6 \u00d7 12.09 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-61",
+      "node": 61,
+      "name": "Magnet:27",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:27"
+      ],
+      "dimensions_mm": [
+        10.54,
+        11.97,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:27",
+      "model_note": "CAD bounding size: 10.54 \u00d7 11.97 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-62",
+      "node": 62,
+      "name": "Magnet:28",
+      "group": "Magnet_asm:1",
+      "hierarchy": [
+        "Magnet_asm:1",
+        "Magnet:28"
+      ],
+      "dimensions_mm": [
+        8.94,
+        11.25,
+        25.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Magnet_asm:1 / Magnet:28",
+      "model_note": "CAD bounding size: 8.94 \u00d7 11.25 \u00d7 25.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-63",
+      "node": 63,
+      "name": "Rotor_holder:1",
+      "group": "Assembly",
+      "hierarchy": [
+        "Rotor_holder:1"
+      ],
+      "dimensions_mm": [
+        74.76,
+        74.78,
+        48.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Rotor_holder:1",
+      "model_note": "CAD bounding size: 74.76 \u00d7 74.78 \u00d7 48.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-65",
+      "node": 65,
+      "name": "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:1",
+      "group": "Stator_holder:1",
+      "hierarchy": [
+        "Stator_holder:1",
+        "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:1"
+      ],
+      "dimensions_mm": [
+        7.0,
+        7.0,
+        34.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder:1 / Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:1",
+      "model_note": "CAD bounding size: 7.0 \u00d7 7.0 \u00d7 34.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-66",
+      "node": 66,
+      "name": "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:2",
+      "group": "Stator_holder:1",
+      "hierarchy": [
+        "Stator_holder:1",
+        "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:2"
+      ],
+      "dimensions_mm": [
+        7.0,
+        7.0,
+        34.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder:1 / Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:2",
+      "model_note": "CAD bounding size: 7.0 \u00d7 7.0 \u00d7 34.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-67",
+      "node": 67,
+      "name": "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:3",
+      "group": "Stator_holder:1",
+      "hierarchy": [
+        "Stator_holder:1",
+        "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:3"
+      ],
+      "dimensions_mm": [
+        7.0,
+        7.0,
+        34.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder:1 / Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:3",
+      "model_note": "CAD bounding size: 7.0 \u00d7 7.0 \u00d7 34.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-68",
+      "node": 68,
+      "name": "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:4",
+      "group": "Stator_holder:1",
+      "hierarchy": [
+        "Stator_holder:1",
+        "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:4"
+      ],
+      "dimensions_mm": [
+        7.0,
+        7.0,
+        34.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder:1 / Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:4",
+      "model_note": "CAD bounding size: 7.0 \u00d7 7.0 \u00d7 34.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-69",
+      "node": 69,
+      "name": "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:5",
+      "group": "Stator_holder:1",
+      "hierarchy": [
+        "Stator_holder:1",
+        "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:5"
+      ],
+      "dimensions_mm": [
+        7.0,
+        7.0,
+        34.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder:1 / Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:5",
+      "model_note": "CAD bounding size: 7.0 \u00d7 7.0 \u00d7 34.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-70",
+      "node": 70,
+      "name": "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:6",
+      "group": "Stator_holder:1",
+      "hierarchy": [
+        "Stator_holder:1",
+        "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:6"
+      ],
+      "dimensions_mm": [
+        7.0,
+        7.0,
+        34.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder:1 / Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:6",
+      "model_note": "CAD bounding size: 7.0 \u00d7 7.0 \u00d7 34.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-71",
+      "node": 71,
+      "name": "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:7",
+      "group": "Stator_holder:1",
+      "hierarchy": [
+        "Stator_holder:1",
+        "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:7"
+      ],
+      "dimensions_mm": [
+        7.0,
+        7.0,
+        34.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder:1 / Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:7",
+      "model_note": "CAD bounding size: 7.0 \u00d7 7.0 \u00d7 34.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-72",
+      "node": 72,
+      "name": "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:8",
+      "group": "Stator_holder:1",
+      "hierarchy": [
+        "Stator_holder:1",
+        "Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:8"
+      ],
+      "dimensions_mm": [
+        7.0,
+        7.0,
+        34.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder:1 / Hexagon Socket Head Cap Screw DIN 912 - M4 x 0.7 x 30 Steel 4.6 Plain v1:8",
+      "model_note": "CAD bounding size: 7.0 \u00d7 7.0 \u00d7 34.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-73",
+      "node": 73,
+      "name": "=>[0:1:1:17]",
+      "group": "Stator_holder:1",
+      "hierarchy": [
+        "Stator_holder:1",
+        "=>[0:1:1:17]"
+      ],
+      "dimensions_mm": [
+        138.06,
+        138.06,
+        14.5
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder:1 / =>[0:1:1:17]",
+      "model_note": "CAD bounding size: 138.06 \u00d7 138.06 \u00d7 14.5 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-74",
+      "node": 74,
+      "name": "Stator_holder_back:1",
+      "group": "Assembly",
+      "hierarchy": [
+        "Stator_holder_back:1"
+      ],
+      "dimensions_mm": [
+        138.06,
+        138.06,
+        20.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Stator_holder_back:1",
+      "model_note": "CAD bounding size: 138.06 \u00d7 138.06 \u00d7 20.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-76",
+      "node": 76,
+      "name": "Coil:1",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:1"
+      ],
+      "dimensions_mm": [
+        12.9,
+        13.44,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:1",
+      "model_note": "CAD bounding size: 12.9 \u00d7 13.44 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-77",
+      "node": 77,
+      "name": "Coil:14",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:14"
+      ],
+      "dimensions_mm": [
+        14.88,
+        16.32,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:14",
+      "model_note": "CAD bounding size: 14.88 \u00d7 16.32 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-78",
+      "node": 78,
+      "name": "Connect:1",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:1"
+      ],
+      "dimensions_mm": [
+        18.24,
+        2.34,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:1",
+      "model_note": "CAD bounding size: 18.24 \u00d7 2.34 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-79",
+      "node": 79,
+      "name": "Coil:15",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:15"
+      ],
+      "dimensions_mm": [
+        17.89,
+        14.55,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:15",
+      "model_note": "CAD bounding size: 17.89 \u00d7 14.55 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-80",
+      "node": 80,
+      "name": "Coil:16",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:16"
+      ],
+      "dimensions_mm": [
+        15.94,
+        13.76,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:16",
+      "model_note": "CAD bounding size: 15.94 \u00d7 13.76 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-81",
+      "node": 81,
+      "name": "Connect:2",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:2"
+      ],
+      "dimensions_mm": [
+        16.74,
+        9.98,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:2",
+      "model_note": "CAD bounding size: 16.74 \u00d7 9.98 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-82",
+      "node": 82,
+      "name": "Coil:17",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:17"
+      ],
+      "dimensions_mm": [
+        18.09,
+        15.85,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:17",
+      "model_note": "CAD bounding size: 18.09 \u00d7 15.85 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-83",
+      "node": 83,
+      "name": "Coil:18",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:18"
+      ],
+      "dimensions_mm": [
+        18.63,
+        15.73,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:18",
+      "model_note": "CAD bounding size: 18.63 \u00d7 15.73 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-84",
+      "node": 84,
+      "name": "Connect:3",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:3"
+      ],
+      "dimensions_mm": [
+        10.74,
+        16.3,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:3",
+      "model_note": "CAD bounding size: 10.74 \u00d7 16.3 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-85",
+      "node": 85,
+      "name": "Coil:19",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:19"
+      ],
+      "dimensions_mm": [
+        13.44,
+        12.9,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:19",
+      "model_note": "CAD bounding size: 13.44 \u00d7 12.9 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-86",
+      "node": 86,
+      "name": "Coil:20",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:20"
+      ],
+      "dimensions_mm": [
+        16.32,
+        14.88,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:20",
+      "model_note": "CAD bounding size: 16.32 \u00d7 14.88 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-87",
+      "node": 87,
+      "name": "Connect:4",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:4"
+      ],
+      "dimensions_mm": [
+        2.34,
+        18.24,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:4",
+      "model_note": "CAD bounding size: 2.34 \u00d7 18.24 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-88",
+      "node": 88,
+      "name": "Coil:21",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:21"
+      ],
+      "dimensions_mm": [
+        14.55,
+        17.89,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:21",
+      "model_note": "CAD bounding size: 14.55 \u00d7 17.89 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-89",
+      "node": 89,
+      "name": "Coil:22",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:22"
+      ],
+      "dimensions_mm": [
+        13.76,
+        15.94,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:22",
+      "model_note": "CAD bounding size: 13.76 \u00d7 15.94 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-90",
+      "node": 90,
+      "name": "Connect:5",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:5"
+      ],
+      "dimensions_mm": [
+        9.98,
+        16.74,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:5",
+      "model_note": "CAD bounding size: 9.98 \u00d7 16.74 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-91",
+      "node": 91,
+      "name": "Coil:23",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:23"
+      ],
+      "dimensions_mm": [
+        15.85,
+        18.09,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:23",
+      "model_note": "CAD bounding size: 15.85 \u00d7 18.09 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-92",
+      "node": 92,
+      "name": "Coil:24",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:24"
+      ],
+      "dimensions_mm": [
+        15.73,
+        18.63,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:24",
+      "model_note": "CAD bounding size: 15.73 \u00d7 18.63 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-93",
+      "node": 93,
+      "name": "Connect:6",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:6"
+      ],
+      "dimensions_mm": [
+        16.3,
+        10.74,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:6",
+      "model_note": "CAD bounding size: 16.3 \u00d7 10.74 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-94",
+      "node": 94,
+      "name": "Coil:25",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:25"
+      ],
+      "dimensions_mm": [
+        12.9,
+        13.44,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:25",
+      "model_note": "CAD bounding size: 12.9 \u00d7 13.44 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-95",
+      "node": 95,
+      "name": "Coil:26",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:26"
+      ],
+      "dimensions_mm": [
+        14.88,
+        16.32,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:26",
+      "model_note": "CAD bounding size: 14.88 \u00d7 16.32 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-96",
+      "node": 96,
+      "name": "Connect:7",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:7"
+      ],
+      "dimensions_mm": [
+        18.24,
+        2.34,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:7",
+      "model_note": "CAD bounding size: 18.24 \u00d7 2.34 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-97",
+      "node": 97,
+      "name": "Coil:27",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:27"
+      ],
+      "dimensions_mm": [
+        17.89,
+        14.55,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:27",
+      "model_note": "CAD bounding size: 17.89 \u00d7 14.55 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-98",
+      "node": 98,
+      "name": "Coil:28",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:28"
+      ],
+      "dimensions_mm": [
+        15.94,
+        13.76,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:28",
+      "model_note": "CAD bounding size: 15.94 \u00d7 13.76 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-99",
+      "node": 99,
+      "name": "Connect:8",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:8"
+      ],
+      "dimensions_mm": [
+        16.74,
+        9.98,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:8",
+      "model_note": "CAD bounding size: 16.74 \u00d7 9.98 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-100",
+      "node": 100,
+      "name": "Coil:29",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:29"
+      ],
+      "dimensions_mm": [
+        18.09,
+        15.85,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:29",
+      "model_note": "CAD bounding size: 18.09 \u00d7 15.85 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-101",
+      "node": 101,
+      "name": "Coil:30",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:30"
+      ],
+      "dimensions_mm": [
+        18.63,
+        15.73,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:30",
+      "model_note": "CAD bounding size: 18.63 \u00d7 15.73 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-102",
+      "node": 102,
+      "name": "Connect:9",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:9"
+      ],
+      "dimensions_mm": [
+        10.74,
+        16.3,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:9",
+      "model_note": "CAD bounding size: 10.74 \u00d7 16.3 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-103",
+      "node": 103,
+      "name": "Coil:31",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:31"
+      ],
+      "dimensions_mm": [
+        13.44,
+        12.9,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:31",
+      "model_note": "CAD bounding size: 13.44 \u00d7 12.9 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-104",
+      "node": 104,
+      "name": "Coil:32",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:32"
+      ],
+      "dimensions_mm": [
+        16.32,
+        14.88,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:32",
+      "model_note": "CAD bounding size: 16.32 \u00d7 14.88 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-105",
+      "node": 105,
+      "name": "Connect:10",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:10"
+      ],
+      "dimensions_mm": [
+        2.34,
+        18.24,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:10",
+      "model_note": "CAD bounding size: 2.34 \u00d7 18.24 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-106",
+      "node": 106,
+      "name": "Coil:33",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:33"
+      ],
+      "dimensions_mm": [
+        14.55,
+        17.89,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:33",
+      "model_note": "CAD bounding size: 14.55 \u00d7 17.89 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-107",
+      "node": 107,
+      "name": "Coil:34",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:34"
+      ],
+      "dimensions_mm": [
+        13.76,
+        15.94,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:34",
+      "model_note": "CAD bounding size: 13.76 \u00d7 15.94 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-108",
+      "node": 108,
+      "name": "Connect:11",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:11"
+      ],
+      "dimensions_mm": [
+        9.98,
+        16.74,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:11",
+      "model_note": "CAD bounding size: 9.98 \u00d7 16.74 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-109",
+      "node": 109,
+      "name": "Coil:35",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:35"
+      ],
+      "dimensions_mm": [
+        15.85,
+        18.09,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:35",
+      "model_note": "CAD bounding size: 15.85 \u00d7 18.09 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-110",
+      "node": 110,
+      "name": "Coil:36",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Coil:36"
+      ],
+      "dimensions_mm": [
+        15.73,
+        18.63,
+        39.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Coil:36",
+      "model_note": "CAD bounding size: 15.73 \u00d7 18.63 \u00d7 39.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-111",
+      "node": 111,
+      "name": "Connect:12",
+      "group": "Winding:1",
+      "hierarchy": [
+        "Winding:1",
+        "Connect:12"
+      ],
+      "dimensions_mm": [
+        16.3,
+        10.74,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Winding:1 / Connect:12",
+      "model_note": "CAD bounding size: 16.3 \u00d7 10.74 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-113",
+      "node": 113,
+      "name": "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:1",
+      "group": "Ring:1",
+      "hierarchy": [
+        "Ring:1",
+        "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:1"
+      ],
+      "dimensions_mm": [
+        4.0,
+        4.0,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Ring:1 / 91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:1",
+      "model_note": "CAD bounding size: 4.0 \u00d7 4.0 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-114",
+      "node": 114,
+      "name": "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:2",
+      "group": "Ring:1",
+      "hierarchy": [
+        "Ring:1",
+        "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:2"
+      ],
+      "dimensions_mm": [
+        5.62,
+        5.62,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Ring:1 / 91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:2",
+      "model_note": "CAD bounding size: 5.62 \u00d7 5.62 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-115",
+      "node": 115,
+      "name": "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:3",
+      "group": "Ring:1",
+      "hierarchy": [
+        "Ring:1",
+        "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:3"
+      ],
+      "dimensions_mm": [
+        4.79,
+        4.79,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Ring:1 / 91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:3",
+      "model_note": "CAD bounding size: 4.79 \u00d7 4.79 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-116",
+      "node": 116,
+      "name": "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:4",
+      "group": "Ring:1",
+      "hierarchy": [
+        "Ring:1",
+        "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:4"
+      ],
+      "dimensions_mm": [
+        5.34,
+        5.34,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Ring:1 / 91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:4",
+      "model_note": "CAD bounding size: 5.34 \u00d7 5.34 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-117",
+      "node": 117,
+      "name": "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:5",
+      "group": "Ring:1",
+      "hierarchy": [
+        "Ring:1",
+        "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:5"
+      ],
+      "dimensions_mm": [
+        5.34,
+        5.34,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Ring:1 / 91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:5",
+      "model_note": "CAD bounding size: 5.34 \u00d7 5.34 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-118",
+      "node": 118,
+      "name": "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:6",
+      "group": "Ring:1",
+      "hierarchy": [
+        "Ring:1",
+        "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:6"
+      ],
+      "dimensions_mm": [
+        4.79,
+        4.79,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Ring:1 / 91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:6",
+      "model_note": "CAD bounding size: 4.79 \u00d7 4.79 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-119",
+      "node": 119,
+      "name": "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:7",
+      "group": "Ring:1",
+      "hierarchy": [
+        "Ring:1",
+        "91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:7"
+      ],
+      "dimensions_mm": [
+        5.62,
+        5.62,
+        5.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Ring:1 / 91294A003_Black-Oxide Alloy Steel Hex Drive Flat Head Screw:7",
+      "model_note": "CAD bounding size: 5.62 \u00d7 5.62 \u00d7 5.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-120",
+      "node": 120,
+      "name": "=>[0:1:1:24]",
+      "group": "Ring:1",
+      "hierarchy": [
+        "Ring:1",
+        "=>[0:1:1:24]"
+      ],
+      "dimensions_mm": [
+        74.74,
+        74.68,
+        2.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Ring:1 / =>[0:1:1:24]",
+      "model_note": "CAD bounding size: 74.74 \u00d7 74.68 \u00d7 2.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-122",
+      "node": 122,
+      "name": "skf_bearing_61809-2rs1_2 v1:1",
+      "group": "Assembly",
+      "hierarchy": [
+        "skf_bearing_61809-2rs1_2 v1:1"
+      ],
+      "dimensions_mm": [
+        58.0,
+        58.0,
+        7.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / skf_bearing_61809-2rs1_2 v1:1",
+      "model_note": "CAD bounding size: 58.0 \u00d7 58.0 \u00d7 7.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-123",
+      "node": 123,
+      "name": "skf_bearing_61809-2rs1_2 v1:2",
+      "group": "Assembly",
+      "hierarchy": [
+        "skf_bearing_61809-2rs1_2 v1:2"
+      ],
+      "dimensions_mm": [
+        58.0,
+        58.0,
+        7.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / skf_bearing_61809-2rs1_2 v1:2",
+      "model_note": "CAD bounding size: 58.0 \u00d7 58.0 \u00d7 7.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-125",
+      "node": 125,
+      "name": "Null:1",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "Null:1"
+      ],
+      "dimensions_mm": [
+        96.4,
+        96.4,
+        0.3
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / Null:1",
+      "model_note": "CAD bounding size: 96.4 \u00d7 96.4 \u00d7 0.3 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-126",
+      "node": 126,
+      "name": "PhaseA:1",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "PhaseA:1"
+      ],
+      "dimensions_mm": [
+        96.4,
+        96.4,
+        0.3
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / PhaseA:1",
+      "model_note": "CAD bounding size: 96.4 \u00d7 96.4 \u00d7 0.3 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-127",
+      "node": 127,
+      "name": "PhaseB:1",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "PhaseB:1"
+      ],
+      "dimensions_mm": [
+        96.4,
+        96.4,
+        0.3
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / PhaseB:1",
+      "model_note": "CAD bounding size: 96.4 \u00d7 96.4 \u00d7 0.3 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-128",
+      "node": 128,
+      "name": "PhaseC:1",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "PhaseC:1"
+      ],
+      "dimensions_mm": [
+        96.4,
+        96.4,
+        0.3
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / PhaseC:1",
+      "model_note": "CAD bounding size: 96.4 \u00d7 96.4 \u00d7 0.3 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-129",
+      "node": 129,
+      "name": "Insulation:1",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "Insulation:1"
+      ],
+      "dimensions_mm": [
+        98.0,
+        98.0,
+        0.5
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / Insulation:1",
+      "model_note": "CAD bounding size: 98.0 \u00d7 98.0 \u00d7 0.5 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-130",
+      "node": 130,
+      "name": "Insulation:2",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "Insulation:2"
+      ],
+      "dimensions_mm": [
+        98.0,
+        98.0,
+        0.5
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / Insulation:2",
+      "model_note": "CAD bounding size: 98.0 \u00d7 98.0 \u00d7 0.5 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-131",
+      "node": 131,
+      "name": "Insulation:3",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "Insulation:3"
+      ],
+      "dimensions_mm": [
+        98.0,
+        98.0,
+        0.5
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / Insulation:3",
+      "model_note": "CAD bounding size: 98.0 \u00d7 98.0 \u00d7 0.5 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-132",
+      "node": 132,
+      "name": "Insulation:4",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "Insulation:4"
+      ],
+      "dimensions_mm": [
+        98.0,
+        98.0,
+        0.5
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / Insulation:4",
+      "model_note": "CAD bounding size: 98.0 \u00d7 98.0 \u00d7 0.5 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-133",
+      "node": 133,
+      "name": "Insulation:5",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "Insulation:5"
+      ],
+      "dimensions_mm": [
+        98.0,
+        98.0,
+        0.5
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / Insulation:5",
+      "model_note": "CAD bounding size: 98.0 \u00d7 98.0 \u00d7 0.5 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-134",
+      "node": 134,
+      "name": "Insulation1:1",
+      "group": "PCB 125_20 v9:1",
+      "hierarchy": [
+        "PCB 125_20 v9:1",
+        "Insulation1:1"
+      ],
+      "dimensions_mm": [
+        98.0,
+        98.0,
+        0.5
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / PCB 125_20 v9:1 / Insulation1:1",
+      "model_note": "CAD bounding size: 98.0 \u00d7 98.0 \u00d7 0.5 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-136",
+      "node": 136,
+      "name": "Bended:1",
+      "group": "Radiator 125_25 v28:1",
+      "hierarchy": [
+        "Radiator 125_25 v28:1",
+        "Bended:1"
+      ],
+      "dimensions_mm": [
+        49.21,
+        29.1,
+        35.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Radiator 125_25 v28:1 / Bended:1",
+      "model_note": "CAD bounding size: 49.21 \u00d7 29.1 \u00d7 35.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-138",
+      "node": 138,
+      "name": "Bended:1",
+      "group": "Radiator 125_25 v28:2",
+      "hierarchy": [
+        "Radiator 125_25 v28:2",
+        "Bended:1"
+      ],
+      "dimensions_mm": [
+        29.12,
+        49.21,
+        35.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Radiator 125_25 v28:2 / Bended:1",
+      "model_note": "CAD bounding size: 29.12 \u00d7 49.21 \u00d7 35.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-140",
+      "node": 140,
+      "name": "Bended:1",
+      "group": "Radiator 125_25 v28:3",
+      "hierarchy": [
+        "Radiator 125_25 v28:3",
+        "Bended:1"
+      ],
+      "dimensions_mm": [
+        29.1,
+        49.21,
+        35.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Radiator 125_25 v28:3 / Bended:1",
+      "model_note": "CAD bounding size: 29.1 \u00d7 49.21 \u00d7 35.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-142",
+      "node": 142,
+      "name": "Bended:1",
+      "group": "Radiator 125_25 v28:4",
+      "hierarchy": [
+        "Radiator 125_25 v28:4",
+        "Bended:1"
+      ],
+      "dimensions_mm": [
+        49.21,
+        29.12,
+        35.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Radiator 125_25 v28:4 / Bended:1",
+      "model_note": "CAD bounding size: 49.21 \u00d7 29.12 \u00d7 35.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-144",
+      "node": 144,
+      "name": "Bended:1",
+      "group": "Radiator 125_25 v28:5",
+      "hierarchy": [
+        "Radiator 125_25 v28:5",
+        "Bended:1"
+      ],
+      "dimensions_mm": [
+        49.21,
+        29.1,
+        35.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Radiator 125_25 v28:5 / Bended:1",
+      "model_note": "CAD bounding size: 49.21 \u00d7 29.1 \u00d7 35.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-146",
+      "node": 146,
+      "name": "Bended:1",
+      "group": "Radiator 125_25 v28:6",
+      "hierarchy": [
+        "Radiator 125_25 v28:6",
+        "Bended:1"
+      ],
+      "dimensions_mm": [
+        29.12,
+        49.21,
+        35.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Radiator 125_25 v28:6 / Bended:1",
+      "model_note": "CAD bounding size: 29.12 \u00d7 49.21 \u00d7 35.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-148",
+      "node": 148,
+      "name": "Bended:1",
+      "group": "Radiator 125_25 v28:7",
+      "hierarchy": [
+        "Radiator 125_25 v28:7",
+        "Bended:1"
+      ],
+      "dimensions_mm": [
+        29.1,
+        49.21,
+        35.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Radiator 125_25 v28:7 / Bended:1",
+      "model_note": "CAD bounding size: 29.1 \u00d7 49.21 \u00d7 35.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    },
+    {
+      "id": "node-150",
+      "node": 150,
+      "name": "Bended:1",
+      "group": "Radiator 125_25 v28:8",
+      "hierarchy": [
+        "Radiator 125_25 v28:8",
+        "Bended:1"
+      ],
+      "dimensions_mm": [
+        49.21,
+        29.12,
+        35.0
+      ],
+      "purpose": "A named component from the source CAD assembly. Its functional explanation has not yet been independently reviewed.",
+      "connection": "Source hierarchy: CIAG 125_25_dc v33 / Radiator 125_25 v28:8 / Bended:1",
+      "model_note": "CAD bounding size: 49.21 \u00d7 29.12 \u00d7 35.0 mm. These are axis-aligned mesh bounds, not toleranced drawing dimensions.",
+      "source": "cad"
+    }
+  ]
+}

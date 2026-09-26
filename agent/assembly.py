@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from copy import deepcopy
 import json
+import math
 from pathlib import Path
 import threading
 import uuid
@@ -18,10 +19,16 @@ HISTORY = 40
 MODEL_PATH = Path(__file__).resolve().parents[1] / 'data' / 'assemblies' / 'dc-motor.json'
 
 
+def model_path(model_id='dc-motor'):
+    if model_id == 'dc-motor':
+        return MODEL_PATH
+    if model_id == 'openmotor-125':
+        return MODEL_PATH.with_name('openmotor-125.json')
+    raise ValueError('Unknown assembly study.')
+
+
 def model(model_id='dc-motor'):
-    if model_id != 'dc-motor':
-        raise ValueError('Only the brushed DC motor study is available yet.')
-    return json.loads(MODEL_PATH.read_text())
+    return json.loads(model_path(model_id).read_text())
 
 
 def create(model_id='dc-motor'):
@@ -29,7 +36,7 @@ def create(model_id='dc-motor'):
     with _LOCK:
         sid = uuid.uuid4().hex
         state = dict(session_id=sid, model=model_id, selected=None, explosion=0.0,
-                     isolated=False, hidden=[], rotating=False, section=False, revision=0)
+                     isolated=False, hidden=[], rotating=False, section=False, transforms={}, revision=0)
         _SESSIONS[sid] = dict(state=state, undo=[], redo=[])
         while len(_SESSIONS) > MAX_SESSIONS:
             _SESSIONS.popitem(last=False)
@@ -61,10 +68,15 @@ def restore(snapshot):
             or any(type(snapshot.get(k)) is not bool for k in ('isolated', 'section'))
             or snapshot['isolated'] and (selected is None or selected in hidden)):
         raise ValueError('Saved study contains an invalid view.')
+    transforms = snapshot.get('transforms', {})
+    if not isinstance(transforms, dict) or any(p not in ids for p in transforms):
+        raise ValueError('Invalid saved component transforms.')
+    transforms = {p: _transform(v) for p, v in transforms.items()}
     with _LOCK:
         s = create(data['id'])
         s.update({k: deepcopy(snapshot[k]) for k in
                   ('selected', 'hidden', 'explosion', 'isolated', 'section')})
+        s['transforms'] = transforms
         # Motion is deliberately paused on restore; the saved rotor angle is
         # restored by the viewer. Undo begins with this saved view.
         _SESSIONS[s['session_id']]['state'] = s
@@ -74,16 +86,33 @@ def restore(snapshot):
 def _part(value, data):
     if not isinstance(value, str):
         raise ValueError('Choose a component first.')
-    part = next((p for p in data['parts'] if value.casefold() in (p['id'].casefold(), p['name'].casefold())), None)
+    exact = next((p for p in data['parts'] if value.casefold() == p['id'].casefold()), None)
+    matches = [p for p in data['parts'] if value.casefold() == p['name'].casefold()]
+    if not exact and len(matches) > 1:
+        raise ValueError('Several components have that name. Choose an exact component id.')
+    part = exact or (matches[0] if matches else None)
     if not part:
         raise ValueError('Unknown component. Choose a name from the component list.')
     return part['id']
 
 
-def apply(sid, action, part=None, amount=None):
+def _transform(value):
+    if not isinstance(value, dict):
+        raise ValueError('Expected a component position and rotation.')
+    for key, bound in (('position', 20), ('rotation', math.tau)):
+        row = value.get(key)
+        if not isinstance(row, list) or len(row) != 3 or any(
+                type(v) not in (int, float) or not math.isfinite(v) or abs(v) > bound for v in row):
+            raise ValueError('Component transform is outside the study range.')
+    return {k: list(value[k]) for k in ('position', 'rotation')}
+
+
+def apply(sid, action, part=None, amount=None, transform=None, expected_revision=None):
     with _LOCK:
         entry = _entry(sid)
         old = entry['state']
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision != old['revision']):
+            raise ValueError('The study changed during this gesture. Movement cancelled; try again.')
         data = model(old['model'])
         new = deepcopy(old)
         if action in ('undo', 'redo'):
@@ -99,8 +128,17 @@ def apply(sid, action, part=None, amount=None):
                 raise ValueError('Separation must be a number from 0 to 1.')
             new['explosion'] = float(value)
             new['rotating'] = False
+        elif action == 'transform':
+            chosen = _part(part, data)
+            if chosen in new['hidden'] or new['isolated'] and new['selected'] != chosen:
+                raise ValueError('Show the component before moving it.')
+            new['transforms'][chosen] = _transform(transform)
+            new.update(selected=chosen, rotating=False)
+        elif action == 'reset_part':
+            chosen = _part(part or new['selected'], data)
+            new['transforms'].pop(chosen, None)
         elif action == 'assemble':
-            new.update(explosion=0.0, isolated=False, hidden=[], rotating=False, section=False)
+            new.update(explosion=0.0, isolated=False, hidden=[], rotating=False, section=False, transforms={})
         elif action == 'isolate':
             new['selected'] = _part(part or new['selected'], data)
             new['isolated'] = not new['isolated']
@@ -114,7 +152,9 @@ def apply(sid, action, part=None, amount=None):
         elif action == 'show_all':
             new.update(hidden=[], isolated=False)
         elif action == 'rotate':
-            if new['explosion'] or new['isolated']:
+            if old['model'] != 'dc-motor':
+                raise ValueError('Illustrative rotor motion is only available for the educational motor.')
+            if new['explosion'] or new['isolated'] or new['transforms']:
                 raise ValueError('Reassemble the model before showing rotor motion.')
             new['rotating'] = not new['rotating']
         elif action == 'section':

@@ -71,7 +71,7 @@ def test_atomic_versions_prevent_two_writers_from_losing_notes():
 def test_model_revision_mismatch_preserves_old_project(monkeypatch):
     body = payload(); p = projects.save(body)
     original_hash = projects.model_hash
-    monkeypatch.setattr(projects, 'model_hash', lambda: 'new-model-hash')
+    monkeypatch.setattr(projects, 'model_hash', lambda model_id='dc-motor': 'new-model-hash')
     assert not projects.recent()[0]['compatible']
     with pytest.raises(projects.Conflict, match='model revision'):
         projects.open_project(p['id'])
@@ -127,3 +127,37 @@ def test_project_routes_auth_origins_limits_and_status_codes(monkeypatch):
         assert c.post('/api/study/projects', content='x' * 600001).status_code == 400
         assert c.post('/api/study/projects', json=[]).status_code == 400
         assert len(c.get('/api/study/projects').json()['projects']) == 1
+
+
+def test_real_backup_restores_study_and_counts_it(test_db,tmp_path,monkeypatch):
+    from pathlib import Path
+    from scripts.backup_brain import backup
+    from agent import longterm
+    body=payload();p=projects.save(body)
+    target=tmp_path/'restored.db'
+    result=backup(Path(test_db),target)
+    assert result['counts']['study_projects']==1
+    monkeypatch.setattr(longterm,'DB_PATH',str(target));assembly._SESSIONS.clear()
+    assert projects.open_project(p['id'])['workspace']==body['workspace']
+
+
+def test_cad_asset_manifest_and_model_projects_are_consistent():
+    import gzip,struct,hashlib
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[1]
+    data=assembly.model('openmotor-125')
+    assert len(data['parts'])==135 and len({p['id'] for p in data['parts']})==135
+    glb=gzip.decompress((root/'dashboard/static/models/openmotor.glb.gz').read_bytes())
+    length=struct.unpack_from('<I',glb,12)[0];scene=json.loads(glb[20:20+length])
+    assert len(scene['nodes'])==151
+    assert all('mesh' in scene['nodes'][p['node']] for p in data['parts'])
+    raw=gzip.decompress((root/'data/reference/openmotor/source.step.gz').read_bytes())
+    assert hashlib.sha256(raw).hexdigest()=='0f6737f1ddba820376e88298cf05725de36048f03c227714bf391e7cf21b07d3'
+    s=assembly.create('openmotor-125');sid=s['session_id']
+    assembly.apply(sid,'select',part='node-2')
+    body=payload();body.update(session_id=sid,session_revision=1,model_hash=projects.model_hash('openmotor-125'))
+    body['workspace']['notes']={'node-2':'Study the core'}
+    p=projects.save(body)
+    opened=projects.open_project(p['id'])
+    assert opened['state']['model']=='openmotor-125' and opened['workspace']['notes']=={'node-2':'Study the core'}
+    with pytest.raises(ValueError,match='only available'):assembly.apply(sid,'rotate')

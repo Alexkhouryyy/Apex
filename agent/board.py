@@ -738,7 +738,10 @@ class Board:
         Refuse during a hold so a pause cannot silently commit or discard work.
         The pause is shared by clients of this board and resets on restart.
         """
-        with self._lock:
+        from agent import study_input
+        with study_input.LOCK, self._lock:
+            if enabled and study_input.active():
+                raise ValueError("Pause study hand controls before resuming board hands.")
             if any(c.held_by for c in self._cards) or self._part_holds:
                 raise ValueError("Release the object before pausing hand controls.")
             self.hands_enabled = enabled

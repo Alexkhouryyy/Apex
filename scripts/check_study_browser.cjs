@@ -14,6 +14,19 @@ from agent import longterm
 longterm.DB_PATH=sys.argv[2]
 longterm.init_db()
 from dashboard.server import app
+from fastapi import Request
+from agent import handtrack
+class FakeTracker:
+ def __init__(self):self.hands=[];self.seq=0
+ def study_sample(self):
+  self.seq+=1
+  return dict(sequence=self.seq,age_ms=0,hands=self.hands)
+fake=FakeTracker()
+handtrack.active_tracker=lambda:fake
+@app.post('/api/test/hands')
+async def test_hands(request:Request):
+ fake.hands=(await request.json())['hands']
+ return {'ok':True}
 import uvicorn
 uvicorn.run(app,host='127.0.0.1',port=8767)`;
 let server,browser;
@@ -74,6 +87,49 @@ async function stop(){if(!server||server.exitCode!==null)return;await new Promis
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.getByRole('button',{name:'Projects',exact:true}).click();
   assert.equal(await page.evaluate(()=>document.querySelector('#projects').getBoundingClientRect().width<=innerWidth),true);
+  await page.getByRole('button',{name:'Close projects',exact:true}).click();
+  await page.setViewportSize({width:1600,height:1000});
+  await page.goto(origin+'/study?model=openmotor-125&token='+token);
+  await page.waitForFunction(()=>document.querySelectorAll('.component').length===135,{},{timeout:30000});
+  await page.locator('[data-part="node-2"]').click();
+  await page.waitForFunction(()=>document.querySelector('#part-name').textContent==='Core:1');
+  assert.match(await page.locator('#part-note').innerText(),/mm/);
+  await page.getByRole('button',{name:'Isolate',exact:true}).click();
+  await page.getByRole('button',{name:'Exit isolation',exact:true}).waitFor();
+  await page.locator('#interaction').selectOption('move');
+  // Search the rendered canvas for a pickable point, then perform a real drag.
+  const canvas=await page.locator('#model').boundingBox();
+  const sid=new URL(page.url()).searchParams.get('session');
+  const stateUrl=origin+'/api/study/session/'+sid;
+  let moved=false, point=null;
+  for(const [x,y] of [[.5,.5],[.45,.5],[.55,.5],[.5,.4],[.5,.6]]){
+    await page.mouse.move(canvas.x+canvas.width*x,canvas.y+canvas.height*y);
+    await page.mouse.down();await page.mouse.move(canvas.x+canvas.width*x+55,canvas.y+canvas.height*y+15,{steps:8});await page.mouse.up();
+    await page.waitForTimeout(200);
+    const state=await (await page.request.get(stateUrl,{headers})).json();
+    if(state.transforms['node-2']){moved=true;point={x,y};break;}
+  }
+  assert(moved,'a rendered CAD component must accept mouse movement');
+  await page.getByRole('button',{name:'Undo study action',exact:true}).click();
+  await page.waitForTimeout(200);
+  assert.deepEqual((await (await page.request.get(stateUrl,{headers})).json()).transforms,{});
+  // Synthetic detector frames through the real ownership endpoint and viewer.
+  // This verifies plumbing, not physical-camera gesture quality.
+  const feed=async(pinched,x=point.x)=>{await page.request.post(origin+'/api/test/hands',{headers,data:{hands:[{id:7,x,y:point.y,pinched}]}});};
+  await page.getByRole('button',{name:'Hands off',exact:true}).click();
+  await page.getByRole('button',{name:'Hands on',exact:true}).waitFor();
+  const before=(await (await page.request.get(stateUrl,{headers})).json()).revision;
+  await feed(false);await page.waitForFunction(()=>document.querySelector('#hand-status').textContent.includes('Ready'),{},{timeout:5000});await feed(true);await page.waitForFunction(()=>document.querySelector('#hand-status').textContent.includes('Holding'));await page.waitForTimeout(120);
+  await feed(true,point.x+.06);await page.waitForTimeout(200);await feed(false,point.x+.06);await page.waitForTimeout(250);
+  const after=await (await page.request.get(stateUrl,{headers})).json();
+  assert.equal(after.revision,before+1,'a hand release must commit exactly once');
+  assert(after.transforms['node-2'],'hand movement must reach the actual assembly session');
+  await page.getByRole('button',{name:'Hands on',exact:true}).click();
+  await page.getByRole('button',{name:'Undo study action',exact:true}).click();
+  await page.getByRole('button',{name:'Exit isolation',exact:true}).click();
+  await page.getByRole('button',{name:'Take apart',exact:true}).click();
+  await page.waitForTimeout(800);
+  if(process.env.APEX_CAD_SCREENSHOT)await page.screenshot({path:process.env.APEX_CAD_SCREENSHOT});
   assert.deepEqual(errors,[]);
-  console.log('PASS: real WebGL, named save, component notes, server restart, restored view/camera, revision update, engineering status and mobile layout.');
+  console.log('PASS: real WebGL, saved notes/views across restart, mobile layout, 135 CAD components, mouse drag/undo and synthetic hand frames through the real input endpoint.');
 }finally{if(browser)await browser.close();await stop();fs.rmSync(temp,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});

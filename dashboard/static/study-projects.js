@@ -10,6 +10,7 @@ export function setupStudyProjects({api, capture, prepareSave, restore, ready}) 
   const message = text => { $('project-message').textContent = text; };
   function projectUrl() {
     const url = new URL(location.href);url.searchParams.set('project',project.id);
+    if(project.model)url.searchParams.set('model',project.model);
     history.replaceState(null,'',url.pathname+url.search);
   }
   function refresh() {
@@ -77,8 +78,9 @@ export function setupStudyProjects({api, capture, prepareSave, restore, ready}) 
       const result = await api('/api/study/projects/' + id + '/open', {method:'POST'});
       // Do not discard the current notebook until the requested project exists.
       await prepareSave();
-      notes = result.workspace.notes;
       await restore(result);
+      notes = result.workspace.notes;
+      $('study-notes').value = notes[partKey] || '';
       project = result.project;baseline = signature(snapshot());projectUrl();
       $('project-name').value = project.name;
       message('Opened version ' + project.version + '. Rotor motion is paused.');

@@ -1,11 +1,11 @@
 # Apex assembly study
 
-The first study is an original, simplified permanent-magnet brushed DC motor.
-Its 14 named component groups can be selected, separated, isolated, hidden and
+The study selector offers an original educational brushed DC motor and a separately licensed OpenMotor CAD reference.
+The educational model has 14 groups; the CAD reference has 135 named mesh occurrences with source hierarchy and approximate bounding sizes. Components can be selected, separated, isolated, hidden and
 reassembled. The graphite/cyan workspace keeps the model central, with a
 searchable component tree and a contextual inspector.
 
-![Motor separated into component groups](images/assembly-study-preview.png)
+![Detailed source CAD in the study viewer](images/cad-study-preview.jpg)
 
 ## Use it
 
@@ -59,10 +59,11 @@ page cannot silently save against a new model definition.
   It is not to scale and contains no validated dimensions or tolerances.
 - Windings are grouped illustrations; electrical connections, brush timing,
   magnetic fields, loads and performance are not simulated.
-- This milestone supports one curated motor. It does not generate arbitrary
+- This milestone supports two curated motor studies. It does not generate arbitrary
   detailed assemblies from a prompt or split an arbitrary mesh into real parts.
-- Study navigation uses mouse/touch. Hand control in this camera/view is still
-  pending. The board's existing gesture controller is a separate view.
+- Study navigation uses mouse/touch and opt-in hands from the existing laptop
+  tracker. Physical-camera quality is pending device acceptance. The board
+  stays paused while a study owns hand input.
 - Unsaved sessions and undo history are in memory: a restart or eviction loses them.
   There are at most 32 recent sessions, with 40 undo steps per session. Reloading
   an expired session opens a new assembly and reports that reset.
@@ -112,14 +113,48 @@ quantitative motor analysis. Publishing it does not establish teaching impact.
 
 Next gates:
 
-1. A licensed, validated assembly asset with explicit units, dimensions,
-   nested part hierarchy, materials, connections and a source/version record.
-   Preserve original geometry and distinguish measured from illustrative data.
-2. Camera-aware hand selection with explicit input ownership, stable grabbing,
-   release recovery and undo. Verify on real laptop gestures, not only mocks.
+1. Independently review the imported OpenMotor reference. Source CAD, units,
+   hierarchy and kernel validity are established; materials, functional
+   connections, physical dimensions and tolerances still need review.
+2. Verify the implemented camera-aware hand controls on real laptop gestures,
+   including tracking loss, hand identity, release and gesture fatigue.
 3. A reviewed lesson and a small engineer/student pilot: identify components,
    explain commutation and recover a saved study. Compare completion errors
    and understanding against conventional diagrams before claiming benefit.
 
 Physics or engineering calculations need a separate validated solver and
 reference cases. More visual detail alone cannot establish engineering accuracy.
+
+
+## Source CAD and direct manipulation
+
+[OpenMotor asset provenance, licence and conversion](../data/reference/openmotor/README.md)
+records the pinned source and geometric checks. Choose **OpenMotor CAD** from
+Reference assembly. This is a different motor from the educational brushed DC
+illustration. It exposes source names and hierarchy without inventing a reviewed
+functional explanation. Dimensions shown are approximate CAD bounding sizes.
+
+Choose **Move across view**, **Move in depth**, or **Turn component**, then drag
+with the mouse. **Explore / select** retains the normal orbit interaction.
+Reset component position restores a single part; Reassemble restores all parts.
+Each completed manipulation is one undoable action. Project snapshots include
+these presentation transforms; values are normalized view units, not CAD edits.
+
+**Hands on** claims the existing laptop tracker for this window and pauses the
+board. It does not start a second camera. Hover with an open hand for 250 ms,
+then pinch. Release to apply. A held pinch on entry cannot grab. Missing hands,
+stale detection, identity jumps, Escape, window blur and connection failures
+cancel an unfinished preview. Another input or voice action that changes the
+session revision cancels a conflicting drag. Mouse input briefly suppresses
+hand gestures; dialogs, typing and the companion panel also block them.
+
+Only one study window owns hand input. A two-second lease expires if the window
+stops renewing. Pausing/closing the study does not reactivate board gestures;
+resume them explicitly in the board. The global gesture recognizer is blocked
+while the study owns hands, preventing a manipulation from also firing a swipe
+or voice summon. Use the companion button to talk during study.
+
+The optional browser check exercises the CAD asset, mouse movement/undo, and
+synthetic detector frames through the real input endpoint. Synthetic frames
+verify software wiring, not real camera accuracy. Python tests cover ownership,
+expiry, stale detector data, transforms, persistence and backup restoration.

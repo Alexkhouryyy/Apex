@@ -8,6 +8,17 @@ from dashboard.companion import _check_origin, _small_json
 router = APIRouter()
 
 
+@router.post('/api/study/session/{sid}/hands')
+async def study_hands(sid: str, request: Request):
+    _check_origin(request)
+    from agent import study_input
+    try:
+        body = await _small_json(request)
+        return study_input.control(sid, body.get('owner'), body.get('action'))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 async def _project_body(request):
     # Notes are larger than the board's 1KB command body; stream a bounded
     # amount instead of reading an unbounded upload into memory.
@@ -59,9 +70,16 @@ async def study_page():
 @router.get('/api/study/model/{model_id}')
 async def study_model(model_id: str):
     try:
-        return dict(assembly.model(model_id), model_hash=study_projects.model_hash())
+        return dict(assembly.model(model_id), model_hash=study_projects.model_hash(model_id))
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.get('/api/study/model/openmotor-125/asset')
+async def study_cad_asset():
+    from dashboard.server import STATIC_DIR
+    return FileResponse(STATIC_DIR / 'models' / 'openmotor.glb.gz',
+                        media_type='model/gltf-binary', headers={'Content-Encoding':'gzip'})
 
 
 @router.post('/api/study/session')
@@ -87,6 +105,7 @@ async def study_action(sid: str, request: Request):
     _check_origin(request)
     try:
         body = await _small_json(request)
-        return assembly.apply(sid, body.get('action'), body.get('part'), body.get('amount'))
+        return assembly.apply(sid, body.get('action'), body.get('part'), body.get('amount'),
+                              body.get('transform'), body.get('expected_revision'))
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
