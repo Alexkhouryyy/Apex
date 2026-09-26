@@ -19,7 +19,7 @@ export class StudyHandController {
       if(h.fist){this.reset('Closed fist · movement cancelled');return;}
       if(this.missingAt!==null&&!h.pinched){this.reset('Hand returned open · movement cancelled');return;}
       this.missingAt=null;
-      if(Math.hypot(h.x-this.held.x,h.y-this.held.y)>.25){this.reset('Tracking jumped · movement cancelled');return;}
+      if(Math.hypot((h.rawX??h.x)-(this.held.rawX??this.held.x),(h.rawY??h.y)-(this.held.rawY??this.held.y))>.25){this.reset('Tracking jumped · movement cancelled');return;}
       if(!h.pinched){
         // A single noisy open frame is not an intentional release. Hold the
         // last pinched pose until a second fresh open observation confirms it.
@@ -33,6 +33,8 @@ export class StudyHandController {
     }
     const h=hands.find(h=>h.id===this.candidate?.id)||hands[0];
     if(!h){this.reset('Show your hand to the camera');return;}
+    const routed=this.cb.route?.(h,now);
+    if(routed){this.candidate=null;this.cb.paint(h,routed.label,{progress:routed.progress});return;}
     if(h.fist){this.candidate=null;this.cb.paint(h,'Open your hand, then pinch thumb and index');return;}
     const part=this.cb.hit(h.x,h.y,h.pinched?this.candidate?.part:null);
     if(!part){this.candidate=null;this.cb.paint(h,'Point at a component');return;}
