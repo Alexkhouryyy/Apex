@@ -33,3 +33,7 @@
 @media(max-width:700px){#hand-mode-bar{width:auto;flex-wrap:nowrap}#hand-mode-bar button{min-width:0;font-size:10px;padding:8px}}
 
 .mode-bar-hint{position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);white-space:nowrap;font-size:9px;color:#a3c9cc;pointer-events:none}
+/* Phase 2a hologram: the hand drawn in light sits over the model; the dot cursor is its fallback. */
+#holo-hand{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+body[data-holo=on] #hand-cursor{opacity:.35;transform:translate(-50%,-50%) scale(.55)}
+body[data-holo=on] #viewport{background:radial-gradient(ellipse at 48% 55%,#0e3a4a66,transparent 68%)}

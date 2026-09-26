@@ -6,7 +6,9 @@ export class StudyReach {
   hand(h){
     if(!Number.isFinite(h.x)||!Number.isFinite(h.y)||h.x<0||h.x>1||h.y<0||h.y>1)return h;
     const fingertips=Object.fromEntries(Object.entries(h.fingertips||{}).map(([name,p])=>{const q=this.point(...p);return [name,[q.x,q.y]];}));
-    return {...h,...this.point(h.x,h.y),rawX:h.x,rawY:h.y,fingertips};
+    // The hologram hand is drawn where the cursor is: same reach mapping.
+    const joints=Array.isArray(h.joints)?h.joints.map(p=>{const q=this.point(...p);return [q.x,q.y];}):h.joints;
+    return {...h,...this.point(h.x,h.y),rawX:h.x,rawY:h.y,fingertips,joints};
   }
 }
 export class StudyModeHover {

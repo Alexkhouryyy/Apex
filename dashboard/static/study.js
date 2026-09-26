@@ -6,6 +6,7 @@ import {StudyHandController} from './study-hands.js';
 import {setupStudyComfort} from './study-comfort.js';
 import {setupStudyMirror} from './study-mirror.js';
 import {setupStudyDiagnostics} from './study-diagnostics.js';
+import {setupHoloScene, HoloHand, HoloSound, isSoftwareRenderer} from './study-holo.js';
 const $ = id => document.getElementById(id);
 let token = '';
 try { token = localStorage.getItem('apex_token') || ''; } catch (_) {}
@@ -14,6 +15,9 @@ if (query.has('token')) { token = query.get('token'); try { localStorage.setItem
 let current = null, manifest = null, session = query.get('session'), timer = null, busy = Promise.resolve();
 let scene, camera, renderer, orbit, cameraTween = null, rotorAngle = 0, amount = 0, targetAmount = 0;
 let manipulation=null, handEnabled=false, handTimer=null, handEpoch=0, mouseUntil=0;
+// Phase 2a: the hologram look (study-holo.js). Presentation only.
+let holo=null, readyKey=null;
+const holoHand=new HoloHand($('holo-hand')), sound=new HoloSound();
 const handOwner=crypto.randomUUID();
 const groups = new Map(), pickables = [], raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
 const clipping = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
@@ -138,9 +142,14 @@ async function initScene(prefetched = null) {
   const rim=new THREE.DirectionalLight('#63c6c0',2);rim.position.set(-4,2,-3);scene.add(rim);
   const grid=new THREE.GridHelper(28,28,'#25424b','#152c36');grid.position.y=-3.2;scene.add(grid);
   orbit=new OrbitControls(camera,renderer.domElement);orbit.enableDamping=true;orbit.dampingFactor=.09;orbit.minDistance=2.5;orbit.maxDistance=30;fitCamera();
-  await buildLoadedModel(prefetched);
+  let glName='';try{const gl=renderer.getContext(),dbg=gl.getExtension('WEBGL_debug_renderer_info');glName=dbg?gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL):'';}catch(_){}
+  holo=setupHoloScene({THREE,scene,camera,renderer,groups,reducedMotion,software:isSoftwareRenderer(glName),
+    onBloomPaused:()=>status('Glow paused · this device renders slowly, and responsive hands come first. Edges stay on.'),
+    onHoloPaused:()=>{syncHoloButtons();status('Hologram paused for this session · rendering is too slow for responsive hands. Holo on retries.');}});
+  if(holo.startedOff)setTimeout(()=>status('Hologram off · no graphics acceleration detected. Holo on to try it anyway.'),0);
+  await buildLoadedModel(prefetched);holo.buildEdges();syncHoloButtons();
   orbit.addEventListener('start',()=>{cameraTween=null;});
-  const resize=()=>{const r=$('viewport').getBoundingClientRect();renderer.setSize(r.width,r.height,false);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();};
+  const resize=()=>{const r=$('viewport').getBoundingClientRect();renderer.setSize(r.width,r.height,false);holo.resize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();};
   new ResizeObserver(resize).observe($('viewport'));resize();
   let down=null;
   $('model').addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,id:e.pointerId};});
@@ -163,8 +172,9 @@ async function initScene(prefetched = null) {
     amount=reducedMotion.matches?targetAmount:THREE.MathUtils.damp(amount,targetAmount,7,dt);
     if(current?.rotating&&!reducedMotion.matches)rotorAngle+=dt*.8;
     if(cameraTween){cameraTween.t=Math.min(1,cameraTween.t+dt/0.65);const t=cameraTween.t;camera.position.lerpVectors(cameraTween.from,cameraTween.to,t*t*(3-2*t));if(t===1)cameraTween=null;}
+    holo.update(dt);
     for(const group of groups.values())pose(group);
-    orbit.update();renderer.render(scene,camera);
+    orbit.update();holo.render();holoHand.draw(now);
     const group=groups.get(current?.selected);const label=$('part-label');
     if(group?.visible){const centre=group.userData.center.clone().applyMatrix4(group.matrixWorld).project(camera);const r=$('viewport').getBoundingClientRect();label.hidden=centre.z< -1||centre.z>1||Math.abs(centre.x)>.92||Math.abs(centre.y)>.92;label.style.left=(centre.x+1)/2*r.width+'px';label.style.top=(-centre.y+1)/2*r.height+'px';}else label.hidden=true;
     requestAnimationFrame(draw);
@@ -197,6 +207,7 @@ function accept(state){
   $('isolate').textContent=state.isolated?'Exit isolation':'Isolate';$('part-label').textContent=selected?.name||'';
   if(selected){$('part-connection').textContent=selected.connection;$('part-note').textContent=selected.model_note;$('part-source').href=manifest.sources.find(s=>s.id===selected.source).url;}
   for(const [id,g] of groups){g.visible=!state.hidden.includes(id)&&(!state.isolated||id===state.selected);g.traverse(o=>{if(o.isMesh){o.material.emissive.setHex(id===state.selected?0x1d5c57:0);o.material.emissiveIntensity=.38;o.material.clippingPlanes=state.section?[clipping]:[];}});}
+  holo?.rebase();
   $('study-caption').textContent=(manifest.id==='dc-motor'?'Illustrative geometry · not to scale':'Source CAD · engineering review pending')+(state.section?' · uncapped section':state.rotating?' · illustrative rotor motion':'');
   $('rotate').disabled=manifest.id!=='dc-motor';
   renderList();
@@ -231,7 +242,7 @@ async function loadModel(id){
   }
   if(scene){for(const group of groups.values()){group.traverse(o=>{if(o.isMesh){o.geometry.dispose();o.material.dispose();}});scene.remove(group);}groups.clear();pickables.length=0;}
   diagnostics.stop();manifest=data;rotorAngle=0;
-  if(!renderer)await initScene(prefetched);else await buildLoadedModel(prefetched);
+  if(!renderer)await initScene(prefetched);else {await buildLoadedModel(prefetched);holo.buildEdges();}
   document.querySelector('h1').textContent=manifest.title;document.querySelector('.view-title p').textContent=manifest.subtitle;$('model-choice').value=manifest.id;
   $('part-count').textContent=String(manifest.parts.length);$('limitations').textContent=manifest.limitations;
   $('sources').replaceChildren();for(const source of manifest.sources){const a=document.createElement('a');a.href=source.url;a.textContent=source.title+(source.license?' · '+source.license:'')+' ↗';a.target='_blank';a.rel='noopener noreferrer';$('sources').append(a);}
@@ -262,6 +273,9 @@ function pose(group){
   const center=group.userData.center;
   group.position.copy(group.userData.offset).multiplyScalar(amount).add(new THREE.Vector3(...(t?.position||[0,0,0])))
     .add(center.clone().applyQuaternion(base)).sub(center.clone().applyQuaternion(group.quaternion));
+  // Hologram: a part ready to grab rises toward you (study-holo.js). View only.
+  const lift=group.userData.holoLift||0;
+  if(lift>1e-4)group.position.add(camera.position.clone().sub(group.position.clone().add(center)).normalize().multiplyScalar(lift));
 }
 function pick(x,y){
   if(!renderer||!current)return null;
@@ -325,13 +339,14 @@ function moveManipulation(h){
   }
 }
 function cancelManipulation(reason){
-  if(manipulation?.input==='hand'&&!manipulation.committing)diagnostics.metrics.event('cancelled',manipulation.recording);
+  if(manipulation?.input==='hand'&&!manipulation.committing){diagnostics.metrics.event('cancelled',manipulation.recording);sound.play('cancel');}
   if(manipulation?.view&&!manipulation.committing){camera.position.copy(manipulation.position);orbit.target.copy(manipulation.target);orbit.update();}
   if(manipulation&&orbit){orbit.enabled=true;orbit.enableDamping=manipulation.damping;}
   manipulation=null;if(reason)status(reason);
 }
 async function commitManipulation(){
   const m=manipulation;if(!m)return;m.committing=true;
+  if(m.input==='hand')sound.play('release');
   try{
     if(m.view){if(m.input==='hand')diagnostics.metrics.event('applied',m.recording);status('View adjusted · component positions unchanged');return;}
     if(m.mode==='select')cancelManipulation();
@@ -353,10 +368,15 @@ $('finger-guide-toggle').onclick=()=>{fingerGuide=!fingerGuide;$('finger-guide-t
 const hands=new StudyHandController({
   route:(h,now)=>comfort.route(h,now),
   hit:(x,y,preferred)=>['orbit','zoom'].includes($('interaction').value)?'@view':pickHand(x,y,preferred)?.object.userData.part,
-  begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
+  begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){sound.play('grab');if(!manipulation.view)holo?.pulse(part);manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
   paint:(h,label,target={})=>{
     const dot=$('hand-cursor');dot.hidden=!h;
     if(h){dot.style.left=h.x*100+'%';dot.style.top=h.y*100+'%';dot.dataset.state=h.pinched?'pinched':target.progress===1?'ready':'tracking';}
+    const held=manipulation&&!manipulation.view&&manipulation.input==='hand'?manipulation.part:null;
+    holo?.setFocus(held||target.part,held?1:target.progress,!!held);
+    holoHand.set(h,held||manipulation?.view&&manipulation.input==='hand'?'held':h?.pinched?'pinched':'tracking',performance.now());
+    const key=target.progress===1&&!held?target.part:null;
+    if(key&&key!==readyKey)sound.play('ready');readyKey=key;
     const name=manifest?.parts.find(p=>p.id===target.part)?.name;
     $('hand-status').textContent=handEnabled?`${$('interaction').selectedOptions[0].textContent} · ${label}${name?' · '+name:''}`:'Hand controls are paused · choose Enable hands';
     paintFingers(h);
@@ -364,13 +384,14 @@ const hands=new StudyHandController({
 });
 const comfort=setupStudyComfort({enabled:()=>handEnabled,reset:reason=>{hands.reset(reason);cancelManipulation();},paint:(h,label)=>hands.cb.paint(h,label),setMode});
 function setMode(mode){
+  sound.play('mode');
   hands.reset('Mode changed · hover again');cancelManipulation();$('interaction').value=mode;comfort.syncMode(mode);
   hands.cb.paint(null,'Mode selected · hover open, then pinch');
 }
 function feedStudyHands(data,now){const mapped=comfort.prepare(data,now);if(mapped)hands.feed(mapped,now);}
 function pauseHands(reason='Hands paused'){
   comfort.stop();
-  const sid=session;const was=handEnabled;handEnabled=false;handEpoch++;clearTimeout(handTimer);hands.reset(reason);cancelManipulation();
+  const sid=session;const was=handEnabled;handEnabled=false;handEpoch++;clearTimeout(handTimer);hands.reset(reason);cancelManipulation();holoHand.clear();holo?.setFocus(null,0,false);
   $('study-hands').textContent='Enable hands';$('study-hands').setAttribute('aria-pressed','false');
   if(was)api('/api/study/session/'+sid+'/hands',{method:'POST',body:JSON.stringify({action:'release',owner:handOwner}),keepalive:true}).catch(()=>{});
 }
@@ -404,6 +425,16 @@ async function enableHands(){
   }catch(e){status(e.message);}
 }
 $('study-hands').onclick=()=>handEnabled?pauseHands():enableHands();
+function syncHoloButtons(){
+  document.body.dataset.holo=holo?.on?'on':'off';
+  $('holo-toggle').setAttribute('aria-pressed',String(!!holo?.on));$('holo-toggle').textContent=holo?.on?'Holo on':'Holo off';
+  $('sound-toggle').setAttribute('aria-pressed',String(sound.on));$('sound-toggle').textContent=sound.on?'Sound on':'Sound off';
+}
+$('holo-toggle').onclick=()=>{holo?.toggle();syncHoloButtons();};
+$('sound-toggle').onclick=()=>{sound.toggle();sound.unlock();syncHoloButtons();};
+// Audio may start only after the page is clicked or a key pressed.
+for(const kind of ['pointerdown','keydown'])addEventListener(kind,()=>sound.unlock(),{once:false,passive:true});
+syncHoloButtons();
 $('reset-part').onclick=()=>command('reset_part');
 $('interaction').onchange=()=>{setMode($('interaction').value);$('interaction').blur();};
 let mouseDrag=null;

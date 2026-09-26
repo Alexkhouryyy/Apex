@@ -469,6 +469,24 @@ def fingertip_positions(lms, *, mirror: bool = True) -> dict:
     return points
 
 
+def hand_joints(lms, *, mirror: bool = True) -> list:
+    """All 21 joints in board space, for drawing the hand (the study's
+    holographic hand). Visual only, like fingertip_positions: input decisions
+    never read these. [] unless every joint is a finite point in the frame
+    (MediaPipe can report slightly outside it; those are clamped)."""
+    out = []
+    try:
+        for p in lms[:21]:
+            x, y = float(p.x), float(p.y)
+            if not (math.isfinite(x) and math.isfinite(y)):
+                return []
+            x, y = min(1.0, max(0.0, x)), min(1.0, max(0.0, y))
+            out.append([round(1 - x if mirror else x, 4), round(y, 4)])
+    except (TypeError, AttributeError, ValueError):
+        return []
+    return out if len(out) == 21 else []
+
+
 def landmarks_to_cursor(lms, *, mirror: bool = True,
                         threshold: Optional[float] = None):
     """One hand's 21 landmarks -> `(x, y, pinched, open_palm)` for the recognizer.
@@ -1062,6 +1080,7 @@ class HandTracker(threading.Thread):
                 "open_palm": bool(cur[3]),
                 "fist": bool(fist),
                 "fingertips": fingertip_positions(lms, mirror=mirror),
+                "joints": hand_joints(lms, mirror=mirror),
             }
             rows.append((hid, cur, detail))
             if getattr(config, "HANDTRACK_DEBUG", False):
