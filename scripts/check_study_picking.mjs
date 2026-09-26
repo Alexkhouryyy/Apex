@@ -1,0 +1,23 @@
+// Real raycasts verify the finger margin stays local and favours an armed part.
+import * as THREE from '../dashboard/static/vendor/three/build/three.module.min.js';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const camera=new THREE.PerspectiveCamera(45,800/600,.1,100);camera.position.z=5;camera.updateMatrixWorld();
+const ray=new THREE.Raycaster();
+const shaft=new THREE.Mesh(new THREE.BoxGeometry(.2,1,.2),new THREE.MeshBasicMaterial());shaft.userData.part='shaft';shaft.updateMatrixWorld();
+const other=new THREE.Mesh(new THREE.BoxGeometry(.2,1,.2),new THREE.MeshBasicMaterial());other.userData.part='other';other.position.x=.27;other.updateMatrixWorld();
+const objects=[shaft];
+const pick=(x,y)=>{ray.setFromCamera(new THREE.Vector2(x*2-1,1-y*2),camera);return ray.intersectObjects(objects)[0]||null;};
+const source=fs.readFileSync('dashboard/static/study.js','utf8');
+const code=source.slice(source.indexOf('function pickHand('),source.indexOf('function beginManipulation('));
+const handPick=new Function('pick','$',code+';return pickHand;')(pick,()=>({getBoundingClientRect:()=>({width:800,height:600})}));
+let edge=.5;while(pick(edge+1/800,.5))edge+=1/800;
+assert.equal(pick(edge+8/800,.5),null);
+assert.equal(handPick(edge+8/800,.5).object.userData.part,'shaft','a nearby finger still catches the narrow part');
+assert.equal(handPick(edge+45/800,.5),null,'assistance cannot reach across empty space');
+objects.push(other);
+const x=edge+14/800;
+assert.equal(pick(x,.5).object.userData.part,'other');
+assert.equal(handPick(x,.5).object.userData.part,'other','unarmed pointing follows the actual hit');
+assert.equal(handPick(x,.5,'shaft').object.userData.part,'shaft','closing a pinch keeps the adjacent armed part');
+console.log('PASS: real raycasts catch a narrow part within the finger margin, retain the armed target, and reject distant space.');

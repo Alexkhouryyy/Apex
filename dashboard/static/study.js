@@ -3,6 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {setupStudyProjects} from './study-projects.js';
 import {StudyHandController} from './study-hands.js';
+import {setupStudyMirror} from './study-mirror.js';
 import {setupStudyDiagnostics} from './study-diagnostics.js';
 const $ = id => document.getElementById(id);
 let token = '';
@@ -17,6 +18,7 @@ const groups = new Map(), pickables = [], raycaster = new THREE.Raycaster(), mou
 const clipping = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const diagnostics=setupStudyDiagnostics({model:()=>manifest?.id,beforeStart:()=>{hands.reset('Recording started · hover again');cancelManipulation();}});
+setupStudyMirror({token:()=>token});
 // Round insignificant OrbitControls drift out of the unsaved-change indicator.
 const coordinates = vector => vector.toArray().map(n=>Math.round(n*1e5)/1e5);
 const notebook = setupStudyProjects({
@@ -267,13 +269,34 @@ function pick(x,y){
   const hits=raycaster.intersectObjects(pickables,false).filter(h=>groups.get(h.object.userData.part).visible&&(!current.section||clipping.distanceToPoint(h.point)>=0));
   return hits.find(h=>h.object.userData.part!=='housing')||hits[0]||null;
 }
-function beginManipulation(h,part){
+// A small screen-space target margin for fingers; mouse picking stays exact.
+// During pinch closure prefer the already armed component within that margin.
+function pickHand(x,y,preferred=null){
+  const direct=pick(x,y);
+  if(direct&&(!preferred||direct.object.userData.part===preferred))return direct;
+  const r=$('model').getBoundingClientRect();
+  if(!r.width||!r.height)return direct;
+  let nearest=direct;
+  for(const radius of [10,20])for(let i=0;i<8;i++){
+    const angle=i*Math.PI/4,nx=x+Math.cos(angle)*radius/r.width,ny=y+Math.sin(angle)*radius/r.height;
+    if(nx<0||nx>1||ny<0||ny>1)continue;
+    const hit=pick(nx,ny);if(!hit)continue;
+    if(!preferred||hit.object.userData.part===preferred)return hit;
+    nearest??=hit;
+  }
+  return nearest;
+}
+function beginManipulation(h,part,input='mouse'){
   if(!current||manipulation||current.rotating||cameraTween||Math.abs(amount-targetAmount)>.02){status('Wait for motion to stop before moving a component.');return false;}
-  const hit=pick(h.x,h.y);if(!hit||hit.object.userData.part!==part)return false;
+  const hit=input==='hand'?pickHand(h.x,h.y,part):pick(h.x,h.y);if(!hit||hit.object.userData.part!==part)return false;
   const mode=$('interaction').value;
   const value=JSON.parse(JSON.stringify(current.transforms?.[part]||{position:[0,0,0],rotation:[0,0,0]}));
   manipulation={part,mode,revision:current.revision,start:{...h},base:JSON.parse(JSON.stringify(value)),value,
     plane:new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()),hit.point),point:hit.point.clone(),damping:orbit.enableDamping};
+  // The assisted hit can be beside the fingertip. Start at the fingertip's
+  // projection onto the same plane so the first motion cannot snap the part.
+  raycaster.setFromCamera(new THREE.Vector2(h.x*2-1,1-h.y*2),camera);
+  raycaster.ray.intersectPlane(manipulation.plane,manipulation.point);
   orbit.enabled=false;orbit.enableDamping=false;orbit.update();return true;
 }
 function moveManipulation(h){
@@ -302,14 +325,31 @@ async function commitManipulation(){
     if(m.input==='hand')diagnostics.metrics.event(applied?'applied':'failed',m.recording);
   }finally{cancelManipulation();}
 }
+let fingerGuide=false;
+const tipNodes=new Map();
+for(const name of ['thumb','index','middle','ring','pinky']){
+  const node=document.createElement('span');node.className='finger-tip';node.textContent=name[0].toUpperCase();node.hidden=true;$('finger-guide').append(node);tipNodes.set(name,node);
+}
+function paintFingers(h){
+  $('finger-guide').hidden=!fingerGuide||!h;
+  for(const [name,node] of tipNodes){const point=h?.fingertips?.[name];node.hidden=!point;if(point){node.style.left=point[0]*100+'%';node.style.top=point[1]*100+'%';}}
+  $('pinch-feedback').textContent=!h?'Show your hand to the camera.':h.ratio==null?'Finger positions unclear · face your palm toward the camera.':`${h.pinched?'Pinch recognised':'Fingers detected'} · gap ${h.ratio.toFixed(2)} / pinch below ${h.threshold?.toFixed(2)??'—'}`;
+}
+$('finger-guide-toggle').onclick=()=>{fingerGuide=!fingerGuide;$('finger-guide-toggle').textContent=fingerGuide?'Hide finger guide':'Show finger guide';$('finger-guide-toggle').setAttribute('aria-pressed',String(fingerGuide));if(!fingerGuide)$('finger-guide').hidden=true;};
 const hands=new StudyHandController({
-  hit:(x,y)=>pick(x,y)?.object.userData.part,
-  begin:(h,part)=>{const ok=beginManipulation(h,part);if(ok){manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
-  paint:(h,label)=>{const dot=$('hand-cursor');dot.hidden=!h;if(h){dot.style.left=h.x*100+'%';dot.style.top=h.y*100+'%';}$('hand-status').textContent=handEnabled?label:'';}
+  hit:(x,y,preferred)=>pickHand(x,y,preferred)?.object.userData.part,
+  begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
+  paint:(h,label,target={})=>{
+    const dot=$('hand-cursor');dot.hidden=!h;
+    if(h){dot.style.left=h.x*100+'%';dot.style.top=h.y*100+'%';dot.dataset.state=h.pinched?'pinched':target.progress===1?'ready':'tracking';}
+    const name=manifest?.parts.find(p=>p.id===target.part)?.name;
+    $('hand-status').textContent=handEnabled?`${$('interaction').selectedOptions[0].textContent} · ${label}${name?' · '+name:''}`:'Hand controls are paused · choose Enable hands';
+    paintFingers(h);
+  }
 });
 function pauseHands(reason='Hands paused'){
   const sid=session;const was=handEnabled;handEnabled=false;handEpoch++;clearTimeout(handTimer);hands.reset(reason);cancelManipulation();
-  $('study-hands').textContent='Hands off';$('study-hands').setAttribute('aria-pressed','false');
+  $('study-hands').textContent='Enable hands';$('study-hands').setAttribute('aria-pressed','false');
   if(was)api('/api/study/session/'+sid+'/hands',{method:'POST',body:JSON.stringify({action:'release',owner:handOwner}),keepalive:true}).catch(()=>{});
 }
 async function enableHands(){
@@ -318,7 +358,7 @@ async function enableHands(){
   try{
     await api('/api/study/session/'+session+'/hands',{method:'POST',body:JSON.stringify({action:'claim',owner:handOwner}),signal:AbortSignal.timeout(2000)});
     if(epoch!==handEpoch)return;
-    handEnabled=true;$('study-hands').textContent='Hands on';$('study-hands').setAttribute('aria-pressed','true');
+    handEnabled=true;$('study-hands').textContent='Pause hands';$('study-hands').setAttribute('aria-pressed','true');
     async function sample(){
       if(!handEnabled||epoch!==handEpoch)return;
       const requestStarted=performance.now();
@@ -328,7 +368,7 @@ async function enableHands(){
         const blocked=!!(document.hidden||document.querySelector('dialog[open]')||!$('study-partner').hidden||/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)||performance.now()<mouseUntil);
         diagnostics.metrics.sample(data,performance.now()-requestStarted,blocked);
         if(blocked)hands.reset('Hands waiting · finish the current input');
-        else hands.feed(data,performance.now());
+        else hands.feed({...data,age_ms:Number.isFinite(data.age_ms)?data.age_ms+(performance.now()-requestStarted):null},performance.now());
       }catch(e){
         // An old request may fail after pause/re-enable. It must not stop the
         // new controller or pollute its diagnostics.

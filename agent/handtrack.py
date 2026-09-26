@@ -454,6 +454,21 @@ def is_open_palm(lms) -> Optional[bool]:
     return True
 
 
+def fingertip_positions(lms, *, mirror: bool = True) -> dict:
+    """Live visual feedback only; never substitute these raw points for input."""
+    points = {}
+    for name, index in (("thumb", THUMB_TIP), ("index", INDEX_TIP),
+                        ("middle", MIDDLE_TIP), ("ring", RING_TIP), ("pinky", PINKY_TIP)):
+        try:
+            x, y = float(lms[index].x), float(lms[index].y)
+            if not (math.isfinite(x) and math.isfinite(y) and 0 <= x <= 1 and 0 <= y <= 1):
+                continue
+            points[name] = [round(1 - x if mirror else x, 4), round(y, 4)]
+        except (IndexError, AttributeError, TypeError, ValueError):
+            continue
+    return points
+
+
 def landmarks_to_cursor(lms, *, mirror: bool = True,
                         threshold: Optional[float] = None):
     """One hand's 21 landmarks -> `(x, y, pinched, open_palm)` for the recognizer.
@@ -833,13 +848,17 @@ class HandTracker(threading.Thread):
         print(f"[HandTrack] Watching camera {self.device_index} at "
               f"{1 / self.interval:.0f} Hz.")
         try:
-            while not self._stop.wait(timeout=self.interval):
+            while not self._stop.is_set():
+                started = time.monotonic()
                 try:
                     self._tick(time.time())
                 except Exception as e:
                     # A raise here would end hand tracking for the rest of the
                     # session with nothing but a dead thread to show for it.
                     print(f"[HandTrack] tick error: {e}")
+                # Capture/inference already consumed part (or all) of the
+                # frame budget. Do not add a whole interval after that work.
+                self._stop.wait(timeout=max(0.0, self.interval - (time.monotonic() - started)))
         finally:
             self._teardown()
 
@@ -920,6 +939,7 @@ class HandTracker(threading.Thread):
             self.recognizer.feed_cursors(None, now)
             return
 
+        captured_at = time.monotonic()
         ok, frame = self._cap.read()
         if not ok or frame is None:
             self._say("no_frame", "[HandTrack] Camera stopped delivering frames.")
@@ -938,11 +958,12 @@ class HandTracker(threading.Thread):
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
-        # detect_for_video demands strictly increasing millisecond timestamps;
-        # a frame counter is monotonic in a way wall-clock is not.
+        # Real monotonic capture time, not an assumed fixed detector cadence.
+        # Keep timestamps strictly increasing even within one millisecond.
         self._frame_no += 1
+        self._detector_timestamp_ms = max(int(captured_at * 1000), getattr(self, '_detector_timestamp_ms', 0) + 1)
         result = self._landmarker.detect_for_video(
-            image, int(self._frame_no * self.interval * 1000))
+            image, self._detector_timestamp_ms)
 
         try:
             from agent import gesture_recorder
@@ -958,7 +979,9 @@ class HandTracker(threading.Thread):
             self._latest_cursors = list(cursors)
             self._latest_hands = list(details)
             self._study_sequence = getattr(self, '_study_sequence', 0) + 1
-            self._study_sample_at = time.monotonic()
+            # Include capture and inference time in freshness. A slow result
+            # must not pretend to be a brand-new observation when published.
+            self._study_sample_at = captured_at
 
         if getattr(config, "BOARD_ENABLED", False):
             try:
@@ -1038,6 +1061,7 @@ class HandTracker(threading.Thread):
                 "pinched": bool(pinched),
                 "open_palm": bool(cur[3]),
                 "fist": bool(fist),
+                "fingertips": fingertip_positions(lms, mirror=mirror),
             }
             rows.append((hid, cur, detail))
             if getattr(config, "HANDTRACK_DEBUG", False):

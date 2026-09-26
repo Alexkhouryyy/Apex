@@ -20,7 +20,10 @@ class FakeTracker:
  def __init__(self):self.hands=[];self.seq=0
  def latest_cursors(self):return []
  def latest_hands(self):return []
- def latest_jpeg(self):return None
+ def latest_jpeg(self):
+  import io
+  from PIL import Image
+  b=io.BytesIO();Image.new('RGB',(160,120),(40,100,90)).save(b,format='JPEG');return b.getvalue()
  def study_sample(self):
   self.seq+=1
   return dict(sequence=self.seq,age_ms=0,hands=self.hands)
@@ -118,18 +121,41 @@ async function stop(){if(!server||server.exitCode!==null)return;await new Promis
   assert.deepEqual((await (await page.request.get(stateUrl,{headers})).json()).transforms,{});
   // Synthetic detector frames through the real ownership endpoint and viewer.
   // This verifies plumbing, not physical-camera gesture quality.
-  const feed=async(pinched,x=point.x)=>{await page.request.post(origin+'/api/test/hands',{headers,data:{hands:[{id:7,x,y:point.y,pinched}]}});};
-  await page.getByRole('button',{name:'Hands off',exact:true}).click();
-  await page.getByRole('button',{name:'Hands on',exact:true}).waitFor();
+  const feed=async(pinched,x=point.x)=>{await page.request.post(origin+'/api/test/hands',{headers,data:{hands:[{id:7,x,y:point.y,pinched,ratio:pinched ? .2 : .8,threshold:.35,fingertips:{index:[x,point.y],thumb:[x+.02,point.y]}}]}});};
+  await page.getByRole('button',{name:'Enable hands',exact:true}).click();
+  await page.getByRole('button',{name:'Pause hands',exact:true}).waitFor();
   await page.getByText('Device check',{exact:true}).click();
   await page.getByRole('button',{name:'Start recording',exact:true}).click();
+  // The mirror reuses the tracker, decodes a real JPEG, and is independent
+  // of gesture ownership. Hidden means no image and no further polling.
+  await page.getByRole('button',{name:'Camera mirror',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#camera-mirror-image').naturalWidth===160);
+  assert.equal(await page.locator('#study-hands').getAttribute('aria-pressed'),'true');
+  await page.getByRole('button',{name:'Hide camera',exact:true}).click();
+  assert.equal(await page.locator('#camera-mirror').isVisible(),false);
+  assert.equal(await page.locator('#camera-mirror-image').getAttribute('src'),null);
+  assert.equal(await page.locator('#study-hands').getAttribute('aria-pressed'),'true');
+  await page.locator('#hand-setup summary').click();
+  await page.getByRole('button',{name:'Show finger guide',exact:true}).click();
   const before=(await (await page.request.get(stateUrl,{headers})).json()).revision;
   await feed(false);await page.waitForFunction(()=>document.querySelector('#hand-status').textContent.includes('Ready'),{},{timeout:5000});await feed(true);await page.waitForFunction(()=>document.querySelector('#hand-status').textContent.includes('Holding'));await page.waitForTimeout(120);
   await feed(true,point.x+.06);await page.waitForTimeout(200);await feed(false,point.x+.06);await page.waitForTimeout(250);
   const after=await (await page.request.get(stateUrl,{headers})).json();
   assert.equal(after.revision,before+1,'a hand release must commit exactly once');
   assert(after.transforms['node-2'],'hand movement must reach the actual assembly session');
-  await page.getByRole('button',{name:'Hands on',exact:true}).click();
+  assert.equal(await page.locator('#finger-guide').isVisible(),true);
+  assert.match(await page.locator('#pinch-feedback').innerText(),/Fingers detected/);
+  if(process.env.APEX_HAND_SCREENSHOT){
+    await page.getByRole('button',{name:'Camera mirror',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#camera-mirror-image').naturalWidth===160);
+    await page.screenshot({path:process.env.APEX_HAND_SCREENSHOT});
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.screenshot({path:process.env.APEX_HAND_SCREENSHOT.replace('.png','-mobile.png')});
+    await page.setViewportSize({width:1600,height:1000});
+    await page.getByRole('button',{name:'Hide camera',exact:true}).click();
+  }
+  await page.getByRole('button',{name:'Pause hands',exact:true}).click();
   await page.getByRole('button',{name:'Flag accidental grab',exact:true}).click();
   await page.getByRole('button',{name:'Stop recording',exact:true}).click();
   const downloadEvent=page.waitForEvent('download');
@@ -148,8 +174,8 @@ async function stop(){if(!server||server.exitCode!==null)return;await new Promis
   if(process.env.APEX_CAD_SCREENSHOT)await page.screenshot({path:process.env.APEX_CAD_SCREENSHOT});
   // Leaving the study releases its lease, but only an explicit board action
   // resumes gestures. Exercise the actual return link and board endpoint.
-  await page.getByRole('button',{name:'Hands off',exact:true}).click();
-  await page.getByRole('button',{name:'Hands on',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Enable hands',exact:true}).click();
+  await page.getByRole('button',{name:'Pause hands',exact:true}).waitFor();
   await page.locator('a.brand').click();
   await page.waitForURL('**/board*');
   await page.waitForFunction(()=>document.querySelector('#hands-toggle')?.textContent==='Resume board hands');

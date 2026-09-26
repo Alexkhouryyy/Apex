@@ -1,11 +1,22 @@
 """Authenticated assembly data and presentation controls."""
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from agent import assembly, study_projects
 import json
 from dashboard.companion import _check_origin, _small_json
 
 router = APIRouter()
+
+
+@router.get('/api/study/camera')
+def study_camera():
+    """Authenticated, opt-in preview; reuse tracking's camera, never open one."""
+    from agent.handtrack import active_tracker
+    tracker = active_tracker()
+    jpeg = tracker.latest_jpeg() if tracker else None
+    if not jpeg:
+        raise HTTPException(503, 'Camera mirror unavailable. Start hand tracking on your Apex laptop.')
+    return Response(jpeg, media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
 
 
 @router.post('/api/study/session/{sid}/hands')

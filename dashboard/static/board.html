@@ -716,7 +716,7 @@ function setHud(show) {
   document.getElementById('hud-toggle').setAttribute('aria-pressed', String(!hudHidden));
   try { localStorage.setItem('apex.board.hud', hudHidden ? 'hidden' : 'shown'); } catch (_) {}
 }
-setHud(!hudHidden);
+setHud(new URLSearchParams(location.search).get('handsetup') === '1' || !hudHidden);
 document.getElementById('hud-close').onclick = () => setHud(false);
 document.getElementById('hud-toggle').onclick = () => setHud(hudHidden);
 
