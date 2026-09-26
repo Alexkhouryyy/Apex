@@ -321,16 +321,23 @@ async function enableHands(){
     handEnabled=true;$('study-hands').textContent='Hands on';$('study-hands').setAttribute('aria-pressed','true');
     async function sample(){
       if(!handEnabled||epoch!==handEpoch)return;
+      const requestStarted=performance.now();
       try{
-        const requestStarted=performance.now();
         const data=await api('/api/study/session/'+session+'/hands',{method:'POST',body:JSON.stringify({action:'sample',owner:handOwner}),signal:AbortSignal.timeout(1000)});
         if(!handEnabled||epoch!==handEpoch)return;
         const blocked=!!(document.hidden||document.querySelector('dialog[open]')||!$('study-partner').hidden||/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)||performance.now()<mouseUntil);
         diagnostics.metrics.sample(data,performance.now()-requestStarted,blocked);
         if(blocked)hands.reset('Hands waiting · finish the current input');
         else hands.feed(data,performance.now());
-      }catch(e){diagnostics.metrics.event('connection_errors');pauseHands();status('Hand connection stopped. '+e.message);return;}
-      handTimer=setTimeout(sample,70);
+      }catch(e){
+        // An old request may fail after pause/re-enable. It must not stop the
+        // new controller or pollute its diagnostics.
+        if(!handEnabled||epoch!==handEpoch)return;
+        diagnostics.metrics.event('connection_errors');pauseHands();status('Hand connection stopped. '+e.message);return;
+      }
+      // Target 30 samples/sec including request time, with only one request
+      // in flight. Slow connections naturally lower the rate, never queue it.
+      if(handEnabled&&epoch===handEpoch)handTimer=setTimeout(sample,Math.max(0,1000/30-(performance.now()-requestStarted)));
     }sample();
   }catch(e){status(e.message);}
 }

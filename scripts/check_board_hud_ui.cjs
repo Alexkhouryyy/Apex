@@ -54,6 +54,12 @@ function open(stored) {
 
   // 2. The "now" line follows what is happening.
   frame({tracking: false}); assert.match($('hud-now').textContent, /Hand tracking is off — HANDTRACK_ENABLED=true/);
+  frame({hands_enabled:false}); assert.match($('hud-now').textContent, /Hand controls are paused/);
+  frame({hands_enabled:false,hands:[{id:0,pinched:true}]});
+  assert.match($('hud-now').textContent, /Resume board hands/);
+  assert.equal($('hands-toggle').textContent,'Resume board hands');
+  assert.equal($('hands-toggle').getAttribute('aria-pressed'),'false');
+  frame({hands_enabled:true}); assert.equal($('hands-toggle').textContent,'Hands on');
   frame({}); assert.match($('hud-now').textContent, /Hold a hand up/);
   const hand = (ratio, pinched) => ({id: 0, ratio, threshold: 0.7, release: 0.78, pinched});
   frame({hands: [hand(1.1, false)]}); assert.match($('hud-now').textContent, /build me a rocket/);

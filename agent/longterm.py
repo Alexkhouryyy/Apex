@@ -14,6 +14,7 @@ import os
 import sqlite3
 import time
 import json
+import threading
 from contextlib import contextmanager
 from typing import Optional
 
@@ -288,6 +289,24 @@ def _conn():
         conn.commit()
     finally:
         conn.close()
+
+
+# Short, write-only transactions from the research collector and telemetry
+# share this gate. Parallel model calls must never hold it. Readers and other
+# processes retain SQLite's normal locking/timeout behavior.
+_write_lock = threading.Lock()
+
+
+@contextmanager
+def _write_conn():
+    """Serialize participating in-process writers through commit and close.
+
+    Do not nest connections or do network/model work inside this context.
+    Exceptions still roll back via _conn; failures are never retried or hidden.
+    """
+    with _write_lock:
+        with _conn() as conn:
+            yield conn
 
 
 _REMEMBER_MAX_CHARS = 8000  # a single memory row shouldn't bloat every future recall/embed

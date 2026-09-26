@@ -18,6 +18,9 @@ from fastapi import Request
 from agent import handtrack
 class FakeTracker:
  def __init__(self):self.hands=[];self.seq=0
+ def latest_cursors(self):return []
+ def latest_hands(self):return []
+ def latest_jpeg(self):return None
  def study_sample(self):
   self.seq+=1
   return dict(sequence=self.seq,age_ms=0,hands=self.hands)
@@ -143,6 +146,17 @@ async function stop(){if(!server||server.exitCode!==null)return;await new Promis
   await page.getByRole('button',{name:'Take apart',exact:true}).click();
   await page.waitForTimeout(800);
   if(process.env.APEX_CAD_SCREENSHOT)await page.screenshot({path:process.env.APEX_CAD_SCREENSHOT});
+  // Leaving the study releases its lease, but only an explicit board action
+  // resumes gestures. Exercise the actual return link and board endpoint.
+  await page.getByRole('button',{name:'Hands off',exact:true}).click();
+  await page.getByRole('button',{name:'Hands on',exact:true}).waitFor();
+  await page.locator('a.brand').click();
+  await page.waitForURL('**/board*');
+  await page.waitForFunction(()=>document.querySelector('#hands-toggle')?.textContent==='Resume board hands');
+  await page.waitForTimeout(2100); // even a lost unload release expires its lease
+  assert.equal(await page.locator('#hands-toggle').getAttribute('aria-pressed'),'false');
+  await page.getByRole('button',{name:'Resume board hands',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#hands-toggle').getAttribute('aria-pressed')==='true');
   assert.deepEqual(errors,[]);
   console.log('PASS: real WebGL, saved notes/views across restart, mobile layout, 135 CAD components, mouse drag/undo and synthetic hand frames through the real input endpoint and exported opt-in diagnostics.');
 }finally{if(browser)await browser.close();await stop();fs.rmSync(temp,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});
