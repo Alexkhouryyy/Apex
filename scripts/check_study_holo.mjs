@@ -91,7 +91,7 @@ for (const id of ['armature', 'shaft']) {
 let rendered = 0;
 const renderer = {getPixelRatio: () => 1, getSize: v => v.set(200, 100), setRenderTarget() {}, render() { rendered++; },
   getRenderTarget: () => null, autoClear: true, clear() {}, getClearColor: c => c, getClearAlpha: () => 1, setClearColor() {}, setClearAlpha() {}};
-const holo = setupHoloScene({THREE, scene, camera, renderer, groups, reducedMotion: {matches: false}, storage});
+const holo = setupHoloScene({THREE, scene, camera, renderer, groups, reducedMotion: {matches: false}, look: 'futuristic'});
 holo.buildEdges();
 const edgesOf = id => { const out = []; groups.get(id).traverse(o => { if (o.isLineSegments) out.push(o); }); return out; };
 assert.equal(edgesOf('armature').length, 1, 'every mesh gets a glowing edge outline');
@@ -111,11 +111,12 @@ for (let i = 0; i < 90; i++) holo.update(1 / 60);
 assert.equal(meshOf('armature').material.emissive.getHex(), 0, 'the glow returns to its own colour afterwards');
 holo.pulse('shaft'); holo.update(1 / 60);
 assert.ok(edgesOf('shaft')[0].material.opacity > 0.4, 'a grab flashes');
-holo.toggle();
-assert.equal(holo.on, false); assert.equal(store.get('apex.study.holo'), 'off');
+holo.setLook('normal');
+assert.equal(holo.on, false, 'the normal look turns the 3D hologram off');
 assert.ok(edgesOf('armature').every(l => !l.visible), 'Holo off hides the edges');
 assert.equal(scene.background, null); assert.equal(scene.fog, null);
-rendered = 0; holo.render(); assert.equal(rendered, 1, 'Holo off renders plainly');
+rendered = 0; holo.render(); assert.equal(rendered, 1, 'normal look renders plainly');
+holo.setLook('futuristic'); assert.equal(holo.on, true); assert.ok(edgesOf('armature').every(l => l.visible), 'and back again');
 
 // 6. Software rendering starts with the hologram off — unless chosen — and
 //    stage 2 of the governor pauses the whole hologram when still slow.
@@ -123,21 +124,19 @@ for (const n of ['Google SwiftShader', 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader
   assert.ok(isSoftwareRenderer(n), n);
 for (const n of ['ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)', 'Apple M2', '', null])
   assert.ok(!isSoftwareRenderer(n), String(n));
-const fresh = new Map(), freshStore = {getItem: k => fresh.get(k) ?? null, setItem: (k, v) => fresh.set(k, v)};
-const soft = setupHoloScene({THREE, scene: new THREE.Scene(), camera, renderer, groups: new Map(), reducedMotion: {matches: false}, storage: freshStore, software: true});
-assert.equal(soft.on, false, 'no GPU: the hologram starts off'); assert.equal(soft.startedOff, true);
-fresh.set('apex.study.holo', 'on');
-assert.equal(setupHoloScene({THREE, scene: new THREE.Scene(), camera, renderer, groups: new Map(), reducedMotion: {matches: false}, storage: freshStore, software: true}).on, true,
-  'switched on by hand, it stays on even without a GPU');
+const soft = setupHoloScene({THREE, scene: new THREE.Scene(), camera, renderer, groups: new Map(), reducedMotion: {matches: false}, look: 'futuristic', software: true});
+assert.equal(soft.on, false, 'no GPU: the 3D hologram stays off'); assert.equal(soft.startedOff, true);
+assert.equal(soft.setLook('futuristic'), false, 'even when the look is switched to futuristic again');
+assert.equal(setupHoloScene({THREE, scene: new THREE.Scene(), camera, renderer, groups: new Map(), reducedMotion: {matches: false}, look: 'normal'}).on, false,
+  'the normal look starts with it off');
 let bloomPaused = 0, holoPaused = 0;
-fresh.clear();
-const slow = setupHoloScene({THREE, scene: new THREE.Scene(), camera, renderer, groups: new Map(), reducedMotion: {matches: false}, storage: freshStore,
+const slow = setupHoloScene({THREE, scene: new THREE.Scene(), camera, renderer, groups: new Map(), reducedMotion: {matches: false}, look: 'futuristic',
   onBloomPaused: () => bloomPaused++, onHoloPaused: () => holoPaused++});
 for (let i = 0; i < 60; i++) slow.update(0.05);
 assert.equal(bloomPaused, 1); assert.equal(slow.on, true, 'stage 1 only drops the glow');
 for (let i = 0; i < 60; i++) slow.update(0.05);
 assert.equal(holoPaused, 1); assert.equal(slow.on, false, 'still slow: the hologram pauses');
-assert.equal(fresh.get('apex.study.holo'), undefined, 'a pause is for this session, not a saved choice');
+assert.equal(slow.setLook('futuristic'), true, 'switching the look again retries');
 
 console.log('PASS: pinch glow, slow-frame glow governor, silent-until-allowed sounds with a remembered mute, '
   + 'the hand drawn in light (with fade and no partial skeletons), and scene edges/glow/lift that react to the hand and toggle off cleanly.');

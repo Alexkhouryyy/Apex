@@ -122,13 +122,13 @@ export function frameGovernor(onSlow) {
 // Render Driver. Unknown names count as hardware.
 export function isSoftwareRenderer(name) { return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(String(name || '')); }
 
-export function setupHoloScene({THREE, scene, camera, renderer, groups, reducedMotion, storage = globalThis.localStorage,
-                                software = false, onBloomPaused, onHoloPaused}) {
-  // An explicit choice (the Holo button) wins; otherwise on, unless the
-  // renderer is software, where it starts off.
-  let saved = null; try { saved = storage?.getItem('apex.study.holo'); } catch (_) {}
-  let on = saved ? saved !== 'off' : !software;
-  const startedOff = !on && !saved && software;
+// The 3D hologram follows Apex's look (theme.js): on in the futuristic look,
+// off in the normal one — and off on a software renderer whatever the look,
+// because it would starve the hands (see the governor above).
+export function setupHoloScene({THREE, scene, camera, renderer, groups, reducedMotion,
+                                look = 'futuristic', software = false, onBloomPaused, onHoloPaused}) {
+  let on = look === 'futuristic' && !software;
+  const startedOff = look === 'futuristic' && software;
   const edges = new Map();            // part id -> [LineSegments]
   const react = new Map();            // part id -> {glow, lift, pulse}
   let composer = null, bloom = null, focus = {part: null, level: 0, held: false};
@@ -196,9 +196,9 @@ export function setupHoloScene({THREE, scene, camera, renderer, groups, reducedM
     }
   }
   function render() { if (on && composer && !governor.tripped) composer.render(); else renderer.render(scene, camera); }
-  function toggle() { on = !on; governor.reset(); governor2.reset(); try { storage?.setItem('apex.study.holo', on ? 'on' : 'off'); } catch (_) {} apply(); return on; }
-  return {buildEdges, resize, setFocus, pulse, update, render, toggle, get on() { return on; }, get bloom() { return on && !governor.tripped; },
-    get startedOff() { return startedOff; },
+  function setLook(next) { governor.reset(); governor2.reset(); on = next === 'futuristic' && !software; apply(); return on; }
+  return {buildEdges, resize, setFocus, pulse, update, render, setLook, get on() { return on; }, get bloom() { return on && !governor.tripped; },
+    get startedOff() { return startedOff; }, get software() { return software; },
     // Selection changes the base glow (study.js sets it); keep it as the baseline.
     rebase() { for (const group of groups.values()) group.traverse(o => { if (o.isMesh && !o.userData.holoEdge && o.material?.emissive) { o.userData.baseEmissive = o.material.emissive.getHex(); o.userData.holoLit = false; } }); }};
 }

@@ -143,10 +143,10 @@ async function initScene(prefetched = null) {
   const grid=new THREE.GridHelper(28,28,'#25424b','#152c36');grid.position.y=-3.2;scene.add(grid);
   orbit=new OrbitControls(camera,renderer.domElement);orbit.enableDamping=true;orbit.dampingFactor=.09;orbit.minDistance=2.5;orbit.maxDistance=30;fitCamera();
   let glName='';try{const gl=renderer.getContext(),dbg=gl.getExtension('WEBGL_debug_renderer_info');glName=dbg?gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL):'';}catch(_){}
-  holo=setupHoloScene({THREE,scene,camera,renderer,groups,reducedMotion,software:isSoftwareRenderer(glName),
+  holo=setupHoloScene({THREE,scene,camera,renderer,groups,reducedMotion,software:isSoftwareRenderer(glName),look:window.ApexLook?.get()||'futuristic',
     onBloomPaused:()=>status('Glow paused · this device renders slowly, and responsive hands come first. Edges stay on.'),
-    onHoloPaused:()=>{syncHoloButtons();status('Hologram paused for this session · rendering is too slow for responsive hands. Holo on retries.');}});
-  if(holo.startedOff)setTimeout(()=>status('Hologram off · no graphics acceleration detected. Holo on to try it anyway.'),0);
+    onHoloPaused:()=>{syncHoloButtons();status('3D hologram paused for this session · rendering is too slow for responsive hands. Switch the look to Normal and back to retry.');}});
+  if(holo.startedOff)setTimeout(()=>status('3D hologram off · no graphics acceleration detected, and responsive hands come first. The rest of the futuristic look stays.'),0);
   await buildLoadedModel(prefetched);holo.buildEdges();syncHoloButtons();
   orbit.addEventListener('start',()=>{cameraTween=null;});
   const resize=()=>{const r=$('viewport').getBoundingClientRect();renderer.setSize(r.width,r.height,false);holo.resize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();};
@@ -427,10 +427,11 @@ async function enableHands(){
 $('study-hands').onclick=()=>handEnabled?pauseHands():enableHands();
 function syncHoloButtons(){
   document.body.dataset.holo=holo?.on?'on':'off';
-  $('holo-toggle').setAttribute('aria-pressed',String(!!holo?.on));$('holo-toggle').textContent=holo?.on?'Holo on':'Holo off';
   $('sound-toggle').setAttribute('aria-pressed',String(sound.on));$('sound-toggle').textContent=sound.on?'Sound on':'Sound off';
 }
-$('holo-toggle').onclick=()=>{holo?.toggle();syncHoloButtons();};
+// The header's look switch is Apex-wide (theme.js); the 3D hologram follows it.
+addEventListener('apex:look',e=>{if(!holo)return;holo.setLook(e.detail);syncHoloButtons();
+  if(e.detail==='futuristic'&&holo.software)status('3D hologram off · no graphics acceleration detected. The rest of the futuristic look is on.');});
 $('sound-toggle').onclick=()=>{sound.toggle();sound.unlock();syncHoloButtons();};
 // Audio may start only after the page is clicked or a key pressed.
 for(const kind of ['pointerdown','keydown'])addEventListener(kind,()=>sound.unlock(),{once:false,passive:true});

@@ -25,8 +25,9 @@ new is saved or sent to the server.
 
 ## Controls
 
-- **Holo on / off** in the header switches between the hologram and the plain
-  view. **Sound on / off** mutes the tones. Both are remembered in this
+- **◈ Futuristic / ◇ Normal** in the header is the Apex-wide look switch (see
+  *The Apex look* below). Futuristic shows the hologram and Normal shows the
+  plain view. **Sound on / off** mutes the tones. Both are remembered in this
   browser.
 - `prefers-reduced-motion` turns off the rise and flash animations.
 
@@ -38,19 +39,46 @@ missing glow. Three safeguards:
 
 1. **No graphics acceleration: it starts off.** The browser reports its 3D
    renderer, and software renderers (SwiftShader, llvmpipe, Microsoft Basic
-   Render Driver) start with the hologram off, saying why. Pressing **Holo
-   on** overrides this and is remembered.
+   Render Driver) keep the 3D hologram off, saying why. The rest of the
+   futuristic look still applies. There is no override: on software rendering
+   the hologram costs working hands.
 2. **Slow frames drop the glow first.** If frames stay slower than 1/25 s for
    two seconds, bloom switches off. The edges and the drawn hand stay
    ("Glow paused…").
 3. **Still slow: the hologram pauses** for the session ("Hologram
-   paused…"). Holo off and on again retries.
+   paused…"). Switching the look to Normal and back retries.
 
 Why this matters, measured on this GPU-less test machine: with the hologram
 on, the study's real-browser check passed **1 of 4** runs, because hand
 control timed out. With it off, 3 of 3. With safeguard 1, the unmodified
 check passes 3 of 3. On a real GPU (the RTX 4070 laptop) frames should take a
 few milliseconds, but that hasn't been measured yet.
+
+## The Apex look: Futuristic or Normal
+
+One switch for every page: the dashboard, companion, workspace board (and the
+car view inside it) and the motor study.
+
+- **Futuristic** (the default) layers a hologram style over each page: a faint
+  projection grid, scanlines, glowing panel edges with HUD corner brackets,
+  glowing headings, technical mono labels, and lit buttons and inputs. The
+  companion's orb gets an orbiting ring. The motor study adds its 3D
+  hologram. The dashboard's glow follows its chosen colour palette.
+- **Normal** is each page exactly as it was before this layer existed.
+
+**Switching.** Use the **◈ Futuristic / ◇ Normal** button: bottom-right on most
+pages, top-right on a phone, in the header on the study. The choice is saved
+in this browser (`apex.look`), applied before the page paints so there is no
+flash, and followed by other open tabs. Pages embedded in another page (the
+companion inside the board) don't get a second button.
+
+**Implementation.** `dashboard/static/theme.js` sets `<html data-look>` and
+fires an `apex:look` event, which the study listens for.
+`dashboard/static/theme.css` scopes every rule to
+`html[data-look="futuristic"]` and moves or resizes nothing. The one
+exception: labels use a mono font with wider spacing, so a label can get
+slightly wider. `scripts/check_theme_ui.cjs` enforces all of this and checks
+that each page loads both files in the right place.
 
 ## Verification
 

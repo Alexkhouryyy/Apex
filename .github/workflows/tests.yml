@@ -66,6 +66,7 @@ jobs:
           node scripts/check_study_comfort.cjs
           node scripts/check_study_view.mjs
           node scripts/check_study_holo.mjs
+          node scripts/check_theme_ui.cjs
           node scripts/check_study_hands.cjs
           node scripts/check_study_poll.cjs
           node scripts/check_study_mirror.cjs
