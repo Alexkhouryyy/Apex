@@ -71,7 +71,8 @@ def workspace_message(body, message):
             + json.dumps(pointed) + "]\n"
             "When the user says 'this' or 'that', prefer the pointed object if it is recent (a few seconds), "
             "otherwise the selection. If they disagree and the sentence does not settle it, ask which one. "
-            "Use the exact object ID for view transforms and the exact src path for Forge checks/exports. "
+            "Use the exact object ID for view transforms. Only model/image src values are prop paths for Forge; "
+            "a link object's src is a web address, not a local file or evidence that its page has been read. "
             "If there is neither, ask which one. View scale does not change physical dimensions. "
             "Do not claim mesh-part selection or physical printing from a whole-object selection.")
     return message
@@ -123,9 +124,16 @@ async def _small_json(request: Request) -> dict:
 async def workspace_action(request: Request):
     """Small, reversible workspace actions, protected by dashboard auth."""
     _check_origin(request)
-    from agent.board import get_board
+    from agent.board import get_board, ContentConflict
     try:
-        body = await _small_json(request)
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > 16000:
+                raise ValueError('Workspace request is too large.')
+        body = json.loads(raw)
+        if not isinstance(body, dict):
+            raise ValueError('Expected a JSON object.')
         board = get_board()
         action = body.get("action")
         if action == "hands":
@@ -141,16 +149,20 @@ async def workspace_action(request: Request):
             if not idle:
                 raise ValueError("Release the object before using history: " + why)
             return {"message": getattr(board, action)()}
-        if action == "note":
-            title, text = body.get("title", "Note"), body.get("body", "")
-            if not isinstance(title, str) or not isinstance(text, str) or not title.strip():
-                raise ValueError("Give the note a title.")
-            if len(title) > 80 or len(text) > 600:
-                raise ValueError("Keep the title under 80 and the note under 600 characters.")
-            card = board.add("card", title.strip(), body=text, x=0.5, y=0.45)
-            board.select(card.id)
-            return {"card": card.as_dict()}
+        if action in ('note', 'link', 'edit_content'):
+            if action == 'edit_content' and not isinstance(body.get('id'), str):
+                raise ValueError('Expected an item id.')
+            kind = body.get('kind') if action == 'edit_content' else ('card' if action == 'note' else 'link')
+            card = board.save_text(kind, body.get('title', ''), body.get('body', ''), body.get('src', ''),
+                                   body.get('id') if action == 'edit_content' else None,
+                                   body.get('expected_revision'))
+            board.select(card['id'])
+            return {'card': card}
         raise ValueError("Unknown workspace action.")
+    except ContentConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 

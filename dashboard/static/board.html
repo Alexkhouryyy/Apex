@@ -219,7 +219,7 @@
 <aside id="objects-panel" class="workspace-panel" aria-label="Workspace objects">
   <div class="panel-heading"><span>IN THIS SPACE</span><span id="object-count">0</span></div>
   <div id="object-list"><p class="muted">Your notes and models will appear here.</p></div>
-  <button id="add-note" class="add-note">+ New note</button>
+  <button id="add-note" class="add-note">+ New note</button><button id="add-link" class="add-note">+ Add a link</button>
   <div class="space-tip">A place for your ideas.<br>Arrange with your mouse or hands.<br>Talk to Céline when you need help.</div>
   <details id="export-tools"><summary>Manufacturing exports</summary><select id="exports" aria-label="Download a manufacturing export"><option value="">Choose a file…</option></select><button id="refresh-exports">Refresh files</button></details>
 </aside>
@@ -228,7 +228,7 @@
   <span id="selection-label" role="status">Select an object to work with it.</span>
   <div class="transform-actions"><button id="scale-down" aria-label="Make view smaller">−</button><span>View size</span><button id="scale-up" aria-label="Make view larger">+</button></div>
   <div class="transform-actions"><button id="rotate-left" aria-label="Rotate left">↶</button><span>Turn</span><button id="rotate-right" aria-label="Rotate right">↷</button></div>
-  <button id="parts-toggle">Edit model parts · P</button><button id="center-object">Centre in workspace</button>
+  <button id="edit-content" hidden>Edit note</button><a id="open-link" hidden target="_blank" rel="noopener noreferrer">Open link ↗</a><button id="parts-toggle">Edit model parts · P</button><button id="center-object">Centre in workspace</button>
   <p class="muted">View size changes appearance, not physical dimensions. Drag the object label to move it.</p>
 </section>
 <nav id="workspace-dock" aria-label="Workspace controls">
@@ -237,7 +237,7 @@
   <button id="voice-toggle" aria-pressed="false" title="Talk to Céline (V)"><span class="voice-dot"></span>Voice <kbd>V</kbd></button>
   <button id="partner-toggle" aria-expanded="false">Ask Céline <span aria-hidden="true">↗</span></button>
 </nav>
-<dialog id="note-dialog" aria-labelledby="note-heading"><form id="note-form"><div class="panel-heading"><h2 id="note-heading">A new thought</h2><button type="button" id="close-note" aria-label="Close note">×</button></div><label>Title<input id="note-title" required maxlength="80" placeholder="Give it a name" autocomplete="off"></label><label>Note<textarea id="note-body" maxlength="600" rows="5" placeholder="Capture an idea, a question, or your next step…"></textarea></label><p id="note-error" role="alert"></p><button type="submit" id="save-note">Add to workspace</button></form></dialog>
+<dialog id="note-dialog" aria-labelledby="note-heading"><form id="note-form"><div class="panel-heading"><h2 id="note-heading">A new thought</h2><button type="button" id="close-note" aria-label="Close note">×</button></div><label id="note-kind-label">Item type<select id="note-kind"><option value="card">Note</option><option value="link">Web link</option></select></label><label>Title<input id="note-title" required maxlength="80" placeholder="Give it a name" autocomplete="off"></label><label id="note-url-label" hidden>Web address<input id="note-url" type="url" maxlength="2048" placeholder="https://…" autocomplete="url"></label><label>Note<textarea id="note-body" maxlength="600" rows="5" placeholder="Capture an idea, a question, or your next step…"></textarea></label><p id="note-error" role="alert"></p><button type="submit" id="save-note">Add to workspace</button><button type="button" id="note-copy" hidden>Save draft as a new item</button><p class="muted">Links open in a separate tab only when you choose Open link. Apex does not fetch them automatically.</p></form></dialog>
 <aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; autoplay; display-capture"></iframe></aside>
 
 <script type="module">
@@ -486,22 +486,65 @@ document.getElementById('rotate-left').onclick = () => turn(-Math.PI / 12);
 document.getElementById('rotate-right').onclick = () => turn(Math.PI / 12);
 document.getElementById('center-object').onclick = () => changeView({x: .5, y: .45});
 const noteDialog = document.getElementById('note-dialog');
-function newNote() { noteDialog.showModal(); document.getElementById('note-title').focus(); }
+let noteEditing=null, noteInitial='', noteSaving=false;
+const noteFields=()=>({kind:document.getElementById('note-kind').value,title:document.getElementById('note-title').value,
+  body:document.getElementById('note-body').value,src:document.getElementById('note-kind').value==='link'?document.getElementById('note-url').value:''});
+function updateNoteKind(){
+  const link=document.getElementById('note-kind').value==='link';
+  document.getElementById('note-url-label').hidden=!link;
+  document.getElementById('note-url').required=link;
+}
+function openNoteEditor(card=null,kind='card') {
+  if(noteSaving)return;
+  noteEditing=card?{id:card.id,revision:card.content_revision,kind:card.kind}:null;
+  document.getElementById('note-form').reset();
+  document.getElementById('note-kind').value=card?.kind||kind;
+  document.getElementById('note-kind').disabled=!!card;
+  document.getElementById('note-title').value=card?.title||'';
+  document.getElementById('note-body').value=card?.body||'';
+  document.getElementById('note-url').value=card?.kind==='link'?card.src:'';
+  document.getElementById('note-heading').textContent=card?'Edit '+(card.kind==='link'?'link':'note'):'A new thought';
+  document.getElementById('save-note').textContent=card?'Save changes':'Add to workspace';
+  document.getElementById('note-error').textContent='';document.getElementById('note-copy').hidden=true;
+  updateNoteKind();noteInitial=JSON.stringify(noteFields());noteDialog.showModal();document.getElementById('note-title').focus();
+}
+function newNote(){openNoteEditor();}
+function closeNote(){
+  if(noteSaving)return;
+  if(JSON.stringify(noteFields())!==noteInitial&&!confirm('Discard this unsaved draft?'))return;
+  noteDialog.close();
+}
+document.getElementById('note-kind').onchange=updateNoteKind;
 document.getElementById('add-note').onclick = newNote;
+document.getElementById('add-link').onclick = ()=>openNoteEditor(null,'link');
 document.getElementById('dock-note').onclick = newNote;
 document.getElementById('empty-note').onclick = newNote;
 document.getElementById('empty-partner').onclick = openPartner;
-document.getElementById('close-note').onclick = () => noteDialog.close();
-document.getElementById('note-form').onsubmit = async ev => {
-  ev.preventDefault();
-  const button = document.getElementById('save-note'); button.disabled = true;
-  document.getElementById('note-error').textContent = '';
+document.getElementById('edit-content').onclick=()=>{const card=selectedCard();if(card&&['card','link'].includes(card.kind))openNoteEditor(card);};
+document.getElementById('close-note').onclick = closeNote;
+noteDialog.addEventListener('cancel',ev=>{ev.preventDefault();closeNote();});
+async function saveNote(copy=false){
+  if(noteSaving||!document.getElementById('note-form').reportValidity())return;
+  const draft=noteFields();const editing=copy?null:noteEditing;
+  noteSaving=true;
+  const controls=[...document.querySelectorAll('#note-form input,#note-form textarea,#note-form select,#note-form button')];
+  controls.forEach(el=>el.disabled=true);document.getElementById('note-error').textContent='';
   try {
-    await workspaceAction('note', {title: document.getElementById('note-title').value, body: document.getElementById('note-body').value});
-    noteDialog.close(); ev.target.reset();
-  } catch (error) { document.getElementById('note-error').textContent = error.message; }
-  finally { button.disabled = false; }
-};
+    await workspaceAction(editing?'edit_content':draft.kind==='link'?'link':'note',
+      {...draft,...(editing?{id:editing.id,expected_revision:editing.revision}:{})});
+    noteInitial=JSON.stringify(draft);noteDialog.close();document.getElementById('note-form').reset();
+    toast(editing?'Changes saved':'Added to workspace');
+  } catch (error) {
+    document.getElementById('note-error').textContent=error.message;
+    document.getElementById('note-copy').hidden=!editing;
+  } finally {noteSaving=false;controls.forEach(el=>el.disabled=false);document.getElementById('note-kind').disabled=!!noteEditing;}
+}
+document.getElementById('note-form').onsubmit=ev=>{ev.preventDefault();saveNote();};
+document.getElementById('note-copy').onclick=()=>saveNote(true);
+addEventListener('beforeunload',ev=>{if(noteDialog.open&&(noteSaving||JSON.stringify(noteFields())!==noteInitial)){ev.preventDefault();ev.returnValue='';}});
+function safeWebLink(src){
+  try{const url=new URL(src);return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password?url:null;}catch(_){return null;}
+}
 let objectListKey = '';
 function updateWorkspace(msg) {
   workspaceConnected = true;
@@ -512,6 +555,9 @@ function updateWorkspace(msg) {
   document.getElementById('object-count').textContent = String(workspaceCards.length);
   document.getElementById('selection-tools').hidden = !selectedId;
   const sel = selectedCard();
+  const edit=document.getElementById('edit-content');edit.hidden=!['card','link'].includes(sel?.kind);edit.textContent=sel?.kind==='link'?'Edit link':'Edit note';
+  const open=document.getElementById('open-link'),url=sel?.kind==='link'?safeWebLink(sel.src):null;
+  open.hidden=!url;if(url){open.href=url.href;open.textContent='Open '+url.hostname+' ↗';}else open.removeAttribute('href');
   document.getElementById('parts-toggle').hidden = sel?.kind !== 'model';
   document.getElementById('parts-toggle').textContent = sel?.parts_mode ? 'Finish parts editing · P' : 'Edit model parts · P';
   for (const id of ['scale-down','scale-up','rotate-left','rotate-right']) document.getElementById(id).hidden = sel?.kind !== 'model';
@@ -523,7 +569,7 @@ function updateWorkspace(msg) {
     for (const c of workspaceCards) {
       const button = document.createElement('button'); button.className = 'object-item';
       button.setAttribute('aria-pressed', String(c.id === selectedId));
-      const icon = document.createElement('span'); icon.className = 'object-icon'; icon.textContent = c.kind === 'model' ? '◇' : '▤';
+      const icon = document.createElement('span'); icon.className = 'object-icon'; icon.textContent = c.kind === 'model' ? '◇' : c.kind === 'link' ? '↗' : '▤';
       const title = document.createElement('span'); title.textContent = c.title;
       button.append(icon, title); button.onclick = () => selectObject(c.id); list.append(button);
     }
@@ -758,7 +804,8 @@ function renderCards(list) {
     // In parts mode the label says so, and names the part in your hand.
     const label = c.parts_mode ? `${c.title} · parts${c.part ? ' · ' + c.part.name : ''}` : c.title;
     if (h.textContent !== label) h.textContent = label;
-    if (p.textContent !== c.body) p.textContent = c.body || "";
+    const body=c.body||(c.kind==='link'?(safeWebLink(c.src)?.hostname||'Web link'):'');
+    if (p.textContent !== body) p.textContent = body;
     if (pointerDrag?.id !== c.id) aim(el, c.x * 100, Math.min(.91, c.y + (c.kind === 'model' ? .12 * c.scale : 0)) * 100);
     el.classList.toggle("held", !!c.held);
     el.classList.toggle('model-label', c.kind === 'model');

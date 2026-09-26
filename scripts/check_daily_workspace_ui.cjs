@@ -15,6 +15,7 @@ function open(stored) {
   w.localStorage.setItem('apex_token', 't');
   if (stored) w.localStorage.setItem('apex.board.hud', stored);
   w.requestAnimationFrame = () => 0;
+  w.confirm = () => true;
   const posts = [];
   w.fetch = async (url, opts = {}) => {
     if (url === '/api/board/calibrate') { posts.push(JSON.parse(opts.body)); return Response.json({phase: 'ready'}); }
@@ -47,7 +48,7 @@ function open(stored) {
     }
     return Response.json({files: []});
   };
-  const note = {id:'n',kind:'card',title:'<script>unsafe</script>',body:'Actual note',x:.5,y:.5,scale:1,rot:0};
+  const note = {id:'n',kind:'card',title:'<script>unsafe</script>',body:'Actual note',x:.5,y:.5,scale:1,rot:0,content_revision:'original'};
   frame({cards:[note],selection:note});
   assert.equal(d.querySelector('#object-list .object-item span:last-child').textContent, note.title);
   assert.equal(d.querySelector('#object-list script'), null);
@@ -80,6 +81,37 @@ function open(stored) {
   assert.match($('note-error').textContent,/Storage unavailable/);
   assert.equal($('save-note').disabled,false);
   $('close-note').click();
-  console.log('PASS: workspace selection, safe titles, pause, preferences, undo/redo, one-commit drag, cancelled drag, note error recovery.');
+  $('edit-content').click();assert.equal($('note-title').value,note.title);
+  assert.equal($('note-kind').disabled,true);
+  $('note-title').value='My edited draft';
+  w.fetch=async(url,opts)=>{
+    const body=JSON.parse(opts.body);requests.push({url,body});
+    if(body.action==='edit_content')return new Response(JSON.stringify({detail:'Changed in another window'}),{status:409});
+    return Response.json({card:{...note,...body}});
+  };
+  // Incoming updates must not overwrite the open draft or its expected revision.
+  const changed={...note,title:'Someone else',content_revision:'new'};
+  frame({cards:[changed],selection:changed});
+  $('note-form').dispatchEvent(new w.Event('submit',{cancelable:true,bubbles:true}));await tick();
+  assert.equal(requests.at(-1).body.expected_revision,'original');
+  assert.equal($('note-dialog').open,true);assert.equal($('note-title').value,'My edited draft');
+  assert.equal($('note-copy').hidden,false);
+  $('note-copy').click();await tick();assert.equal(requests.at(-1).body.action,'note');
+  assert.equal(requests.at(-1).body.id,undefined);assert.equal($('note-dialog').open,false);
+  const link={...note,id:'link',kind:'link',title:'Reference',src:'https://example.com/project'};
+  frame({cards:[link],selection:link});assert.equal($('open-link').href,link.src);
+  assert.equal($('open-link').target,'_blank');assert.match($('open-link').rel,/noopener/);
+  frame({cards:[{...link,src:'javascript:alert(1)'}],selection:link});
+  assert.equal($('open-link').hidden,true);assert.equal($('open-link').hasAttribute('href'),false);
+  $('add-link').click();assert.equal($('note-kind').value,'link');assert.equal($('note-url-label').hidden,false);
+  $('note-title').value='Docs';$('note-url').value='https://example.com';
+  let complete;
+  w.fetch=(url,opts)=>new Promise(resolve=>{requests.push({url,body:JSON.parse(opts.body)});complete=resolve;});
+  $('note-form').dispatchEvent(new w.Event('submit',{cancelable:true,bubbles:true}));await tick();
+  assert.equal($('note-title').disabled,true);$('close-note').click();assert.equal($('note-dialog').open,true);
+  complete(Response.json({card:link}));await tick();
+  assert.equal($('note-dialog').open,false);assert.equal($('note-title').disabled,false);
+  assert.equal(requests.at(-1).body.action,'link');
+  console.log('PASS: workspace controls, edit conflicts preserve drafts, save a copy, safe links, pending-save guards and creation error recovery.');
   w.close();process.exit(0);
 })().catch(e=>{console.error(e);process.exit(1);});

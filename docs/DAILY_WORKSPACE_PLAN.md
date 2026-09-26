@@ -32,6 +32,12 @@ recoverable actions and continuity matter more than decorative effects.
    is verified locally. General named workspaces, project-linked files/notes/links,
    resumable layouts, version history and explicit save/error feedback. Test
    restart, backup and restore on both laptop and cloud.
+   Board notes can now be edited, and web reference links can be created,
+   edited and reopened explicitly. Both use board storage and content undo/redo.
+   Content fingerprints reject stale editor saves while allowing independent
+   position changes. A conflict preserves the draft and offers a new copy;
+   explicit content saves report storage errors. This does not add general
+   named workspaces or cloud/laptop synchronization.
 4. **Daily work integration.** Existing applications remain usable. Start with
    supported links/files and explicit screen-sharing context; evaluate a native
    companion/overlay for Windows. A browser cannot embed/control arbitrary
@@ -74,5 +80,29 @@ Targeted Python checks: `python -m pytest tests/test_daily_workspace.py
  tests/test_board_tap.py tests/test_handtrack.py -q` (run as one command).
 UI checks: `node scripts/check_daily_workspace_ui.cjs` and existing board
 HUD/parts/voice/companion/drive checks; jsdom must be available on NODE_PATH.
+
+The optional `node scripts/check_workspace_browser.cjs` checks the real server
+and browser with an isolated database: note editing, content undo/redo, a second
+writer's conflict, copying a preserved draft, safe link controls, process restart
+and mobile creation. It uses the same Playwright/Chromium and Python runtime
+overrides as `scripts/check_study_browser.cjs`.
+
+### Notes and references
+
+Choose **New note** or **Add a link**. On a narrow screen use the **+** dock button
+and select the item type. Select an existing note/link and use **Edit note/link**.
+Links require an HTTP/HTTPS address without credentials and open in a separate
+tab only through the visible **Open** control. Saving, selecting or moving one
+does not fetch or embed its contents. Notes are plain text (80-character titles,
+600-character bodies); web addresses may contain up to 2048 characters.
+
+Save is explicit. The editor keeps failed drafts, guards closing with unsaved
+changes, and disables editing while a save is pending. If content changed in
+another window, reopen the current item or choose **Save draft as a new item**.
+The editor never silently replaces newer content. Undo history is process-local
+and shared by this board; saved content uses the host's existing SQLite database.
+New text/link items refuse a full board instead of evicting an older item.
+Legacy tracker writes and history persistence remain best-effort; strict storage
+error handling here applies to explicit note/link saves.
 
 Release gate tracking: [FIRST_RELEASE_CHECKLIST.md](FIRST_RELEASE_CHECKLIST.md).
