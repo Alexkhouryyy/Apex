@@ -105,7 +105,10 @@ async def select_object(request: Request):
         body = json.loads(raw)
         if not isinstance(body, dict) or (body.get("id") is not None and not isinstance(body["id"], str)):
             raise ValueError("Expected an object identifier.")
-        return {"selection": get_board().select(body.get("id"))}
+        from agent import board_workspaces
+        board = get_board()
+        board_workspaces.check_context(board, body.get('workspace'))
+        return {"selection": board.select(body.get("id"))}
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -125,6 +128,7 @@ async def workspace_action(request: Request):
     """Small, reversible workspace actions, protected by dashboard auth."""
     _check_origin(request)
     from agent.board import get_board, ContentConflict
+    from agent import board_workspaces
     try:
         raw = bytearray()
         async for chunk in request.stream():
@@ -135,6 +139,7 @@ async def workspace_action(request: Request):
         if not isinstance(body, dict):
             raise ValueError('Expected a JSON object.')
         board = get_board()
+        board_workspaces.check_context(board, body.get('workspace'))
         action = body.get("action")
         if action == "hands":
             if type(body.get("enabled")) is not bool:
@@ -159,7 +164,7 @@ async def workspace_action(request: Request):
             board.select(card['id'])
             return {'card': card}
         raise ValueError("Unknown workspace action.")
-    except ContentConflict as exc:
+    except (ContentConflict, board_workspaces.Conflict) as exc:
         raise HTTPException(409, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
@@ -176,7 +181,10 @@ async def parts_mode(request: Request):
         body = await _small_json(request)
         if body.get("id") is not None and not isinstance(body["id"], str):
             raise ValueError("Expected an object identifier.")
-        return {"parts_mode": get_board().set_parts_mode(body.get("id"))}
+        from agent import board_workspaces
+        board = get_board()
+        board_workspaces.check_context(board, body.get('workspace'))
+        return {"parts_mode": board.set_parts_mode(body.get("id"))}
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
