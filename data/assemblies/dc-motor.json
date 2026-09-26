@@ -1,0 +1,157 @@
+{
+  "id": "dc-motor",
+  "title": "Brushed DC motor",
+  "subtitle": "Permanent-magnet · component study",
+  "fidelity": "Educational illustration · not to scale",
+  "limitations": "Original simplified geometry. No manufacturer dimensions, exact winding layout, electrical simulation or fabrication data. Section view is an uncapped clipping plane; motion shows only which components rotate.",
+  "sources": [
+    {
+      "id": "construction",
+      "title": "Nidec: construction of a DC motor",
+      "url": "https://www.nidec.com/en/technology/motor/glossary/item/construction_of_a_dc_motor/"
+    },
+    {
+      "id": "commutator",
+      "title": "Nidec: commutator",
+      "url": "https://www.nidec.com/en/technology/motor/glossary/item/commutator/"
+    },
+    {
+      "id": "commutation",
+      "title": "Nidec: commutation",
+      "url": "https://www.nidec.com/en/technology/motor/glossary/item/commutation/"
+    },
+    {
+      "id": "brush",
+      "title": "Nidec: carbon brushes",
+      "url": "https://www.nidec.com/en/technology/motor/glossary/item/carbon_brush/"
+    }
+  ],
+  "parts": [
+    {
+      "id": "housing",
+      "name": "Housing / magnetic yoke",
+      "group": "Stator",
+      "purpose": "A stationary enclosure that also provides a return path for magnetic flux.",
+      "connection": "Forms the stator with the field magnets.",
+      "model_note": "Illustrated as an open metal sleeve so the internal layout can be explored.",
+      "source": "construction"
+    },
+    {
+      "id": "magnet-n",
+      "name": "Field magnet · N",
+      "group": "Stator",
+      "purpose": "Supplies one side of the stationary magnetic field.",
+      "connection": "Works with the opposing magnet and the current-carrying armature.",
+      "model_note": "Pole colours are teaching labels; real magnets are not colour-coded this way.",
+      "source": "construction"
+    },
+    {
+      "id": "magnet-s",
+      "name": "Field magnet · S",
+      "group": "Stator",
+      "purpose": "Provides the opposing magnetic pole.",
+      "connection": "Together the two magnets establish the field in which the armature turns.",
+      "model_note": "Magnet curvature and spacing are illustrative. No field strength is calculated.",
+      "source": "construction"
+    },
+    {
+      "id": "armature",
+      "name": "Armature core",
+      "group": "Rotor",
+      "purpose": "Supports the rotating winding.",
+      "connection": "The armature develops torque when current flows in its winding.",
+      "model_note": "Three simplified poles are shown; this is not a production lamination design.",
+      "source": "construction"
+    },
+    {
+      "id": "windings",
+      "name": "Armature windings",
+      "group": "Rotor",
+      "purpose": "Carry current through the rotating armature.",
+      "connection": "Connected through the commutator and brushes.",
+      "model_note": "Copper loops show location, not exact turns, insulation, slots or electrical connections.",
+      "source": "construction"
+    },
+    {
+      "id": "shaft",
+      "name": "Output shaft",
+      "group": "Rotor",
+      "purpose": "Transfers rotation to an external load.",
+      "connection": "Runs through the rotor and bearing supports.",
+      "model_note": "No coupling, tolerances or rated load are specified.",
+      "source": "construction"
+    },
+    {
+      "id": "commutator",
+      "name": "Segmented commutator",
+      "group": "Commutation",
+      "purpose": "A rotating mechanical switch made from insulated conductive segments. Brushes contact the segments as they pass.",
+      "connection": "Switches winding current with rotor position, keeping its timing and polarity appropriate for continued torque.",
+      "model_note": "Three copper segments and insulating gaps are represented. Wiring and switching timing are simplified.",
+      "source": "commutator"
+    },
+    {
+      "id": "brush-positive",
+      "name": "Brush · supply side",
+      "group": "Commutation",
+      "purpose": "A stationary sliding electrical contact against the commutator. Graphite is one common brush material.",
+      "connection": "Brings supply current into the rotating circuit through a contacted segment.",
+      "model_note": "The brush block and holder are schematic; spring pressure and contact behaviour are not simulated.",
+      "source": "brush"
+    },
+    {
+      "id": "brush-negative",
+      "name": "Brush · return side",
+      "group": "Commutation",
+      "purpose": "The opposing sliding contact completes the electrical path through the armature circuit.",
+      "connection": "Maintains contact while successive commutator segments rotate past it.",
+      "model_note": "The supply/return labels assume one chosen polarity. Reversing the supply changes those labels.",
+      "source": "brush"
+    },
+    {
+      "id": "front-bearing",
+      "name": "Front bearing",
+      "group": "Supports",
+      "purpose": "Supports the rotating shaft at the output end.",
+      "connection": "Seated within the front cover.",
+      "model_note": "Balls and rings are visual teaching geometry, not a specified bearing.",
+      "source": "construction"
+    },
+    {
+      "id": "rear-bearing",
+      "name": "Rear bearing",
+      "group": "Supports",
+      "purpose": "Supports the shaft at the commutator end.",
+      "connection": "Seated within the rear cover.",
+      "model_note": "Exploded positions reveal assembly relationships; they are not a service procedure.",
+      "source": "construction"
+    },
+    {
+      "id": "front-cover",
+      "name": "Front cover",
+      "group": "Supports",
+      "purpose": "Closes the output end of the housing.",
+      "connection": "Holds the front bearing in the illustrated assembly.",
+      "model_note": "Mounting hardware and fits are omitted.",
+      "source": "construction"
+    },
+    {
+      "id": "rear-cover",
+      "name": "Rear cover / brush support",
+      "group": "Supports",
+      "purpose": "Closes the commutator end.",
+      "connection": "Supports the rear bearing and brush arrangement.",
+      "model_note": "Insulating structures and fasteners are simplified.",
+      "source": "construction"
+    },
+    {
+      "id": "terminals",
+      "name": "Supply terminals",
+      "group": "Commutation",
+      "purpose": "Provide the external connection to the brush circuit.",
+      "connection": "The brush and commutator system switches current through the rotating winding as the rotor moves.",
+      "model_note": "The model does not specify a voltage, current limit or wiring procedure.",
+      "source": "commutation"
+    }
+  ]
+}

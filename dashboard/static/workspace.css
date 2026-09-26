@@ -101,3 +101,5 @@ kbd{font:10px inherit;border:1px solid #acc7d02a;padding:1px 4px;border-radius:3
   #parts-toggle,#center-object{width:auto;padding:7px;margin-right:6px}
   #workspace-dock button{padding:10px 9px}
 }
+
+@media(max-width:700px){.header-actions{flex-wrap:wrap;gap:0}#board-bar{height:144px}#board-bar button{font-size:11px;padding:6px 7px}#hud,#partner-panel{top:156px}}

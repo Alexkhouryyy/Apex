@@ -13,7 +13,13 @@ recoverable actions and continuity matter more than decorative effects.
    voice/parts/calibration/export capabilities. UI preferences persist locally;
    content uses the existing board database. A Railway volume is still required
    for durable cloud storage. This is a browser workspace, not a desktop overlay.
-2. **Dependable spatial manipulation.** Tune against Alex's recorded gestures;
+2. **Explorable assemblies and dependable spatial manipulation.** The first
+   [motor study](ASSEMBLY_STUDY.md) is implemented on this branch: a separate
+   mouse/touch 3D view, 14 component groups, reversible exploded views,
+   sourced explanations and selected-part companion context. It is educational
+   geometry, not arbitrary detailed model generation. Next add validated CAD
+   assets with assembly metadata and connect hand picking to the 3D camera.
+   Tune against Alex's recorded gestures;
    measure false grabs, target selection, release success and perceived delay.
    Add visible hover/armed/grabbed states and resolve input ownership. Implement
    camera orbit, depth, axis constraints and physical versus view transforms

@@ -6,8 +6,9 @@ const {JSDOM} = require('jsdom');
 const fs = require('fs'), path = require('path'), assert = require('node:assert/strict');
 const base = path.join(__dirname, '..', 'dashboard', 'static') + path.sep;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const study = process.argv.includes('--assembly');
 const dom = new JSDOM(fs.readFileSync(base + 'companion.html', 'utf8'),
-  {url: 'http://localhost:7860/companion?workspace=board', runScripts: 'outside-only'});
+  {url: 'http://localhost:7860/companion?' + (study ? 'workspace=assembly&study_session=test-session' : 'workspace=board'), runScripts: 'outside-only'});
 const w = dom.window, $ = id => w.document.getElementById(id);
 w.TextDecoder = TextDecoder;
 w.localStorage.setItem('apex_token', 'tok');
@@ -51,7 +52,21 @@ const root = $('companion');
 (async () => {
   await sleep(80);
   assert.ok(posted.some(m => m.apex === 'ready'), 'the companion must tell the board it is ready');
-  assert.equal(root.dataset.workspace, 'board');
+  assert.equal(root.dataset.workspace, study ? 'assembly' : 'board');
+  if (study) {
+    fromBoard({apex: 'study-ask'}, w);
+    fromBoard({apex: 'study-ask'}, board, 'https://evil.example');
+    await sleep(50);
+    assert.equal(chats.length, 0, 'untrusted senders cannot ask about the study');
+    fromBoard({apex: 'study-ask'});
+    for (let i = 0; i < 100 && !chats.length; i++) await sleep(10);
+    assert.equal(chats.length, 1);
+    assert.equal(chats[0].workspace, 'assembly');
+    assert.equal(chats[0].study_session, 'test-session');
+    assert.match(chats[0].message, /selected motor component/);
+    console.log('PASS: trusted study question carries the assembly session to the server.');
+    w.close(); process.exit(0);
+  }
 
   // 1. Only its own board, same origin, can turn voice on.
   fromBoard({apex: 'voice', on: true}, w);

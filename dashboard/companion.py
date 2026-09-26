@@ -45,8 +45,17 @@ async def submit_job(request: Request):
 
 
 def workspace_message(body, message):
-    if body.get("workspace") not in (None, "board"):
+    if body.get("workspace") not in (None, "board", "assembly"):
         raise ValueError("Unknown workspace.")
+    if body.get("workspace") == "assembly":
+        from agent.assembly import context
+        study = context(body.get("study_session"))
+        return message + "\n\n[Assembly study at send time: " + json.dumps(study) + (
+            "]\nUse assembly_study with this exact session_id for view commands. "
+            "Explain the selected component and its connections. Distinguish verified motor principles "
+            "from this simplified illustration. Cite provided sources for sourced claims; do not invent "
+            "dimensions, exact winding geometry, performance values, or simulation results. "
+            "If no component is selected, ask which part or use the component list.")
     if body.get("workspace") == "board":
         from agent.board import get_board
         board = get_board()
@@ -319,7 +328,7 @@ async def companion_chat(request: Request, durable: bool = False):
         raise HTTPException(400, str(exc)) from exc
 
     fingerprint = hashlib.sha256(json.dumps({k: body.get(k) for k in
-        ("message", "mode", "thread_id", "workspace")}, sort_keys=True).encode()).hexdigest()
+        ("message", "mode", "thread_id", "workspace", "study_session")}, sort_keys=True).encode()).hexdigest()
     if durable:
         previous = jobs.get(turn_id)
         if previous:

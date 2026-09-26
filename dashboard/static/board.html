@@ -214,7 +214,7 @@
 </div>
 <header id="board-bar">
   <a class="brand" href="/" aria-label="Apex dashboard"><span class="brand-mark">A</span>APEX<span class="brand-divider">/</span><span class="brand-sub">Workspace</span></a>
-  <div class="header-actions"><button id="hands-toggle" aria-pressed="true" title="Pause hand actions on this Apex instance; camera stays running">Hands on</button><button id="camera-toggle" aria-pressed="false" title="Show or hide the camera background; this does not stop the camera">Camera view</button><button id="focus-toggle" aria-pressed="false" title="Hide workspace panels (F)">Focus</button><button id="hud-toggle" aria-pressed="false" title="Hand setup and instructions (H)">Hand setup</button></div>
+  <div class="header-actions"><button id="open-study">Motor study ↗</button><button id="hands-toggle" aria-pressed="true" title="Pause hand actions on this Apex instance; camera stays running">Hands on</button><button id="camera-toggle" aria-pressed="false" title="Show or hide the camera background; this does not stop the camera">Camera view</button><button id="focus-toggle" aria-pressed="false" title="Hide workspace panels (F)">Focus</button><button id="hud-toggle" aria-pressed="false" title="Hand setup and instructions (H)">Hand setup</button></div>
 </header>
 <aside id="objects-panel" class="workspace-panel" aria-label="Workspace objects">
   <div class="panel-heading"><span>IN THIS SPACE</span><span id="object-count">0</span></div>
@@ -420,6 +420,16 @@ addEventListener('message', ev => {
     document.getElementById('voice-toggle').setAttribute('aria-pressed', String(voiceOn));
   }
 });
+
+// Study uses a separate 3D camera; pause board gestures before leaving so
+// invisible board objects cannot keep moving while the user studies a motor.
+async function openStudy(sessionId = null) {
+  try {
+    await api('/api/board/workspace', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'hands', enabled:false})});
+    location.assign('/study' + (sessionId ? '?session=' + encodeURIComponent(sessionId) : ''));
+  } catch (error) { toast(error.message, 5000); }
+}
+document.getElementById('open-study').onclick = () => openStudy();
 
 // Daily workspace: presentation preferences are local; edits use the board's
 // authenticated, undoable operations. No simulated saved state or AI replies.
@@ -711,7 +721,8 @@ document.getElementById('calib-action').onclick = ev => {
 
 function handleBoardEvents(events) {
   for (const ev of events || []) {
-    if (ev.type === "thrown") toast(`Threw away ${ev.title} — say "undo" to bring it back`);
+    if (ev.type === "study_open" && !document.hidden) openStudy(ev.session_id);
+    else if (ev.type === "thrown") toast(`Threw away ${ev.title} — say "undo" to bring it back`);
     // Swipe up, pinch-and-hold or a wave: start talking. Swipe down: she
     // stops speaking and goes on listening.
     else if (ev.type === "summon" || ev.type === "listen") voiceFromGesture();
