@@ -3,6 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {setupStudyProjects} from './study-projects.js';
 import {StudyHandController} from './study-hands.js';
+import {setupStudyDiagnostics} from './study-diagnostics.js';
 const $ = id => document.getElementById(id);
 let token = '';
 try { token = localStorage.getItem('apex_token') || ''; } catch (_) {}
@@ -15,6 +16,7 @@ const handOwner=crypto.randomUUID();
 const groups = new Map(), pickables = [], raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
 const clipping = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const diagnostics=setupStudyDiagnostics({model:()=>manifest?.id,beforeStart:()=>{hands.reset('Recording started · hover again');cancelManipulation();}});
 // Round insignificant OrbitControls drift out of the unsaved-change indicator.
 const coordinates = vector => vector.toArray().map(n=>Math.round(n*1e5)/1e5);
 const notebook = setupStudyProjects({
@@ -52,8 +54,8 @@ async function api(path, options = {}) {
 function command(action, extra = {}) {
   if(action!=='transform'){hands.reset('View changed · hover again');cancelManipulation();}
   busy = busy.catch(() => {}).then(async () => {
-    try { accept(await api('/api/study/session/' + session, {method:'POST',body:JSON.stringify({action,...extra})})); status('View updated · original geometry preserved'); }
-    catch (error) { status(error.message); targetAmount = current?.explosion || 0; $('separation').value = String(targetAmount * 100); }
+    try { accept(await api('/api/study/session/' + session, {method:'POST',body:JSON.stringify({action,...extra})})); status('View updated · original geometry preserved'); return true; }
+    catch (error) { status(error.message); targetAmount = current?.explosion || 0; $('separation').value = String(targetAmount * 100); return false; }
   });
   return busy;
 }
@@ -152,6 +154,7 @@ async function initScene(prefetched = null) {
   });
   let before=0;
   function draw(now){
+    diagnostics.metrics.frame(now,!document.hidden);
     if(document.hidden){before=now;requestAnimationFrame(draw);return;}
     const dt=Math.min(.05,(now-before)/1000||0);before=now;
     amount=reducedMotion.matches?targetAmount:THREE.MathUtils.damp(amount,targetAmount,7,dt);
@@ -224,7 +227,7 @@ async function loadModel(id){
     if(data.parts.some(p=>!ids.has(p.node)))throw new Error('Source geometry does not match its component list.');
   }
   if(scene){for(const group of groups.values()){group.traverse(o=>{if(o.isMesh){o.geometry.dispose();o.material.dispose();}});scene.remove(group);}groups.clear();pickables.length=0;}
-  manifest=data;rotorAngle=0;
+  diagnostics.stop();manifest=data;rotorAngle=0;
   if(!renderer)await initScene(prefetched);else await buildLoadedModel(prefetched);
   document.querySelector('h1').textContent=manifest.title;document.querySelector('.view-title p').textContent=manifest.subtitle;$('model-choice').value=manifest.id;
   $('part-count').textContent=String(manifest.parts.length);$('limitations').textContent=manifest.limitations;
@@ -287,17 +290,21 @@ function moveManipulation(h){
   }
 }
 function cancelManipulation(reason){
+  if(manipulation?.input==='hand'&&!manipulation.committing)diagnostics.metrics.event('cancelled',manipulation.recording);
   if(manipulation&&orbit){orbit.enabled=true;orbit.enableDamping=manipulation.damping;}
   manipulation=null;if(reason)status(reason);
 }
 async function commitManipulation(){
   const m=manipulation;if(!m)return;m.committing=true;
-  if(m.mode==='select'){cancelManipulation();await command('select',{part:m.part});return;}
-  try{await command('transform',{part:m.part,transform:m.value,expected_revision:m.revision});}finally{cancelManipulation();}
+  try{
+    if(m.mode==='select')cancelManipulation();
+    const applied=await (m.mode==='select'?command('select',{part:m.part}):command('transform',{part:m.part,transform:m.value,expected_revision:m.revision}));
+    if(m.input==='hand')diagnostics.metrics.event(applied?'applied':'failed',m.recording);
+  }finally{cancelManipulation();}
 }
 const hands=new StudyHandController({
   hit:(x,y)=>pick(x,y)?.object.userData.part,
-  begin:beginManipulation,move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
+  begin:(h,part)=>{const ok=beginManipulation(h,part);if(ok){manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
   paint:(h,label)=>{const dot=$('hand-cursor');dot.hidden=!h;if(h){dot.style.left=h.x*100+'%';dot.style.top=h.y*100+'%';}$('hand-status').textContent=handEnabled?label:'';}
 });
 function pauseHands(reason='Hands paused'){
@@ -315,11 +322,14 @@ async function enableHands(){
     async function sample(){
       if(!handEnabled||epoch!==handEpoch)return;
       try{
+        const requestStarted=performance.now();
         const data=await api('/api/study/session/'+session+'/hands',{method:'POST',body:JSON.stringify({action:'sample',owner:handOwner}),signal:AbortSignal.timeout(1000)});
         if(!handEnabled||epoch!==handEpoch)return;
-        if(document.hidden||document.querySelector('dialog[open]')||!$('study-partner').hidden||/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)||performance.now()<mouseUntil)hands.reset('Hands waiting · finish the current input');
+        const blocked=!!(document.hidden||document.querySelector('dialog[open]')||!$('study-partner').hidden||/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)||performance.now()<mouseUntil);
+        diagnostics.metrics.sample(data,performance.now()-requestStarted,blocked);
+        if(blocked)hands.reset('Hands waiting · finish the current input');
         else hands.feed(data,performance.now());
-      }catch(e){pauseHands();status('Hand connection stopped. '+e.message);return;}
+      }catch(e){diagnostics.metrics.event('connection_errors');pauseHands();status('Hand connection stopped. '+e.message);return;}
       handTimer=setTimeout(sample,70);
     }sample();
   }catch(e){status(e.message);}
@@ -340,7 +350,7 @@ $('model').addEventListener('pointerup',e=>{if(mouseDrag===e.pointerId){mouseDra
 $('model').addEventListener('pointercancel',()=>{mouseDrag=null;cancelManipulation('Movement cancelled');});
 addEventListener('blur',()=>{pauseHands();mouseDrag=null;cancelManipulation();});
 addEventListener('pagehide',()=>pauseHands());
-addEventListener('visibilitychange',()=>{if(document.hidden)pauseHands();});
+addEventListener('visibilitychange',()=>{if(document.hidden){diagnostics.metrics.frame(performance.now(),false);pauseHands();}});
 addEventListener('keydown',e=>{if(e.key==='Escape'){hands.reset('Movement cancelled');mouseDrag=null;cancelManipulation('Movement cancelled');}});
 
 async function buildLoadedModel(prefetched = null){
