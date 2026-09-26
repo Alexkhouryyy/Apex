@@ -23,3 +23,13 @@
 #hand-cursor[data-state="ready"]{border-color:#e5fff9;box-shadow:0 0 0 6px #9be3d733,0 0 22px #8ee5d588}#hand-cursor[data-state="pinched"]{background:#a1e3d766}
 #hand-status{max-width:calc(100% - 56px);line-height:1.5}#hand-setup a{display:inline-block;margin:8px 0;color:var(--accent)}#finger-guide-toggle{width:100%;margin-top:8px}
 @media(max-width:700px){#camera-mirror{top:80px;right:10px;width:140px}header{height:auto;min-height:102px}#hand-status{left:18px;max-width:calc(100% - 36px)}}
+
+/* Reachable controls stay inside the hand-controlled viewport. */
+#hand-mode-bar{position:absolute;bottom:92px;left:50%;transform:translateX(-50%);display:flex;gap:4px;padding:5px;border:1px solid #9ecbd53a;border-radius:11px;background:#0c1d25f2;max-width:calc(100% - 20px);z-index:2}
+#hand-mode-bar button{font-size:11px;min-width:46px;padding:9px 10px;background:linear-gradient(to right,#37645d var(--dwell,0%),#14232b var(--dwell,0%));}
+#hand-mode-bar button[aria-pressed=true]{border-color:#9ae4d8;color:#e2fff6}
+#hand-setup label{display:block;margin-top:12px}#hand-reach{width:100%;margin:6px 0 10px;padding:8px;border:1px solid var(--line);border-radius:7px;background:#14232b;color:#c9e1e5}#hand-center,#hand-reach-reset{font-size:10px;padding:7px}
+@media(max-width:1050px){#hand-mode-bar{flex-wrap:wrap;width:188px;justify-content:center}#hand-mode-bar button{flex:1}}
+@media(max-width:700px){#hand-mode-bar{width:auto;flex-wrap:nowrap}#hand-mode-bar button{min-width:0;font-size:10px;padding:8px}}
+
+.mode-bar-hint{position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);white-space:nowrap;font-size:9px;color:#a3c9cc;pointer-events:none}

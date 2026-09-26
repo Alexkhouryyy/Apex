@@ -3,6 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {setupStudyProjects} from './study-projects.js';
 import {StudyHandController} from './study-hands.js';
+import {setupStudyComfort} from './study-comfort.js';
 import {setupStudyMirror} from './study-mirror.js';
 import {setupStudyDiagnostics} from './study-diagnostics.js';
 const $ = id => document.getElementById(id);
@@ -241,7 +242,7 @@ $('search').oninput=renderList;
 $('explode').onclick=()=>command('explode');$('assemble').onclick=()=>command('assemble');
 $('section').onclick=()=>command('section');$('rotate').onclick=()=>command('rotate');
 $('isolate').onclick=()=>command('isolate');$('hide-part').onclick=()=>command('hide');$('show-all').onclick=()=>command('show_all');
-$('undo').onclick=()=>command('undo');$('redo').onclick=()=>command('redo');$('reset-camera').onclick=()=>{if(orbit)fitCamera();};
+$('undo').onclick=()=>command('undo');$('redo').onclick=()=>command('redo');$('reset-camera').onclick=()=>{hands.reset('View reset · hover again');cancelManipulation();if(orbit)fitCamera();};
 $('separation').oninput=e=>{targetAmount=Number(e.target.value)/100;$('separation-value').textContent=e.target.value+'%';};
 $('separation').onchange=e=>command('explode',{amount:Number(e.target.value)/100});
 let partnerReady=false, askPending=false;
@@ -288,8 +289,14 @@ function pickHand(x,y,preferred=null){
 }
 function beginManipulation(h,part,input='mouse'){
   if(!current||manipulation||current.rotating||cameraTween||Math.abs(amount-targetAmount)>.02){status('Wait for motion to stop before moving a component.');return false;}
-  const hit=input==='hand'?pickHand(h.x,h.y,part):pick(h.x,h.y);if(!hit||hit.object.userData.part!==part)return false;
   const mode=$('interaction').value;
+  if(mode==='orbit'||mode==='zoom'){
+    const damping=orbit.enableDamping;orbit.enableDamping=false;orbit.update();orbit.enabled=false;
+    manipulation={mode,view:true,revision:current.revision,start:{...h},position:camera.position.clone(),target:orbit.target.clone(),damping,
+      spherical:new THREE.Spherical().setFromVector3(camera.position.clone().sub(orbit.target))};
+    return true;
+  }
+  const hit=input==='hand'?pickHand(h.x,h.y,part):pick(h.x,h.y);if(!hit||hit.object.userData.part!==part)return false;
   const value=JSON.parse(JSON.stringify(current.transforms?.[part]||{position:[0,0,0],rotation:[0,0,0]}));
   manipulation={part,mode,revision:current.revision,start:{...h},base:JSON.parse(JSON.stringify(value)),value,
     plane:new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()),hit.point),point:hit.point.clone(),damping:orbit.enableDamping};
@@ -301,7 +308,12 @@ function beginManipulation(h,part,input='mouse'){
 }
 function moveManipulation(h){
   const m=manipulation;if(!m||m.committing)return;
-  if(m.mode==='move'){
+  if(m.view){
+    const sphere=m.spherical.clone();
+    if(m.mode==='orbit'){sphere.theta-=(h.x-m.start.x)*Math.PI*2;sphere.phi-=(h.y-m.start.y)*Math.PI;sphere.makeSafe();}
+    else sphere.radius=Math.max(orbit.minDistance,Math.min(orbit.maxDistance,sphere.radius*Math.exp((h.y-m.start.y)*3)));
+    camera.position.copy(m.target).add(new THREE.Vector3().setFromSpherical(sphere));orbit.update();
+  }else if(m.mode==='move'){
     raycaster.setFromCamera(new THREE.Vector2(h.x*2-1,1-h.y*2),camera);
     const p=raycaster.ray.intersectPlane(m.plane,new THREE.Vector3());
     if(p)m.value.position=new THREE.Vector3(...m.base.position).add(p.sub(m.point)).toArray().map(n=>Math.max(-20,Math.min(20,n)));
@@ -314,12 +326,14 @@ function moveManipulation(h){
 }
 function cancelManipulation(reason){
   if(manipulation?.input==='hand'&&!manipulation.committing)diagnostics.metrics.event('cancelled',manipulation.recording);
+  if(manipulation?.view&&!manipulation.committing){camera.position.copy(manipulation.position);orbit.target.copy(manipulation.target);orbit.update();}
   if(manipulation&&orbit){orbit.enabled=true;orbit.enableDamping=manipulation.damping;}
   manipulation=null;if(reason)status(reason);
 }
 async function commitManipulation(){
   const m=manipulation;if(!m)return;m.committing=true;
   try{
+    if(m.view){if(m.input==='hand')diagnostics.metrics.event('applied',m.recording);status('View adjusted · component positions unchanged');return;}
     if(m.mode==='select')cancelManipulation();
     const applied=await (m.mode==='select'?command('select',{part:m.part}):command('transform',{part:m.part,transform:m.value,expected_revision:m.revision}));
     if(m.input==='hand')diagnostics.metrics.event(applied?'applied':'failed',m.recording);
@@ -337,7 +351,8 @@ function paintFingers(h){
 }
 $('finger-guide-toggle').onclick=()=>{fingerGuide=!fingerGuide;$('finger-guide-toggle').textContent=fingerGuide?'Hide finger guide':'Show finger guide';$('finger-guide-toggle').setAttribute('aria-pressed',String(fingerGuide));if(!fingerGuide)$('finger-guide').hidden=true;};
 const hands=new StudyHandController({
-  hit:(x,y,preferred)=>pickHand(x,y,preferred)?.object.userData.part,
+  route:(h,now)=>comfort.route(h,now),
+  hit:(x,y,preferred)=>['orbit','zoom'].includes($('interaction').value)?'@view':pickHand(x,y,preferred)?.object.userData.part,
   begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
   paint:(h,label,target={})=>{
     const dot=$('hand-cursor');dot.hidden=!h;
@@ -347,7 +362,14 @@ const hands=new StudyHandController({
     paintFingers(h);
   }
 });
+const comfort=setupStudyComfort({enabled:()=>handEnabled,reset:reason=>{hands.reset(reason);cancelManipulation();},paint:(h,label)=>hands.cb.paint(h,label),setMode});
+function setMode(mode){
+  hands.reset('Mode changed · hover again');cancelManipulation();$('interaction').value=mode;comfort.syncMode(mode);
+  hands.cb.paint(null,'Mode selected · hover open, then pinch');
+}
+function feedStudyHands(data,now){const mapped=comfort.prepare(data,now);if(mapped)hands.feed(mapped,now);}
 function pauseHands(reason='Hands paused'){
+  comfort.stop();
   const sid=session;const was=handEnabled;handEnabled=false;handEpoch++;clearTimeout(handTimer);hands.reset(reason);cancelManipulation();
   $('study-hands').textContent='Enable hands';$('study-hands').setAttribute('aria-pressed','false');
   if(was)api('/api/study/session/'+sid+'/hands',{method:'POST',body:JSON.stringify({action:'release',owner:handOwner}),keepalive:true}).catch(()=>{});
@@ -358,7 +380,7 @@ async function enableHands(){
   try{
     await api('/api/study/session/'+session+'/hands',{method:'POST',body:JSON.stringify({action:'claim',owner:handOwner}),signal:AbortSignal.timeout(2000)});
     if(epoch!==handEpoch)return;
-    handEnabled=true;$('study-hands').textContent='Pause hands';$('study-hands').setAttribute('aria-pressed','true');
+    handEnabled=true;comfort.show();$('study-hands').textContent='Pause hands';$('study-hands').setAttribute('aria-pressed','true');
     async function sample(){
       if(!handEnabled||epoch!==handEpoch)return;
       const requestStarted=performance.now();
@@ -367,8 +389,8 @@ async function enableHands(){
         if(!handEnabled||epoch!==handEpoch)return;
         const blocked=!!(document.hidden||document.querySelector('dialog[open]')||!$('study-partner').hidden||/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)||performance.now()<mouseUntil);
         diagnostics.metrics.sample(data,performance.now()-requestStarted,blocked);
-        if(blocked)hands.reset('Hands waiting · finish the current input');
-        else hands.feed({...data,age_ms:Number.isFinite(data.age_ms)?data.age_ms+(performance.now()-requestStarted):null},performance.now());
+        if(blocked){comfort.blocked();hands.reset('Hands waiting · finish the current input');}
+        else feedStudyHands({...data,age_ms:Number.isFinite(data.age_ms)?data.age_ms+(performance.now()-requestStarted):null},performance.now());
       }catch(e){
         // An old request may fail after pause/re-enable. It must not stop the
         // new controller or pollute its diagnostics.
@@ -383,13 +405,13 @@ async function enableHands(){
 }
 $('study-hands').onclick=()=>handEnabled?pauseHands():enableHands();
 $('reset-part').onclick=()=>command('reset_part');
-$('interaction').onchange=()=>{hands.reset('Mode changed · hover again');cancelManipulation();$('interaction').blur();};
+$('interaction').onchange=()=>{setMode($('interaction').value);$('interaction').blur();};
 let mouseDrag=null;
 function normalized(e){const r=$('model').getBoundingClientRect();return {x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height};}
 $('model').addEventListener('pointerdown',e=>{
   hands.reset('Mouse in use');mouseUntil=performance.now()+1000;
   if(e.button!==0||$('interaction').value==='select')return;
-  const h=normalized(e),part=pick(h.x,h.y)?.object.userData.part;
+  const h=normalized(e),part=['orbit','zoom'].includes($('interaction').value)?'@view':pick(h.x,h.y)?.object.userData.part;
   if(part&&beginManipulation(h,part)){mouseDrag=e.pointerId;$('model').setPointerCapture(e.pointerId);e.stopImmediatePropagation();e.preventDefault();}
 },true);
 $('model').addEventListener('pointermove',e=>{if(mouseDrag===e.pointerId){mouseUntil=performance.now()+1000;moveManipulation(normalized(e));}},true);
