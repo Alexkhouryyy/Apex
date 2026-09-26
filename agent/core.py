@@ -556,6 +556,31 @@ TOOLS = [
         },
     },
     {
+        "name": "assembly_study",
+        "description": (
+            "Open or control an educational 3D assembly study. Use action open when the user "
+            "wants to create/explore/take apart a motor for learning. Choose model dc-motor for "
+            "the simplified brushed DC illustration or openmotor-125 for published OpenMotor CAD. "
+            "The CAD has not had independent engineering review. Do not substitute these for a combustion "
+            "engine or another motor type. In a study use the session_id from the supplied assembly "
+            "context. explode separates parts; assemble restores them; select/hide/isolate use an "
+            "exact component id or name; show_all restores visibility; section toggles an uncapped "
+            "cutaway; rotate toggles illustrative rotor motion on an assembled model. "
+            "reset_part restores a moved component. No study provides electromagnetic simulation."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["open", "select", "explode", "assemble", "isolate", "hide", "show_all", "section", "rotate", "reset_part", "undo", "redo"]},
+                "model": {"type": "string", "enum": ["dc-motor", "openmotor-125"]},
+                "session_id": {"type": "string"},
+                "part": {"type": "string"},
+                "amount": {"type": "number", "description": "Explosion amount 0..1; default 1."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "board_build",
         "description": (
             "Build a 3D object out of parts and put it on Apex's glass board, "
@@ -2188,6 +2213,21 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             out = f"'{card.title}' is on the board — grab it with one hand, two to scale."
             _broadcast_live_event("board", out)
             return out
+
+        elif name == "assembly_study":
+            from agent import assembly
+            try:
+                action = inputs.get("action")
+                if action == "open":
+                    from agent.board import get_board
+                    s = assembly.create(inputs.get("model", "dc-motor"))
+                    get_board().emit("study_open", session_id=s["session_id"])
+                    return json.dumps({"url": "/study?session=" + s["session_id"],
+                                       "notice": "Motor study ready. The active board opens it; otherwise open this URL on the Apex host. " + assembly.model(s['model'])['fidelity']})
+                return json.dumps(assembly.apply(inputs.get("session_id"), action,
+                                                inputs.get("part"), inputs.get("amount")))
+            except (ValueError, TypeError) as exc:
+                return "Study action not applied: " + str(exc)
 
         elif name == "board_build":
             from agent import build3d as _b3

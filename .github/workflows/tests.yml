@@ -61,8 +61,12 @@ jobs:
           node scripts/check_build3d_glb.mjs
           node scripts/check_board_voice_ui.cjs
           node scripts/check_companion_in_board_ui.cjs
+          node scripts/check_companion_in_board_ui.cjs --assembly
+          node scripts/check_study_projects_ui.cjs
+          node scripts/check_study_hands.cjs
           node scripts/check_board_parts_ui.cjs
           node scripts/check_board_hud_ui.cjs
+          node scripts/check_daily_workspace_ui.cjs
           node scripts/check_relay_phone_ui.cjs
           node scripts/check_speech_queue.cjs
           node scripts/check_handsfree_ui.cjs

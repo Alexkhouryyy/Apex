@@ -122,6 +122,8 @@ app = FastAPI(title="Voice Agent Dashboard")
 
 from dashboard.companion import router as companion_router
 app.include_router(companion_router)
+from dashboard.study import router as study_router
+app.include_router(study_router)
 from dashboard.team import router as team_router
 app.include_router(team_router)
 
@@ -199,7 +201,7 @@ async def _auth(request: Request, call_next):
     # NOT exempt, so this must stay an exact match: `path.startswith("/board")`
     # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
-            or path == "/board" or path == "/companion" or path == "/drive"
+            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
     # Inbound webhooks can't present a bearer token, so they authenticate
@@ -2339,6 +2341,7 @@ async def ws_board(ws: WebSocket):
         while True:
             tracker = _ht.active_tracker()
             payload = {
+                "hands_enabled": board.hands_enabled,
                 "cards": board.cards(),
                 "selection": board.selection(),
                 "cursors": [],

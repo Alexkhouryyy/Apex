@@ -1,4 +1,4 @@
-// The instructions on /board: shown by default, H (or the button) hides them
+// Hand setup on /board: hidden by default, H (or the button) opens it
 // and the choice is remembered; the "now" line says what to do this second;
 // the pinch meter shows the number that decides a pinch; and the calibration
 // runs on screen, prompt by prompt. The board's own script with three.js
@@ -34,9 +34,11 @@ function open(stored) {
 }
 
 (async () => {
-  // 1. Shown by default; H hides it and it stays hidden next time.
+  // 1. Quiet by default; H opens it, and the choice survives reload.
   let {w, $, posts, frame} = open();
-  assert.equal($('hud').hidden, false, 'the instructions are in front of you by default');
+  assert.equal($('hud').hidden, true, 'setup stays out of the daily workspace by default');
+  $('hud-toggle').click();
+  assert.equal($('hud').hidden, false);
   assert.match($('hud-moves').textContent, /Pinch & hold/); assert.match($('hud-moves').textContent, /Quick tap/);
   assert.match($('hud').textContent, /Calibrate your pinch/);
   w.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'h', bubbles: true}));
@@ -130,7 +132,7 @@ function open(stored) {
   frame({calibration: {phase: 'idle'}, recording: {phase: 'done', path: 'x', size_kb: 1, frames: 1, missing: []}});
   assert.equal($('calib').hidden, true, 'closed stays closed');
 
-  console.log('PASS: the instructions are shown by default and H / Help hide them (remembered); the "now" line follows what you are doing; '
+  console.log('PASS: hand setup is hidden by default and H / Help toggle it (remembered); the "now" line follows what you are doing; '
     + 'the pinch meter shows the deciding number; calibration runs prompt by prompt on screen, can be cancelled, and shows its result.');
   w.close(); process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

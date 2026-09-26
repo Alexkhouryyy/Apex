@@ -2,10 +2,10 @@
 <!--
   Apex's glass board.
 
-  This page renders the board and offers explicit touch selection. It never runs MediaPipe, never sees a
+  This page renders the board and offers mouse, keyboard and touch editing. It never runs MediaPipe, never sees a
   landmark, and never opens the camera — it cannot, because Python is holding it
   exclusively. Cursor positions, card positions and the backdrop all arrive over
-  one websocket already decided.
+  one websocket; pointer edits commit through authenticated board actions.
 
   That is the whole architectural difference from a board that tracks in the
   page: closing this tab does not stop Apex seeing your hands, because nothing
@@ -16,7 +16,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Apex — Board</title>
+<title>Apex — Workspace</title>
 <script type="importmap">
 { "imports": {
   "three": "/static/vendor/three/build/three.module.min.js",
@@ -162,14 +162,16 @@
   [hidden] {display:none!important}
   @media(max-width:650px){#partner-panel{width:calc(100vw - 24px);top:140px}.card.model-label{max-width:42vw}#board-bar{font-size:12px}}
 </style>
+<link rel="stylesheet" href="/static/workspace.css">
 </head>
-<body>
+<body class="digital-workspace">
+<div id="workspace-atmosphere" aria-hidden="true"></div>
 <img id="cam" class="off" alt="">
 <canvas id="gl"></canvas>
 <div id="stage"></div>
 <div id="hint">
-  <h1>Apex board</h1>
-  <p id="hint-body">Connecting…</p>
+  <span class="eyebrow">ROOM TO THINK</span><h1>What are we working on?</h1>
+  <p id="hint-body">Connecting to your workspace…</p><div class="empty-actions"><button id="empty-note">Create a note</button><button id="empty-partner">Ask Céline</button></div>
 </div>
 <div id="status">—</div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -210,7 +212,32 @@
   <p id="calib-note"></p>
   <div><button id="calib-action">Cancel</button></div>
 </div>
-<nav id="board-bar"><a href="/">APEX</a><span id="selection-label" role="status">Pinch an object or tap its label to select it.</span><button id="clear-selection">Deselect</button><button id="hud-toggle" aria-pressed="true" title="Show or hide the instructions (H)">? Help</button><button id="voice-toggle" aria-pressed="false" title="Talk with Celine while you use your hands (V). Swipe down stops her; swipe up or pinch-and-hold starts listening.">🎙 Voice</button><button id="partner-toggle" aria-expanded="false">Talk to Apex</button><select id="exports" aria-label="Download a manufacturing export"><option value="">Manufacturing exports…</option></select><button id="refresh-exports">Refresh exports</button></nav>
+<header id="board-bar">
+  <a class="brand" href="/" aria-label="Apex dashboard"><span class="brand-mark">A</span>APEX<span class="brand-divider">/</span><span class="brand-sub">Workspace</span></a>
+  <div class="header-actions"><button id="open-study">Motor study ↗</button><button id="hands-toggle" aria-pressed="true" title="Pause hand actions on this Apex instance; camera stays running">Hands on</button><button id="camera-toggle" aria-pressed="false" title="Show or hide the camera background; this does not stop the camera">Camera view</button><button id="focus-toggle" aria-pressed="false" title="Hide workspace panels (F)">Focus</button><button id="hud-toggle" aria-pressed="false" title="Hand setup and instructions (H)">Hand setup</button></div>
+</header>
+<aside id="objects-panel" class="workspace-panel" aria-label="Workspace objects">
+  <div class="panel-heading"><span>IN THIS SPACE</span><span id="object-count">0</span></div>
+  <div id="object-list"><p class="muted">Your notes and models will appear here.</p></div>
+  <button id="add-note" class="add-note">+ New note</button>
+  <div class="space-tip">A place for your ideas.<br>Arrange with your mouse or hands.<br>Talk to Céline when you need help.</div>
+  <details id="export-tools"><summary>Manufacturing exports</summary><select id="exports" aria-label="Download a manufacturing export"><option value="">Choose a file…</option></select><button id="refresh-exports">Refresh files</button></details>
+</aside>
+<section id="selection-tools" class="workspace-panel" aria-label="Selected object" hidden>
+  <div class="panel-heading">SELECTION <button id="clear-selection" aria-label="Deselect object">×</button></div>
+  <span id="selection-label" role="status">Select an object to work with it.</span>
+  <div class="transform-actions"><button id="scale-down" aria-label="Make view smaller">−</button><span>View size</span><button id="scale-up" aria-label="Make view larger">+</button></div>
+  <div class="transform-actions"><button id="rotate-left" aria-label="Rotate left">↶</button><span>Turn</span><button id="rotate-right" aria-label="Rotate right">↷</button></div>
+  <button id="parts-toggle">Edit model parts · P</button><button id="center-object">Centre in workspace</button>
+  <p class="muted">View size changes appearance, not physical dimensions. Drag the object label to move it.</p>
+</section>
+<nav id="workspace-dock" aria-label="Workspace controls">
+  <button id="dock-note" aria-label="Create a note" title="Create a note">+</button>
+  <div class="history-actions"><button id="undo-board" aria-label="Undo" title="Undo (Ctrl/Cmd+Z)">↶ <span>Undo</span></button><button id="redo-board" aria-label="Redo" title="Redo (Ctrl/Cmd+Shift+Z)">↷ <span>Redo</span></button></div>
+  <button id="voice-toggle" aria-pressed="false" title="Talk to Céline (V)"><span class="voice-dot"></span>Voice <kbd>V</kbd></button>
+  <button id="partner-toggle" aria-expanded="false">Ask Céline <span aria-hidden="true">↗</span></button>
+</nav>
+<dialog id="note-dialog" aria-labelledby="note-heading"><form id="note-form"><div class="panel-heading"><h2 id="note-heading">A new thought</h2><button type="button" id="close-note" aria-label="Close note">×</button></div><label>Title<input id="note-title" required maxlength="80" placeholder="Give it a name" autocomplete="off"></label><label>Note<textarea id="note-body" maxlength="600" rows="5" placeholder="Capture an idea, a question, or your next step…"></textarea></label><p id="note-error" role="alert"></p><button type="submit" id="save-note">Add to workspace</button></form></dialog>
 <aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; autoplay; display-capture"></iframe></aside>
 
 <script type="module">
@@ -394,9 +421,167 @@ addEventListener('message', ev => {
   }
 });
 
+// Study uses a separate 3D camera; pause board gestures before leaving so
+// invisible board objects cannot keep moving while the user studies a motor.
+async function openStudy(sessionId = null) {
+  try {
+    await api('/api/board/workspace', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'hands', enabled:false})});
+    location.assign('/study' + (sessionId ? '?session=' + encodeURIComponent(sessionId) : ''));
+  } catch (error) { toast(error.message, 5000); }
+}
+document.getElementById('open-study').onclick = () => openStudy();
+
+// Daily workspace: presentation preferences are local; edits use the board's
+// authenticated, undoable operations. No simulated saved state or AI replies.
+let workspaceCards = [], workspaceHands = true, pointerDrag = null, suppressClick = false;
+let workspaceConnected = false;
+const pref = (key, fallback) => { try { return localStorage.getItem('apex.workspace.' + key) ?? fallback; } catch (_) { return fallback; } };
+function savePref(key, value) { try { localStorage.setItem('apex.workspace.' + key, value); } catch (_) {} }
+function cameraView(on) {
+  document.body.classList.toggle('camera-workspace', on);
+  document.getElementById('camera-toggle').setAttribute('aria-pressed', String(on));
+  savePref('camera', String(on));
+}
+function focusView(on) {
+  document.body.classList.toggle('focus-workspace', on);
+  document.getElementById('focus-toggle').setAttribute('aria-pressed', String(on));
+  document.getElementById('focus-toggle').textContent = on ? 'Exit focus' : 'Focus';
+  savePref('focus', String(on));
+}
+cameraView(pref('camera', 'false') === 'true');
+focusView(pref('focus', 'false') === 'true');
+document.getElementById('camera-toggle').onclick = () => cameraView(!document.body.classList.contains('camera-workspace'));
+document.getElementById('focus-toggle').onclick = () => focusView(!document.body.classList.contains('focus-workspace'));
+async function workspaceAction(action, values = {}) {
+  if (!workspaceConnected) throw new Error('Wait for the workspace to reconnect before editing.');
+  return (await api('/api/board/workspace', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action, ...values})})).json();
+}
+async function runWorkspace(action, values = {}) {
+  try {
+    const result = await workspaceAction(action, values);
+    if (action === 'undo' || action === 'redo') toast(result.message || `Nothing to ${action}.`);
+    if (result.card) {
+      workspaceCards = workspaceCards.map(c => c.id === result.card.id ? {...c, ...result.card} : c);
+      renderCards(workspaceCards); syncModels(workspaceCards);
+    }
+    return result;
+  } catch (error) { toast(error.message, 5000); return null; }
+}
+document.getElementById('hands-toggle').onclick = async () => {
+  const result = await runWorkspace('hands', {enabled: !workspaceHands});
+  if (result) toast(result.hands_enabled ? 'Hand controls resumed' : 'Hand controls paused · camera stays running');
+};
+document.getElementById('undo-board').onclick = () => runWorkspace('undo');
+document.getElementById('redo-board').onclick = () => runWorkspace('redo');
+document.getElementById('parts-toggle').onclick = toggleParts;
+function selectedCard() { return workspaceCards.find(c => c.id === selectedId); }
+async function changeView(changes) {
+  const c = selectedCard(); if (!c) return;
+  await runWorkspace('transform', {id: c.id, changes});
+}
+document.getElementById('scale-down').onclick = () => { const c = selectedCard(); if (c) changeView({scale: Math.max(.25, c.scale / 1.15)}); };
+document.getElementById('scale-up').onclick = () => { const c = selectedCard(); if (c) changeView({scale: Math.min(4, c.scale * 1.15)}); };
+const turn = delta => { const c = selectedCard(); if (c) changeView({rot: Math.atan2(Math.sin(c.rot + delta), Math.cos(c.rot + delta))}); };
+document.getElementById('rotate-left').onclick = () => turn(-Math.PI / 12);
+document.getElementById('rotate-right').onclick = () => turn(Math.PI / 12);
+document.getElementById('center-object').onclick = () => changeView({x: .5, y: .45});
+const noteDialog = document.getElementById('note-dialog');
+function newNote() { noteDialog.showModal(); document.getElementById('note-title').focus(); }
+document.getElementById('add-note').onclick = newNote;
+document.getElementById('dock-note').onclick = newNote;
+document.getElementById('empty-note').onclick = newNote;
+document.getElementById('empty-partner').onclick = openPartner;
+document.getElementById('close-note').onclick = () => noteDialog.close();
+document.getElementById('note-form').onsubmit = async ev => {
+  ev.preventDefault();
+  const button = document.getElementById('save-note'); button.disabled = true;
+  document.getElementById('note-error').textContent = '';
+  try {
+    await workspaceAction('note', {title: document.getElementById('note-title').value, body: document.getElementById('note-body').value});
+    noteDialog.close(); ev.target.reset();
+  } catch (error) { document.getElementById('note-error').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+let objectListKey = '';
+function updateWorkspace(msg) {
+  workspaceConnected = true;
+  workspaceCards = msg.cards || [];
+  workspaceHands = msg.hands_enabled !== false;
+  document.getElementById('hands-toggle').textContent = workspaceHands ? 'Hands on' : 'Hands paused';
+  document.getElementById('hands-toggle').setAttribute('aria-pressed', String(workspaceHands));
+  document.getElementById('object-count').textContent = String(workspaceCards.length);
+  document.getElementById('selection-tools').hidden = !selectedId;
+  const sel = selectedCard();
+  document.getElementById('parts-toggle').hidden = sel?.kind !== 'model';
+  document.getElementById('parts-toggle').textContent = sel?.parts_mode ? 'Finish parts editing · P' : 'Edit model parts · P';
+  for (const id of ['scale-down','scale-up','rotate-left','rotate-right']) document.getElementById(id).hidden = sel?.kind !== 'model';
+  const key = JSON.stringify([workspaceCards.map(c => [c.id, c.title, c.kind]), selectedId]);
+  if (key !== objectListKey) {
+    objectListKey = key;
+    const list = document.getElementById('object-list'); list.replaceChildren();
+    if (!workspaceCards.length) { const p = document.createElement('p'); p.className = 'muted'; p.textContent = 'Your notes and models will appear here.'; list.append(p); }
+    for (const c of workspaceCards) {
+      const button = document.createElement('button'); button.className = 'object-item';
+      button.setAttribute('aria-pressed', String(c.id === selectedId));
+      const icon = document.createElement('span'); icon.className = 'object-icon'; icon.textContent = c.kind === 'model' ? '◇' : '▤';
+      const title = document.createElement('span'); title.textContent = c.title;
+      button.append(icon, title); button.onclick = () => selectObject(c.id); list.append(button);
+    }
+  }
+}
+// A drag previews locally and commits exactly once on release, so Undo
+// reverses the whole motion. Touch cancellation and Escape never save it.
+function installPointerDrag(el, id) {
+  el.addEventListener('pointerdown', ev => {
+    if (ev.button !== 0 || pointerDrag || !workspaceConnected) return;
+    const c = workspaceCards.find(c => c.id === id);
+    if (!c || c.held || c.part) return;
+    pointerDrag = {id, el, pointerId: ev.pointerId, sx: ev.clientX, sy: ev.clientY, x: c.x, y: c.y, scale: c.scale, kind: c.kind, moved: false};
+    el.setPointerCapture?.(ev.pointerId);
+  });
+  el.addEventListener('pointermove', ev => {
+    const d = pointerDrag; if (!d || d.id !== id || d.pointerId !== ev.pointerId) return;
+    const dx = ev.clientX - d.sx, dy = ev.clientY - d.sy;
+    if (!d.moved && Math.hypot(dx, dy) < 5) return;
+    d.moved = true;
+    d.next = {x: Math.min(.94, Math.max(.06, d.x + dx / innerWidth)), y: Math.min(.85, Math.max(.15, d.y + dy / innerHeight))};
+    aim(el, d.next.x * 100, Math.min(.91, d.next.y + (d.kind === 'model' ? .12 * d.scale : 0)) * 100);
+    const model = models.get(id); if (model?.target) Object.assign(model.target, d.next);
+    el.classList.add('dragging');
+  });
+  const finish = async (ev, cancel) => {
+    const d = pointerDrag; if (!d || d.id !== id || (ev.pointerId !== undefined && d.pointerId !== ev.pointerId)) return;
+    pointerDrag = null; el.classList.remove('dragging');
+    if (el.hasPointerCapture?.(d.pointerId)) el.releasePointerCapture(d.pointerId);
+    if (!d.moved) return;
+    suppressClick = true; setTimeout(() => { suppressClick = false; }, 0);
+    if (!cancel) await runWorkspace('transform', {id, changes: d.next});
+    // The next authoritative board frame also restores a cancelled/rejected preview.
+    renderCards(workspaceCards); syncModels(workspaceCards);
+  };
+  el.addEventListener('pointerup', ev => finish(ev, false));
+  el.addEventListener('pointercancel', ev => finish(ev, true));
+  el.addEventListener('lostpointercapture', ev => finish(ev, true));
+}
+addEventListener('keydown', ev => {
+  const target = ev.target;
+  if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName) || noteDialog.open) return;
+  if (ev.key === 'Escape' && pointerDrag) {
+    pointerDrag.el.dispatchEvent(new Event('pointercancel')); return;
+  }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+    ev.preventDefault(); runWorkspace(ev.shiftKey ? 'redo' : 'undo'); return;
+  }
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (ev.key.toLowerCase() === 'f') focusView(!document.body.classList.contains('focus-workspace'));
+  const delta = {ArrowLeft: [-.01, 0], ArrowRight: [.01, 0], ArrowUp: [0, -.01], ArrowDown: [0, .01]}[ev.key];
+  const c = selectedCard();
+  if (delta && c) { ev.preventDefault(); changeView({x: Math.min(.94, Math.max(.06, c.x + delta[0])), y: Math.min(.85, Math.max(.15, c.y + delta[1]))}); }
+});
+
 // --- The instructions, in front of you (H hides them) -----------------------
-let hudHidden = false;
-try { hudHidden = localStorage.getItem('apex.board.hud') === 'hidden'; } catch (_) {}
+let hudHidden = true;
+try { hudHidden = localStorage.getItem('apex.board.hud') !== 'shown'; } catch (_) {}
 function setHud(show) {
   hudHidden = !show;
   document.getElementById('hud').hidden = hudHidden;
@@ -536,7 +721,8 @@ document.getElementById('calib-action').onclick = ev => {
 
 function handleBoardEvents(events) {
   for (const ev of events || []) {
-    if (ev.type === "thrown") toast(`Threw away ${ev.title} — say "undo" to bring it back`);
+    if (ev.type === "study_open" && !document.hidden) openStudy(ev.session_id);
+    else if (ev.type === "thrown") toast(`Threw away ${ev.title} — say "undo" to bring it back`);
     // Swipe up, pinch-and-hold or a wave: start talking. Swipe down: she
     // stops speaking and goes on listening.
     else if (ev.type === "summon" || ev.type === "listen") voiceFromGesture();
@@ -560,7 +746,8 @@ function renderCards(list) {
       el = document.createElement("button");
       el.type = 'button';
       el.className = "card";
-      el.onclick = () => selectObject(c.id);
+      el.onclick = () => { if (!suppressClick) selectObject(c.id); };
+      installPointerDrag(el, c.id);
       el.innerHTML = '<h3></h3><p></p>';
       stage.appendChild(el);
       cards.set(c.id, el);
@@ -572,7 +759,7 @@ function renderCards(list) {
     const label = c.parts_mode ? `${c.title} · parts${c.part ? ' · ' + c.part.name : ''}` : c.title;
     if (h.textContent !== label) h.textContent = label;
     if (p.textContent !== c.body) p.textContent = c.body || "";
-    aim(el, c.x * 100, Math.min(.91, c.y + (c.kind === 'model' ? .12 * c.scale : 0)) * 100);
+    if (pointerDrag?.id !== c.id) aim(el, c.x * 100, Math.min(.91, c.y + (c.kind === 'model' ? .12 * c.scale : 0)) * 100);
     el.classList.toggle("held", !!c.held);
     el.classList.toggle('model-label', c.kind === 'model');
     el.classList.toggle('selected', c.id === selectedId);
@@ -764,7 +951,7 @@ function syncModels(cards) {
       continue;
     }
     // Where it should be; the glide loop gets it there, every screen frame.
-    entry.target = {x: c.x, y: c.y, scale: c.scale || 1, rot: c.rot || 0};
+    if (pointerDrag?.id !== c.id) entry.target = {x: c.x, y: c.y, scale: c.scale || 1, rot: c.rot || 0};
     if (!entry.cur) entry.cur = {...entry.target};
     showPart(entry.group, c.part);
   }
@@ -787,6 +974,7 @@ function aim(el, x, y) {
 }
 function ease(cur, target, tau, dt) { return cur + (target - cur) * (1 - Math.exp(-dt / tau)); }
 function glide(dt) {
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) dt = 1;
   const move = (el, tau) => {
     if (!el._aim) return;
     el._at = [ease(el._at[0], el._aim[0], tau, dt), ease(el._at[1], el._aim[1], tau, dt)];
@@ -935,6 +1123,7 @@ function connect() {
     // Cards and models are two layers of one board: text stays DOM, geometry
     // goes to WebGL, and both read the same positions from Python.
     selectedId = msg.selection?.id || null;
+    updateWorkspace(msg);
     pointedId = msg.pointed || null;
     handleBoardEvents(msg.events);
     const sel = msg.selection && (msg.cards || []).find(c => c.id === msg.selection.id);
@@ -944,7 +1133,7 @@ function connect() {
     renderCards(msg.cards || []);
     renderHud(msg);
     syncModels(msg.cards || []);
-    renderCursors(msg.cursors || []);
+    renderCursors(msg.hands_enabled === false ? [] : (msg.cursors || []));
     if (!diagEl.hidden) renderDiag(msg);
 
     if (msg.frame) {
@@ -959,16 +1148,15 @@ function connect() {
     // never leave you guessing which.
     const n = (msg.cursors || []).length;
     if (!msg.tracking) {
-      say("hand tracking is off");
-      hintBody.textContent =
-        "Set HANDTRACK_ENABLED=true and BOARD_ENABLED=true, then restart Apex.";
+      say("Connected · mouse & keyboard");
+      hintBody.textContent = "Start with a note, or ask Céline to bring an idea into the space.";
       hint.classList.toggle("hidden", (msg.cards || []).length > 0);
     } else if (n === 0) {
-      say("tracking — no hands in frame");
-      hintBody.textContent = "Hold a hand up in front of the camera.";
+      say(msg.hands_enabled === false ? "Connected · hands paused" : "Connected · hands ready");
+      hintBody.textContent = "Start with a note, or ask Céline to create something. Use your mouse, voice, or hands.";
       hint.classList.toggle("hidden", (msg.cards || []).length > 0);
     } else {
-      say(`${n} hand${n > 1 ? "s" : ""} · ${(msg.cards || []).length} card${(msg.cards || []).length === 1 ? "" : "s"}`);
+      say(msg.hands_enabled === false ? "Connected · hands paused" : `Connected · ${n} hand${n > 1 ? "s" : ""} ready`);
       hint.classList.add("hidden");
     }
   };
@@ -984,6 +1172,7 @@ function connect() {
   // dead process, and no amount of waiting would ever fix it. Say which one it
   // is, and stop.
   ws.onclose = (ev) => {
+    workspaceConnected = false;
     if (ev && ev.code === 1008) {
       say("not authorized");
       hintBody.textContent = token

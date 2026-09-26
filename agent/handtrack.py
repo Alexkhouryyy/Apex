@@ -684,6 +684,8 @@ class HandTracker(threading.Thread):
         # list rather than widening it: `latest_cursors` feeds the gesture
         # recognizer and the board, and both unpack 4-tuples.
         self._latest_hands: list = []
+        self._study_sequence = 0
+        self._study_sample_at = 0.0
         self._jpeg_error_logged = False  # see latest_jpeg
         self._cap = None
         self._landmarker = None
@@ -787,6 +789,15 @@ class HandTracker(threading.Thread):
         """
         with self._lock:
             return [dict(d) for d in self._latest_hands]
+
+    def study_sample(self) -> dict:
+        """Timestamp detection results, not camera frames, to reject stale grabs."""
+        with self._lock:
+            stamp = getattr(self, '_study_sample_at', 0.0)
+            age = max(0, time.monotonic() - stamp) if stamp else None
+            return {'sequence': getattr(self, '_study_sequence', 0),
+                    'age_ms': round(age * 1000) if age is not None else None,
+                    'hands': [dict(d) for d in self._latest_hands] if age is not None and age < .4 else []}
 
     def latest_frame(self):
         """The most recent camera frame, or None.
@@ -946,6 +957,8 @@ class HandTracker(threading.Thread):
         with self._lock:
             self._latest_cursors = list(cursors)
             self._latest_hands = list(details)
+            self._study_sequence = getattr(self, '_study_sequence', 0) + 1
+            self._study_sample_at = time.monotonic()
 
         if getattr(config, "BOARD_ENABLED", False):
             try:
@@ -1072,11 +1085,16 @@ class HandTracker(threading.Thread):
         fired swipe_down -> stop, and holding a card still fired
         pinch_hold -> listen every three seconds.
         """
+        from agent import study_input
+        if study_input.active():
+            return "study owns hand controls"
         if not getattr(config, "BOARD_ENABLED", False):
             return ""
         try:
             from agent.board import get_board
             board = get_board()
+            if not board.hands_enabled:
+                return "hand controls are paused"
             if gesture.startswith("swipe_"):
                 ok, why = board.swipes_allowed()
                 return "" if ok else why

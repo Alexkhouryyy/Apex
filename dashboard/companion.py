@@ -45,8 +45,17 @@ async def submit_job(request: Request):
 
 
 def workspace_message(body, message):
-    if body.get("workspace") not in (None, "board"):
+    if body.get("workspace") not in (None, "board", "assembly"):
         raise ValueError("Unknown workspace.")
+    if body.get("workspace") == "assembly":
+        from agent.assembly import context
+        study = context(body.get("study_session"))
+        return message + "\n\n[Assembly study at send time: " + json.dumps(study) + (
+            "]\nUse assembly_study with this exact session_id for view commands. "
+            "Explain the selected component and its connections. Distinguish verified motor principles "
+            "from this simplified illustration. Cite provided sources for sourced claims; do not invent "
+            "dimensions, exact winding geometry, performance values, or simulation results. "
+            "If no component is selected, ask which part or use the component list.")
     if body.get("workspace") == "board":
         from agent.board import get_board
         board = get_board()
@@ -108,6 +117,42 @@ async def _small_json(request: Request) -> dict:
     if not isinstance(body, dict):
         raise ValueError("Expected a JSON object.")
     return body
+
+
+@router.post("/api/board/workspace")
+async def workspace_action(request: Request):
+    """Small, reversible workspace actions, protected by dashboard auth."""
+    _check_origin(request)
+    from agent.board import get_board
+    try:
+        body = await _small_json(request)
+        board = get_board()
+        action = body.get("action")
+        if action == "hands":
+            if type(body.get("enabled")) is not bool:
+                raise ValueError("enabled must be true or false")
+            return {"hands_enabled": board.set_hands_enabled(body["enabled"])}
+        if action == "transform":
+            if not isinstance(body.get("id"), str) or not isinstance(body.get("changes"), dict):
+                raise ValueError("Expected an object id and changes.")
+            return {"card": board.transform(body["id"], **body["changes"])}
+        if action in ("undo", "redo"):
+            idle, why = board.hands_idle()
+            if not idle:
+                raise ValueError("Release the object before using history: " + why)
+            return {"message": getattr(board, action)()}
+        if action == "note":
+            title, text = body.get("title", "Note"), body.get("body", "")
+            if not isinstance(title, str) or not isinstance(text, str) or not title.strip():
+                raise ValueError("Give the note a title.")
+            if len(title) > 80 or len(text) > 600:
+                raise ValueError("Keep the title under 80 and the note under 600 characters.")
+            card = board.add("card", title.strip(), body=text, x=0.5, y=0.45)
+            board.select(card.id)
+            return {"card": card.as_dict()}
+        raise ValueError("Unknown workspace action.")
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/api/board/parts")
@@ -283,7 +328,7 @@ async def companion_chat(request: Request, durable: bool = False):
         raise HTTPException(400, str(exc)) from exc
 
     fingerprint = hashlib.sha256(json.dumps({k: body.get(k) for k in
-        ("message", "mode", "thread_id", "workspace")}, sort_keys=True).encode()).hexdigest()
+        ("message", "mode", "thread_id", "workspace", "study_session")}, sort_keys=True).encode()).hexdigest()
     if durable:
         previous = jobs.get(turn_id)
         if previous:

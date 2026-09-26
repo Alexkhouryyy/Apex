@@ -36,7 +36,9 @@
     } catch (_) { /* Measurement must never break a turn. */ }
   }
   const drive = location.pathname === '/drive';
-  const workspace = new URLSearchParams(location.search).get('workspace') === 'board' ? 'board' : null;
+  const requestedWorkspace = new URLSearchParams(location.search).get('workspace');
+  const workspace = ['board', 'assembly'].includes(requestedWorkspace) ? requestedWorkspace : null;
+  const studySession = workspace === 'assembly' ? new URLSearchParams(location.search).get('study_session') : null;
   let pendingRemote = null;
   try { pendingRemote = drive ? JSON.parse(localStorage.getItem('apex_remote_pending')) : null; } catch (_) {}
   const savePending = value => {
@@ -106,6 +108,9 @@
       else if (voiceMode) stop();
     } else if (m.apex === 'ask') {
       askAbout(m);
+    } else if (m.apex === 'study-ask' && workspace === 'assembly') {
+      const question = 'Explain the selected motor component in detail: its function, connections, and what this illustration simplifies. If none is selected, give me an overview.';
+      $('message').value = question; send(question, false);
     } else if (m.apex === 'hush') {
       // Stop talking, keep listening: a turn still being written is cut too.
       if (active) { active.stopped = true; request(`/api/companion/cancel/${active.id}`, {method: 'POST'}).catch(() => {}); }
@@ -634,7 +639,7 @@
       } else {
       const response = await request('/api/companion/chat', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({message: text, thread_id: threadId, turn_id: turn.id,
-          screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace, proactive: automatic,
+          screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace, study_session: studySession, proactive: automatic,
           ...(liveTurn ? {look_live: true} : {}),
           // Which voice will speak the reply: in Celine's voice, Apex answers as Celine.
           voice: $('voice').value, voice_profile: $('voicebox-profile').value,
@@ -959,7 +964,7 @@
   if (workspace) {
     root.dataset.workspace = workspace;
     root.querySelector('h1').textContent = 'Let’s shape it together.';
-    $('screen-status').textContent = 'Your selected board object is attached to each message.';
+    $('screen-status').textContent = workspace === 'assembly' ? 'Your selected motor component is attached to each message.' : 'Your selected board object is attached to each message.';
   }
   boot().catch(exc => { state('', 'Apex is not connected yet.'); error(exc.message); });
 })();

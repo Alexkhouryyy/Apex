@@ -303,6 +303,7 @@ class Board:
 
     def __init__(self, max_cards: int = MAX_CARDS):
         self._cards: list[Card] = []
+        self.hands_enabled = True
         self._lock = threading.Lock()
         self._max = max_cards
         # Where on the object each hand took hold, so a drag moves it by the
@@ -731,6 +732,27 @@ class Board:
             self._selected = card_id
             return card.as_dict() if card else None
 
+    def set_hands_enabled(self, enabled: bool) -> bool:
+        """Pause board gestures without closing the camera or stopping voice.
+
+        Refuse during a hold so a pause cannot silently commit or discard work.
+        The pause is shared by clients of this board and resets on restart.
+        """
+        from agent import study_input
+        with study_input.LOCK, self._lock:
+            if enabled and study_input.active():
+                raise ValueError("Pause study hand controls before resuming board hands.")
+            if any(c.held_by for c in self._cards) or self._part_holds:
+                raise ValueError("Release the object before pausing hand controls.")
+            self.hands_enabled = enabled
+            self._armed_since.clear()
+            self._point_candidate.clear()
+            self._pointed = None
+            self._hand_seen = None
+            self._last_hands.clear()
+            self._hand_state.clear()
+            return enabled
+
     def transform(self, card_id: str, **changes) -> dict:
         """Undoable view transform. Does not change manufacturing dimensions."""
         limits = {"x": (0., 1.), "y": (0., 1.), "scale": (.25, 4.),
@@ -967,15 +989,18 @@ class Board:
         now = now if now is not None else time.time()
         import config as _config
         throw_on = bool(getattr(_config, "BOARD_THROW_ENABLED", False))
+        if not self.hands_enabled:
+            return
         hands = self.read_cursors(cursors)
         byid = {h[4]: h for h in hands}
-        # Recorded AFTER normalisation, so the readout explains the hands the
-        # board actually acted on rather than the raw ones it was handed.
-        self._last_hands = list(hands)
-        if hands:
-            self._hand_seen = (hands[0][0], hands[0][1], now)
-
         with self._lock:
+            if not self.hands_enabled:
+                return
+            # Record under the same lock as pause, so a frame cannot restore
+            # a stale hand anchor after the user switches to mouse controls.
+            self._last_hands = list(hands)
+            if hands:
+                self._hand_seen = (hands[0][0], hands[0][1], now)
             stalled = (self._last_frame_at is not None
                        and now - self._last_frame_at > STALL_SECONDS)
             self._last_frame_at = now

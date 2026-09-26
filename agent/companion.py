@@ -14,7 +14,7 @@ DISCUSS_TOOLS = frozenset({
     "board_state", "board_history", "board_props",
     # Building on the board is making a picture to look at together — a new
     # file in Apex's props folder and a card, nothing on the machine changes.
-    "board_build",
+    "board_build", "assembly_study",
     # Moving, sizing, turning and showing things on the board, and undoing
     # that: "make this bigger" by voice while your hands are on the board.
     # Each changes only the board and each is undoable. board_clear is left
