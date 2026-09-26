@@ -18,6 +18,7 @@ export function setupStudyProjects({api, capture, prepareSave, restore, ready}) 
     $('project-status').title = $('project-status').textContent;
     $('project-save').disabled = working || !ready();
     $('project-copy').disabled = working || !ready() || !project;
+    $('pin-study').disabled = working || !project || dirty() || !$('project-workspace').value;
   }
   function selection(id, name) {
     partKey = id || 'overview';
@@ -49,6 +50,15 @@ export function setupStudyProjects({api, capture, prepareSave, restore, ready}) 
     message('Saved on this Apex host. Motion pauses when saved or reopened.');
     refresh();
     try { await list(); } catch (e) { message(e.message); }
+    const menu=$('project-workspace');menu.disabled=true;menu.replaceChildren();refresh();
+    try {
+      const result=await api('/api/board/workspaces');
+      for(const space of result.workspaces){const option=document.createElement('option');option.value=space.id;option.textContent=space.name;menu.append(option);}
+      if(result.active)menu.value=result.active.id;
+      menu.disabled=false;
+      $('pin-message').textContent='Save any changes, then choose a workspace for this study.';
+    }catch(e){$('pin-message').textContent='Could not load workspaces. '+e.message;}
+    refresh();
   }
   async function save(copy = false) {
     if (working || !ready()) return;
@@ -92,6 +102,19 @@ export function setupStudyProjects({api, capture, prepareSave, restore, ready}) 
   $('projects-close').onclick = () => $('projects').close();
   $('project-form').onsubmit = e => {e.preventDefault();save();};
   $('project-copy').onclick = () => save(true);
+  $('project-workspace').onchange=refresh;
+  $('pin-study').onclick=async()=>{
+    if(working||!project||dirty()||!$('project-workspace').value)return;
+    const saved={...project},workspaceId=$('project-workspace').value;
+    const name=$('project-workspace').selectedOptions[0].textContent;
+    working=true;refresh();$('project-workspace').disabled=true;
+    $('pin-message').textContent='Adding saved study…';
+    try{
+      await api('/api/board/workspaces/'+encodeURIComponent(workspaceId)+'/studies',{method:'POST',body:JSON.stringify({action:'pin',project_id:saved.id,version:saved.version})});
+      $('pin-message').textContent='Added to '+name+'. Open it from the board’s workspace menu.'+(dirty()?' Newer edits still need saving.':'');
+    }catch(e){$('pin-message').textContent='Not added. '+e.message;}
+    finally{working=false;$('project-workspace').disabled=false;refresh();}
+  };
   addEventListener('beforeunload', e => { if (dirty()) {e.preventDefault();e.returnValue = '';} });
   setInterval(() => { if (ready()) refresh(); }, 300);
   return {selection, async initialize(projectId) {

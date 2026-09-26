@@ -13,3 +13,5 @@
 #model-choice{width:100%;margin:8px 0 12px;padding:8px;background:#14232b;color:#c9e1e5;border:1px solid var(--line);border-radius:7px;font-size:10px}
 
 #device-check dt{color:#aec9ce;margin-top:8px}#device-check dd{margin:3px 0;color:#89adb7}.diagnostics-buttons{display:flex;flex-wrap:wrap;gap:6px}.diagnostics-buttons button{font-size:10px;padding:7px}
+
+.project-pinning{border-top:1px solid var(--line);margin-top:18px;padding-top:4px}.project-pinning label{display:block;font-size:11px;margin:8px 0}.project-pinning select{display:block;width:100%;background:#0c1720;border:1px solid var(--line);color:#d1e9eb;padding:10px;border-radius:7px}.project-pinning button{margin-top:10px}#pin-message{font-size:11px;color:#9cc9c1}
