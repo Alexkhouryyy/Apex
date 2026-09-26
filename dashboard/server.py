@@ -2339,6 +2339,7 @@ async def ws_board(ws: WebSocket):
         while True:
             tracker = _ht.active_tracker()
             payload = {
+                "hands_enabled": board.hands_enabled,
                 "cards": board.cards(),
                 "selection": board.selection(),
                 "cursors": [],

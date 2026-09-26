@@ -110,6 +110,42 @@ async def _small_json(request: Request) -> dict:
     return body
 
 
+@router.post("/api/board/workspace")
+async def workspace_action(request: Request):
+    """Small, reversible workspace actions, protected by dashboard auth."""
+    _check_origin(request)
+    from agent.board import get_board
+    try:
+        body = await _small_json(request)
+        board = get_board()
+        action = body.get("action")
+        if action == "hands":
+            if type(body.get("enabled")) is not bool:
+                raise ValueError("enabled must be true or false")
+            return {"hands_enabled": board.set_hands_enabled(body["enabled"])}
+        if action == "transform":
+            if not isinstance(body.get("id"), str) or not isinstance(body.get("changes"), dict):
+                raise ValueError("Expected an object id and changes.")
+            return {"card": board.transform(body["id"], **body["changes"])}
+        if action in ("undo", "redo"):
+            idle, why = board.hands_idle()
+            if not idle:
+                raise ValueError("Release the object before using history: " + why)
+            return {"message": getattr(board, action)()}
+        if action == "note":
+            title, text = body.get("title", "Note"), body.get("body", "")
+            if not isinstance(title, str) or not isinstance(text, str) or not title.strip():
+                raise ValueError("Give the note a title.")
+            if len(title) > 80 or len(text) > 600:
+                raise ValueError("Keep the title under 80 and the note under 600 characters.")
+            card = board.add("card", title.strip(), body=text, x=0.5, y=0.45)
+            board.select(card.id)
+            return {"card": card.as_dict()}
+        raise ValueError("Unknown workspace action.")
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/api/board/parts")
 async def parts_mode(request: Request):
     """Turn parts mode on for one model (P on the board), or off with id null."""

@@ -1077,6 +1077,8 @@ class HandTracker(threading.Thread):
         try:
             from agent.board import get_board
             board = get_board()
+            if not board.hands_enabled:
+                return "hand controls are paused"
             if gesture.startswith("swipe_"):
                 ok, why = board.swipes_allowed()
                 return "" if ok else why
