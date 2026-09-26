@@ -32,12 +32,16 @@ recoverable actions and continuity matter more than decorative effects.
    is verified locally. General named workspaces, project-linked files/notes/links,
    resumable layouts, version history and explicit save/error feedback. Test
    restart, backup and restore on both laptop and cloud.
+   [Named board workspaces](NAMED_WORKSPACES.md) are now implemented with separate
+   item/layout storage, per-board process-local undo, optional copies, shared
+   switching, stale-window guards, last-active restart and backup restoration.
+   Deployed persistence and real laptop acceptance remain to be verified.
    Board notes can now be edited, and web reference links can be created,
    edited and reopened explicitly. Both use board storage and content undo/redo.
    Content fingerprints reject stale editor saves while allowing independent
    position changes. A conflict preserves the draft and offers a new copy;
-   explicit content saves report storage errors. This does not add general
-   named workspaces or cloud/laptop synchronization.
+   explicit content saves report storage errors. Cloud/laptop synchronization
+   remains unfinished.
 4. **Daily work integration.** Existing applications remain usable. Start with
    supported links/files and explicit screen-sharing context; evaluate a native
    companion/overlay for Windows. A browser cannot embed/control arbitrary
@@ -103,6 +107,7 @@ The editor never silently replaces newer content. Undo history is process-local
 and shared by this board; saved content uses the host's existing SQLite database.
 New text/link items refuse a full board instead of evicting an older item.
 Legacy tracker writes and history persistence remain best-effort; strict storage
-error handling here applies to explicit note/link saves.
+error handling applies to explicit note/link saves and flushing before a workspace
+switch. See [Named workspaces](NAMED_WORKSPACES.md) for switching and storage scope.
 
 Release gate tracking: [FIRST_RELEASE_CHECKLIST.md](FIRST_RELEASE_CHECKLIST.md).

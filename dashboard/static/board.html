@@ -214,7 +214,7 @@
 </div>
 <header id="board-bar">
   <a class="brand" href="/" aria-label="Apex dashboard"><span class="brand-mark">A</span>APEX<span class="brand-divider">/</span><span class="brand-sub">Workspace</span></a>
-  <div class="header-actions"><button id="open-study">Motor study ↗</button><button id="hands-toggle" aria-pressed="true" title="Pause hand actions on this Apex instance; camera stays running">Hands on</button><button id="camera-toggle" aria-pressed="false" title="Show or hide the camera background; this does not stop the camera">Camera view</button><button id="focus-toggle" aria-pressed="false" title="Hide workspace panels (F)">Focus</button><button id="hud-toggle" aria-pressed="false" title="Hand setup and instructions (H)">Hand setup</button></div>
+  <div class="header-actions"><button id="open-spaces" title="Switch named workspaces"><span id="space-name">Spaces</span> ▾</button><button id="open-study">Motor study ↗</button><button id="hands-toggle" aria-pressed="true" title="Pause hand actions on this Apex instance; camera stays running">Hands on</button><button id="camera-toggle" aria-pressed="false" title="Show or hide the camera background; this does not stop the camera">Camera view</button><button id="focus-toggle" aria-pressed="false" title="Hide workspace panels (F)">Focus</button><button id="hud-toggle" aria-pressed="false" title="Hand setup and instructions (H)">Hand setup</button></div>
 </header>
 <aside id="objects-panel" class="workspace-panel" aria-label="Workspace objects">
   <div class="panel-heading"><span>IN THIS SPACE</span><span id="object-count">0</span></div>
@@ -237,8 +237,8 @@
   <button id="voice-toggle" aria-pressed="false" title="Talk to Céline (V)"><span class="voice-dot"></span>Voice <kbd>V</kbd></button>
   <button id="partner-toggle" aria-expanded="false">Ask Céline <span aria-hidden="true">↗</span></button>
 </nav>
-<dialog id="note-dialog" aria-labelledby="note-heading"><form id="note-form"><div class="panel-heading"><h2 id="note-heading">A new thought</h2><button type="button" id="close-note" aria-label="Close note">×</button></div><label id="note-kind-label">Item type<select id="note-kind"><option value="card">Note</option><option value="link">Web link</option></select></label><label>Title<input id="note-title" required maxlength="80" placeholder="Give it a name" autocomplete="off"></label><label id="note-url-label" hidden>Web address<input id="note-url" type="url" maxlength="2048" placeholder="https://…" autocomplete="url"></label><label>Note<textarea id="note-body" maxlength="600" rows="5" placeholder="Capture an idea, a question, or your next step…"></textarea></label><p id="note-error" role="alert"></p><button type="submit" id="save-note">Add to workspace</button><button type="button" id="note-copy" hidden>Save draft as a new item</button><p class="muted">Links open in a separate tab only when you choose Open link. Apex does not fetch them automatically.</p></form></dialog>
-<aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; autoplay; display-capture"></iframe></aside>
+<dialog id="note-dialog" aria-labelledby="note-heading"><form id="note-form"><div class="panel-heading"><h2 id="note-heading">A new thought</h2><button type="button" id="close-note" aria-label="Close note">×</button></div><label id="note-kind-label">Item type<select id="note-kind"><option value="card">Note</option><option value="link">Web link</option></select></label><label>Title<input id="note-title" required maxlength="80" placeholder="Give it a name" autocomplete="off"></label><label id="note-url-label" hidden>Web address<input id="note-url" type="url" maxlength="2048" placeholder="https://…" autocomplete="url"></label><label>Note<textarea id="note-body" maxlength="600" rows="5" placeholder="Capture an idea, a question, or your next step…"></textarea></label><p id="note-error" role="alert"></p><button type="submit" id="save-note">Add to workspace</button><button type="button" id="note-copy" hidden>Save draft in the current workspace</button><p class="muted">Links open in a separate tab only when you choose Open link. Apex does not fetch them automatically.</p></form></dialog>
+<dialog id="spaces-dialog" aria-labelledby="spaces-title"><div class="panel-heading"><h2 id="spaces-title">Your workspaces</h2><button id="close-spaces" aria-label="Close workspaces">×</button></div><p class="muted">Separate boards for your projects. All open windows on this host follow a switch. Hands pause when switching.</p><div id="spaces-list"></div><form id="space-form"><label>New workspace name<input id="space-title" maxlength="80" required autocomplete="off" placeholder="Apex development"></label><label class="copy-space"><input id="space-copy" type="checkbox">Copy this board’s items and layout</label><button id="space-create">Create and open</button></form><p id="space-message" role="status"></p><p class="muted">Stored on this Apex host. Models keep references to their files; study projects remain in Motor study. Undo history is separate for each board and lasts until restart.</p></dialog><aside id="partner-panel" hidden><iframe title="Apex workspace partner" data-src="/companion?workspace=board" allow="microphone; autoplay; display-capture"></iframe></aside>
 
 <script type="module">
 "use strict";
@@ -292,12 +292,12 @@ async function api(path, options = {}) {
     // not just a status number.
     let detail = '';
     try { detail = (await response.json()).detail || ''; } catch (_) {}
-    throw new Error(response.status === 401 ? 'Log in on the dashboard to continue.' : detail || `Request failed (${response.status}).`);
+    const error=new Error(response.status === 401 ? 'Log in on the dashboard to continue.' : detail || `Request failed (${response.status}).`);error.status=response.status;throw error;
   }
   return response;
 }
 async function selectObject(id) {
-  try { await api('/api/board/select', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id})}); }
+  try { await api('/api/board/select', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id,...workspaceEnvelope()})}); }
   catch (error) { say(error.message); }
 }
 document.getElementById('clear-selection').onclick = () => selectObject(null);
@@ -402,7 +402,7 @@ async function toggleParts() {
   const target = partsModeId ? null : selectedId;
   if (!partsModeId && !target) { toast("Select a model first — pinch it or tap its label — then press P", 3000); return; }
   try {
-    await api('/api/board/parts', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: target})});
+    await api('/api/board/parts', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: target,...workspaceEnvelope()})});
   } catch (error) { toast(error.message, 5000); }
 }
 addEventListener('message', ev => {
@@ -425,7 +425,7 @@ addEventListener('message', ev => {
 // invisible board objects cannot keep moving while the user studies a motor.
 async function openStudy(sessionId = null) {
   try {
-    await api('/api/board/workspace', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'hands', enabled:false})});
+    await api('/api/board/workspace', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'hands', enabled:false,...workspaceEnvelope()})});
     location.assign('/study' + (sessionId ? '?session=' + encodeURIComponent(sessionId) : ''));
   } catch (error) { toast(error.message, 5000); }
 }
@@ -434,7 +434,8 @@ document.getElementById('open-study').onclick = () => openStudy();
 // Daily workspace: presentation preferences are local; edits use the board's
 // authenticated, undoable operations. No simulated saved state or AI replies.
 let workspaceCards = [], workspaceHands = true, pointerDrag = null, suppressClick = false;
-let workspaceConnected = false;
+let workspaceConnected = false, workspaceContext = null;
+function workspaceEnvelope(context=workspaceContext){return context?{workspace:context}:{};}
 const pref = (key, fallback) => { try { return localStorage.getItem('apex.workspace.' + key) ?? fallback; } catch (_) { return fallback; } };
 function savePref(key, value) { try { localStorage.setItem('apex.workspace.' + key, value); } catch (_) {} }
 function cameraView(on) {
@@ -454,7 +455,7 @@ document.getElementById('camera-toggle').onclick = () => cameraView(!document.bo
 document.getElementById('focus-toggle').onclick = () => focusView(!document.body.classList.contains('focus-workspace'));
 async function workspaceAction(action, values = {}) {
   if (!workspaceConnected) throw new Error('Wait for the workspace to reconnect before editing.');
-  return (await api('/api/board/workspace', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action, ...values})})).json();
+  return (await api('/api/board/workspace', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action, ...workspaceEnvelope(), ...values})})).json();
 }
 async function runWorkspace(action, values = {}) {
   try {
@@ -486,7 +487,7 @@ document.getElementById('rotate-left').onclick = () => turn(-Math.PI / 12);
 document.getElementById('rotate-right').onclick = () => turn(Math.PI / 12);
 document.getElementById('center-object').onclick = () => changeView({x: .5, y: .45});
 const noteDialog = document.getElementById('note-dialog');
-let noteEditing=null, noteInitial='', noteSaving=false;
+let noteEditing=null, noteInitial='', noteSaving=false, noteWorkspace=null;
 const noteFields=()=>({kind:document.getElementById('note-kind').value,title:document.getElementById('note-title').value,
   body:document.getElementById('note-body').value,src:document.getElementById('note-kind').value==='link'?document.getElementById('note-url').value:''});
 function updateNoteKind(){
@@ -496,6 +497,7 @@ function updateNoteKind(){
 }
 function openNoteEditor(card=null,kind='card') {
   if(noteSaving)return;
+  noteWorkspace=workspaceContext?{...workspaceContext}:null;
   noteEditing=card?{id:card.id,revision:card.content_revision,kind:card.kind}:null;
   document.getElementById('note-form').reset();
   document.getElementById('note-kind').value=card?.kind||kind;
@@ -531,12 +533,12 @@ async function saveNote(copy=false){
   controls.forEach(el=>el.disabled=true);document.getElementById('note-error').textContent='';
   try {
     await workspaceAction(editing?'edit_content':draft.kind==='link'?'link':'note',
-      {...draft,...(editing?{id:editing.id,expected_revision:editing.revision}:{})});
+      {...draft,workspace:copy?workspaceContext:noteWorkspace,...(editing?{id:editing.id,expected_revision:editing.revision}:{})});
     noteInitial=JSON.stringify(draft);noteDialog.close();document.getElementById('note-form').reset();
     toast(editing?'Changes saved':'Added to workspace');
   } catch (error) {
     document.getElementById('note-error').textContent=error.message;
-    document.getElementById('note-copy').hidden=!editing;
+    document.getElementById('note-copy').hidden=!editing&&error.status!==409;
   } finally {noteSaving=false;controls.forEach(el=>el.disabled=false);document.getElementById('note-kind').disabled=!!noteEditing;}
 }
 document.getElementById('note-form').onsubmit=ev=>{ev.preventDefault();saveNote();};
@@ -545,8 +547,56 @@ addEventListener('beforeunload',ev=>{if(noteDialog.open&&(noteSaving||JSON.strin
 function safeWebLink(src){
   try{const url=new URL(src);return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password?url:null;}catch(_){return null;}
 }
+const spacesDialog=document.getElementById('spaces-dialog');
+let spacesBusy=false, spacesContext=null;
+function spacesMessage(text){document.getElementById('space-message').textContent=text;}
+function lockSpaces(on){spacesBusy=on;spacesDialog.querySelectorAll('button,input').forEach(el=>el.disabled=on);}
+async function listSpaces(){
+  const data=await (await api('/api/board/workspaces')).json();spacesContext=data.active;
+  const list=document.getElementById('spaces-list');list.replaceChildren();
+  for(const space of data.workspaces){
+    const button=document.createElement('button');button.type='button';button.className='space-item';
+    button.textContent=space.name+' · '+space.items+' items'+(space.id===data.active?.id?' · Open':'');
+    button.dataset.space=space.id;button.setAttribute('aria-pressed',String(space.id===data.active?.id));
+    button.onclick=()=>openSpace(space.id);list.append(button);
+  }
+}
+async function switchSpace(id){
+  const data=await (await api('/api/board/workspaces',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'switch',id,context:spacesContext})})).json();
+  if(workspaceContext?.epoch!==data.active.epoch)workspaceConnected=false;
+  spacesDialog.close();toast('Opened '+data.active.name+' · hands paused');
+}
+async function openSpace(id){
+  if(spacesBusy)return;lockSpaces(true);spacesMessage('Saving current board and opening workspace…');
+  try{await switchSpace(id);}catch(e){spacesMessage(e.message);try{await listSpaces();}catch(_){} }
+  finally{lockSpaces(false);}
+}
+document.getElementById('open-spaces').onclick=async()=>{
+  if(noteDialog.open||spacesBusy)return;
+  spacesDialog.showModal();spacesMessage('Loading workspaces…');lockSpaces(true);
+  try{await listSpaces();spacesMessage('');}catch(e){spacesMessage(e.message);}finally{lockSpaces(false);}
+};
+document.getElementById('close-spaces').onclick=()=>{if(!spacesBusy)spacesDialog.close();};
+spacesDialog.addEventListener('cancel',e=>{if(spacesBusy)e.preventDefault();});
+document.getElementById('space-form').onsubmit=async e=>{
+  e.preventDefault();if(spacesBusy)return;
+  const name=document.getElementById('space-title').value,copy_current=document.getElementById('space-copy').checked;
+  lockSpaces(true);spacesMessage('Creating workspace…');let created=false;
+  try{
+    const data=await (await api('/api/board/workspaces',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'create',name,copy_current,context:spacesContext})})).json();
+    created=true;document.getElementById('space-form').reset();await switchSpace(data.workspace.id);
+  }catch(error){spacesMessage((created?'Workspace created, but opening it failed. Choose it from the list. ':'')+error.message);try{await listSpaces();}catch(_){} }
+  finally{lockSpaces(false);}
+};
 let objectListKey = '';
 function updateWorkspace(msg) {
+  if(workspaceContext?.epoch&&msg.workspace?.epoch!==workspaceContext.epoch){
+    if(pointerDrag)pointerDrag.el.dispatchEvent(new Event('pointercancel'));
+    objectListKey='';
+    toast('Workspace changed · hands paused');
+  }
+  workspaceContext=msg.workspace||null;
+  document.getElementById('space-name').textContent=workspaceContext?.name||'Spaces';
   workspaceConnected = true;
   workspaceCards = msg.cards || [];
   workspaceHands = msg.hands_enabled !== false;
@@ -611,7 +661,7 @@ function installPointerDrag(el, id) {
 }
 addEventListener('keydown', ev => {
   const target = ev.target;
-  if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName) || noteDialog.open) return;
+  if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName) || noteDialog.open || document.getElementById('spaces-dialog').open) return;
   if (ev.key === 'Escape' && pointerDrag) {
     pointerDrag.el.dispatchEvent(new Event('pointercancel')); return;
   }

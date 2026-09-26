@@ -315,7 +315,7 @@ class Board:
     def __init__(self, max_cards: int = MAX_CARDS):
         self._cards: list[Card] = []
         self.hands_enabled = True
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._max = max_cards
         # Where on the object each hand took hold, so a drag moves it by the
         # hand's DELTA rather than snapping its centre to the fingertip.
@@ -343,6 +343,9 @@ class Board:
         # Off for a bare Board() so tests get pure in-memory behaviour without
         # touching the real database; get_board() turns it on for the live one.
         self.persist = False
+        self.workspace_id = None  # None retains the legacy/test storage path.
+        self.workspace_name = ''
+        self.workspace_epoch = ''
         # Reversible history. The design doc's History command family is
         # "undo, redo, compare versions, name, save, restore", and the golden
         # demonstration says the words "Undo that" out loud — there was no
@@ -475,7 +478,7 @@ class Board:
                 self._write(target)
         return what
 
-    def _persist_all(self) -> None:
+    def _persist_all(self, *, strict=False) -> None:
         """Rewrite storage to match memory exactly — used after operations that
         add or delete cards, where a per-card write cannot express a removal."""
         if not self.persist:
@@ -484,16 +487,14 @@ class Board:
             from agent import longterm
             with self._lock:
                 snaps = [self._snapshot(c) for c in self._cards]
-            with longterm._conn() as c:
-                c.execute("DELETE FROM board_cards")
-                for s in snaps:
-                    c.execute(
-                        """INSERT INTO board_cards
-                           (id, kind, title, body, src, x, y, scale, rot, created)
-                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                        (s["id"], s["kind"], s["title"], s["body"], s["src"],
-                         s["x"], s["y"], s["scale"], s["rot"], s["created"]))
+                with longterm._conn() as c:
+                    table, where, args = self._storage()
+                    c.execute(f"DELETE FROM {table} WHERE {where}", args)
+                    for s in snaps:
+                        self._save_row(c, s)
         except Exception as e:
+            if strict:
+                raise RuntimeError('Could not save the current workspace. Switching was cancelled.') from e
             print(f"[Board] could not save the board: {e}")
 
     def undo(self) -> Optional[str]:
@@ -515,6 +516,28 @@ class Board:
         return what
 
     # -- persistence -------------------------------------------------------
+    def workspace_context(self):
+        if self.workspace_id is None:
+            return None
+        return dict(id=self.workspace_id, name=self.workspace_name, epoch=self.workspace_epoch)
+
+    def _storage(self):
+        if self.workspace_id is not None:
+            return 'workspace_cards', 'workspace_id=?', (self.workspace_id,)
+        return 'board_cards', '1=1', ()
+
+    def _save_row(self, db, snap):
+        table, _, args = self._storage()
+        columns = 'id,kind,title,body,src,x,y,scale,rot,created'
+        values = tuple(snap[k] for k in columns.split(','))
+        key = 'id'
+        if self.workspace_id is not None:
+            columns, values, key = 'workspace_id,' + columns, args + values, 'workspace_id,id'
+        db.execute(f'''INSERT INTO {table} ({columns}) VALUES ({','.join('?' for _ in values)})
+            ON CONFLICT({key}) DO UPDATE SET kind=excluded.kind,title=excluded.title,
+            body=excluded.body,src=excluded.src,x=excluded.x,y=excluded.y,
+            scale=excluded.scale,rot=excluded.rot''', values)
+
     def _write(self, card: "Card", *, strict: bool = False) -> None:
         """Upsert a card. Tracker writes are best-effort; explicit text saves
         use strict=True so failed durability is not acknowledged as success."""
@@ -522,17 +545,13 @@ class Board:
             return
         try:
             from agent import longterm
-            with longterm._conn() as c:
-                c.execute(
-                    """INSERT INTO board_cards
-                       (id, kind, title, body, src, x, y, scale, rot, created)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)
-                       ON CONFLICT(id) DO UPDATE SET
-                         kind=excluded.kind, title=excluded.title,
-                         body=excluded.body, src=excluded.src, x=excluded.x,
-                         y=excluded.y, scale=excluded.scale, rot=excluded.rot""",
-                    (card.id, card.kind, card.title, card.body, card.src,
-                     card.x, card.y, card.scale, card.rot, card.created))
+            with self._lock:
+                if not strict:
+                    card = next((live for live in self._cards if live.id == card.id), None)
+                    if card is None:
+                        return
+                with longterm._conn() as c:
+                    self._save_row(c, self._snapshot(card))
         except Exception as e:
             if strict:
                 raise RuntimeError("Could not save this item. Your draft is still open; try again.") from e
@@ -543,13 +562,16 @@ class Board:
             return
         try:
             from agent import longterm
-            with longterm._conn() as c:
+            with self._lock, longterm._conn() as c:
+                table, where, args = self._storage()
+                live = {card.id for card in self._cards}
                 for cid in card_ids:
-                    c.execute("DELETE FROM board_cards WHERE id = ?", (cid,))
+                    if cid not in live:
+                        c.execute(f"DELETE FROM {table} WHERE {where} AND id=?", args + (cid,))
         except Exception as e:
             print(f"[Board] could not remove card(s) from storage: {e}")
 
-    def restore(self) -> int:
+    def restore(self, *, strict=False) -> int:
         """Load saved cards back onto the board. Returns how many came back.
 
         Held state is deliberately not restored — no hand is holding anything
@@ -559,10 +581,13 @@ class Board:
         try:
             from agent import longterm
             with longterm._conn() as c:
+                table, where, args = self._storage()
                 rows = c.execute(
-                    """SELECT id, kind, title, body, src, x, y, scale, rot, created
-                       FROM board_cards ORDER BY created ASC""").fetchall()
+                    f"""SELECT id, kind, title, body, src, x, y, scale, rot, created
+                       FROM {table} WHERE {where} ORDER BY created ASC""", args).fetchall()
         except Exception as e:
+            if strict:
+                raise RuntimeError('Could not restore the workspace. Existing data was not replaced.') from e
             print(f"[Board] could not restore saved cards: {e}")
             return 0
         with self._lock:
@@ -1421,7 +1446,7 @@ class Board:
 # One board per process — the dashboard and the tracker must be looking at the
 # same one, and passing it through every layer would be worse.
 _board: Optional[Board] = None
-_board_lock = threading.Lock()
+_board_lock = threading.RLock()
 
 
 def get_board() -> Board:
@@ -1433,14 +1458,6 @@ def get_board() -> Board:
     global _board
     with _board_lock:
         if _board is None:
-            b = Board()
-            b.persist = True
-            try:
-                n = b.restore()
-                if n:
-                    print(f"[Board] Restored {n} card(s) from the last session.")
-            except Exception as e:
-                # A board that cannot restore is still a usable empty board.
-                print(f"[Board] could not restore: {e}")
-            _board = b
+            from agent import board_workspaces
+            _board = board_workspaces.load_initial()
         return _board

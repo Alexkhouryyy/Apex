@@ -123,6 +123,8 @@ app = FastAPI(title="Voice Agent Dashboard")
 from dashboard.companion import router as companion_router
 app.include_router(companion_router)
 from dashboard.study import router as study_router
+from dashboard.workspaces import router as workspaces_router
+app.include_router(workspaces_router)
 app.include_router(study_router)
 from dashboard.team import router as team_router
 app.include_router(team_router)
@@ -2340,7 +2342,12 @@ async def ws_board(ws: WebSocket):
     try:
         while True:
             tracker = _ht.active_tracker()
+            active_board = _board_mod.get_board()
+            if active_board is not board:
+                board = active_board
+                seen_event = board.latest_event_seq()
             payload = {
+                "workspace": board.workspace_context(),
                 "hands_enabled": board.hands_enabled,
                 "cards": board.cards(),
                 "selection": board.selection(),

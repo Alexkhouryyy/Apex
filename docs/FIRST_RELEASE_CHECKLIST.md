@@ -13,8 +13,8 @@ validation, real-device acceptance, or evidence of educational impact.
 | Manipulation | Camera-aware picking; mouse/hand movement, depth and rotation; release commit; reset/reassemble; undo | Real webcam precision, false grabs, rapid hand changes and gesture fatigue |
 | Input ownership | Exclusive expiring study owner; board/gesture suppression; mouse, typing and dialog guards; stale frames cancel | Multi-window use on the laptop with its actual tracker |
 | Conversation | Selected-part session context, references, view tools, both model choices, companion controls | Live microphone/STT/TTS, model correctness, interruption and latency |
-| Daily workspace | Clean board, notes, object controls, focus/camera preferences, model selector and study notebook | A sustained coding/planning workflow and a learning session with Alex |
-| Persistence | Named studies, camera and component transforms, conflict checks, restart recovery; actual backup helper restores projects | Verify DB_PATH on the deployed persistent volume and restore a deployed backup |
+| Daily workspace | Clean board, editable notes/links, object controls, focus/camera preferences, model selector, study notebook and named board switching | A sustained coding/planning workflow and a learning session with Alex |
+| Persistence | Named studies and boards, independent layouts, stale-window guards, restart recovery; actual backup helper restores projects and boards | Verify DB_PATH on the deployed persistent volume and restore a deployed backup; include referenced prop files |
 | Performance | Local assets, compressed CAD transfer, no hidden-tab WebGL rendering; desktop/mobile software browser checks; opt-in device timing reports | Lenovo frame rate, fan/GPU use, touch accuracy and long-session comfort |
 | Release | PR #3 merged after GitHub tests, boot smoke and DOM checks passed | Verify deployment and deployed smoke checks; close the device and engineering acceptance gaps |
 
