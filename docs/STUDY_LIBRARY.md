@@ -72,7 +72,67 @@ saved studies pin the manifest's hash. `tests/test_study_library.py` checks
 that the committed files are exactly what the script builds, that every
 component maps to a named node, and that every source and label is present.
 
-Real models (a GLB from Sketchfab, GrabCAD, NASA 3D and so on) will fit the
-same manifest. An importer that reads a GLB's node names into a draft
-manifest is the planned next step. Check each model's licence before
-committing it.
+## Importing your own models
+
+On the study page, choose **＋ Import a 3D model** (under the library picker).
+
+**File.** One self-contained glTF 2.0 file, up to 150 MB: a `.glb`, or a
+`.gltf` with everything embedded. Most model sites offer a glTF download.
+Sketchfab, for example, offers "glTF", which gives a `.glb` or a zip holding a
+`.gltf`. For STL, OBJ, FBX or STEP, convert first, for example in Blender with
+File → Export → glTF 2.0.
+
+**Refused, with a reason and a fix:**
+- Draco or meshopt compression, which the viewer can't decode yet. Re-export
+  without compression, or run `npx @gltf-transform/cli copy in.glb out.glb`.
+- Files that link to separate texture or data files. Export a single `.glb`.
+- Old glTF 1.0 files.
+- Files with no geometry.
+
+**Parts come from the file's own node tree.** Wrapper nodes that exporters
+add ("Sketchfab_model", "root", "GLTF_SceneRootNode") are skipped. Named
+objects become the parts, and a generic name like "Object_4" takes its named
+parent's name. **Split into** has two settings:
+- **Main assemblies** stops at the first level with enough named pieces.
+  The real OpenMotor CAD gives 19 parts: Stator, Rotor, Magnet asm, Winding,
+  8 radiators…
+- **Every piece** goes down to each mesh and groups repeats. The same file
+  gives 26 parts, including "Magnet ×28", "Tooth ×24" and "Coil ×24".
+
+A part list is only as good as the names the author gave. A file that is one
+single mesh stays one piece and can't be taken apart; the page says so.
+
+**Taking it apart.** Imported files have no take-apart directions, so Apex
+finds the axis the parts are stacked along and spreads them in order along
+it. For fully concentric parts it uses the model's longest side, and it also
+pushes off-centre parts outward. This suits motors, gearboxes, wheels and
+most mechanisms. It is automatic, not a hand-made exploded view.
+
+**Notes.** An import starts with no explanations. **Draft notes with AI**
+sends the part names and groups, with no geometry, to your background model:
+- It asks for what each part is and how it connects, to flag guesses, never
+  to invent figures, and never to give medical advice.
+- The notes are labelled AI-drafted and not reviewed everywhere they appear.
+- They are stored beside the model (`<id>.notes.json`), so drafting them never
+  changes the manifest, and saved studies of the model keep opening.
+- **Redraft notes** replaces them.
+
+**Where imports live.** In `~/.apex/study` (on Windows
+`C:\Users\<you>\.apex\study`), or `APEX_STUDY_DIR`. Never in the repository.
+**Remove** deletes the file, manifest and notes; saved studies of it can then
+no longer be opened.
+
+**Céline** can open an import by name straight away; her study tool refreshes
+when the library changes.
+
+**Licences.** Only import what you're allowed to use. The dialog records where
+a model came from and its licence, and both show under *About this
+illustration*.
+
+**Checks:**
+- `tests/test_study_import.py`: file safety, part detection (including the
+  real OpenMotor CAD), storage, notes and removal, plus the API.
+- `scripts/check_study_import.mjs`: the take-apart layout.
+- `scripts/check_study_import_browser.cjs` (optional, real browser): imports
+  the OpenMotor CAD through the dialog, takes it apart, drafts notes with a
+  stand-in and removes it.

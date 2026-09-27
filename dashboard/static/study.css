@@ -37,3 +37,4 @@
 #holo-hand{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
 body[data-holo=on] #hand-cursor{opacity:.35;transform:translate(-50%,-50%) scale(.55)}
 body[data-holo=on] #viewport{background:radial-gradient(ellipse at 48% 55%,#0e3a4a66,transparent 68%)}
+.library-actions{display:flex;gap:6px;margin:10px 0 4px}.library-actions button{flex:1;font-size:10px;padding:7px 8px;background:none}#import-tools .fine{margin:8px 0 0}#import-dialog{width:480px;max-height:88vh;overflow:auto}#import-dialog h2{margin:0}#import-dialog label{display:block;color:#b1ced4;font-size:11px}#import-dialog input{margin:6px 0 14px}#import-dialog select{display:block;width:100%;margin:6px 0 14px;padding:9px;border-radius:6px;border:1px solid var(--line);background:#0c1720;color:#dcf0f2}#import-progress{width:100%;accent-color:#9be3d7}#import-message{color:#a8d5cd;font-size:12px;min-height:22px;white-space:pre-line}#import-message.error{color:#f5b7a1}

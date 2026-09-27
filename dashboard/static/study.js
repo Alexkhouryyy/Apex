@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {setupStudyProjects} from './study-projects.js';
+import {setupStudyImport, autoExplode} from './study-import.js';
 import {StudyHandController} from './study-hands.js';
 import {setupStudyComfort} from './study-comfort.js';
 import {setupStudyMirror} from './study-mirror.js';
@@ -48,6 +49,7 @@ const notebook = setupStudyProjects({
   }
 });
 function status(text) { $('status').textContent = text; }
+const importer = setupStudyImport({token:()=>token, api, status, beforeLeave:()=>pauseHands()});
 async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers:{Authorization:`Bearer ${token}`, 'Content-Type':'application/json', ...options.headers}});
   if (!response.ok) {
@@ -205,7 +207,7 @@ function accept(state){
   $('part-purpose').textContent=selected?.purpose||'Separate the assembly, select a component, and discover how it connects to the whole.';
   $('part-details').hidden=!selected;$('isolate').disabled=!selected;$('hide-part').disabled=!selected;$('reset-part').disabled=!selected;
   $('isolate').textContent=state.isolated?'Exit isolation':'Isolate';$('part-label').textContent=selected?.name||'';
-  if(selected){$('part-connection').textContent=selected.connection;$('part-note').textContent=selected.model_note;$('part-source').href=manifest.sources.find(s=>s.id===selected.source).url;}
+  if(selected){$('part-connection').textContent=selected.connection;$('part-note').textContent=selected.model_note;const url=manifest.sources.find(s=>s.id===selected.source)?.url;$('part-source').hidden=!url;if(url)$('part-source').href=url;}
   for(const [id,g] of groups){g.visible=!state.hidden.includes(id)&&(!state.isolated||id===state.selected);g.traverse(o=>{if(o.isMesh){o.material.emissive.setHex(id===state.selected?0x1d5c57:0);o.material.emissiveIntensity=.38;o.material.clippingPlanes=state.section?[clipping]:[];}});}
   holo?.rebase();
   $('study-caption').textContent=(manifest.caption||(manifest.id==='dc-motor'?'Illustrative geometry · not to scale':'Source CAD · engineering review pending'))+(state.section?' · uncapped section':state.rotating?' · illustrative motion':'');
@@ -250,7 +252,7 @@ async function loadModel(id){
     status('Loading detailed source geometry…');
     const loader=new GLTFLoader();loader.setRequestHeader({Authorization:'Bearer '+token});prefetched=await loader.loadAsync(data.asset);
     const ids=new Set();prefetched.scene.traverse(o=>{const index=prefetched.parser.associations.get(o)?.nodes;if(index!==undefined)ids.add(index);});
-    if(data.parts.some(p=>!ids.has(p.node)))throw new Error('Source geometry does not match its component list.');
+    if(data.parts.some(p=>(p.nodes||[p.node]).some(n=>!ids.has(n))))throw new Error('Source geometry does not match its component list.');
   }
   if(scene){for(const group of groups.values()){group.traverse(o=>{if(o.isMesh){o.geometry.dispose();o.material.dispose();}});scene.remove(group);}groups.clear();pickables.length=0;}
   diagnostics.stop();manifest=data;rotorAngle=0;
@@ -258,7 +260,10 @@ async function loadModel(id){
   document.querySelector('h1').textContent=manifest.title;document.querySelector('.view-title p').textContent=manifest.subtitle;await fillLibrary();$('model-choice').value=manifest.id;
   $('rotate').textContent=manifest.motion?.label||(manifest.id==='dc-motor'?'Rotor motion':'Motion');document.title=manifest.title+' · Apex study';
   $('part-count').textContent=String(manifest.parts.length);$('limitations').textContent=manifest.limitations;
-  $('sources').replaceChildren();for(const source of manifest.sources){const a=document.createElement('a');a.href=source.url;a.textContent=source.title+(source.license?' · '+source.license:'')+' ↗';a.target='_blank';a.rel='noopener noreferrer';$('sources').append(a);}
+  $('sources').replaceChildren();for(const source of manifest.sources){const label=source.title+(source.license?' · '+source.license:'');
+    if(!source.url){const span=document.createElement('p');span.textContent=label;$('sources').append(span);continue;}
+    const a=document.createElement('a');a.href=source.url;a.textContent=label+' ↗';a.target='_blank';a.rel='noopener noreferrer';$('sources').append(a);}
+  importer.show(manifest);
   $('model-revision').textContent='Model revision '+manifest.revision;
   $('validation-list').replaceChildren();for(const [label,value] of Object.entries(manifest.validation)){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;$('validation-list').append(dt,dd);}
 }
@@ -478,10 +483,12 @@ async function buildLoadedModel(prefetched = null){
   const box=new THREE.Box3().setFromObject(gltf.scene),center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());
   const scale=4.5/Math.max(size.x,size.y,size.z);
   const nodes=new Map();gltf.scene.traverse(o=>{const index=gltf.parser.associations.get(o)?.nodes;if(index!==undefined)nodes.set(index,o);});
+  const built=[];
   for(const p of manifest.parts){
-    const node=nodes.get(p.node);if(!node)throw new Error('Source component missing: '+p.name);
+    // A component is one node of the file, or several (imported repeats: "Bolt ×12").
+    const members=(p.nodes||[p.node]).map(n=>nodes.get(n));if(members.some(n=>!n))throw new Error('Source component missing: '+p.name);
     const g=part(p.id,[0,0,0]);
-    node.traverse(o=>{if(!o.isMesh)return;
+    for(const node of members)node.traverse(o=>{if(!o.isMesh)return;
       const geo=o.geometry.clone().applyMatrix4(o.matrixWorld);geo.translate(-center.x,-center.y,-center.z);geo.scale(scale,scale,scale);
       const material=o.material.clone();material.side=THREE.DoubleSide;
       const item=new THREE.Mesh(geo,material);item.userData.part=p.id;g.add(item);pickables.push(item);
@@ -490,9 +497,11 @@ async function buildLoadedModel(prefetched = null){
     // A subject can say where each part goes when taken apart; otherwise it moves out from the centre.
     if(Array.isArray(p.explode))g.userData.offset.set(...p.explode).multiplyScalar(scale);
     else g.userData.offset.copy(g.userData.center).multiplyScalar(1.1);
+    built.push(g);
     const speed=manifest.motion?.parts?.[p.id];
     if(speed){g.userData.rotating=true;g.userData.spin={speed,axis:new THREE.Vector3(...(manifest.motion.axis||[1,0,0])).normalize(),
       pivot:new THREE.Vector3(...(manifest.motion.pivot||[0,0,0])).sub(center).multiplyScalar(scale)};}
   }
+  if(manifest.auto_explode)autoExplode(THREE,built.map(g=>({center:g.userData.center,offset:g.userData.offset})),size.clone().multiplyScalar(scale));
 }
 $('model-choice').onchange=()=>{pauseHands();location.assign('/study?model='+encodeURIComponent($('model-choice').value));};

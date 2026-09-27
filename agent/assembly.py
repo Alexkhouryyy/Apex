@@ -22,30 +22,59 @@ MODEL_PATH = MODEL_DIR / 'dc-motor.json'
 _ID = re.compile(r'[a-z0-9][a-z0-9-]{0,63}')
 
 
+def _imports():
+    from agent import study_import
+    return study_import.study_dir()
+
+
 def model_path(model_id='dc-motor'):
-    """A subject in the study library: data/assemblies/<id>.json."""
-    if not isinstance(model_id, str) or not _ID.fullmatch(model_id) or not (MODEL_DIR / f'{model_id}.json').is_file():
+    """A subject in the study library: built in (data/assemblies/<id>.json) or
+    imported by the person (their study folder, see agent/study_import.py)."""
+    if not isinstance(model_id, str) or not _ID.fullmatch(model_id):
         raise ValueError('Unknown assembly study.')
-    return MODEL_DIR / f'{model_id}.json'
+    for root in (MODEL_DIR, _imports()):
+        if (root / f'{model_id}.json').is_file():
+            return root / f'{model_id}.json'
+    raise ValueError('Unknown assembly study.')
 
 
 def model(model_id='dc-motor'):
-    return json.loads(model_path(model_id).read_text())
+    from agent import study_import
+    return study_import.with_notes(json.loads(model_path(model_id).read_text()))
+
+
+def asset_path(model_id):
+    """The subject's geometry file, or None (the DC motor is drawn by the page)."""
+    path = model_path(model_id)
+    data = json.loads(path.read_text())
+    name = _LEGACY_ASSETS.get(model_id) or data.get('asset_file')
+    if not data.get('asset') or not isinstance(name, str) or not re.fullmatch(r'[a-z0-9][a-z0-9.-]*\.glb\.gz', name):
+        return None
+    base = path.parent if data.get('imported') else Path(__file__).resolve().parents[1] / 'dashboard' / 'static' / 'models'
+    return base / name
+
+
+_LEGACY_ASSETS = {'openmotor-125': 'openmotor.glb.gz'}
 
 
 def library():
     """Every subject, for the study page's picker and the companion's tool."""
-    out = []
-    for path in sorted(MODEL_DIR.glob('*.json')):
-        if not _ID.fullmatch(path.stem):
-            continue
-        m = json.loads(path.read_text())
-        if m.get('id') != path.stem:
-            continue
-        out.append({'id': m['id'], 'title': m['title'], 'subtitle': m.get('subtitle', ''),
-                    'category': m.get('category', 'Engineering'), 'summary': m.get('summary', ''),
-                    'fidelity': m['fidelity'], 'parts': len(m['parts']),
-                    'motion': bool(m.get('motion')) or m['id'] == 'dc-motor', 'order': m.get('order', 100)})
+    out, seen = [], set()
+    for root in (MODEL_DIR, _imports()):
+        for path in sorted(root.glob('*.json')):
+            if not _ID.fullmatch(path.stem) or path.stem in seen:
+                continue
+            try:
+                m = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(m, dict) or m.get('id') != path.stem or not isinstance(m.get('parts'), list):
+                continue
+            seen.add(m['id'])
+            out.append({'id': m['id'], 'title': m['title'], 'subtitle': m.get('subtitle', ''),
+                        'category': m.get('category', 'Engineering'), 'summary': m.get('summary', ''),
+                        'fidelity': m['fidelity'], 'parts': len(m['parts']), 'imported': bool(m.get('imported')),
+                        'motion': bool(m.get('motion')) or m['id'] == 'dc-motor', 'order': m.get('order', 100)})
     return sorted(out, key=lambda m: (m['order'], m['title']))
 
 
