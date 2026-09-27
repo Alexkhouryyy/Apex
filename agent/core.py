@@ -420,6 +420,16 @@ def _forge_tool(inputs: dict) -> str:
             "as a manufacturing file).")
 
 
+def _study_library_ids():
+    from agent import assembly
+    return [m["id"] for m in assembly.library()]
+
+
+def _study_library_text():
+    from agent import assembly
+    return "; ".join(f"{m['id']} = {m['title']} ({m['fidelity']})" for m in assembly.library())
+
+
 TOOLS = [
     {
         "name": "start_team_task",
@@ -558,21 +568,21 @@ TOOLS = [
     {
         "name": "assembly_study",
         "description": (
-            "Open or control an educational 3D assembly study. Use action open when the user "
-            "wants to create/explore/take apart a motor for learning. Choose model dc-motor for "
-            "the simplified brushed DC illustration or openmotor-125 for published OpenMotor CAD. "
-            "The CAD has not had independent engineering review. Do not substitute these for a combustion "
-            "engine or another motor type. In a study use the session_id from the supplied assembly "
-            "context. explode separates parts; assemble restores them; select/hide/isolate use an "
-            "exact component id or name; show_all restores visibility; section toggles an uncapped "
-            "cutaway; rotate toggles illustrative rotor motion on an assembled model. "
-            "reset_part restores a moved component. No study provides electromagnetic simulation."
+            "Open or control an educational 3D study from Apex's study library. Use action open "
+            "when the user wants to explore, take apart or learn how something works. Choose the model "
+            "id that matches what they asked for: " + _study_library_text() + ". If nothing in the "
+            "library matches, say so instead of substituting a different subject. Models are "
+            "illustrations with the review status given in their notes. In a study use the session_id "
+            "from the supplied assembly context. explode separates parts; assemble restores them; "
+            "select/hide/isolate use an exact component id or name; show_all restores visibility; "
+            "section toggles an uncapped cutaway; rotate toggles illustrative motion where a model has "
+            "it. reset_part restores a moved component. No study is a physical simulation."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "action": {"type": "string", "enum": ["open", "select", "explode", "assemble", "isolate", "hide", "show_all", "section", "rotate", "reset_part", "undo", "redo"]},
-                "model": {"type": "string", "enum": ["dc-motor", "openmotor-125"]},
+                "model": {"type": "string", "enum": _study_library_ids()},
                 "session_id": {"type": "string"},
                 "part": {"type": "string"},
                 "amount": {"type": "number", "description": "Explosion amount 0..1; default 1."},
@@ -2223,7 +2233,7 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                     s = assembly.create(inputs.get("model", "dc-motor"))
                     get_board().emit("study_open", session_id=s["session_id"])
                     return json.dumps({"url": "/study?session=" + s["session_id"],
-                                       "notice": "Motor study ready. The active board opens it; otherwise open this URL on the Apex host. " + assembly.model(s['model'])['fidelity']})
+                                       "notice": "Study ready. The active board opens it; otherwise open this URL on the Apex host. " + assembly.model(s['model'])['fidelity']})
                 return json.dumps(assembly.apply(inputs.get("session_id"), action,
                                                 inputs.get("part"), inputs.get("amount")))
             except (ValueError, TypeError) as exc:

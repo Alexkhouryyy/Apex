@@ -59,7 +59,7 @@ database path, never by overwriting live data.
 
 ## Connect a motor study
 
-1. In Motor study, save your notes and view through **Projects**.
+1. In a study, save your notes and view through **Projects**.
 2. Choose a named workspace under **Add this study to a workspace**, then click
    **Add to workspace**. Save unsaved changes first. Choosing a destination does
    not switch the board's active workspace.

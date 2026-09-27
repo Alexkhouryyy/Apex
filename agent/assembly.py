@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from copy import deepcopy
 import json
+import re
 import math
 from pathlib import Path
 import threading
@@ -16,19 +17,40 @@ _LOCK = threading.RLock()
 _SESSIONS = OrderedDict()
 MAX_SESSIONS = 32
 HISTORY = 40
-MODEL_PATH = Path(__file__).resolve().parents[1] / 'data' / 'assemblies' / 'dc-motor.json'
+MODEL_DIR = Path(__file__).resolve().parents[1] / 'data' / 'assemblies'
+MODEL_PATH = MODEL_DIR / 'dc-motor.json'
+_ID = re.compile(r'[a-z0-9][a-z0-9-]{0,63}')
 
 
 def model_path(model_id='dc-motor'):
-    if model_id == 'dc-motor':
-        return MODEL_PATH
-    if model_id == 'openmotor-125':
-        return MODEL_PATH.with_name('openmotor-125.json')
-    raise ValueError('Unknown assembly study.')
+    """A subject in the study library: data/assemblies/<id>.json."""
+    if not isinstance(model_id, str) or not _ID.fullmatch(model_id) or not (MODEL_DIR / f'{model_id}.json').is_file():
+        raise ValueError('Unknown assembly study.')
+    return MODEL_DIR / f'{model_id}.json'
 
 
 def model(model_id='dc-motor'):
     return json.loads(model_path(model_id).read_text())
+
+
+def library():
+    """Every subject, for the study page's picker and the companion's tool."""
+    out = []
+    for path in sorted(MODEL_DIR.glob('*.json')):
+        if not _ID.fullmatch(path.stem):
+            continue
+        m = json.loads(path.read_text())
+        if m.get('id') != path.stem:
+            continue
+        out.append({'id': m['id'], 'title': m['title'], 'subtitle': m.get('subtitle', ''),
+                    'category': m.get('category', 'Engineering'), 'summary': m.get('summary', ''),
+                    'fidelity': m['fidelity'], 'parts': len(m['parts']),
+                    'motion': bool(m.get('motion')) or m['id'] == 'dc-motor', 'order': m.get('order', 100)})
+    return sorted(out, key=lambda m: (m['order'], m['title']))
+
+
+def has_motion(model_id):
+    return model_id == 'dc-motor' or bool(model(model_id).get('motion'))
 
 
 def create(model_id='dc-motor'):
@@ -45,7 +67,7 @@ def create(model_id='dc-motor'):
 
 def _entry(sid):
     if not isinstance(sid, str) or sid not in _SESSIONS:
-        raise ValueError('This study session expired. Open a new motor study.')
+        raise ValueError('This study session expired. Open the study again.')
     _SESSIONS.move_to_end(sid)
     return _SESSIONS[sid]
 
@@ -152,8 +174,8 @@ def apply(sid, action, part=None, amount=None, transform=None, expected_revision
         elif action == 'show_all':
             new.update(hidden=[], isolated=False)
         elif action == 'rotate':
-            if old['model'] != 'dc-motor':
-                raise ValueError('Illustrative rotor motion is only available for the educational motor.')
+            if not has_motion(old['model']):
+                raise ValueError('Illustrative motion is only available for subjects that include it.')
             if new['explosion'] or new['isolated'] or new['transforms']:
                 raise ValueError('Reassemble the model before showing rotor motion.')
             new['rotating'] = not new['rotating']

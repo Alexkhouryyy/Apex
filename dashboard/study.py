@@ -86,11 +86,29 @@ async def study_model(model_id: str):
         raise HTTPException(404, str(exc)) from exc
 
 
-@router.get('/api/study/model/openmotor-125/asset')
-async def study_cad_asset():
+@router.get('/api/study/models')
+async def study_library():
+    return {'models': assembly.library()}
+
+
+# Legacy file name for the OpenMotor CAD; library subjects name theirs in `asset_file`.
+_ASSET_FILES = {'openmotor-125': 'openmotor.glb.gz'}
+
+
+@router.get('/api/study/model/{model_id}/asset')
+async def study_asset(model_id: str):
     from dashboard.server import STATIC_DIR
-    return FileResponse(STATIC_DIR / 'models' / 'openmotor.glb.gz',
-                        media_type='model/gltf-binary', headers={'Content-Encoding':'gzip'})
+    try:
+        data = assembly.model(model_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    name = _ASSET_FILES.get(model_id) or data.get('asset_file')
+    if not data.get('asset') or not isinstance(name, str) or '/' in name or '\\' in name or not name.endswith('.glb.gz'):
+        raise HTTPException(404, 'This study has no geometry file.')
+    path = STATIC_DIR / 'models' / name
+    if not path.is_file():
+        raise HTTPException(404, 'Geometry file missing. Run scripts/build_study_models.py.')
+    return FileResponse(path, media_type='model/gltf-binary', headers={'Content-Encoding':'gzip'})
 
 
 @router.post('/api/study/session')

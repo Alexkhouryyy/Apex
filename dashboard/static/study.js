@@ -208,8 +208,8 @@ function accept(state){
   if(selected){$('part-connection').textContent=selected.connection;$('part-note').textContent=selected.model_note;$('part-source').href=manifest.sources.find(s=>s.id===selected.source).url;}
   for(const [id,g] of groups){g.visible=!state.hidden.includes(id)&&(!state.isolated||id===state.selected);g.traverse(o=>{if(o.isMesh){o.material.emissive.setHex(id===state.selected?0x1d5c57:0);o.material.emissiveIntensity=.38;o.material.clippingPlanes=state.section?[clipping]:[];}});}
   holo?.rebase();
-  $('study-caption').textContent=(manifest.id==='dc-motor'?'Illustrative geometry · not to scale':'Source CAD · engineering review pending')+(state.section?' · uncapped section':state.rotating?' · illustrative rotor motion':'');
-  $('rotate').disabled=manifest.id!=='dc-motor';
+  $('study-caption').textContent=(manifest.caption||(manifest.id==='dc-motor'?'Illustrative geometry · not to scale':'Source CAD · engineering review pending'))+(state.section?' · uncapped section':state.rotating?' · illustrative motion':'');
+  $('rotate').disabled=!hasMotion();
   renderList();
   notebook.selection(state.selected,selected?.name);
 }
@@ -227,8 +227,20 @@ async function boot(){
   await loadModel(s.model);
   history.replaceState(null,'','/study?session='+encodeURIComponent(session)+'&model='+manifest.id);
   current=null;accept(s);
-  status(renewed?'Previous study expired; a new assembly is open.':'Ready · select a component or take the motor apart');
+  status(renewed?'Previous study expired; a new one is open.':'Ready · select a component or take it apart');
   await notebook.initialize(query.get('project'));schedulePoll();
+}
+const hasMotion=()=>manifest?.id==='dc-motor'||!!manifest?.motion;
+// The study library: every subject in data/assemblies, grouped by category.
+let library=null;
+async function fillLibrary(){
+  if(library)return;
+  try{library=(await api('/api/study/models')).models;}catch(_){return;}
+  const select=$('model-choice'),groups=new Map();select.replaceChildren();
+  for(const m of library){
+    if(!groups.has(m.category)){const g=document.createElement('optgroup');g.label=m.category;groups.set(m.category,g);select.append(g);}
+    const o=document.createElement('option');o.value=m.id;o.textContent=m.title+' · '+m.parts+' parts';o.title=m.summary||m.subtitle;groups.get(m.category).append(o);
+  }
 }
 async function loadModel(id){
   if(manifest?.id===id && renderer)return;
@@ -243,7 +255,8 @@ async function loadModel(id){
   if(scene){for(const group of groups.values()){group.traverse(o=>{if(o.isMesh){o.geometry.dispose();o.material.dispose();}});scene.remove(group);}groups.clear();pickables.length=0;}
   diagnostics.stop();manifest=data;rotorAngle=0;
   if(!renderer)await initScene(prefetched);else {await buildLoadedModel(prefetched);holo.buildEdges();}
-  document.querySelector('h1').textContent=manifest.title;document.querySelector('.view-title p').textContent=manifest.subtitle;$('model-choice').value=manifest.id;
+  document.querySelector('h1').textContent=manifest.title;document.querySelector('.view-title p').textContent=manifest.subtitle;await fillLibrary();$('model-choice').value=manifest.id;
+  $('rotate').textContent=manifest.motion?.label||(manifest.id==='dc-motor'?'Rotor motion':'Motion');document.title=manifest.title+' · Apex study';
   $('part-count').textContent=String(manifest.parts.length);$('limitations').textContent=manifest.limitations;
   $('sources').replaceChildren();for(const source of manifest.sources){const a=document.createElement('a');a.href=source.url;a.textContent=source.title+(source.license?' · '+source.license:'')+' ↗';a.target='_blank';a.rel='noopener noreferrer';$('sources').append(a);}
   $('model-revision').textContent='Model revision '+manifest.revision;
@@ -267,12 +280,15 @@ boot().catch(e=>status(e.message));
 
 function pose(group){
   const t=manipulation?.part===group.userData.id?manipulation.value:current?.transforms?.[group.userData.id];
-  const base=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),group.userData.rotating?rotorAngle:0);
+  const spin=group.userData.spin;
+  const base=new THREE.Quaternion().setFromAxisAngle(spin?.axis||new THREE.Vector3(1,0,0),group.userData.rotating?rotorAngle*(spin?.speed||1):0);
   const user=new THREE.Quaternion().setFromEuler(new THREE.Euler(...(t?.rotation||[0,0,0])));
   group.quaternion.copy(user).multiply(base);
   const center=group.userData.center;
   group.position.copy(group.userData.offset).multiplyScalar(amount).add(new THREE.Vector3(...(t?.position||[0,0,0])))
     .add(center.clone().applyQuaternion(base)).sub(center.clone().applyQuaternion(group.quaternion));
+  // Motion turns about the subject's own axis line (the motor's is the origin).
+  if(spin)group.position.add(spin.pivot.clone().sub(spin.pivot.clone().applyQuaternion(base)));
   // Hologram: a part ready to grab rises toward you (study-holo.js). View only.
   const lift=group.userData.holoLift||0;
   if(lift>1e-4)group.position.add(camera.position.clone().sub(group.position.clone().add(center)).normalize().multiplyScalar(lift));
@@ -471,7 +487,12 @@ async function buildLoadedModel(prefetched = null){
       const item=new THREE.Mesh(geo,material);item.userData.part=p.id;g.add(item);pickables.push(item);
     });
     g.userData.center=new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3());
-    g.userData.offset.copy(g.userData.center).multiplyScalar(1.1);
+    // A subject can say where each part goes when taken apart; otherwise it moves out from the centre.
+    if(Array.isArray(p.explode))g.userData.offset.set(...p.explode).multiplyScalar(scale);
+    else g.userData.offset.copy(g.userData.center).multiplyScalar(1.1);
+    const speed=manifest.motion?.parts?.[p.id];
+    if(speed){g.userData.rotating=true;g.userData.spin={speed,axis:new THREE.Vector3(...(manifest.motion.axis||[1,0,0])).normalize(),
+      pivot:new THREE.Vector3(...(manifest.motion.pivot||[0,0,0])).sub(center).multiplyScalar(scale)};}
   }
 }
 $('model-choice').onchange=()=>{pauseHands();location.assign('/study?model='+encodeURIComponent($('model-choice').value));};
