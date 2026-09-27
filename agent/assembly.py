@@ -11,6 +11,7 @@ import re
 import math
 from pathlib import Path
 import threading
+import time
 import uuid
 
 _LOCK = threading.RLock()
@@ -221,11 +222,40 @@ def apply(sid, action, part=None, amount=None, transform=None, expected_revision
         return deepcopy(entry['state'])
 
 
+# You point, THEN you speak: remember the part an open hand hovered over long
+# enough for a spoken sentence to arrive, and say how old it is (as the board does).
+POINT_MEMORY_SECONDS = 8.0
+
+
+def point(sid, part, now=None):
+    """The study page reports the part an open hand is hovering over."""
+    with _LOCK:
+        entry = _entry(sid)
+        data = model(entry['state']['model'])
+        if not isinstance(part, str) or part not in {p['id'] for p in data['parts']}:
+            return
+        entry['pointed'] = (part, time.time() if now is None else now)
+
+
+def pointed(sid, now=None, max_age=POINT_MEMORY_SECONDS):
+    now = time.time() if now is None else now
+    with _LOCK:
+        entry = _entry(sid)
+        if not entry.get('pointed'):
+            return None
+        part, at = entry['pointed']
+        if now - at > max_age:
+            return None
+        data = model(entry['state']['model'])
+    p = next((p for p in data['parts'] if p['id'] == part), None)
+    return p and {'id': p['id'], 'name': p['name'], 'seconds_ago': round(max(0.0, now - at), 1)}
+
+
 def context(sid):
     s = state(sid)
     data = model(s['model'])
     part = next((p for p in data['parts'] if p['id'] == s['selected']), None)
     return {'state': s, 'title': data['title'], 'fidelity': data['fidelity'],
-            'limitations': data['limitations'], 'selected_part': part,
+            'limitations': data['limitations'], 'selected_part': part, 'pointed_part': pointed(sid),
             'available_parts': [{'id': p['id'], 'name': p['name']} for p in data['parts']],
             'sources': data['sources']}

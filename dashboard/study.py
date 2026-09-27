@@ -25,7 +25,7 @@ async def study_hands(sid: str, request: Request):
     from agent import study_input
     try:
         body = await _small_json(request)
-        return study_input.control(sid, body.get('owner'), body.get('action'))
+        return study_input.control(sid, body.get('owner'), body.get('action'), body.get('pointed'))
     except (ValueError, TypeError) as exc:
         raise HTTPException(409, str(exc)) from exc
 

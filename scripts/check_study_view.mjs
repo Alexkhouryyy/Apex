@@ -8,7 +8,7 @@ const orbit={target:new THREE.Vector3(.45,0,0),enabled:true,enableDamping:true,m
 let mode='orbit',writes=0;
 const {begin,move,cancel,commit}=new Function('THREE','camera','orbit','$','command',`
  let current={revision:1,transforms:{}},manipulation=null,cameraTween=null,amount=0,targetAmount=0;
- const status=()=>{},diagnostics={metrics:{event(){}}};
+ const status=()=>{},diagnostics={metrics:{event(){}}},reducedMotion={matches:false},coast={stop(){},track(){},release(){return false;}};
  ${code}
  return {begin:beginManipulation,move:moveManipulation,cancel:cancelManipulation,commit:commitManipulation};
 `)(THREE,camera,orbit,()=>({value:mode}),()=>{writes++;return true;});

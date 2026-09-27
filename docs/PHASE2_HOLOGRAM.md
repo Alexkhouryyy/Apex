@@ -104,7 +104,65 @@ keeps the pointer still. Real recordings should show which way people
 actually pinch. If the index moves, the fix is to aim with a point between the
 fingers, or to freeze the aim during pinch closure.
 
-## Not in this pass (Phase 2b)
+## Phase 2b: moving it with your hands
 
-Two-hand springy explode, orbit momentum, and "take this apart" while
-pointing.
+Three gestures, on every subject in the library (built-in and imported).
+
+**Pull it apart with two hands.**
+- Pinch with both hands at about the same moment (within 0.45 s) and pull
+  them apart: the model separates live, following a spring with a slight
+  bounce.
+- Push your hands together to reassemble. Hands (nearly) touching always
+  means fully assembled, wherever you started.
+- Pulling apart by about half the view width goes from assembled to fully
+  apart. Small tremors (a 2% dead zone) never move it, and it snaps to fully
+  closed or open near the ends.
+- **Let go to keep it.** Only then is the separation saved (one undoable
+  step).
+- **A fist cancels** and returns to where you started. So does a hand
+  hidden for more than 0.18 s, or a tracking jump.
+- It never starts while one hand is holding a part: single-hand grabs win.
+- The camera's zoom-out after separating doesn't block the next pull.
+
+**Spin with momentum.**
+- Hover an open hand over empty space until it reads *empty space · pinch
+  and drag to spin*, then pinch and drag to turn the view.
+- Let go while still moving and it keeps turning, slowing to a stop in a
+  second or two.
+- Speed is measured over the last 0.12 s of the drag. A hand that stopped
+  before letting go doesn't coast, and speed is capped so a tracking glitch
+  can't fling the view.
+- A new pinch, a mouse drag or Reset view stops it. Spinning changes the
+  view only, never a component.
+- With reduced motion turned on, there's no coasting.
+
+**"Take this apart" while pointing.**
+- While an open hand rests on a part (the ready ring), the study remembers
+  it for 8 seconds, as the board does.
+- Céline gets it as `pointed_part` with `seconds_ago`, and is told:
+  - "this" and "that" mean the pointed part when it's recent, otherwise the
+    selection;
+  - to ask when the two disagree;
+  - "take this apart" means select it, then separate the model (isolating
+    it only if asked).
+- Only the window that owns hand control can report pointing.
+
+**Timing on slow machines.** Timed animations (the camera zoom, easing
+between separations, the spring) now run on real elapsed time. Before this,
+a slow renderer stretched a 0.65 s camera move into several seconds, and hand
+grabs were refused ("wait for motion to stop") the whole time.
+
+**Checks:**
+- `scripts/check_study_gestures.mjs` (in CI): the gesture rules, the
+  spring's overshoot and settling, and coasting.
+- `tests/test_study_pointing.py`: pointing memory, age and ownership, and
+  Céline's prompt.
+- `scripts/check_study_gestures_browser.cjs` (optional, real browser):
+  synthetic two-hand frames through the real endpoint. It checks that pulling
+  saves only on release, pushing together reassembles and a fist writes
+  nothing. It also checks that a continuous flick keeps the view spinning and
+  that the pointed part reaches Céline's context.
+
+**Not verified yet: how it feels with a real camera.** The gains (half a view
+width for fully apart, the spring's bounce, 2.2/s friction) are first
+choices. Tune them after trying them.
