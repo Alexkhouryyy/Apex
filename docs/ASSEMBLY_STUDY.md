@@ -1,5 +1,9 @@
 # Apex assembly study
 
+The study now opens any subject in the study library: a jet engine, the human heart, a car
+engine and the motors below. See [STUDY_LIBRARY.md](STUDY_LIBRARY.md). This page describes the
+viewer and the two motor subjects.
+
 The study selector offers an original educational brushed DC motor and a separately licensed OpenMotor CAD reference.
 The educational model has 14 groups; the CAD reference has 135 named mesh occurrences with source hierarchy and approximate bounding sizes. Components can be selected, separated, isolated, hidden and
 reassembled. The graphite/cyan workspace keeps the model central, with a
@@ -9,7 +13,7 @@ searchable component tree and a contextual inspector.
 
 ## Use it
 
-Open **Motor study** from `/board`. This pauses board hand actions before
+Open **Study** from `/board`. This pauses board hand actions before
 navigating; release any held board object first. Returning to the board leaves
 hands paused until you resume them. Direct navigation to `/study` is also
 supported but does not change board hand controls in other windows.

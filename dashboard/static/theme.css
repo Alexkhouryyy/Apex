@@ -1,0 +1,127 @@
+/* Apex's futuristic look — a layer over every page, switched by theme.js.
+ *
+ * Everything here is scoped to html[data-look="futuristic"], so the normal
+ * look is each page's own stylesheet exactly as it was. Colours, borders,
+ * glows, backgrounds and label typography only: no box is moved or resized
+ * (scripts/check_theme_ui.cjs enforces both). The one honest exception:
+ * labels switch to a technical font with wider letter-spacing, which can
+ * make a label a little wider.
+ *
+ * --holo is the hologram colour. The dashboard follows its chosen palette's
+ * accent (Midnight, Cyberpunk, Ember…); the other pages use hologram cyan.
+ */
+html[data-look="futuristic"] {
+  --holo: #5fe6ff;
+  --holo-font: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, ui-monospace, monospace;
+  --holo-line: color-mix(in srgb, var(--holo) 32%, transparent);
+  --holo-faint: color-mix(in srgb, var(--holo) 7%, transparent);
+  --holo-corner: color-mix(in srgb, var(--holo) 80%, transparent);
+}
+html[data-look="futuristic"]:has(#sidebar) { --holo: var(--accent); }
+
+/* The space: a faint projection grid and a glow from above. */
+html[data-look="futuristic"] body {
+  background-image:
+    radial-gradient(ellipse at 50% -12%, color-mix(in srgb, var(--holo) 16%, transparent), transparent 62%),
+    linear-gradient(var(--holo-faint) 1px, transparent 1px),
+    linear-gradient(90deg, var(--holo-faint) 1px, transparent 1px);
+  background-size: auto, 44px 44px, 44px 44px;
+  background-attachment: fixed;
+}
+/* Scanlines — barely there, and never in the way of a click. */
+html[data-look="futuristic"] body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 2147483000;
+  background: repeating-linear-gradient(0deg, rgba(160, 240, 255, .028) 0 1px, transparent 1px 3px);
+}
+
+/* Panels: glass with a glowing edge and HUD corner brackets. */
+html[data-look="futuristic"] :is(
+  .panel, .stat-card, #sidebar,                                   /* dashboard */
+  .workspace-panel, #board-bar, #workspace-dock, #hud, #diag,     /* board */
+  #components, #inspector, #controls, #hand-mode-bar, #study-partner, header, /* study */
+  .message.agent, #composer, #remote-panel,                       /* companion */
+  dialog
+) {
+  border-color: var(--holo-line) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--holo) 9%, transparent),
+              0 0 28px color-mix(in srgb, var(--holo) 9%, transparent),
+              inset 0 0 24px color-mix(in srgb, var(--holo) 6%, transparent) !important;
+  background-image:
+    linear-gradient(var(--holo-corner), var(--holo-corner)), linear-gradient(var(--holo-corner), var(--holo-corner)),
+    linear-gradient(var(--holo-corner), var(--holo-corner)), linear-gradient(var(--holo-corner), var(--holo-corner)),
+    linear-gradient(var(--holo-corner), var(--holo-corner)), linear-gradient(var(--holo-corner), var(--holo-corner)),
+    linear-gradient(var(--holo-corner), var(--holo-corner)), linear-gradient(var(--holo-corner), var(--holo-corner));
+  background-size: 14px 1.5px, 1.5px 14px, 14px 1.5px, 1.5px 14px, 14px 1.5px, 1.5px 14px, 14px 1.5px, 1.5px 14px;
+  background-position: 0 0, 0 0, 100% 0, 100% 0, 0 100%, 0 100%, 100% 100%, 100% 100%;
+  background-repeat: no-repeat;
+}
+/* Page headers run edge to edge: a glowing rule under them, no brackets. */
+html[data-look="futuristic"] :is(header, #board-bar) { background-image: linear-gradient(90deg, transparent, var(--holo-line), transparent) !important;
+  background-size: 100% 1px !important; background-position: 0 100% !important; box-shadow: 0 1px 24px color-mix(in srgb, var(--holo) 10%, transparent) !important; }
+html[data-look="futuristic"] .page-head { background: none; }
+
+/* Type: glowing headings, technical labels. */
+html[data-look="futuristic"] :is(h1, h2) { text-shadow: 0 0 22px color-mix(in srgb, var(--holo) 38%, transparent); }
+html[data-look="futuristic"] :is(.eyebrow, .panel-title, .panel-heading, .panel-head, .stat-label, .nav-group-label,
+    .component-group, .hud-label, .brand, .badge, h3, #hud h2, .page-sub) {
+  font-family: var(--holo-font); letter-spacing: .14em;
+}
+html[data-look="futuristic"] :is(.stat-value) { text-shadow: 0 0 16px color-mix(in srgb, var(--holo) 45%, transparent); }
+
+/* Controls: glowing edges, brighter on hover, lit when active. */
+html[data-look="futuristic"] :is(button, select, .nav-btn, .primary-btn, .ghost-btn):not(.apex-look-toggle) {
+  border-color: color-mix(in srgb, var(--holo) 26%, transparent);
+  transition: box-shadow .18s ease, border-color .18s ease, color .18s ease;
+}
+html[data-look="futuristic"] :is(button, .nav-btn, .primary-btn, .ghost-btn):not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--holo) 65%, transparent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--holo) 32%, transparent), inset 0 0 10px color-mix(in srgb, var(--holo) 10%, transparent);
+}
+html[data-look="futuristic"] :is([aria-pressed="true"], .nav-btn.active, .component[aria-pressed="true"], .object-item[aria-pressed="true"]) {
+  box-shadow: 0 0 18px color-mix(in srgb, var(--holo) 34%, transparent), inset 0 0 12px color-mix(in srgb, var(--holo) 14%, transparent);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--holo) 60%, transparent);
+}
+html[data-look="futuristic"] :is(.primary, .primary-btn) {
+  box-shadow: 0 0 22px color-mix(in srgb, var(--holo) 45%, transparent), inset 0 0 12px rgba(255, 255, 255, .25);
+}
+html[data-look="futuristic"] :is(input, textarea, select):focus-visible,
+html[data-look="futuristic"] :is(button, a, summary):focus-visible {
+  outline-color: var(--holo);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--holo) 25%, transparent), 0 0 18px color-mix(in srgb, var(--holo) 40%, transparent);
+}
+html[data-look="futuristic"] :is(input:not([type=range]):not([type=checkbox]), textarea) {
+  border-color: color-mix(in srgb, var(--holo) 24%, transparent);
+  box-shadow: inset 0 0 14px color-mix(in srgb, var(--holo) 6%, transparent);
+}
+
+/* The companion's orb: a live core with an orbiting ring. */
+html[data-look="futuristic"] .orb {
+  box-shadow: 0 0 46px color-mix(in srgb, var(--holo) 45%, transparent), inset 0 0 20px color-mix(in srgb, var(--holo) 55%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--holo) 35%, transparent); outline-offset: 6px;
+}
+html[data-look="futuristic"] .orb > div { animation: apex-orbit 9s linear infinite; }
+@keyframes apex-orbit { to { transform: rotate(332deg); } }
+
+/* Workspace cards and labels on the board. */
+html[data-look="futuristic"] .card { border-color: var(--holo-line) !important;
+  box-shadow: 0 0 24px color-mix(in srgb, var(--holo) 14%, transparent), inset 0 0 18px color-mix(in srgb, var(--holo) 7%, transparent) !important; }
+
+/* Thin glowing scrollbars. */
+html[data-look="futuristic"] * { scrollbar-color: color-mix(in srgb, var(--holo) 45%, transparent) transparent; }
+
+/* The switch itself (pages without their own). Same in both looks, readable in both. */
+.apex-look-toggle {
+  position: fixed; right: 14px; bottom: 14px; z-index: 2147483001;
+  font: 600 11px/1 ui-monospace, "Cascadia Code", Consolas, monospace; letter-spacing: .08em;
+  padding: 8px 12px; border-radius: 999px; cursor: pointer;
+  color: #c9f6ff; background: rgba(8, 18, 26, .86); border: 1px solid rgba(95, 230, 255, .45);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .35);
+}
+html[data-look="futuristic"] .apex-look-toggle { box-shadow: 0 0 18px rgba(95, 230, 255, .35); }
+.apex-look-toggle:focus-visible { outline: 2px solid #5fe6ff; outline-offset: 3px; }
+@media (max-width: 700px) { .apex-look-toggle { bottom: auto; top: 10px; right: 10px; padding: 6px 9px; } }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-look="futuristic"] .orb > div { animation: none; }
+  html[data-look="futuristic"] * { transition: none !important; }
+}

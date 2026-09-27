@@ -12,7 +12,7 @@ const ctx=vm.createContext({performance:{now:()=>now},AbortSignal,
     if(action!=='sample')return Promise.resolve({});
     return new Promise((resolve,reject)=>requests.push({resolve,reject}));
   },
-  comfort:{stop(){},show(){},blocked(){}},feedStudyHands:data=>feeds.push(data),hands:{reset(){}},cancelManipulation(){},status:s=>errors.push(s),
+  comfort:{stop(){},show(){},blocked(){}},holoHand:{clear(){}},holo:null,feedStudyHands:data=>feeds.push(data),hands:{reset(){}},cancelManipulation(){},status:s=>errors.push(s),
   diagnostics:{metrics:{sample(){},event:e=>errors.push(e)}}});
 vm.runInContext(`let current={},session='s',handEnabled=false,handEpoch=0,handTimer=null,handOwner='owner',mouseUntil=0;\n${code}\nglobalThis.start=enableHands;globalThis.stop=pauseHands;globalThis.enabled=()=>handEnabled;`,ctx);
 const flush=async()=>{for(let i=0;i<5;i++)await Promise.resolve();};

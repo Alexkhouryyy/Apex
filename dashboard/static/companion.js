@@ -109,7 +109,7 @@
     } else if (m.apex === 'ask') {
       askAbout(m);
     } else if (m.apex === 'study-ask' && workspace === 'assembly') {
-      const question = 'Explain the selected motor component in detail: its function, connections, and what this illustration simplifies. If none is selected, give me an overview.';
+      const question = 'Explain the selected component in detail: its function, connections, and what this illustration simplifies. If none is selected, give me an overview.';
       $('message').value = question; send(question, false);
     } else if (m.apex === 'hush') {
       // Stop talking, keep listening: a turn still being written is cut too.
@@ -964,7 +964,7 @@
   if (workspace) {
     root.dataset.workspace = workspace;
     root.querySelector('h1').textContent = 'Let’s shape it together.';
-    $('screen-status').textContent = workspace === 'assembly' ? 'Your selected motor component is attached to each message.' : 'Your selected board object is attached to each message.';
+    $('screen-status').textContent = workspace === 'assembly' ? 'Your selected study component is attached to each message.' : 'Your selected board object is attached to each message.';
   }
   boot().catch(exc => { state('', 'Apex is not connected yet.'); error(exc.message); });
 })();
