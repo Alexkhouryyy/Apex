@@ -1,8 +1,7 @@
-"""Jarvis persona — British butler AI personality layer.
+"""Editable Apex identity, controlled by the legacy persona-enabled switch.
 
-Activated when JARVIS_PERSONA_ENABLED=true (default). The persona prefix is
-prepended to the effective system prompt each turn so it takes priority over the
-base SYSTEM_PROMPT tone without replacing any capability documentation.
+The old JARVIS text remains a reference preset; it no longer overrides the
+owner's preferred name, form of address or response style.
 """
 from __future__ import annotations
 
@@ -33,4 +32,5 @@ def get_persona_prefix() -> str | None:
             return None
     except Exception:
         pass
-    return JARVIS_PERSONA
+    from agent.continuity import persona_block
+    return persona_block()

@@ -175,19 +175,22 @@ def _check_llm(spec: str, evidence: str, client=None) -> tuple[bool, str]:
 
 # --- the gate ----------------------------------------------------------------
 
-def verify(goal_id: int, evidence: str = "", client=None) -> dict:
+def verify(goal_id: int, evidence: str = "", client=None, *, contracts=None,
+           allow_llm: bool = True, before_check=None) -> dict:
     """Evaluate every contract on a goal and write the evidence ledger.
 
     Returns {contracted, passed, results:[{kind, spec, passed, evidence}]}.
     A goal with no contracts returns contracted=False, passed=True (nothing to
     disprove) — the caller decides what that means.
     """
-    contracts = list_contracts(goal_id)
+    contracts = list_contracts(goal_id) if contracts is None else contracts
     if not contracts:
         return {"contracted": False, "passed": True, "results": []}
 
     results = []
     for ct in contracts:
+        if before_check:
+            before_check()
         kind, spec, detail = ct["kind"], ct["spec"], ct.get("detail", "")
         if kind == COMMAND:
             ok, ev = _check_command(spec)
@@ -196,7 +199,10 @@ def verify(goal_id: int, evidence: str = "", client=None) -> dict:
         elif kind == CONTAINS:
             ok, ev = _check_contains(spec, detail)
         elif kind == LLM:
-            ok, ev = _check_llm(spec, evidence, client=client)
+            if allow_llm:
+                ok, ev = _check_llm(spec, evidence, client=client)
+            else:
+                ok, ev = False, "Model judgment deferred: this run does not budget an additional judge call."
         elif kind == MANUAL:
             ok, ev = False, "manual confirmation required — a human must close this"
         else:

@@ -128,6 +128,10 @@ app.include_router(workspaces_router)
 app.include_router(study_router)
 from dashboard.team import router as team_router
 app.include_router(team_router)
+from dashboard.apps import router as apps_router
+app.include_router(apps_router)
+from dashboard.home import router as home_router
+app.include_router(home_router)
 
 # Allow the browser extension (chrome-extension:// / moz-extension://) to call the
 # API cross-origin. Auth is bearer-token (not cookies), so credentials stay off.
@@ -203,7 +207,7 @@ async def _auth(request: Request, call_next):
     # NOT exempt, so this must stay an exact match: `path.startswith("/board")`
     # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
-            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive"
+            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
     # Inbound webhooks can't present a bearer token, so they authenticate
@@ -239,7 +243,8 @@ async def _auth(request: Request, call_next):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "apex", "pid": os.getpid(),
+            "agent_ready": _agent_ref is not None}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1440,9 +1445,18 @@ async def chat_endpoint(request: Request):
     if not _agent_ref:
         return JSONResponse({"error": "agent not ready"}, status_code=503)
 
-    conversations.add_message(thread_id, "user", user_text)
-
     async with _chat_lock:
+        # Use the durable thread ID, not the browser's ephemeral stream ID.
+        channel_id = f"dashboard:{thread_id}"
+        memory, memory_lock = _agent_ref._get_channel(channel_id)
+        with memory_lock:
+            if not memory.messages:
+                for item in conversations.messages(thread_id, limit=30, newest=True):
+                    if item['role'] == 'user':
+                        memory.add_user(item['text'])
+                    else:
+                        memory.add_assistant([{'type':'text', 'text':item['text']}])
+        conversations.add_message(thread_id, "user", user_text)
         streamer = ChatStreamer(chat_id)
 
         # Show what Apex actually DOES, live. This is the thing a hosted
@@ -1465,7 +1479,7 @@ async def chat_endpoint(request: Request):
             _core.set_tool_observer(_on_tool)
             response = await loop.run_in_executor(
                 None,
-                lambda: _agent_ref.run(user_text, include_screenshot=False, streamer=streamer, channel_id=f"dashboard:{chat_id}"),
+                lambda: _agent_ref.run(user_text, include_screenshot=False, streamer=streamer, channel_id=channel_id),
             )
         except Exception as e:
             ws_manager.broadcast_threadsafe({"type": "chat_error", "error": str(e), "chat_id": chat_id})

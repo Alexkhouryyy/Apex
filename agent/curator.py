@@ -70,14 +70,16 @@ def _load_usage() -> dict:
 
 
 def _archive_md(name: str) -> None:
-    src = _SKILLS_MD_DIR / name / "SKILL.md"
-    dst = _SKILLS_MD_DIR / ".archive" / name / "SKILL.md"
+    src = _SKILLS_MD_DIR / name
+    dst = _SKILLS_MD_DIR / ".archive" / (name + '-' + str(time.time_ns()))
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.exists():
         src.rename(dst)
 
 
 def _mark_stale_md(path: Path) -> None:
+    if (path.parent / '.apex-import.json').exists():
+        return  # Reviewed files are immutable, including their frontmatter.
     text = path.read_text()
     if "state: stale" not in text:
         text = text.replace("use_count:", "state: stale\nuse_count:", 1)

@@ -48,6 +48,11 @@ def _setup_logging() -> None:
             self.level = level
             self._buf = ""
 
+        def isatty(self) -> bool:
+            # Uvicorn probes stdout while configuring its formatters. This
+            # stream writes to the resident log, never to an interactive TTY.
+            return False
+
         def write(self, s: str) -> None:
             self._buf += s
             while "\n" in self._buf:
@@ -313,7 +318,6 @@ def run_resident(model_override: Optional[str] = None) -> None:
             logging.error(f"Telegram polling failed to start: {e}")
 
     # --- Wake listener ---
-    from voice.wake import WakeWordListener
     from voice.stt import listen, warm_up as _stt_warm
     from app import audit, hotkey as hotkey_mod, tray as tray_mod
 
@@ -424,11 +428,6 @@ def run_resident(model_override: Optional[str] = None) -> None:
             logging.info("Muted via hotkey.")
             tray_obj.notify("Apex", "Muted (until you unmute)") if tray_obj else None
 
-    wake_listener = None
-    if config.WAKE_WORD_ENABLED:
-        wake_listener = WakeWordListener(wake_phrases=config.WAKE_PHRASES)
-        wake_listener.start(on_wake=_on_wake)
-
     # Gestures wake Apex from the native tracker. Gated on the same flag that
     # decides whether it recognizes them at all — turning gestures on with no
     # tracker running would recognize things that could never do anything.
@@ -518,6 +517,7 @@ def run_resident(model_override: Optional[str] = None) -> None:
     hotkeys = hotkey_mod.GlobalHotkeys()
     hotkeys.bind(config.RESIDENT_GLOBAL_HOTKEY, _on_hotkey_wake)
     hotkeys.bind(config.RESIDENT_MUTE_HOTKEY, _on_mute_hotkey)
+    wake_listener = _configure_attention(hotkeys, _on_wake, state.is_muted)
     hotkeys.start()
 
     # --- Signals ---
@@ -553,6 +553,49 @@ def run_resident(model_override: Optional[str] = None) -> None:
         except Exception:
             pass
         logging.info("Resident exited cleanly.")
+
+
+def _configure_attention(hotkeys, on_apex_wake, is_muted):
+    """Share one wake listener and hotkey manager with Screen Companion.
+
+    Celine's phrases route to the browser companion; Apex phrases retain the
+    native voice conversation. Both honor the resident tray's mute control.
+    """
+    from agent import look_now
+    from voice.wake import WakeWordListener, matches_wake_phrase
+
+    apex_phrases = list(config.WAKE_PHRASES) if config.WAKE_WORD_ENABLED else []
+    celine_phrases = []
+
+    def when_unmuted(callback):
+        def run(*args):
+            if not is_muted():
+                return callback(*args)
+        return run
+
+    if config.DASHBOARD_ENABLED:
+        for combo, callback in ((config.CELINE_HOTKEY, look_now.on_hotkey),
+                                (config.CELINE_TALK_HOTKEY, look_now.on_talk_hotkey)):
+            if combo:
+                hotkeys.bind(combo, when_unmuted(callback))
+        if config.CELINE_WAKE_ENABLED:
+            celine_phrases = list(config.CELINE_WAKE_PHRASES)
+    phrases = list(dict.fromkeys(celine_phrases + apex_phrases))
+    if not phrases:
+        return None
+    on_celine_wake = look_now.make_wake_handler(celine_phrases)
+
+    def route(transcript=""):
+        if is_muted():
+            return
+        if matches_wake_phrase(transcript, celine_phrases):
+            on_celine_wake(transcript)
+        elif matches_wake_phrase(transcript, apex_phrases):
+            on_apex_wake(transcript)
+
+    listener = WakeWordListener(wake_phrases=phrases)
+    listener.start(on_wake=route)
+    return listener
 
 
 def _extract_request(transcript: str, wake_phrases: list[str]) -> str:

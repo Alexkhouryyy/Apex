@@ -16,9 +16,9 @@
 <link rel="stylesheet" href="/static/styles.css?v=omni30">
 <link rel="stylesheet" href="/static/mobile.css?v=omni30">
 <script src="/static/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
-<script src="https://unpkg.com/globe.gl"></script>
+<script async src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<script async src="https://unpkg.com/globe.gl"></script>
 <script type="importmap">
 {
   "imports": {
@@ -38,48 +38,37 @@
     </div>
   </div>
 
-  <nav class="sidenav">
-    <div class="nav-group-label">Agent</div>
-    <a href="/companion" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">◉ Screen companion ↗</a>
-    <a href="/drive" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Car companion ↗</a>
+  <nav class="sidenav" aria-label="Apex navigation">
+    <div class="nav-group-label">Workspace</div>
+    <a href="/companion" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Screen companion ↗</a>
     <a href="/board" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Spatial workspace ↗</a>
+    <a href="/home" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Apex Home ↗</a>
+    <a href="/apps" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Apps & connections ↗</a>
     <button data-tab="overview" class="nav-btn active"><span class="icon">⊕</span>Command</button>
-    <button data-tab="live" class="nav-btn"><span class="icon">▣</span>Live feed</button>
     <button data-tab="chat" class="nav-btn"><span class="icon">◌</span>Chat</button>
-    <button data-tab="council" class="nav-btn"><span class="icon">⚖</span>Council</button>
-    <button data-tab="compare" class="nav-btn"><span class="icon">⚔</span>Compare</button>
     <button data-tab="documents" class="nav-btn"><span class="icon">✍</span>Documents</button>
-    <button data-tab="constellation" class="nav-btn"><span class="icon">✷</span>Constellation</button>
-    <button data-tab="research" class="nav-btn"><span class="icon">⁂</span>Research</button>
-
-    <div class="nav-group-label">Intelligence</div>
+    <button data-tab="constellation" class="nav-btn"><span class="icon">✷</span>Team</button>
     <button data-tab="goals" class="nav-btn"><span class="icon">◇</span>Goals</button>
     <button data-tab="memory" class="nav-btn"><span class="icon">◎</span>Memory</button>
+    <button data-tab="knowledge" class="nav-btn"><span class="icon">≡</span>Knowledge base</button>
+    <button data-tab="schedule" class="nav-btn"><span class="icon">◷</span>Schedule</button>
+    <button data-tab="approvals" class="nav-btn"><span class="icon">✔</span>Approvals<span id="nav-approvals-badge" class="nav-badge" style="display:none"></span></button>
+    <button data-tab="control" class="nav-btn"><span class="icon">⚙</span>Control</button>
+    <details class="nav-advanced"><summary style="padding:16px 14px;color:#a1b1ba;cursor:pointer">Advanced</summary>
+    <button data-tab="research" class="nav-btn"><span class="icon">⁂</span>Research</button>
+    <button data-tab="council" class="nav-btn"><span class="icon">⚖</span>Council</button>
+    <button data-tab="compare" class="nav-btn"><span class="icon">⚔</span>Compare</button>
+    <button data-tab="briefing" class="nav-btn"><span class="icon">☀</span>Briefing</button>
     <button data-tab="graph" class="nav-btn"><span class="icon">◈</span>Knowledge graph</button>
     <button data-tab="reflections" class="nav-btn"><span class="icon">⌘</span>Reflections</button>
     <button data-tab="evolution" class="nav-btn"><span class="icon">✦</span>Evolution</button>
     <button data-tab="learning" class="nav-btn"><span class="icon">◔</span>Learning</button>
-
-    <div class="nav-group-label">Observability</div>
+    <button data-tab="live" class="nav-btn"><span class="icon">▣</span>Live feed</button>
     <button data-tab="telemetry" class="nav-btn"><span class="icon">▤</span>Telemetry</button>
     <button data-tab="replay" class="nav-btn"><span class="icon">▷</span>Replay</button>
-
-    <div class="nav-group-label">Automation</div>
-    <button data-tab="approvals" class="nav-btn"><span class="icon">✔</span>Approvals<span id="nav-approvals-badge" class="nav-badge" style="display:none"></span></button>
-    <button data-tab="briefing" class="nav-btn"><span class="icon">☀</span>Briefing</button>
-    <button data-tab="schedule" class="nav-btn"><span class="icon">◷</span>Schedule</button>
-    <button data-tab="subagents" class="nav-btn"><span class="icon">⌥</span>Sub-agents</button>
-
-    <div class="nav-group-label">Extensions</div>
-    <button data-tab="knowledge" class="nav-btn"><span class="icon">≡</span>Knowledge base</button>
     <button data-tab="selfmod" class="nav-btn"><span class="icon">✎</span>Self-mod</button>
-    <button data-tab="phone" class="nav-btn"><span class="icon">☎</span>Phone</button>
-    <button data-tab="inbox" class="nav-btn"><span class="icon">✉</span>Inbox</button>
-    <button data-tab="calendar" class="nav-btn"><span class="icon">◷</span>Calendar</button>
-    <button data-tab="camera" class="nav-btn"><span class="icon">◉</span>Vision</button>
-
-    <div class="nav-group-label">System</div>
-    <button data-tab="control" class="nav-btn"><span class="icon">⚙</span>Control</button>
+    <a href="/drive" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Car companion ↗</a>
+    </details>
   </nav>
 
   <div class="sidebar-footer">
@@ -327,55 +316,7 @@
     </div>
   </section>
 
-  <!-- INBOX -->
-  <section id="tab-inbox" class="tab">
-    <header class="page-head">
-      <h1>Inbox</h1>
-      <div class="page-sub">Email triage — Apex reads, summarizes, and drafts replies. Drafts stage for your approval; nothing sends unprompted.</div>
-    </header>
 
-    <div class="inbox-toolbar">
-      <button id="inbox-refresh" class="btn-primary">Refresh</button>
-      <button id="inbox-triage" class="btn-primary">AI triage unread</button>
-      <label class="inbox-filter"><input type="checkbox" id="inbox-unread-only"> unread only</label>
-      <span class="inbox-status" id="inbox-status"></span>
-    </div>
-
-    <div id="inbox-triage-report" class="inbox-triage-report" style="display:none"></div>
-
-    <div class="inbox-grid">
-      <div class="panel">
-        <div class="panel-head"><h2>Messages</h2><span class="panel-sub" id="inbox-count"></span></div>
-        <div id="inbox-list" class="inbox-list"><div class="evo-empty">Loading…</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Pending drafts</h2><span class="panel-sub">awaiting your approval to send</span></div>
-        <div id="inbox-drafts" class="inbox-drafts"><div class="evo-empty">No drafts staged.</div></div>
-      </div>
-    </div>
-
-    <div id="inbox-reader" class="inbox-reader" style="display:none"></div>
-  </section>
-
-  <!-- CALENDAR -->
-  <section id="tab-calendar" class="tab">
-    <header class="page-head">
-      <h1>Calendar</h1>
-      <div class="page-sub">Your upcoming events. Apex reads these to warn you before meetings.</div>
-    </header>
-    <div class="inbox-toolbar">
-      <button id="cal-refresh" class="btn-primary">Refresh</button>
-      <label class="inbox-filter">Look ahead
-        <select id="cal-range">
-          <option value="1">today</option>
-          <option value="7" selected>7 days</option>
-          <option value="30">30 days</option>
-        </select>
-      </label>
-      <span class="inbox-status" id="cal-status"></span>
-    </div>
-    <div id="cal-list" class="cal-list"><div class="evo-empty">Loading…</div></div>
-  </section>
 
   <!-- TELEMETRY -->
   <section id="tab-control" class="tab">
@@ -421,8 +362,7 @@
         <div id="ctl-mcp-policy" class="muted" style="margin:6px 0 10px"></div>
         <div id="ctl-mcp-list"></div>
         <div id="ctl-mcp-audit" style="margin-top:14px"></div>
-        <h4 style="margin:18px 0 6px;font-size:13px">Add a server</h4>
-        <div id="ctl-mcp-catalog" class="muted">Loading…</div>
+        <p style="margin-top:18px"><a href="/apps" style="color:#90e6cb">Manage apps and MCP connections ↗</a></p>
       </div>
     </div>
 
@@ -650,11 +590,6 @@
     <div id="tasks-list" class="cards"></div>
   </section>
 
-  <!-- SUB-AGENTS -->
-  <section id="tab-subagents" class="tab">
-    <header class="page-head"><h1>Sub-agents</h1></header>
-    <div id="subagents-list" class="cards"></div>
-  </section>
 
   <!-- KNOWLEDGE BASE -->
   <section id="tab-knowledge" class="tab">
@@ -684,157 +619,6 @@
     <button id="revert-btn" class="danger">Revert all self-mods</button>
   </section>
 
-  <!-- PHONE -->
-  <section id="tab-phone" class="tab">
-    <header class="page-head">
-      <h1>Phone</h1>
-      <div class="page-sub">Twilio SMS + voice — agent is reachable anywhere</div>
-    </header>
-    <div id="phone-state" class="panel">—</div>
-    <form id="sms-form" class="add-form">
-      <input name="to" placeholder="+14155551234" required>
-      <input name="body" placeholder="Message body" required>
-      <button type="submit">Send SMS</button>
-    </form>
-    <div id="sms-result" class="panel-result"></div>
-  </section>
-
-
-  <!-- CAMERA / VISION — Self-Awareness Panel -->
-  <section id="tab-camera" class="tab">
-
-    <div class="vp-grid" id="vision-grid">
-
-      <!-- ── LEFT RAIL ── -->
-      <div class="vp-rail vp-left">
-
-        <!-- Goals -->
-        <div class="vp-card" id="vp-goals-card">
-          <div class="vp-card-head">
-            <span class="vp-card-label">Active goals</span>
-            <span class="vp-card-count" id="vp-goals-count">—</span>
-          </div>
-          <div id="vp-goals-list" class="vp-goals-list"></div>
-        </div>
-
-        <!-- Top memories -->
-        <div class="vp-card" id="vp-memories-card">
-          <div class="vp-card-head">
-            <span class="vp-card-label">Top memories</span>
-          </div>
-          <div id="vp-memories-list" class="vp-memories-list"></div>
-        </div>
-
-        <!-- Camera widget (compact) -->
-        <div class="vp-card vp-cam-widget" id="vp-cam-card">
-          <div class="vp-card-head">
-            <span class="vp-card-label">Camera</span>
-            <div class="vision-controls">
-              <span id="camera-status-text" class="camera-status-label">Camera off</span>
-              <label class="toggle-switch">
-                <input type="checkbox" id="camera-toggle">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-          <div id="vp-cam-body" class="vp-cam-body">
-            <div class="webcam-frame vp-webcam-frame">
-              <div class="webcam-placeholder" id="webcam-placeholder">
-                <span class="webcam-placeholder-icon">◉</span>
-                <span>Camera disabled</span>
-                <span class="webcam-placeholder-hint">Enable to let Apex see you</span>
-              </div>
-              <img id="webcam-img" class="webcam-img" alt="Live webcam feed">
-            </div>
-            <div class="webcam-meta" id="webcam-meta"></div>
-          </div>
-        </div>
-
-      </div><!-- /vp-left -->
-
-      <!-- ── CENTER STAGE ── -->
-      <div class="vp-stage" id="vp-stage">
-
-        <!-- Cinematic avatar area — all existing avatar IDs preserved verbatim -->
-        <div class="vp-avatar-stage" id="vp-avatar-stage">
-          <div class="vp-avatar-aura" id="vp-avatar-aura"></div>
-          <div class="vp-apex-pill-wrap">
-            <span class="apex-state-pill" id="apex-state-pill">idle</span>
-          </div>
-          <div id="apex-portrait" class="apex-portrait vp-portrait" style="display:none">
-            <div class="apex-portrait-aura" id="apex-portrait-aura"></div>
-            <video id="apex-portrait-video" class="apex-portrait-video" autoplay loop muted playsinline style="display:none"></video>
-            <img id="apex-portrait-img" class="apex-portrait-img" alt="Apex">
-          </div>
-          <div id="apex-avatar-3d" class="apex-avatar-3d vp-avatar-3d" style="display:none">
-            <div class="apex-avatar-loading" id="apex-avatar-loading">Loading Apex…</div>
-          </div>
-          <canvas id="apex-avatar" width="400" height="400" style="display:none"></canvas>
-        </div>
-
-        <!-- Spend sparkline -->
-        <div class="vp-card vp-sparkline-card">
-          <div class="vp-card-head">
-            <span class="vp-card-label">Spend · 7 days</span>
-            <span class="vp-card-meta" id="vp-spend-total">—</span>
-          </div>
-          <canvas id="vp-cost-chart" height="72"></canvas>
-        </div>
-
-      </div><!-- /vp-stage -->
-
-      <!-- ── RIGHT RAIL ── -->
-      <div class="vp-rail vp-right">
-
-        <!-- KPI 2×2 grid -->
-        <div class="vp-intel-grid" id="vp-intel-grid">
-          <div class="vp-intel-card">
-            <div class="vp-intel-label">Approval</div>
-            <div class="vp-intel-value" id="vp-intel-approval">—</div>
-            <div class="stat-bar"><div class="stat-bar-fill" id="vp-intel-approval-bar" style="width:0%"></div></div>
-          </div>
-          <div class="vp-intel-card">
-            <div class="vp-intel-label">Cache hit</div>
-            <div class="vp-intel-value" id="vp-intel-cache">—</div>
-          </div>
-          <div class="vp-intel-card">
-            <div class="vp-intel-label">API calls · 7d</div>
-            <div class="vp-intel-value" id="vp-intel-calls">—</div>
-          </div>
-          <div class="vp-intel-card">
-            <div class="vp-intel-label">Memories</div>
-            <div class="vp-intel-value" id="vp-intel-memories">—</div>
-          </div>
-        </div>
-
-        <!-- Recent insights -->
-        <div class="vp-card" id="vp-insights-card">
-          <div class="vp-card-head">
-            <span class="vp-card-label">Recent insights</span>
-            <span class="vp-card-count" id="vp-pending-count"></span>
-          </div>
-          <div id="vp-insights-list" class="vp-insights-list"></div>
-        </div>
-
-        <!-- Skills doughnut -->
-        <div class="vp-card" id="vp-skills-card">
-          <div class="vp-card-head">
-            <span class="vp-card-label">Skill performance</span>
-          </div>
-          <div class="vp-skills-inner">
-            <canvas id="vp-skills-chart" width="100" height="100"></canvas>
-            <div id="vp-skills-legend" class="vp-skills-legend"></div>
-          </div>
-        </div>
-
-      </div><!-- /vp-right -->
-
-    </div><!-- /vp-grid -->
-
-    <div class="panel vision-help" id="camera-install-hint" style="display:none">
-      opencv-python is not installed. Run: <code>pip install opencv-python</code>
-    </div>
-  </section>
 
 
   <!-- CHAT -->
@@ -1089,7 +873,9 @@
         <div id="team-roles"></div>
         <label>Apex summary model <input id="team-model-apex" list="team-model-options" placeholder="Current startup model"></label>
         <datalist id="team-model-options"></datalist>
-        <label>Task budget, USD <input id="team-budget" type="number" min="0.01" max="5" step="0.01" value="0.50" required></label>
+          <label>Task budget, USD <input id="team-budget" type="number" min="0.01" max="5" step="0.01" value="0.50" required></label>
+          <label>Completion goal ID (optional) <input id="team-goal" type="number" min="1" step="1" placeholder="Existing goal with completion contracts"></label>
+          <p>Linked completion checks run after the team finishes. Without a goal, the result remains unverified. Manual and model judgments require separate review.</p>
         <p>Stops before the next call when the estimated budget is reached; an in-flight call can exceed it. Maximum four calls per stage and 24 tools per task. Stop takes effect after the current call or tool returns.</p>
         <button class="primary-btn" type="submit" id="team-start">Start task</button>
       </form>
@@ -1175,9 +961,8 @@
   <button class="ib-no" id="install-no">Not now</button>
 </div>
 
-<script src="/static/app.js?v=omni30"></script>
+<script src="/static/app.js?v=apps31"></script>
 <script src="/static/voice-mobile.js?v=omni30"></script>
-<script type="module" src="/static/avatar3d.js?v=vision3"></script>
 <script type="module" src="/static/cst3d.js?v=omni30"></script>
 <script src="/static/team.js"></script>
 </body>

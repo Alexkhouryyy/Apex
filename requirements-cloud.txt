@@ -2,6 +2,8 @@ anthropic>=0.40.0
 apscheduler
 sentence-transformers
 mcp
+httpx>=0.27,<1
+jsonschema>=4,<5
 jupyter_client
 ipykernel
 watchdog

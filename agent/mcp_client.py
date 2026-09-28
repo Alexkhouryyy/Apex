@@ -37,6 +37,7 @@ _loop: Optional[asyncio.AbstractEventLoop] = None
 _loop_thread: Optional[threading.Thread] = None
 _sessions: dict = {}       # server_name -> (session, tools)
 _tool_registry: dict = {}  # full_tool_name -> (server_name, original_tool_name)
+_definitions: dict = {}  # schemas for on-demand discovery
 
 # full_tool_name -> the server's own ToolAnnotations (readOnlyHint /
 # destructiveHint / ...), kept so agent/mcp_policy.py can take them into
@@ -79,7 +80,12 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
 
 def _run(coro):
     loop = _ensure_loop()
-    return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=30)
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    try:
+        return future.result(timeout=30)
+    except TimeoutError:
+        future.cancel()
+        raise
 
 
 def _find_settings_files() -> list[Path]:
@@ -91,6 +97,7 @@ def _find_settings_files() -> list[Path]:
         Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",  # Mac
         Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json",  # Windows
         Path("/home/user/.claude/settings.json"),
+        Path.cwd() / "mcp_servers.local.json",  # machine-specific overrides, never committed
     ]
     return [p for p in candidates if p.exists()]
 
@@ -98,6 +105,7 @@ def _find_settings_files() -> list[Path]:
 def _load_mcp_configs() -> dict:
     """Return merged mcpServers dict from all settings files. Skips _example_* entries."""
     servers = {}
+    _source_of.clear()
     for path in _find_settings_files():
         try:
             data = json.loads(path.read_text())
@@ -137,11 +145,11 @@ def _expand_env(value):
 
 def _params(config: dict):
     """Build StdioServerParameters from one server config, secrets resolved."""
-    from mcp.client.stdio import StdioServerParameters
+    from mcp.client.stdio import StdioServerParameters, get_default_environment
     return StdioServerParameters(
         command=_expand_env(config.get("command", "")),
         args=_expand_env(config.get("args", [])),
-        env={**os.environ, **_expand_env(config.get("env", {}))},
+        env={**get_default_environment(), **_expand_env(config.get("env", {}))},
     )
 
 
@@ -310,6 +318,29 @@ async def _transport(config: dict, *, timeout: float = 30.0):
             yield read, write
 
 
+async def _healthcheck(session, config):
+    check = config.get('healthcheck')
+    if not check:
+        return
+    if check != 'blender_scene':
+        raise ValueError('Unknown MCP health check.')
+    result = await session.call_tool('get_scene_info', arguments={'user_prompt': ''})
+    raw = '\n'.join(getattr(c, 'text', '') for c in (result.content or []))
+    try:
+        scene = json.loads(raw)
+    except (ValueError, TypeError):
+        scene = None
+    if getattr(result, 'isError', False) or not isinstance(scene, dict) or 'error' in scene:
+        raise ValueError('Blender MCP is installed but cannot read the scene. Open Blender, enable the add-on and click Start MCP Server, then Connect again.')
+
+
+def _error_detail(exc):
+    children = getattr(exc, 'exceptions', ())
+    if children:
+        return '; '.join(_error_detail(child) for child in children)[:2000]
+    return f'{type(exc).__name__}: {exc}'
+
+
 def probe(config: dict, timeout: float = 180.0) -> tuple:
     """Start a server, handshake, stop. Returns (ok, detail).
 
@@ -323,22 +354,24 @@ def probe(config: dict, timeout: float = 180.0) -> tuple:
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
+                await _healthcheck(session, config)
                 return len(tools.tools or [])
+    future = asyncio.run_coroutine_threadsafe(_go(), _ensure_loop())
     try:
-        n = asyncio.run_coroutine_threadsafe(_go(), _ensure_loop()).result(timeout=timeout)
+        n = future.result(timeout=timeout)
     except TimeoutError:
+        future.cancel()  # close transports/children, including an unfinished OAuth flow
         # concurrent.futures.TimeoutError arrives with an EMPTY message, so the
         # bare exception renders as "TimeoutError:" and tells nobody anything.
         # Observed on a real first install here: `npx -y <pkg>` downloads the
         # package before it runs, which took longer than the old 60s budget —
         # and the second attempt, with npm's cache warm, took 2.2 seconds.
         return False, (
-            f"it did not answer within {timeout:.0f}s. The usual cause is the "
-            f"first run of `npx -y <package>`, which downloads before it starts. "
-            f"Trying again is often enough. If it keeps timing out, run the "
-            f"command by hand to see what it says.")
+            f"it did not answer within {timeout:.0f}s. A package download, "
+            "unfinished browser authorization, or unavailable server can cause this. "
+            "The pending connection was cancelled. Complete setup and Connect again.")
     except Exception as e:
-        return False, f"{type(e).__name__}: {e}"
+        return False, _error_detail(e)
     return True, f"connected, {n} tool(s)"
 
 
@@ -362,6 +395,7 @@ async def _connect_server(name: str, config: dict) -> list[dict]:
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools_result = await session.list_tools()
+                await _healthcheck(session, config)
                 tools = [
                     {
                         "name": f"mcp__{name}__{t.name}",
@@ -389,7 +423,7 @@ async def _connect_server(name: str, config: dict) -> list[dict]:
             "server": name, "state": "failed", "tools": 0, "tool_names": [],
             "command": cmd, "transport": _safe_transport(config), "endpoint": cmd,
             "source": _source_of.get(name, ""),
-            "error": f"{type(e).__name__}: {e}",
+            "error": _error_detail(e),
         }
         return []
 
@@ -427,6 +461,8 @@ def discover() -> list[dict]:
     global _mcp_configs, _tool_registry, _discovered_at, _ran
     _status.clear()
     _annotations.clear()
+    _tool_registry.clear()
+    _definitions.clear()
     _ran = True
     _discovered_at = time.time()
     _mcp_configs = _load_mcp_configs()
@@ -437,7 +473,25 @@ def discover() -> list[dict]:
 
     all_tools = []
     for name, config in _mcp_configs.items():
-        tools = _run(_connect_server(name, config))
+        if config.get("disabled"):
+            _status[name] = {
+                "server": name, "state": "setup_required", "tools": 0,
+                "tool_names": [], "command": endpoint_of(config),
+                "transport": _safe_transport(config), "endpoint": endpoint_of(config),
+                "source": _source_of.get(name, ""),
+                "error": config.get("setup_note", "Connection disabled. Complete setup in the MCP catalog."),
+            }
+            continue
+        try:
+            tools = _run(_connect_server(name, config))
+        except Exception as exc:
+            _status[name] = {
+                "server": name, "state": "failed", "tools": 0, "tool_names": [],
+                "command": endpoint_of(config), "transport": _safe_transport(config),
+                "endpoint": endpoint_of(config), "source": _source_of.get(name, ""),
+                "error": f"{type(exc).__name__}: connection did not complete",
+            }
+            continue
         for t in tools:
             _tool_registry[t["name"]] = (name, t["_original"])
             _annotations[t["name"]] = t.get("_annotations")
@@ -445,6 +499,7 @@ def discover() -> list[dict]:
         for t in tools:
             t.pop("_server", None)
             t.pop("_original", None)
+            _definitions[t['name']] = {k: v for k, v in t.items() if not k.startswith('_')}
             t.pop("_annotations", None)
         all_tools.extend(tools)
 
@@ -489,6 +544,10 @@ def get_registered_names() -> list[str]:
     return list(_tool_registry.keys())
 
 
+def get_definitions() -> list[dict]:
+    return [dict(t) for n, t in _definitions.items() if n in _tool_registry]
+
+
 def status() -> dict:
     """What MCP is actually doing, for the dashboard and for `smoke`.
 
@@ -516,9 +575,8 @@ def status() -> dict:
                   "Apex folder, or to ~/.claude/settings.json.")
     elif failed:
         state = "degraded"
-        detail = (f"{len(failed)} of {len(servers)} server(s) failed to start. "
-                  f"Their tools are missing, which looks identical to the model "
-                  f"choosing not to use them.")
+        detail = (f"{len(failed)} of {len(servers)} server(s) need setup or failed to connect. "
+                  "See each connection's status; unavailable tools are not offered to the model.")
     else:
         state = "ok"
         detail = f"{len(servers)} server(s) connected."

@@ -6,6 +6,8 @@ sentence-transformers
 # `pip install -U` could silently break all MCP tools. Re-pin deliberately
 # after verifying the stdio transport against the new spec.
 mcp<2.0
+httpx>=0.27,<1
+jsonschema>=4,<5
 jupyter_client
 ipykernel
 watchdog

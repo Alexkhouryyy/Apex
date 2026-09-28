@@ -84,6 +84,65 @@ def test_no_config_means_no_tools_and_a_clear_line(monkeypatch, capsys):
     assert "No MCP server configs found" in capsys.readouterr().out
 
 
+def test_prepared_connections_never_launch_and_stale_tools_are_removed(monkeypatch):
+    monkeypatch.setattr(mcp_client, '_load_mcp_configs', lambda: {
+        'notion': {'command':'npx','disabled':True,'setup_note':'Sign in first'}})
+    monkeypatch.setattr(mcp_client, '_run', lambda *a: __import__('pytest').fail('Disabled connection launched'))
+    mcp_client._tool_registry['mcp__old__write'] = ('old','write')
+    assert mcp_client.discover() == []
+    assert mcp_client.get_registered_names() == []
+    assert mcp_client.status()['servers'][0]['state']=='setup_required'
+
+
+def test_one_timeout_does_not_abort_other_connections(monkeypatch):
+    monkeypatch.setattr(mcp_client, '_load_mcp_configs', lambda: {
+        'slow': {'command':'slow'}, 'ready': {'command':'ready'}})
+    monkeypatch.setattr(mcp_client, '_connect_server', lambda name, config: name)
+    def run(name):
+        if name=='slow': raise TimeoutError()
+        return [{'name':'mcp__ready__read','_original':'read','_server':'ready','description':'','input_schema':{}}]
+    monkeypatch.setattr(mcp_client, '_run', run)
+    assert mcp_client.discover()[0]['name']=='mcp__ready__read'
+    assert mcp_client._status['slow']['state']=='failed'
+
+
+def test_probe_timeout_cancels_connection(monkeypatch):
+    import concurrent.futures
+    future=concurrent.futures.Future()
+    def schedule(coro, loop):
+        coro.close()
+        return future
+    monkeypatch.setattr(mcp_client.asyncio, 'run_coroutine_threadsafe',schedule)
+    monkeypatch.setattr(mcp_client, '_ensure_loop',lambda:None)
+    assert mcp_client.probe({'command':'anything'}, timeout=.001)[0] is False
+    assert future.cancelled()
+
+
+def test_children_do_not_inherit_unrelated_credentials(monkeypatch):
+    monkeypatch.setenv('PRIVATE_MODEL_API_KEY', 'never-share')
+    monkeypatch.setenv('EXPLICIT_SERVER_KEY', 'for-this-server')
+    params=mcp_client._params({'command':'server','env':{'AUTH':'${EXPLICIT_SERVER_KEY}'}})
+    assert 'PRIVATE_MODEL_API_KEY' not in params.env
+    assert params.env['AUTH']=='for-this-server'
+
+
+def test_blender_health_requires_a_real_scene():
+    import asyncio
+    from types import SimpleNamespace as NS
+    import pytest
+    class Session:
+        async def call_tool(self, name, arguments):
+            assert name=='get_scene_info'
+            return NS(isError=False,content=[NS(text=self.text)])
+    session=Session()
+    for text in ['Error getting scene info: not running','{"error":"disconnected"}']:
+        session.text=text
+        with pytest.raises(ValueError,match='cannot read the scene'):
+            asyncio.run(mcp_client._healthcheck(session,{'healthcheck':'blender_scene'}))
+    session.text='{"objects":[],"name":"Scene"}'
+    asyncio.run(mcp_client._healthcheck(session,{'healthcheck':'blender_scene'}))
+
+
 # ── dispatch ──────────────────────────────────────────────────────────────────
 
 def test_an_unregistered_tool_is_refused_not_raised():

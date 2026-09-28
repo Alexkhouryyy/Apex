@@ -23,7 +23,7 @@ from tools import computer, bash, research, files, browser, repl, vision, phone,
 SYSTEM_PROMPT = """You are an advanced AI agent with voice interface, computer vision, computer control, \
 research capabilities, and a bash terminal. You are running on the user's machine and can see their screen.
 
-## PERSONALITY — This is non-negotiable:
+## DEFAULT COMMUNICATION — owner preferences may adjust tone and detail:
 - You are DIRECT and CONFIDENT. You say what you think, not what you think the user wants to hear.
 - You PUSH BACK when you disagree. If an idea is flawed, a plan is risky, or there's a clearly better \
 approach, say so plainly and explain why. You are not a yes-man.
@@ -53,6 +53,10 @@ evaluate JS. Use this when you need to actually INTERACT with a website (log in,
 click buttons, submit). Use web_browse for read-only access.
 - **schedule_task / list_scheduled_tasks / cancel_scheduled_task**: Schedule autonomous recurring \
 tasks (daily briefings, reminders, periodic checks). Tasks run even when you're not talking.
+- **search_connected_tools / describe_connected_tool / call_connected_tool**: Find actions in \
+enabled Apps and MCP connections, read the selected action's input schema, then execute it. \
+These tools discover large catalogs on demand. Connect missing accounts in the dashboard Apps page. \
+Each underlying action still requires its usual permissions; do not retry uncertain writes automatically.
 - **mcp__***: Dynamically loaded tools from configured MCP servers (Slack, Notion, Gmail, Calendar, \
 etc.). If these appear, use them for integrations with the user's real data.
 - **spawn_subagent / wait_for_subagents**: For complex multi-part tasks, spawn role-specialized \
@@ -429,6 +433,7 @@ TOOLS = [
             "task":{"type":"string"}, "context":{"type":"string"},
             "roles":{"type":"array", "items":{"type":"string", "enum":["researcher","coder","reviewer"]}},
             "budget_usd":{"type":"number", "minimum":0.01, "maximum":5, "default":0.5},
+            "goal_id":{"type":"integer", "minimum":1, "description":"Optional existing goal with completion contracts. Checks run after the stages; no goal is automatically closed. Omit to finish unverified."},
             "models":{"type":"object", "properties":{r:{"type":"string"} for r in ("researcher","coder","reviewer","apex")}, "additionalProperties":False}
         }, "required":["id","task","context","roles"]}
     },
@@ -2634,6 +2639,14 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             from agent import scheduler as sched
             return sched.cancel(inputs["task_id"])
 
+        elif name == 'project_checkpoint':
+            from agent import continuity
+            return json.dumps(continuity.checkpoint(inputs.get('data'), inputs.get('revision'), inputs.get('action','save')))
+
+        elif name in ('search_connected_tools', 'describe_connected_tool', 'call_connected_tool'):
+            from agent import app_tools
+            return app_tools.dispatch(name, inputs)
+
         elif name.startswith("mcp__"):
             if name.startswith("mcp__hass") or name.startswith("mcp__homeassistant"):
                 from agent.iot import is_enabled as _iot_enabled
@@ -2657,7 +2670,7 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             from agent import team
             if inputs.get("id"):
                 return json.dumps(team.get(inputs["id"]) or {"error":"Task not found."})
-            return json.dumps([{k:r[k] for k in ("id","task","status","cost_usd","calls","error")} for r in team.recent()])
+            return json.dumps([{**{k:r[k] for k in ("id","task","status","cost_usd","calls","error")}, "verification":r.get("verification", {"status":"unverified"})} for r in team.recent()])
         elif name == "stop_team_task":
             from agent import team
             return json.dumps({"stop_requested":team.stop(inputs["id"])})
@@ -3041,7 +3054,7 @@ def _make_tool_result_content(name: str, tool_use_id: str, result_str: str) -> d
 # Cap concurrent proposal threads so rapid complex turns can't pile up LLM calls.
 _skill_autocreate_sema = threading.Semaphore(2)
 
-_SKILL_PROPOSE_PROMPT = """You just finished a multi-step task for the user. Decide \
+_SKILL_PROPOSE_PROMPT = """The agent attempted a multi-step task for the user. Tool names alone do not prove success. Propose only a draft for owner review; never describe it as verified. Decide \
 whether the work is worth packaging as a reusable SKILL — a small, parameterized \
 Python function the agent could call again on similar future requests.
 
@@ -3096,7 +3109,7 @@ def _propose_skill(client, user_text: str, tool_names: list[str]) -> None:
             # allowed to overwrite an existing one.
             print(f"[AutoSkill] skipped — skill {name!r} already exists.")
             return
-        print(f"[AutoSkill] {skills_mod.create_skill(name, desc, code)}")
+        print(f"[AutoSkill] {skills_mod.create_skill(name, desc, code, _trigger='auto_proposal')}")
     except Exception as e:
         print(f"[AutoSkill] proposal failed: {e}")
 
@@ -3210,7 +3223,10 @@ class AgentCore:
         # Cache all static tools at the last entry; dynamic tools come after the checkpoint.
         cached = list(TOOLS)
         cached[-1] = {**cached[-1], "cache_control": {"type": "ephemeral"}}
-        return cached + self._offered_mcp_tools() + self_mod.get_dynamic_tools()
+        from agent.app_tools import DEFINITIONS
+        from agent.continuity import DEFINITION
+        direct = self._offered_mcp_tools()
+        return cached + DEFINITIONS + [DEFINITION] + (direct if len(direct) <= 12 else []) + self_mod.get_dynamic_tools()
 
     def _offered_mcp_tools(self) -> list[dict]:
         """MCP tools from servers that are switched on.
@@ -3244,6 +3260,9 @@ class AgentCore:
             if persona == "celine":
                 from agent import celine
                 blocks.append({"type": "text", "text": celine.persona_block()})
+                from agent.continuity import persona_block
+                if persona_block():
+                    blocks.append({"type": "text", "text": persona_block()})
             else:
                 from agent.persona import get_persona_prefix
                 prefix = get_persona_prefix()
@@ -3298,6 +3317,10 @@ class AgentCore:
         # earlier it would invalidate the cached prefix on every single request
         # and quietly multiply the bill. Last also makes it the most recent
         # thing the model reads before the conversation.
+        from agent.continuity import prompt as continuity_prompt
+        project_context = continuity_prompt()
+        if project_context:
+            blocks.append({"type": "text", "text": project_context})
         blocks.append({"type": "text", "text": time_block()})
         return blocks
 
@@ -3310,6 +3333,9 @@ class AgentCore:
         """
         if channel_id is None:
             return self.memory, self._run_lock
+        prefix, _, suffix = channel_id.partition(':')
+        if prefix in ('dashboard', 'companion') and suffix.isdigit():
+            channel_id = 'conversation:' + suffix
         with self._channels_mutex:
             if channel_id not in self._channel_memories:
                 self._channel_memories[channel_id] = Memory()
@@ -3365,7 +3391,7 @@ class AgentCore:
             result = _sub.run_turn(
                 self._effective_system_prompt(),
                 _sub.transcript_prompt(memory.get_messages(), user_text),
-                TOOLS,
+                self._all_tools(),
                 _execute_tool,
                 model=self._model,
                 confirm=lambda name, inputs: safety.check(name, inputs)[0],
@@ -3413,7 +3439,8 @@ class AgentCore:
             raise ValueError("Companion mode must be discuss or work.")
         screen_b64 = companion.validate_screen_image(screen_image)
         memory, lock = self._get_channel(channel_id)
-        with lock:
+        from agent import continuity
+        with lock, continuity.turn(channel_id), continuity.conversation(channel_id, self, memory, user_text) as memory:
             if cancel_event is not None and cancel_event.is_set():
                 return "[turn interrupted]"
             memory.maybe_summarize(self.anthropic)
@@ -3430,7 +3457,7 @@ class AgentCore:
                 if companion_mode:
                     blocks = blocks + [{"type": "text", "text": companion.prompt(
                         companion_mode, bool(screen_b64),
-                        name="Celine" if persona == "celine" else "Apex",
+                        name="Celine" if persona == "celine" else continuity.display_name(),
                         screen_origin=screen_origin)}]
                 return blocks
 

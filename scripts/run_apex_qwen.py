@@ -8,6 +8,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import webbrowser
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,10 +29,57 @@ def apply_wake_default(env, dotenv_keys=None):
     return env
 
 
-def port_in_use(port):
-    with socket.socket() as sock:
-        sock.settimeout(1)
-        return sock.connect_ex(('127.0.0.1', port)) == 0
+def port_in_use(port, host='127.0.0.1'):
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def launch_environment():
+    from dotenv import dotenv_values
+    env = {k: v for k, v in dotenv_values(ROOT / '.env').items() if v is not None}
+    env.update(os.environ)
+    apply_wake_default(env)
+    env.update(TTS_ENGINE='voicebox', VOICEBOX_URL='http://127.0.0.1:17494',
+               VOICEBOX_PROFILE='celine', APEX_SUPERVISED='1')
+    return env
+
+
+def dashboard_address(env):
+    host = env.get('DASHBOARD_HOST', '127.0.0.1')
+    # Match the server's fallback for a tokenless public bind.
+    if host not in {'127.0.0.1', 'localhost', '::1'} and not env.get('DASHBOARD_TOKEN'):
+        host = '127.0.0.1'
+    if host == '0.0.0.0':
+        host = '127.0.0.1'
+    port = int(env.get('DASHBOARD_PORT', '7860'))
+    shown = f'[{host}]' if ':' in host else host
+    return host, port, f'http://{shown}:{port}'
+
+
+def wait_healthy(opener, url, accept, processes, label, timeout):
+    deadline = time.monotonic() + timeout
+    next_notice = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        for name, process in processes:
+            if process.poll() is not None:
+                raise RuntimeError(f'{name} stopped during startup (exit {process.returncode}). '
+                                   'See the console or ~/.apex/resident.log.')
+        try:
+            with opener.open(url, timeout=2) as response:
+                health = json.load(response)
+            if isinstance(health, dict) and accept(health):
+                return
+        except (OSError, ValueError, urllib.error.URLError):
+            pass
+        if time.monotonic() >= next_notice:
+            print(f'Waiting for {label}...', flush=True)
+            next_notice = time.monotonic() + 15
+        time.sleep(1)
+    raise RuntimeError(f'{label} did not become ready within {timeout} seconds. '
+                       'See the console or ~/.apex/resident.log.')
 
 
 def stop(process):
@@ -48,48 +96,77 @@ def main(argv=None):
     # --fast: the streaming engine (scripts/qwen_fast_server.py) in the
     # environment Test-Apex-Fast-Voice.cmd installs. First audio in about a
     # second instead of the whole section first; measured on the laptop.
-    fast = '--fast' in (sys.argv[1:] if argv is None else argv)
+    args = sys.argv[1:] if argv is None else argv
+    fast = '--fast' in args
+    resident = '--resident' in args
     env_name, server = (('apex-qwen-fast-env', 'scripts/qwen_fast_server.py') if fast
                         else ('apex-qwen-env', 'scripts/qwen_server.py'))
     qwen_python = Path.home() / env_name / 'Scripts' / 'python.exe'
     if not qwen_python.is_file():
         hint = ' Run Test-Apex-Fast-Voice.cmd once to install it.' if fast else ''
         raise RuntimeError(f'Qwen environment missing: {qwen_python}.{hint}')
-    if port_in_use(17494) or port_in_use(7860):
-        raise RuntimeError('Close existing Apex/Qwen servers first (ports 7860 and 17494).')
+    env = launch_environment()
+    host, port, dashboard_url = dashboard_address(env)
+    dashboard_enabled = env.get('DASHBOARD_ENABLED', 'true').lower() in {'1', 'true', 'yes'}
+    if dashboard_enabled and port == 17494:
+        raise RuntimeError('DASHBOARD_PORT conflicts with Celine voice port 17494.')
+    if port_in_use(17494) or (dashboard_enabled and port_in_use(port, host)):
+        raise RuntimeError(f'An Apex/Qwen port is occupied ({port}, 17494). '
+                           'Stop the previous launcher with Ctrl+C or quit Apex from its tray, then retry.')
     voice = agent = None
     try:
+        print('Starting Celine voice. The first GPU warm-up can take several minutes.', flush=True)
         voice = subprocess.Popen([str(qwen_python), '-u', str(ROOT / server)], cwd=ROOT)
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        deadline = time.monotonic() + 900
-        while time.monotonic() < deadline:
-            if voice.poll() is not None:
-                raise RuntimeError('Qwen stopped during startup. Read the error above.')
-            try:
-                with opener.open('http://127.0.0.1:17494/health', timeout=2) as response:
-                    health = json.load(response)
-                if health.get('service') == 'apex-qwen' and health.get('model_loaded'):
-                    break
-            except (OSError, ValueError, urllib.error.URLError):
-                pass
-            time.sleep(1)
-        else:
-            raise RuntimeError('Qwen startup timed out after 15 minutes.')
-        env = os.environ.copy()
-        env.update(TTS_ENGINE='voicebox', VOICEBOX_URL='http://127.0.0.1:17494', VOICEBOX_PROFILE='celine')
-        # "Hey Celly" — Celine looks at your screen and helps (agent/look_now.py).
-        # On by default for this launcher, but a CELINE_WAKE_ENABLED already in
-        # the environment or in .env wins: load_dotenv() never overrides a
-        # variable that is already set, so setting it here unconditionally
-        # would have made .env powerless to turn it off.
-        apply_wake_default(env)
-        print('\nCeline connected. Open http://127.0.0.1:7860/companion once Apex is ready.\n', flush=True)
-        agent = subprocess.Popen([sys.executable, str(ROOT / 'main.py'), '--text'], cwd=ROOT, env=env)
-        while agent.poll() is None:
-            if voice.poll() is not None:
-                raise RuntimeError('Qwen voice service stopped. Restart this launcher; see error above.')
-            time.sleep(1)
-        return agent.returncode
+        wait_healthy(opener, 'http://127.0.0.1:17494/health',
+                     lambda h: h.get('service') == 'apex-qwen' and h.get('model_loaded'),
+                     [('Celine voice', voice)], 'Celine voice', 900)
+        print('Celine voice: ready.', flush=True)
+        # Own the child directly, so stopping this launcher also stops Apex.
+        # Only the explicit dashboard restart exit code triggers a new child.
+        starts = []
+        opened = False
+        while True:
+            env = launch_environment()  # Pick up settings saved before a restart.
+            host, port, dashboard_url = dashboard_address(env)
+            dashboard_enabled = env.get('DASHBOARD_ENABLED', 'true').lower() in {'1', 'true', 'yes'}
+            if dashboard_enabled and (port == 17494 or port_in_use(port, host)):
+                raise RuntimeError(f'Dashboard port {port} is occupied. Check DASHBOARD_PORT or stop the other Apex instance.')
+            now = time.monotonic()
+            starts = [t for t in starts if now - t < 120]
+            if len(starts) >= 5:
+                raise RuntimeError('Too many Apex restarts in two minutes; stopping.')
+            starts.append(now)
+            print('Starting Apex' + (' resident mode' if resident else '') + '...', flush=True)
+            agent = subprocess.Popen([sys.executable, str(ROOT / 'main.py'),
+                                      '--resident' if resident else '--text'], cwd=ROOT, env=env)
+            if dashboard_enabled:
+                wait_healthy(opener, dashboard_url + '/health',
+                             lambda h: h.get('service') == 'apex' and h.get('pid') == agent.pid
+                             and h.get('agent_ready') is True,
+                             [('Apex', agent), ('Celine voice', voice)], 'Apex dashboard', 180)
+                print(f'Dashboard: ready. {dashboard_url}/home\n'
+                      f'Screen Companion: {dashboard_url}/companion\n'
+                      'Open Companion and click Voice mode to allow browser audio/microphone access.', flush=True)
+                if '--open' in args and not opened:
+                    try:
+                        webbrowser.open(dashboard_url + '/companion')
+                    except Exception:
+                        print('Open the Companion link above in your browser.', flush=True)
+                    opened = True
+            else:
+                print('Dashboard: disabled in your settings.', flush=True)
+            print('Background features and MCP servers follow your existing settings.\n'
+                  'Apps requiring keys or account authorization still need setup in Apps.\n'
+                  'Keep this window open. Press Ctrl+C to stop Apex and Celine.', flush=True)
+            while agent.poll() is None:
+                if voice.poll() is not None:
+                    raise RuntimeError('Celine voice stopped. Restart this launcher; see error above.')
+                time.sleep(1)
+            if agent.returncode != 42:
+                return agent.returncode
+            print('Restart requested. Keeping Celine voice warm...', flush=True)
+            time.sleep(2)
     finally:
         stop(agent)
         stop(voice)

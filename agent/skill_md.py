@@ -2,6 +2,8 @@
 import json
 import re
 import time
+import shutil
+import tempfile
 from pathlib import Path
 
 _SKILLS_DIR = Path.home() / ".apex" / "skills"
@@ -9,12 +11,12 @@ _USAGE_FILE = _SKILLS_DIR / ".usage.json"
 
 
 def _load_usage() -> dict:
-    return json.loads(_USAGE_FILE.read_text()) if _USAGE_FILE.exists() else {}
+    return json.loads(_USAGE_FILE.read_text(encoding='utf-8')) if _USAGE_FILE.exists() else {}
 
 
 def _save_usage(data: dict) -> None:
     _SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-    _USAGE_FILE.write_text(json.dumps(data, indent=2))
+    _USAGE_FILE.write_text(json.dumps(data, indent=2), encoding='utf-8')
 
 
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -66,10 +68,20 @@ def install_bundled() -> int:
                 dest = _skill_path(name)          # validates the name
             except ValueError:
                 continue
-            if dest.exists():
+            if dest.parent.exists():
                 continue
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(src.read_text())
+            # Keep source notices, compatibility manifests and supporting files.
+            # Publish the complete directory together; never expose half a skill.
+            if any(p.is_symlink() for p in src.parent.rglob('*')):
+                continue
+            dest.parent.parent.mkdir(parents=True, exist_ok=True)
+            staging = Path(tempfile.mkdtemp(prefix='.bundled-', dir=dest.parent.parent))
+            try:
+                shutil.copytree(src.parent, staging, dirs_exist_ok=True)
+                staging.rename(dest.parent)
+            finally:
+                if staging.exists():
+                    shutil.rmtree(staging)
             usage.setdefault(name, {"use_count": 0})
             usage[name]["last_used_at"] = time.time()
             installed += 1
@@ -86,10 +98,11 @@ def list_skills() -> list[dict]:
         return []
     out = []
     for p in sorted(_SKILLS_DIR.glob("*/SKILL.md")):
-        if ".archive" in str(p):
+        from agent.skill_imports import available
+        if p.parent.name.startswith('.') or not available(p.parent):
             continue
-        fm = _parse_frontmatter(p.read_text())
-        out.append({"name": fm.get("name", p.parent.name), "description": fm.get("description", "")})
+        fm = _parse_frontmatter(p.read_text(encoding='utf-8'))
+        out.append({"name": p.parent.name, "description": fm.get("description", "")})
     return out
 
 
@@ -110,6 +123,14 @@ def manage(
         except ValueError as e:
             return f"[skill_manage] {e}"
     # Write-approval gate: stage skill creation when enabled.
+    if name and action in ('view', 'edit', 'patch'):
+        folder = _skill_path(name).parent
+        if (folder / '.apex-import.json').exists():
+            from agent.skill_imports import available
+            if action != 'view':
+                return 'Imported skills are immutable. Preview a new revision and install under a new name.'
+            if not available(folder):
+                return 'This imported skill is disabled or its reviewed files changed. Review it again in Apex Home.'
     if action == "create" and not _bypass_approval:
         try:
             import config as _cfg
@@ -143,7 +164,7 @@ def manage(
             f"---\nname: {name}\ndescription: {description}\n"
             f"created: {today}\nuse_count: 0\nlast_used_at: null\n---\n\n"
         )
-        path.write_text(header + content.strip() + "\n")
+        path.write_text(header + content.strip() + "\n", encoding='utf-8')
         # Seed the usage sidecar. Without this there is no `last_used_at`, so
         # curator computes age_days = 999.0 (curator.py:176-177) and ARCHIVES the
         # skill on its very next run — every freshly authored skill would silently
@@ -170,7 +191,14 @@ def manage(
         entry["last_used_at"] = time.time()
         usage[name] = entry
         _save_usage(usage)
-        return path.read_text()
+        text = path.read_text(encoding='utf-8')
+        if (path.parent / '.apex-import.json').exists():
+            manifest = json.loads((path.parent / '.apex-import.json').read_text(encoding='utf-8'))
+            text = (f'Reviewed skill directory: {path.parent}\n'
+                    'Resolve relative support-file references against this directory using read_file. '
+                    'Instructions do not grant additional tool permissions.\n\n' + text)
+            text = 'APEX COMPATIBILITY REVIEW:\n' + manifest['review_notes'] + '\n\n' + text
+        return text
 
     if action == "edit":
         if not name or not content:
@@ -178,10 +206,10 @@ def manage(
         path = _skill_path(name)
         if not path.exists():
             return f"No skill named {name!r}."
-        existing = path.read_text()
+        existing = path.read_text(encoding='utf-8')
         fm_match = re.match(r"^(---\n.*?\n---\n)", existing, re.DOTALL)
         header = fm_match.group(1) if fm_match else ""
-        path.write_text(header + "\n" + content.strip() + "\n")
+        path.write_text(header + "\n" + content.strip() + "\n", encoding='utf-8')
         return f"Skill {name!r} updated."
 
     if action == "patch":
@@ -190,10 +218,10 @@ def manage(
         path = _skill_path(name)
         if not path.exists():
             return f"No skill named {name!r}."
-        text = path.read_text()
+        text = path.read_text(encoding='utf-8')
         if old_text not in text:
             return f"Text not found in {name!r}."
-        path.write_text(text.replace(old_text, new_text or "", 1))
+        path.write_text(text.replace(old_text, new_text or "", 1), encoding='utf-8')
         return f"Skill {name!r} patched."
 
     if action == "delete":
@@ -202,9 +230,9 @@ def manage(
         path = _skill_path(name)
         if not path.exists():
             return f"No skill named {name!r}."
-        archive = _SKILLS_DIR / ".archive" / name / "SKILL.md"
+        archive = _SKILLS_DIR / ".archive" / (name + '-' + str(time.time_ns()))
         archive.parent.mkdir(parents=True, exist_ok=True)
-        path.rename(archive)
+        path.parent.rename(archive)
         return f"Skill {name!r} archived (not deleted permanently)."
 
     return f"Unknown action: {action!r}. Valid: list, create, view, edit, patch, delete."

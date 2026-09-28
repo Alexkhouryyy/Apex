@@ -11,7 +11,7 @@ DISCUSS_TOOLS = frozenset({
     # themselves is a note in Apex's own memory, not an action on the machine.
     "recall", "remember", "kb_search", "web_search", "web_browse", "research",
     "usage_summary", "replay_session", "evaluate_recent_work", "team_task_status",
-    "board_state", "board_history", "board_props",
+    "board_state", "board_history", "board_props", "project_checkpoint",
     # Building on the board is making a picture to look at together — a new
     # file in Apex's props folder and a card, nothing on the machine changes.
     "board_build", "assembly_study",

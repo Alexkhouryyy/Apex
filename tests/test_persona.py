@@ -39,10 +39,10 @@ def _blocks_text(agent) -> list[str]:
 
 # ── the flag ──────────────────────────────────────────────────────────────────
 
-def test_enabled_by_default(monkeypatch):
+def test_enabled_by_default(monkeypatch, test_db):
     monkeypatch.setattr(config, "JARVIS_PERSONA_ENABLED", True, raising=False)
     prefix = persona.get_persona_prefix()
-    assert prefix and "JARVIS" in prefix
+    assert prefix and "APEX IDENTITY" in prefix
 
 
 def test_disabled_returns_nothing(monkeypatch):
@@ -57,7 +57,7 @@ def test_persona_reaches_the_system_prompt(agent, monkeypatch):
     and nothing errors."""
     monkeypatch.setattr(config, "JARVIS_PERSONA_ENABLED", True, raising=False)
     joined = "\n".join(_blocks_text(agent))
-    assert "JARVIS" in joined, "the persona never reached the prompt"
+    assert "APEX IDENTITY" in joined, "the persona never reached the prompt"
 
 
 def test_persona_is_the_first_block(agent, monkeypatch):
@@ -65,16 +65,16 @@ def test_persona_is_the_first_block(agent, monkeypatch):
     SYSTEM_PROMPT it is just a suggestion."""
     monkeypatch.setattr(config, "JARVIS_PERSONA_ENABLED", True, raising=False)
     blocks = _blocks_text(agent)
-    assert "JARVIS" in blocks[0], (
+    assert "APEX IDENTITY" in blocks[0], (
         f"persona is not first — it sits at index "
-        f"{next((i for i, b in enumerate(blocks) if 'JARVIS' in b), None)}"
+        f"{next((i for i, b in enumerate(blocks) if 'APEX IDENTITY' in b), None)}"
     )
 
 
 def test_persona_precedes_the_base_system_prompt(agent, monkeypatch):
     monkeypatch.setattr(config, "JARVIS_PERSONA_ENABLED", True, raising=False)
     blocks = _blocks_text(agent)
-    persona_at = next(i for i, b in enumerate(blocks) if "JARVIS" in b)
+    persona_at = next(i for i, b in enumerate(blocks) if "APEX IDENTITY" in b)
     base_at = next(i for i, b in enumerate(blocks) if core.SYSTEM_PROMPT[:60] in b)
     assert persona_at < base_at
 
@@ -85,6 +85,7 @@ def test_no_persona_leaks_when_disabled(agent, monkeypatch):
     monkeypatch.setattr(config, "JARVIS_PERSONA_ENABLED", False, raising=False)
     joined = "\n".join(_blocks_text(agent))
     assert "JARVIS" not in joined
+    assert "APEX IDENTITY" not in joined
     assert 'Address the user as "sir"' not in joined
 
 

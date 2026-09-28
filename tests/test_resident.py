@@ -203,12 +203,9 @@ class TestWakeListener:
 
 class TestAutostart:
     def test_linux_install_writes_desktop_file(self, tmp_path, monkeypatch):
-        # Redirect HOME so we don't pollute the user's real config
-        monkeypatch.setenv("HOME", str(tmp_path))
         from app import autostart
-        # Re-resolve project paths by importing fresh
-        if hasattr(autostart, "_linux_desktop_path"):
-            target = autostart._linux_desktop_path()
+        # Path.home() ignores HOME on Windows. Isolate the actual target.
+        monkeypatch.setattr(autostart, "_linux_desktop_path", lambda: tmp_path / "apex.desktop")
         # Force-call Linux installer regardless of host OS
         result = autostart._linux_install()
         path = autostart._linux_desktop_path()
@@ -219,8 +216,8 @@ class TestAutostart:
         assert "Installed" in result
 
     def test_linux_uninstall_removes_file(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HOME", str(tmp_path))
         from app import autostart
+        monkeypatch.setattr(autostart, "_linux_desktop_path", lambda: tmp_path / "apex.desktop")
         autostart._linux_install()
         assert autostart._linux_desktop_path().exists()
         result = autostart._linux_uninstall()
@@ -228,8 +225,8 @@ class TestAutostart:
         assert "Removed" in result
 
     def test_linux_status_reflects_install(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HOME", str(tmp_path))
         from app import autostart
+        monkeypatch.setattr(autostart, "_linux_desktop_path", lambda: tmp_path / "apex.desktop")
         assert autostart._linux_status() == "Not installed."
         autostart._linux_install()
         assert "Installed" in autostart._linux_status()
@@ -379,3 +376,30 @@ class TestLiveFeedAttachment:
         import main
         assert "attach_live_feed" in inspect.getsource(resident.run_resident)
         assert "attach_live_feed" in inspect.getsource(main)
+
+
+def test_dashboard_logging_initializes_after_resident_redirect(tmp_path):
+    """Exercise Uvicorn's real formatter setup, isolated from pytest's logging."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    log_path = tmp_path / 'resident.log'
+    script = '''
+import sys
+import config
+from app.resident import _setup_logging
+import uvicorn
+config.RESIDENT_LOG_FILE = sys.argv[1]
+_setup_logging()
+async def app(scope, receive, send):
+    pass
+uvicorn.Config(app, log_level='warning')
+print('Dashboard logging ready')
+sys.stdout.flush()
+'''
+    result = subprocess.run([sys.executable, '-X', 'utf8', '-c', script, str(log_path)],
+                            cwd=Path(__file__).resolve().parents[1], capture_output=True,
+                            text=True, timeout=20)
+    output = log_path.read_text(encoding='utf-8') if log_path.exists() else result.stderr
+    assert result.returncode == 0, output
+    assert 'Dashboard logging ready' in output

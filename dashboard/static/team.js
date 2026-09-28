@@ -27,6 +27,7 @@
   if (pending) {
     $('team-task').value=pending.task; $('team-context').value=pending.context;
     $('team-budget').value=pending.budget_usd;
+    $('team-goal').value=pending.goal_id || '';
     for (const r of roles) $('team-use-'+r).checked=pending.roles.includes(r);
     for (const r of [...roles,'apex']) $('team-model-'+r).value=pending.models[r] || '';
   }
@@ -46,8 +47,12 @@
       item.addEventListener('toggle', () => item.open ? expanded.add(run.id) : expanded.delete(run.id));
       item.append(node('summary', `${run.task.slice(0,100)} · ${run.status} · ~$${run.cost_usd.toFixed(4)} · ${run.calls} calls`));
       item.append(node('p', run.context || 'No additional project context.'));
+      const verification=run.verification || {status:'unverified',results:[]};
+      item.append(node('p', `Verification: ${verification.status}${run.goal_id ? ' · Goal #'+run.goal_id : ''}`));
+      if (verification.reason) item.append(node('p',verification.reason));
+      for (const check of verification.results || []) item.append(node('p',`${check.kind}: ${check.passed ? 'passed' : 'not passed'} · ${check.evidence}`));
       if (run.error) item.append(node('p', run.error));
-      if (['queued','running','stopping'].includes(run.status)) {
+      if (['queued','running','stopping','verifying'].includes(run.status)) {
         const stop = node('button','Stop task'); stop.type='button';
         stop.onclick=async () => { try { await api(`/api/team/${run.id}/stop`,{}); stop.textContent='Stop requested'; stop.disabled=true; } catch(e) { $('team-error').textContent=e.message; } };
         item.append(stop);
@@ -80,6 +85,7 @@
     try {
       if (!pending) {
         pending={id:crypto.randomUUID(), task:$('team-task').value, context:$('team-context').value, roles:roles.filter(r=>$('team-use-'+r).checked), models:Object.fromEntries([...roles,'apex'].map(r=>[r,$('team-model-'+r).value.trim()])), budget_usd:Number($('team-budget').value)};
+        if ($('team-goal').value) pending.goal_id=Number($('team-goal').value);
         sessionStorage.setItem('apex_team_pending',JSON.stringify(pending));
       }
       const run=await api('/api/team',pending); expanded.add(run.id); pending=null; sessionStorage.removeItem('apex_team_pending'); await refresh();

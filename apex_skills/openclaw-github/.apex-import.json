@@ -1,0 +1,15 @@
+{
+  "source": "openclaw",
+  "repo": "openclaw/openclaw",
+  "revision": "8777448a9ffab1d0a5ad39d5abc11640cba849de",
+  "path": "skills/github",
+  "description": "\"GitHub CLI for issues, PRs, CI/check logs, comments, reviews, releases, repos, and gh api queries.\"",
+  "enabled": true,
+  "reviewed_at": 1790561436.249841,
+  "review_notes": "Apex adaptation review: use the existing bash tool to run gh. GitHub CLI is present on this Windows host; check gh auth status only when GitHub work is requested. Authentication and external writes still need the user's authorized scope. Do not install brew or assume /tmp exists: use platform-appropriate temporary paths and body files. Apex has no OpenClaw runtime sessionUrl; omit that footer. No new daemon, account, credentials or permissions are supplied by this skill.",
+  "review_id": "7fd9a33dc5f4d0fcb1b5d9964c1e31d2ef5b461d89d12e8f9aa72bdd14c7c738",
+  "hashes": {
+    "SKILL.md": "efee896479d9257a19ed787e324b005be28c62ac6446bd8f193798dce6574731",
+    "UPSTREAM-LICENSE.txt": "73571b25326281d369087f469842c02444fe39faaecebda4d82ed21ff3a1c29d"
+  }
+}

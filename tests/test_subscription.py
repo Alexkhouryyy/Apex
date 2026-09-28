@@ -294,7 +294,9 @@ class TestConversationFallback:
 
     def _core(self):
         from agent.core import AgentCore
-        return AgentCore.__new__(AgentCore)
+        core = AgentCore.__new__(AgentCore)
+        core._all_tools = lambda: []
+        return core
 
     class _Mem:
         def __init__(self): self.added = []

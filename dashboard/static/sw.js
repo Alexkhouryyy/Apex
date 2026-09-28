@@ -1,12 +1,18 @@
 /* Apex service worker — offline app shell + Web Push receiver.
  * Served from the origin root (/sw.js) so its scope covers the whole app.
  */
-const CACHE = 'apex-shell-v30';
+const CACHE = 'apex-shell-v34';
 const SHELL = [
   '/',
   '/static/styles.css?v=omni30',
   '/static/mobile.css?v=omni30',
-  '/static/app.js?v=omni30',
+  '/static/app.js?v=apps31',
+  '/apps',
+  '/home',
+  '/static/home.js?v=home33',
+  '/static/home.css?v=home33',
+  '/static/apps.js?v=apps31',
+  '/static/apps.css?v=apps31',
   '/static/voice-mobile.js?v=omni30',
   '/static/cst3d.js?v=omni30',
   '/static/marked.min.js',
@@ -38,13 +44,15 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws')) return;
 
   if (req.mode === 'navigate') {
+    const pages = ['/', '/apps', '/home', '/companion', '/board', '/drive', '/study'];
+    if (!pages.includes(url.pathname)) return;
     // Network-first for the shell so updates land when online.
     event.respondWith(
       fetch(req).then((res) => {
         const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put('/', copy)).catch(() => {});
+        if (res.ok) caches.open(CACHE).then((c) => c.put(url.pathname, copy)).catch(() => {});
         return res;
-      }).catch(() => caches.match('/'))
+      }).catch(() => caches.match(url.pathname).then((hit) => hit || caches.match('/')))
     );
     return;
   }

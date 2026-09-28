@@ -111,14 +111,14 @@ def test_the_endpoints_exist():
 def test_the_client_stores_the_thread_outside_the_session():
     """sessionStorage was the bug. localStorage is what makes it survive."""
     from pathlib import Path
-    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text(encoding='utf-8')
     fn = js[js.index("const _THREAD_KEY"):js.index("async function _loadThreadList")]
     assert "localStorage" in fn and "sessionStorage" not in fn
 
 
 def test_the_chat_endpoint_records_both_sides():
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "dashboard/server.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "dashboard/server.py").read_text(encoding='utf-8')
     chat = src[src.index("user_text = (body.get"):src.index("# --- Council")]
     assert 'add_message(thread_id, "user"' in chat
     assert 'add_message(thread_id, "agent"' in chat
@@ -128,7 +128,7 @@ def test_the_chat_endpoint_records_both_sides():
 
 def _js():
     from pathlib import Path
-    return (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    return (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text(encoding='utf-8')
 
 
 def test_every_message_gets_a_copy_button():

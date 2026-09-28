@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Apps · Apex</title><link rel="icon" href="/static/icons/favicon-64.png"><link rel="stylesheet" href="/static/apps.css?v=apps31"></head>
+<body>
+<header class="topbar"><a class="brand" href="/">A<span>PEX</span><small> / Apps</small></a><nav aria-label="Workspace"><a href="/companion">Screen companion</a><a href="/board">Spatial workspace</a><a href="/">Dashboard ↗</a></nav></header>
+<main>
+  <section class="hero"><div><p class="eyebrow">YOUR WORK, CONNECTED</p><h1>Give Apex the right tools.</h1><p class="lede">Find your apps. Connect your accounts. Let Apex work across them.</p></div><button id="settings-toggle" class="quiet">Catalog settings</button></section>
+  <div id="notice" role="status" aria-live="polite" hidden></div>
+  <section id="login" class="setup" hidden><div><p class="eyebrow">OWNER ACCESS</p><h2>Unlock your connections</h2><p>Use your Apex dashboard token to manage accounts and credentials.</p></div><form id="login-form"><label for="owner-token">Dashboard token</label><input id="owner-token" type="password" required autocomplete="current-password"><button>Unlock Apps</button></form></section>
+  <section id="settings" class="setup" hidden><div><p class="eyebrow">ONE-TIME SETUP</p><h2>Connect the app catalog</h2><p>Apex uses Composio for its broad catalog and account sign-in. Composio stores and refreshes connected credentials; its plan limits apply. Apex still controls which actions can run.</p><a href="https://platform.composio.dev" target="_blank" rel="noopener noreferrer">Get a Composio project key ↗</a><p class="small">Changing projects requires connecting your apps again. Local MCP servers work independently.</p></div><form id="settings-form"><label for="provider-key">Composio project API key</label><input id="provider-key" type="password" required autocomplete="off" placeholder="Paste your project key"><button>Verify & save key</button><span class="small">Saved on the Apex host. Never shown back in this page.</span></form></section>
+  <section id="workspace" hidden>
+    <div class="toolbar"><div class="tabs" role="tablist" aria-label="Connections"><button role="tab" data-view="catalog" aria-selected="true">Discover</button><button role="tab" data-view="connected" aria-selected="false">My apps <span id="connection-count">0</span></button><button role="tab" data-view="local" aria-selected="false">Local MCP</button></div><button id="refresh" class="quiet">↻ Refresh status</button></div>
+    <form class="filters" id="search-form"><label class="search"><span>⌕</span><input id="query" type="search" placeholder="Search apps or capabilities…" aria-label="Search apps"></label><select id="category" aria-label="App category"><option value="">All categories</option></select><button class="quiet">Search</button></form>
+    <div class="list-heading"><h2 id="list-title">Discover apps</h2><span id="list-meta" class="small"></span></div>
+    <p id="view-help" class="small"></p>
+    <div id="results" class="cards" aria-live="polite"></div>
+    <div class="load-more"><button id="more" class="quiet" hidden>Load more apps</button></div>
+  </section>
+  <footer><span>Connected tools are discovered when a task needs them.</span><a href="/?tab=control" id="policy-link">Manage action permissions in Control ↗</a></footer>
+</main>
+<dialog id="details"><div class="dialog-head"><h2 id="details-title">Available actions</h2><button id="close-details" class="quiet" aria-label="Close actions">✕</button></div><input id="tool-filter" type="search" aria-label="Filter actions" placeholder="Filter actions…"><div id="tool-list"></div></dialog>
+<script src="/static/apps.js?v=apps31" defer></script></body></html>

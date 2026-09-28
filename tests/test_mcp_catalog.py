@@ -28,7 +28,8 @@ def root(tmp_path, monkeypatch):
 
 
 def _servers(root):
-    return json.loads((root / "mcp_servers.json").read_text())["mcpServers"]
+    path = root / "mcp_servers.local.json"
+    return json.loads(path.read_text())["mcpServers"] if path.exists() else {}
 
 
 class TestTheTrackedFileIsWhyThisExists:
@@ -67,25 +68,23 @@ class TestTheTrackedFileIsWhyThisExists:
 
 class TestSecretsNeverReachTheTrackedFile:
     def test_a_credential_is_written_to_env_not_to_the_config(self, root):
-        cat.install("slack", {"SLACK_BOT_TOKEN": "xoxb-real-secret",
-                              "SLACK_TEAM_ID": "T123"}, verify=OK)
-        raw = (root / "mcp_servers.json").read_text()
+        cat.install("slack", {"SLACK_MCP_ACCESS_TOKEN": "xoxb-real-secret"}, verify=OK)
+        raw = (root / "mcp_servers.local.json").read_text()
         assert "xoxb-real-secret" not in raw
-        assert "${SLACK_BOT_TOKEN}" in raw
+        assert "${SLACK_MCP_ACCESS_TOKEN}" in raw
         assert "xoxb-real-secret" in (root / ".env").read_text()
 
     def test_the_config_holds_only_placeholders(self, root):
-        cat.install("slack", {"SLACK_BOT_TOKEN": "xoxb-x", "SLACK_TEAM_ID": "T1"},
+        cat.install("slack", {"SLACK_MCP_ACCESS_TOKEN": "xoxb-x"},
                     verify=OK)
-        env = _servers(root)["slack"]["env"]
-        assert env == {"SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
-                       "SLACK_TEAM_ID": "${SLACK_TEAM_ID}"}
+        headers = _servers(root)["slack"]["headers"]
+        assert headers == {"Authorization": "Bearer ${SLACK_MCP_ACCESS_TOKEN}"}
 
     def test_a_literal_secret_is_refused_outright(self, root, monkeypatch):
         """"Be careful" is not a mechanism. If some future path tried to write a
         real value into the launch config, this stops it."""
         with pytest.raises(cat.InstallRefused) as e:
-            cat._check_secrets({"SLACK_BOT_TOKEN": "xoxb-1234567890"})
+            cat._check_secrets({"SLACK_MCP_ACCESS_TOKEN": "xoxb-1234567890"})
         assert "tracked in git" in str(e.value)
 
     def test_placeholders_are_not_mistaken_for_secrets(self, root):
@@ -94,7 +93,7 @@ class TestSecretsNeverReachTheTrackedFile:
     def test_uninstall_leaves_the_credential_alone(self, root):
         """A Remove button silently deleting a token you use elsewhere is not
         something a Remove button should do."""
-        cat.install("slack", {"SLACK_BOT_TOKEN": "xoxb-x", "SLACK_TEAM_ID": "T1"},
+        cat.install("slack", {"SLACK_MCP_ACCESS_TOKEN": "xoxb-x"},
                     verify=OK)
         cat.uninstall("slack")
         assert "xoxb-x" in (root / ".env").read_text()
@@ -114,7 +113,7 @@ class TestInstallIsVerifiedNotAssumed:
     def test_a_failed_install_keeps_the_credential_it_was_given(self, root):
         """So a retry does not ask for the token again."""
         with pytest.raises(cat.InstallRefused):
-            cat.install("slack", {"SLACK_BOT_TOKEN": "xoxb-x", "SLACK_TEAM_ID": "T1"},
+            cat.install("slack", {"SLACK_MCP_ACCESS_TOKEN": "xoxb-x"},
                         verify=lambda l: (False, "boom"))
         assert "xoxb-x" in (root / ".env").read_text()
 
@@ -122,29 +121,29 @@ class TestInstallIsVerifiedNotAssumed:
         out = cat.install("filesystem", verify=OK)
         assert out["ok"] is True
         entry = _servers(root)["filesystem"]
-        assert entry["command"] == "npx"
+        assert Path(entry["command"]).stem.lower() == "npx"
         assert "@modelcontextprotocol/server-filesystem" in entry["args"]
 
     def test_the_examples_are_left_untouched(self, root):
         cat.install("filesystem", verify=OK)
-        assert "_example_x" in _servers(root)
+        assert "_example_x" in json.loads((root / "mcp_servers.json").read_text())["mcpServers"]
 
 
 class TestMissingCredentialsAreCaughtBeforeLaunch:
     def test_installing_without_a_required_key_is_refused(self, root, monkeypatch):
-        monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+        monkeypatch.delenv("SLACK_MCP_ACCESS_TOKEN", raising=False)
         monkeypatch.delenv("SLACK_TEAM_ID", raising=False)
         ran = []
         with pytest.raises(cat.InstallRefused) as e:
             cat.install("slack", {}, verify=lambda l: ran.append(1) or (True, ""))
-        assert "SLACK_BOT_TOKEN" in str(e.value)
+        assert "SLACK_MCP_ACCESS_TOKEN" in str(e.value)
         assert ran == [], "it should not launch a server it knows will fail"
 
     def test_a_key_already_in_the_environment_counts(self, root, monkeypatch):
-        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-from-env")
+        monkeypatch.setenv("SLACK_MCP_ACCESS_TOKEN", "xoxb-from-env")
         monkeypatch.setenv("SLACK_TEAM_ID", "T9")
         assert cat.install("slack", {}, verify=OK)["ok"] is True
-        assert "xoxb-from-env" not in (root / "mcp_servers.json").read_text()
+        assert "xoxb-from-env" not in (root / "mcp_servers.local.json").read_text()
 
     def test_a_server_needing_nothing_installs_in_one_step(self, root):
         assert cat.install("filesystem", verify=OK)["ok"] is True
@@ -173,8 +172,8 @@ class TestListing:
     def test_every_entry_is_well_formed(self):
         """A catalogue row missing a command is a button that cannot work."""
         for e in cat.CATALOG:
-            assert e["id"] and e["name"] and e["blurb"] and e["command"]
-            assert isinstance(e["args"], list) and e["args"]
+            assert e["id"] and e["name"] and e["blurb"]
+            assert bool(e.get("command")) != bool(e.get("url"))
             assert isinstance(e["env"], dict)
             for var, why in e["env"].items():
                 assert var.isupper() and why, f"{e['id']}: {var} has no guidance"
@@ -182,6 +181,52 @@ class TestListing:
     def test_ids_are_unique(self):
         ids = [e["id"] for e in cat.CATALOG]
         assert len(ids) == len(set(ids))
+
+    def test_prepare_is_disabled_idempotent_and_keeps_existing_config(self, root):
+        cat.install('filesystem', verify=OK)
+        before=_servers(root)['filesystem']
+        cat.prepare()
+        staged=_servers(root)
+        assert set(cat.DEFAULT_CONNECTIONS) <= staged.keys()
+        assert all(staged[s]['disabled'] for s in cat.DEFAULT_CONNECTIONS)
+        assert cat.installed()==['filesystem']
+        assert staged['filesystem']==before
+        cat.prepare()
+        assert _servers(root)==staged
+        assert '${GOOGLE_DRIVE_MCP_ACCESS_TOKEN}' in staged['google-drive']['headers']['Authorization']
+        assert json.loads((root/'mcp_servers.json').read_text())['mcpServers']=={'_example_x':{'command':'npx'}}
+
+    def test_failed_connection_remains_disabled(self, root, monkeypatch):
+        monkeypatch.setenv('GITHUB_PERSONAL_ACCESS_TOKEN','example')
+        cat.prepare()
+        with pytest.raises(cat.InstallRefused):
+            cat.install('github',verify=lambda _: (False,'authorization required'))
+        assert _servers(root)['github']['disabled']
+        assert 'github' not in cat.installed()
+
+    def test_remote_install_keeps_token_out_of_config(self, root):
+        seen=[]
+        def probe(launch):
+            seen.append(launch)
+            return True,'connected'
+        cat.prepare()
+        cat.install('github',{'GITHUB_PERSONAL_ACCESS_TOKEN':'ghp-private-test'},verify=probe)
+        assert seen[0]['type']=='http'
+        assert seen[0]['headers']['X-MCP-Readonly']=='true'
+        assert 'ghp-private-test' not in (root/cat.CONFIG_NAME).read_text()
+        assert 'github' in cat.installed()
+
+    def test_prepare_and_remove_preserve_inherited_project_files(self, root):
+        path=root/'.mcp.json'
+        raw=json.dumps({'mcpServers':{'github':{'url':'https://custom.example/mcp'}}})
+        path.write_text(raw)
+        cat.prepare()
+        assert 'github' in cat.installed()
+        assert 'github' not in _servers(root)
+        cat.uninstall('github')
+        assert 'github' not in cat.installed()
+        assert _servers(root)['github']['disabled']
+        assert path.read_text()==raw
 
 
 class TestRefusals:
@@ -195,11 +240,11 @@ class TestRefusals:
 
     def test_a_corrupt_config_is_not_overwritten(self, root):
         """Rewriting it would throw away whatever is in there."""
-        (root / "mcp_servers.json").write_text("{ this is not json")
+        (root / "mcp_servers.local.json").write_text("{ this is not json")
         with pytest.raises(cat.InstallRefused) as e:
             cat.install("filesystem", verify=OK)
         assert "not valid JSON" in str(e.value)
-        assert (root / "mcp_servers.json").read_text() == "{ this is not json"
+        assert (root / "mcp_servers.local.json").read_text() == "{ this is not json"
 
 
 class TestEnvExpansionAtLaunch:
@@ -207,10 +252,10 @@ class TestEnvExpansionAtLaunch:
 
     def test_a_placeholder_becomes_the_real_value(self, monkeypatch):
         from agent import mcp_client
-        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-live")
+        monkeypatch.setenv("SLACK_MCP_ACCESS_TOKEN", "xoxb-live")
         p = mcp_client._params({"command": "npx", "args": ["-y", "x"],
-                                "env": {"SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}"}})
-        assert p.env["SLACK_BOT_TOKEN"] == "xoxb-live"
+                                "env": {"SLACK_MCP_ACCESS_TOKEN": "${SLACK_MCP_ACCESS_TOKEN}"}})
+        assert p.env["SLACK_MCP_ACCESS_TOKEN"] == "xoxb-live"
 
     def test_it_expands_inside_arguments_too(self, monkeypatch):
         from agent import mcp_client

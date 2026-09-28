@@ -106,7 +106,6 @@ function fmtNum(n) { return new Intl.NumberFormat().format(n || 0); }
 document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const prevTab = document.querySelector('.tab.active')?.id?.replace('tab-', '');
-    if (prevTab === 'camera') _teardownVision();
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     btn.classList.add('active');
@@ -238,17 +237,12 @@ async function loadTab(tab) {
     graph: loadGraph,
     reflections: loadReflections,
     evolution: loadEvolution,
-    inbox: loadInbox,
-    calendar: loadCalendar,
     telemetry: loadTelemetry,
     replay: loadReplay,
     briefing: loadBriefing,
     schedule: loadTasks,
-    subagents: loadSubagents,
     knowledge: loadKB,
     selfmod: loadSelfMod,
-    phone: loadPhone,
-    camera: loadVision,
     chat: loadChat,
     council: loadCouncil,
     compare: loadCompare,
@@ -272,12 +266,9 @@ const FEATURES = [
   { tab: 'telemetry',   icon: '▤', label: 'Telemetry' },
   { tab: 'replay',      icon: '▷', label: 'Replay' },
   { tab: 'schedule',    icon: '◷', label: 'Schedule',   badge: 'tasks' },
-  { tab: 'subagents',   icon: '⌥', label: 'Sub-agents', badge: 'subagents' },
   { tab: 'knowledge',   icon: '≡', label: 'Knwl Base' },
   { tab: 'selfmod',     icon: '✎', label: 'Self-Mod' },
-  { tab: 'phone',       icon: '☎', label: 'Phone' },
-  { tab: 'camera',      icon: '◉', label: 'Vision' },
-  { tab: 'constellation', icon: '✦', label: 'Constellation' },
+  { tab: 'constellation', icon: '✦', label: 'Team' },
 ];
 
 // World hub coordinates [lat, lng] — agent activity lights these up
@@ -473,6 +464,16 @@ function initGlobe() {
     mount.innerHTML = '<div class="globe-fallback"></div>';
   }
 }
+
+// Optional graphics must not delay dashboard controls when a CDN is slow.
+document.querySelectorAll('script[async][src]').forEach(script => {
+  script.addEventListener('load', () => {
+    const current = document.querySelector('.nav-btn.active')?.dataset.tab;
+    if (current === 'overview' && script.src.includes('globe.gl')) initGlobe();
+    if (current === 'graph' && script.src.includes('vis-network')) loadGraph();
+    if (current === 'telemetry' && script.src.includes('chart.js')) loadTelemetry();
+  });
+});
 
 function spawnArc(source) {
   if (!globeInstance) return;
@@ -725,6 +726,10 @@ async function renderGraph(filter = {}) {
   }));
 
   const container = document.getElementById('graph-canvas');
+  if (typeof vis === 'undefined') {
+    container.textContent = 'The graph renderer is still loading or unavailable. Reopen this page to try again.';
+    return;
+  }
   if (visNetwork) visNetwork.destroy();
   visNetwork = new vis.Network(container, { nodes, edges }, {
     physics: { stabilization: true, barnesHut: { gravitationalConstant: -8000, springLength: 120 } },
@@ -1228,6 +1233,8 @@ async function loadTelemetry() {
   document.getElementById('tel-cache').textContent = (t.cache_hit_rate * 100).toFixed(1) + '%';
   document.getElementById('tel-out').textContent = fmtNum(t.total_output_tokens);
 
+  if (typeof Chart === 'undefined') return; // Numeric telemetry remains usable offline.
+
   if (telCostChart) telCostChart.destroy();
   telCostChart = new Chart(document.getElementById('tel-cost-chart').getContext('2d'), {
     type: 'bar',
@@ -1593,7 +1600,7 @@ async function loadPhone() {
     document.getElementById('phone-state').innerHTML = '<div class="card-meta">Unavailable.</div>';
   }
 }
-document.getElementById('sms-form').addEventListener('submit', async e => {
+document.getElementById('sms-form')?.addEventListener('submit', async e => {
   e.preventDefault(); const f = e.target;
   document.getElementById('sms-result').textContent = 'Sending...';
   try {
@@ -3036,7 +3043,13 @@ async function boot() {
   refreshStatus();
   setInterval(refreshStatus, 5000);
   connectWS();
-  loadTab('overview');
+  const requestedTab = new URLSearchParams(location.search).get('tab');
+  const requestedButton = Array.from(document.querySelectorAll('.nav-btn')).find(b => b.dataset.tab === requestedTab);
+  if (requestedButton) {
+    const group = requestedButton.closest('details');
+    if (group) group.open = true;
+    requestedButton.click();
+  } else loadTab('overview');
   refreshApprovalsBadge();
 }
 boot();
@@ -3253,9 +3266,8 @@ document.getElementById('token-new-btn')?.addEventListener('click', () => {
 document.getElementById('token-create')?.addEventListener('click', createToken);
 
 
-// ========================== VISION / CAMERA ==========================
+// ========================== SHARED VOICE STATE ==========================
 
-let _cameraFeedInterval = null;
 let _apexAvatarRaf = null;
 let _apexState = 'idle'; // idle | thinking | speaking
 
@@ -3267,366 +3279,6 @@ function _setApexState(state) {
     pill.textContent = state;
     pill.className = 'apex-state-pill apex-state-' + state;
   }
-}
-
-// Avatar priority chain:
-//   1. Custom portrait image (dashboard/static/apex/apex.png|jpg) — a living,
-//      voice-reactive render of Apex (the user's own art)
-//   2. Ready Player Me 3D head (three.js)
-//   3. 2D canvas face (always works, no network)
-let _avatarChosen = false;
-const _PORTRAIT_VIDEOS = ['/static/apex/apex.mp4', '/static/apex/apex.webm'];
-const _PORTRAIT_SRCS   = ['/static/apex/apex.png',  '/static/apex/apex.jpg', '/static/apex/apex.webp'];
-
-function _ensureApexFace() {
-  if (_avatarChosen) return;
-  _tryVideo(0);
-}
-
-// Check for a looping video first — more alive than a still image.
-function _tryVideo(i) {
-  if (_avatarChosen) return;
-  if (i >= _PORTRAIT_VIDEOS.length) return _tryPortrait(0);
-  const src = _PORTRAIT_VIDEOS[i] + '?cb=' + Date.now();
-  const v = document.createElement('video');
-  v.preload = 'metadata';
-  v.onloadedmetadata = () => { if (!_avatarChosen) _enableVideo(_PORTRAIT_VIDEOS[i]); };
-  v.onerror = () => _tryVideo(i + 1);
-  v.src = src;
-}
-
-function _enableVideo(src) {
-  _avatarChosen = true;
-  const stage = document.getElementById('apex-portrait');
-  const vid = document.getElementById('apex-portrait-video');
-  const img = document.getElementById('apex-portrait-img');
-  const d3 = document.getElementById('apex-avatar-3d');
-  const c2 = document.getElementById('apex-avatar');
-  if (d3) d3.style.display = 'none';
-  if (c2) c2.style.display = 'none';
-  if (img) img.style.display = 'none';
-  if (vid) { vid.src = src; vid.style.display = 'block'; }
-  if (stage) stage.style.display = 'flex';
-  _startPortraitLoop(vid);
-}
-
-function _tryPortrait(i) {
-  if (_avatarChosen) return;
-  if (i >= _PORTRAIT_SRCS.length) return _try3DFace();   // no portrait → 3D
-  const probe = new Image();
-  probe.onload = () => { if (!_avatarChosen) _enablePortrait(_PORTRAIT_SRCS[i]); };
-  probe.onerror = () => _tryPortrait(i + 1);
-  probe.src = _PORTRAIT_SRCS[i] + '?cb=' + Date.now();
-}
-
-function _enablePortrait(src) {
-  _avatarChosen = true;
-  const stage = document.getElementById('apex-portrait');
-  const img = document.getElementById('apex-portrait-img');
-  const d3 = document.getElementById('apex-avatar-3d');
-  const c2 = document.getElementById('apex-avatar');
-  if (d3) d3.style.display = 'none';
-  if (c2) c2.style.display = 'none';
-  if (img) img.src = src;
-  if (stage) stage.style.display = 'flex';
-  _startPortraitLoop(null);
-}
-
-// Voice-reactive "living portrait": the aura behind Apex swells and brightens
-// with its real speaking amplitude; the image/video breathes via CSS + filter.
-let _portraitCur = 0;
-function _startPortraitLoop(videoEl) {
-  const aura  = document.getElementById('apex-portrait-aura');
-  const img   = document.getElementById('apex-portrait-img');
-  const stage = document.getElementById('apex-portrait');
-  const vid   = videoEl || null;
-  let last = null;
-  function loop(ts) {
-    if (!stage || stage.style.display === 'none') { requestAnimationFrame(loop); return; }
-    const dt = last === null ? 0 : Math.min(0.05, (ts - last) / 1000);
-    last = ts;
-    const t = ts / 1000;
-    const st = window.__apexState || 'idle';
-    let target;
-    if (st === 'speaking') {
-      target = window.__apexAudioActive
-        ? (window.__apexMouth || 0)
-        : 0.3 + 0.35 * Math.abs(Math.sin(t * 8));
-    } else if (st === 'thinking') {
-      target = 0.12 + 0.08 * Math.sin(t * 3);
-    } else {
-      target = 0.1 + 0.05 * Math.sin(t * 1.1);
-    }
-    _portraitCur += (target - _portraitCur) * Math.min(1, dt * 16 || 0.3);
-    if (aura) {
-      aura.style.opacity = (0.28 + 0.62 * _portraitCur).toFixed(3);
-      aura.style.transform = `translate(-50%,-50%) scale(${(1 + 0.22 * _portraitCur).toFixed(3)})`;
-    }
-    const filterVal = `brightness(${(1 + 0.18 * _portraitCur).toFixed(3)}) saturate(${(1 + 0.25 * _portraitCur).toFixed(3)})`;
-    if (vid) {
-      vid.style.filter = filterVal;
-      vid.classList.toggle('apex-portrait-speaking', st === 'speaking');
-    } else if (img) {
-      img.style.filter = filterVal;
-      img.classList.toggle('apex-portrait-speaking', st === 'speaking');
-    }
-    requestAnimationFrame(loop);
-  }
-  requestAnimationFrame(loop);
-}
-
-// Start the 3D Ready Player Me face; fall back to the 2D canvas if three.js
-// or the avatar GLB fails to load.
-let _avatar2dStarted = false;
-function _try3DFace() {
-  if (_avatarChosen) return;
-  _avatarChosen = true;
-  const d3 = document.getElementById('apex-avatar-3d');
-  if (d3) d3.style.display = 'flex';
-  let tries = 0;
-  const tick = () => {
-    if (window.ApexAvatar && !window.ApexAvatar.failed) {
-      try { window.ApexAvatar.start(); } catch (e) {}
-      if (window.ApexAvatar.ready) return;
-    }
-    if (window.ApexAvatar?.failed) return _start2DFallback();
-    if (++tries < 50) setTimeout(tick, 150);
-    else _start2DFallback();   // module never loaded (offline, blocked CDN)
-  };
-  tick();
-}
-function _start2DFallback() {
-  if (_avatar2dStarted) return;
-  _avatar2dStarted = true;
-  const d3 = document.getElementById('apex-avatar-3d');
-  const c2 = document.getElementById('apex-avatar');
-  if (d3) d3.style.display = 'none';
-  if (c2) c2.style.display = 'block';
-  _startApexAvatar();
-}
-
-// ── Vision panel state ──
-let _visionRefreshInterval = null;
-let _visionCostChart = null;
-let _visionSkillsChart = null;
-let _visionInited = false;
-
-async function loadVision() {
-  if (!_visionInited) {
-    _visionInited = true;
-    _wireVisionCamera();
-    _ensureApexFace();
-  }
-  await _refreshVisionData();
-  if (!_visionRefreshInterval)
-    _visionRefreshInterval = setInterval(_refreshVisionData, 30_000);
-}
-
-function _teardownVision() {
-  if (_visionRefreshInterval) { clearInterval(_visionRefreshInterval); _visionRefreshInterval = null; }
-  _stopCameraFeed();
-}
-
-async function _wireVisionCamera() {
-  let data;
-  try { data = await api('/api/camera/status'); } catch (e) { return; }
-  const toggle = document.getElementById('camera-toggle');
-  const hint   = document.getElementById('camera-install-hint');
-  if (hint) hint.style.display = data.cv2_available ? 'none' : 'block';
-  if (toggle && !toggle._wired) {
-    toggle._wired = true;
-    toggle.addEventListener('change', async () => {
-      try {
-        const r = await api('/api/camera/toggle', { method: 'POST', body: { enabled: toggle.checked } });
-        _updateCameraStatus(r.enabled);
-        if (r.enabled) _startCameraFeed(); else _stopCameraFeed();
-      } catch (e) { toggle.checked = !toggle.checked; }
-    });
-  }
-  if (toggle) toggle.checked = data.enabled;
-  _updateCameraStatus(data.enabled);
-  if (data.enabled) _startCameraFeed();
-}
-
-async function _refreshVisionData() {
-  const settled = await Promise.allSettled([
-    api('/api/goals?active_only=true'),
-    api('/api/memories?limit=8'),
-    api('/api/telemetry?days=7'),
-    api('/api/reflections?status=pending&limit=3'),
-    api('/api/outcomes/skills?days=7'),
-    api('/api/feedback/summary?days=7'),
-  ]);
-  const [goals, mems, tel, refl, skillOutcomes, fbSummary] = settled.map(p => p.status === 'fulfilled' ? p.value : null);
-  _renderVpGoals(goals);
-  _renderVpMemories(mems);
-  _renderVpTelemetry(tel, fbSummary);
-  _renderVpInsights(refl);
-  _renderVpSkills(skillOutcomes);
-}
-
-function _setVpEl(id, text) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = text;
-}
-
-function _renderVpGoals(goals) {
-  const countEl = document.getElementById('vp-goals-count');
-  const listEl  = document.getElementById('vp-goals-list');
-  if (!listEl) return;
-  const items = Array.isArray(goals) ? goals : (goals?.goals || []);
-  if (countEl) countEl.textContent = items.length || '0';
-  listEl.innerHTML = items.slice(0, 5).map(g => {
-    const score = g.recent_progress?.[0]?.score;
-    const bar = score != null
-      ? `<div class="vp-goal-bar"><div class="vp-goal-bar-fill" style="width:${score * 10}%"></div></div>`
-      : '';
-    const dl = g.deadline
-      ? `<span class="vp-goal-deadline">${new Date(g.deadline * 1000).toLocaleDateString([], {month:'short', day:'numeric'})}</span>`
-      : '';
-    return `<div class="vp-goal-item">
-      <div class="vp-goal-top"><span class="badge">${escapeHTML(g.horizon || '')}</span>${dl}</div>
-      <div class="vp-goal-title">${escapeHTML(g.title || '')}</div>${bar}
-    </div>`;
-  }).join('') || '<div class="vp-empty">No active goals — add one in the Goals tab.</div>';
-}
-
-function _renderVpMemories(mems) {
-  const listEl = document.getElementById('vp-memories-list');
-  if (!listEl) return;
-  const items = Array.isArray(mems) ? mems : (mems?.memories || []);
-  _setVpEl('vp-intel-memories', String(items.length || '—'));
-  listEl.innerHTML = items.slice(0, 5).map(m => {
-    const stars = '★'.repeat(Math.min(Math.round(m.importance || 0), 5));
-    const text  = (m.content || '').slice(0, 80) + ((m.content || '').length > 80 ? '…' : '');
-    return `<div class="vp-memory-item">
-      <span class="badge">${escapeHTML(m.kind || 'note')}</span>
-      <span class="vp-memory-text">${escapeHTML(text)}</span>
-      <span class="vp-memory-imp">${stars}</span>
-    </div>`;
-  }).join('') || '<div class="vp-empty">No memories yet.</div>';
-}
-
-function _renderVpTelemetry(tel, fbSummary) {
-  if (!tel) return;
-  const cache = ((tel.cache_hit_rate || 0) * 100).toFixed(1) + '%';
-  _setVpEl('vp-intel-cache', cache);
-  _setVpEl('vp-intel-calls', fmtNum(tel.total_calls));
-  _setVpEl('vp-spend-total', fmtCost(tel.total_cost_usd));
-
-  const rate = fbSummary?.approval_rate;
-  _setVpEl('vp-intel-approval', rate != null ? Math.round(rate * 100) + '%' : '—');
-  const bar = document.getElementById('vp-intel-approval-bar');
-  if (bar && rate != null) bar.style.width = (rate * 100) + '%';
-
-  const ctx = document.getElementById('vp-cost-chart')?.getContext('2d');
-  if (!ctx) return;
-  const days = Array.isArray(tel.by_day) ? tel.by_day : [];
-  if (_visionCostChart) { _visionCostChart.destroy(); _visionCostChart = null; }
-  _visionCostChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: days.map(d => new Date(d.day * 1000).toLocaleDateString([], {weekday:'short'})),
-      datasets: [{
-        data: days.map(d => d.cost_usd || 0),
-        backgroundColor: 'rgba(95,216,255,0.35)',
-        borderColor: 'rgba(95,216,255,0.7)',
-        borderWidth: 1, borderRadius: 3,
-        hoverBackgroundColor: 'rgba(95,216,255,0.6)',
-      }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '$' + (c.raw || 0).toFixed(4) } } },
-      scales: {
-        x: { ticks: { color: '#5e6878', font: { size: 10 } }, grid: { display: false } },
-        y: { display: false, beginAtZero: true },
-      },
-    },
-  });
-}
-
-function _renderVpInsights(refl) {
-  const listEl  = document.getElementById('vp-insights-list');
-  const countEl = document.getElementById('vp-pending-count');
-  if (!listEl) return;
-  const items = Array.isArray(refl) ? refl : (refl?.reflections || []);
-  if (countEl) countEl.textContent = items.length ? items.length + ' pending' : '';
-  listEl.innerHTML = items.slice(0, 3).map(r => {
-    const text = (r.content || '').slice(0, 90) + ((r.content || '').length > 90 ? '…' : '');
-    const conf = Math.round((r.confidence || 0) * 100);
-    return `<div class="vp-insight-item">
-      <span class="badge">${escapeHTML(r.kind || 'insight')}</span>
-      <div class="vp-insight-text">${escapeHTML(text)}</div>
-      <div class="vp-conf-bar"><div class="vp-conf-bar-fill" style="width:${conf}%"></div></div>
-    </div>`;
-  }).join('') || '<div class="vp-empty">No pending insights.</div>';
-}
-
-function _renderVpSkills(skillOutcomes) {
-  const ctx   = document.getElementById('vp-skills-chart')?.getContext('2d');
-  const legEl = document.getElementById('vp-skills-legend');
-  if (!ctx) return;
-  const items = Array.isArray(skillOutcomes) ? skillOutcomes : (skillOutcomes?.skills || []);
-  const top = items.slice(0, 5);
-  if (!top.length) { if (legEl) legEl.innerHTML = '<div class="vp-empty">No skill data yet.</div>'; return; }
-  const COLORS = ['#5fd8ff', '#8a7cff', '#3ddc97', '#ffb547', '#ff6a6a'];
-  if (_visionSkillsChart) { _visionSkillsChart.destroy(); _visionSkillsChart = null; }
-  _visionSkillsChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: top.map(s => s.name),
-      datasets: [{ data: top.map(s => s.total_runs || 1), backgroundColor: COLORS, borderWidth: 0, hoverOffset: 4 }],
-    },
-    options: {
-      responsive: false, cutout: '68%',
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.label}: ${c.raw} runs` } } },
-    },
-  });
-  if (legEl) {
-    legEl.innerHTML = top.map((s, i) => {
-      const rate = s.approval_rate != null ? Math.round(s.approval_rate * 100) + '%' : '—';
-      return `<div class="vp-skill-row">
-        <span class="vp-skill-dot" style="background:${COLORS[i]}"></span>
-        <span class="vp-skill-name">${escapeHTML(s.name)}</span>
-        <span class="vp-skill-rate">${rate}</span>
-      </div>`;
-    }).join('');
-  }
-}
-
-function _updateCameraStatus(enabled) {
-  const el = document.getElementById('camera-status-text');
-  if (el) el.textContent = enabled ? 'Camera on' : 'Camera off';
-}
-
-function _startCameraFeed() {
-  _stopCameraFeed();
-  _fetchCameraFrame();
-  _cameraFeedInterval = setInterval(_fetchCameraFrame, 2000);
-}
-
-function _stopCameraFeed() {
-  if (_cameraFeedInterval) { clearInterval(_cameraFeedInterval); _cameraFeedInterval = null; }
-  const img = document.getElementById('webcam-img');
-  const ph  = document.getElementById('webcam-placeholder');
-  if (img) img.style.display = 'none';
-  if (ph)  ph.style.display  = 'flex';
-  const meta = document.getElementById('webcam-meta');
-  if (meta) meta.textContent = '';
-}
-
-async function _fetchCameraFrame() {
-  try {
-    const data = await api('/api/camera/frame');
-    if (!data.ok) return;
-    const img = document.getElementById('webcam-img');
-    const ph  = document.getElementById('webcam-placeholder');
-    if (img) { img.src = 'data:image/jpeg;base64,' + data.image; img.style.display = 'block'; }
-    if (ph)  ph.style.display = 'none';
-    const meta = document.getElementById('webcam-meta');
-    if (meta) meta.textContent = data.width + '\xd7' + data.height + ' \xb7 live';
-  } catch (e) {}
 }
 
 // ---------- Apex avatar: expressive talking face + lip-sync ----------
@@ -4633,13 +4285,15 @@ async function _loadMcpCatalog() {
                  escapeHTML(v)}" style="max-width:230px;margin-right:6px">`).join('');
       const btn = e.installed
         ? `<button class="ghost-btn mcp-uninstall" data-id="${escapeHTML(e.id)}">Remove</button>`
-        : `<button class="ghost-btn mcp-install" data-id="${escapeHTML(e.id)}">Add</button>`;
+        : `<button class="ghost-btn mcp-install" data-id="${escapeHTML(e.id)}">${e.prepared ? 'Connect' : 'Add'}</button>`;
       return `
       <div class="mcp-row" style="align-items:flex-start;flex-wrap:wrap">
         <span style="flex:0 0 160px"><b>${escapeHTML(e.name)}</b></span>
         <span class="v" style="flex:1 1 320px">
           ${escapeHTML(e.blurb)}
+          ${e.prepared && !e.installed ? '<br><b>Setup required — not connected</b>' : ''}
           ${e.note ? `<br><span class="muted">${escapeHTML(e.note)}</span>` : ''}
+          ${e.docs ? `<br><a href="${escapeHTML(e.docs)}" target="_blank" rel="noopener noreferrer">Setup instructions</a>` : ''}
           ${fields ? `<br>${fields}` : ''}
           ${(!e.installed && e.needs.length && !e.missing.length)
               ? '<br><span class="muted">Credentials already in .env.</span>' : ''}

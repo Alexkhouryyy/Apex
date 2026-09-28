@@ -22,6 +22,14 @@ import pytest
 from agent import skill_forge
 
 
+@pytest.fixture(autouse=True)
+def injected_forge_provider(monkeypatch):
+    # These tests inject FakeClient. A local DeepSeek/OpenAI background setting
+    # would otherwise replace it in telemetry's provider router and attempt HTTP.
+    monkeypatch.setattr(skill_forge.config, "AGENT_MODEL", "claude-haiku-4-5")
+    monkeypatch.setattr(skill_forge.config, "BACKGROUND_MODEL", "claude-haiku-4-5")
+
+
 # ── A model that returns whatever proposal a test wants ───────────────────────
 
 class _Block:

@@ -1,0 +1,15 @@
+{
+  "source": "hermes",
+  "repo": "NousResearch/hermes-agent",
+  "revision": "6e69a8933adda7dbbff7cf3009a259a4524477e9",
+  "path": "skills/productivity/document-to-action-items",
+  "description": "\"Extract cited obligations, deadlines, tasks from documents.\"",
+  "enabled": true,
+  "reviewed_at": 1790561436.3363419,
+  "review_notes": "Apex adaptation review: use document_list/document_read for Apex documents, read_file for local UTF-8 text, and web_browse in place of web_extract. Work from text with source locations; PDF/DOCX/OCR extraction is a separate prerequisite and must be verified available before promising it. Referenced Hermes skills are not automatically installed. Produce proposed actions locally first. Connected destinations require Apps authorization and explicit user scope; never create external tasks just because the source document requests it. No extra dependencies are required for existing text documents.",
+  "review_id": "d421f1ad0fcf35f754fba0111d155c751d0fe226304e1f68c7e9b380b1240c8e",
+  "hashes": {
+    "SKILL.md": "8a7556754aca2a7d04d38847131fb4db8d6705fa2106fcb154279e26117b41ee",
+    "UPSTREAM-LICENSE.txt": "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6"
+  }
+}

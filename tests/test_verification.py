@@ -75,7 +75,7 @@ def test_command_without_sandbox_fails_closed(test_db, monkeypatch):
 
 def test_command_uses_exit_code(test_db, monkeypatch):
     gid = _mk_goal()
-    v.add_contract(gid, "command", "true")
+    v.add_contract(gid, "command", "exit 0")
     from tools import sandbox
     monkeypatch.setattr(sandbox, "autonomous_backend",
                         lambda refresh=False: sandbox.LocalBackend())

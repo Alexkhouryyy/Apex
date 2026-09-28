@@ -69,6 +69,58 @@ def test_handoffs_and_independent_review(setup, monkeypatch, tmp_path):
     assert saved['steps'][-1]['result']=='apex report'
     assert subagent_scope.active_role() is None
     assert set(models)=={'deepseek-flash'}
+    assert saved['verification']['status']=='unverified'
+    assert saved['receipt']['tools'][0]['status']=='returned'
+
+
+@pytest.mark.parametrize('kind,expected', [('contains','verified'), ('file_exists','failed'), ('manual','pending'), ('llm','pending')])
+def test_team_checks_goal_contracts_without_extra_model_calls(setup, monkeypatch, tmp_path, kind, expected):
+    from agent import goals, verification
+    agent, spec = setup
+    goals.init_db()
+    goals.set_goal('Prove the result')
+    gid=goals.list_goals()[0]['id']
+    target=tmp_path/'result.txt'
+    if kind=='contains':
+        target.write_text('accepted result')
+    verification.add_contract(gid,kind,str(target),'accepted')
+    monkeypatch.setattr(verification, '_check_llm', lambda *a,**k: pytest.fail('Unbudgeted judge call'))
+    monkeypatch.setattr(team.telemetry,'create',lambda *a,**k:text_response('I succeeded'))
+    data=team.submit({**spec,'goal_id':gid},agent)
+    team.run(data,agent,threading.Event())
+    saved=team.get(data['id'])
+    assert saved['status']=='done'
+    assert saved['verification']['status']==expected
+    assert saved['receipt']['verification_status']==expected
+    assert goals.list_goals()[0]['status']=='active'
+    assert verification.history(gid)
+
+
+def test_changed_contracts_are_not_silently_used_and_retry_retains_snapshot(setup, monkeypatch):
+    from agent import goals, verification
+    agent,spec=setup
+    goals.init_db(); goals.set_goal('Acceptance')
+    gid=goals.list_goals()[0]['id']
+    verification.add_contract(gid,'manual','Human review')
+    spec={**spec,'goal_id':gid}
+    data=team.submit(spec,agent)
+    verification.add_contract(gid,'command','must never execute')
+    assert team.submit(spec,agent)['contracts']==data['contracts']
+    monkeypatch.setattr(verification,'verify',lambda *a,**k:pytest.fail('Changed criteria ran'))
+    monkeypatch.setattr(team.telemetry,'create',lambda *a,**k:text_response())
+    team.run(data,agent,threading.Event())
+    assert team.get(data['id'])['verification']['status']=='unknown'
+
+
+def test_goal_link_requires_existing_contracts(setup):
+    from agent import goals
+    agent,spec=setup
+    for bad in [True,0,-1,'1']:
+        with pytest.raises(ValueError): team.validate({**spec,'goal_id':bad})
+    with pytest.raises(ValueError,match='does not exist'): team.submit({**spec,'goal_id':999},agent)
+    goals.set_goal('No criteria')
+    with pytest.raises(ValueError,match='completion contracts'):
+        team.submit({**spec,'goal_id':goals.list_goals()[0]['id']},agent)
 
 
 def test_unoffered_tool_never_dispatches(setup, monkeypatch):

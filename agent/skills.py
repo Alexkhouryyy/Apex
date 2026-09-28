@@ -153,7 +153,7 @@ def failure_stats(hours: int = 24, min_failures: int = 3) -> list[dict]:
 def read_source(name: str) -> Optional[str]:
     """Return the raw source of a skill file, or None if it doesn't exist."""
     path = _skill_path(name)
-    return path.read_text() if path.exists() else None
+    return path.read_text(encoding='utf-8') if path.exists() else None
 
 
 def get_description(name: str) -> str:
@@ -207,15 +207,15 @@ def create_skill(
         f"VERSION = {version!r}\n\n"
         f"{code}\n"
     )
-    old_source = path.read_text() if path.exists() else None
-    path.write_text(source)
+    old_source = path.read_text(encoding='utf-8') if path.exists() else None
+    path.write_text(source, encoding='utf-8')
     try:
         _load(name)
     except Exception as e:
         if old_source is not None:
             # Overwrite failed — restore the previously working version so a bad
             # rewrite (e.g. from refine_skills) can never destroy a good skill.
-            path.write_text(old_source)
+            path.write_text(old_source, encoding='utf-8')
             try:
                 _load(name)
             except Exception:
@@ -264,7 +264,7 @@ def restore_from_snapshot(rewrite_id: int) -> str:
         if not old_source:
             return f"Rewrite #{rewrite_id} has no old_source (was a brand-new skill)."
         path = _skill_path(name)
-        path.write_text(old_source)
+        path.write_text(old_source, encoding='utf-8')
         _load(name)
         return f"Skill {name!r} restored from snapshot #{rewrite_id}."
     except Exception as e:

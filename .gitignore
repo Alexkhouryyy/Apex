@@ -1,4 +1,5 @@
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 *.egg-info/
@@ -15,6 +16,8 @@ secrets/
 
 # Local data
 *.db
+mcp_servers.local.json
+.mcp-runtime/
 
 # Claude Code local config (settings, worktrees)
 # Ignore .claude contents (worktrees, local settings) but keep the directory
