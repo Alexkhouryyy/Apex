@@ -17,15 +17,18 @@ fastapi
 uvicorn[standard]
 websockets
 pytesseract
-opencv-python-headless
-# NOTE: `pip install mediapipe` (below, optional) pulls opencv-contrib-python,
-# which installs into the SAME cv2 directory as this one and overwrites files
-# from it. Two OpenCV distributions is a supported-by-nobody configuration.
+opencv-contrib-python
+# The SAME OpenCV that mediapipe (below) pulls in. Listing a different one here
+# (it used to be opencv-python-headless) made every `pip install -r
+# requirements.txt` install a SECOND OpenCV into the same cv2 directory,
+# overwriting files from the first. Two OpenCV distributions is a
+# supported-by-nobody configuration, and on one user's PC a routine reinstall
+# did exactly that. One name, one package.
 #
-# Do NOT fix that by uninstalling one of them. pip removes files by the
-# uninstalled package's manifest, and since the two overlap, that deletes files
-# the survivor still needs — leaving a cv2 that imports fine with no
-# VideoCapture. Remove them ALL and install exactly one:
+# If a machine already has two, do NOT fix it by uninstalling one of them. pip
+# removes files by the uninstalled package's manifest, and since the two
+# overlap, that deletes files the survivor still needs — leaving a cv2 that
+# imports fine with no VideoCapture. Remove them ALL and install exactly one:
 #
 #   pip uninstall -y opencv-python opencv-python-headless \
 #       opencv-contrib-python opencv-contrib-python-headless
