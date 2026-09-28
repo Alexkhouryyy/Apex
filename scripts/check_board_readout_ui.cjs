@@ -60,7 +60,7 @@ assert.match(whyNot(hand({}), grabOf({})), /not pinched/);
 assert.match(whyNot(hand({}), grabOf({})), /0\.830/, 'the measured ratio must be shown');
 assert.match(whyNot(hand({}), grabOf({})), /0\.700/, 'the threshold must be shown');
 
-assert.match(whyNot(hand({open_palm: true}), grabOf({})), /open palm/);
+assert.match(whyNot(hand({open_palm: true}), grabOf({})), /open hand/);
 assert.match(whyNot(hand({ratio: null}), grabOf({})), /unreadable/);
 
 const far = whyNot(hand({pinched: true, ratio: .4}),

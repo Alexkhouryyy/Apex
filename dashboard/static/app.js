@@ -382,7 +382,7 @@ function setBadge(key, val) {
 function buildFeatureOrbit() {
   const orbit = document.getElementById('feature-orbit');
   if (!orbit || orbit.childElementCount) return;
-  const R = 318;
+  const R = 284;   // one ring just outside the globe; the Ask bar sits below it
   FEATURES.forEach((f, i) => {
     const ang = (-90 + i * (360 / FEATURES.length)) * Math.PI / 180;
     const node = document.createElement('div');
