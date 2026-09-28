@@ -109,7 +109,27 @@ let server,browser;
     if(found)break;
   }
   assert.ok(found&&found.name&&found.seconds_ago<5,'the part under an open hand reaches the study context');
+  // 6. Real hands pinch one after the other: the first grabs a part on its own,
+  //    the second joins 150 ms later. The pull must take over and put the part back.
+  const before=(await state());
+  for(let i=0;i<4;i++)await send([hand(5,found?.x??.5,.5,false)]);
+  let target=null;
+  for(const [x,y] of [[.5,.5],[.45,.5],[.55,.5],[.5,.45],[.5,.55]]){
+    for(let i=0;i<4;i++)await send([hand(5,x,y,false),hand(6,.85,.5,false)]);
+    if(/Ready · pinch/.test(await page.locator('#hand-status').textContent())){target=[x,y];break;}
+  }
+  assert.ok(target,'a part becomes ready under the first hand');
+  await send([hand(5,target[0],target[1],true),hand(6,.85,.5,false)]);
+  await page.waitForFunction(()=>/Holding/.test(document.querySelector('#hand-status').textContent));
+  await page.waitForTimeout(10);
+  await send([hand(5,target[0],target[1],true),hand(6,.85,.5,true)]);
+  await page.waitForFunction(()=>/Two hands/.test(document.querySelector('#hand-status').textContent));
+  for(const [a,b] of [[target[0]-.1,.9],[target[0]-.25,.95],[.05,.95]])await send([hand(5,a,target[1],true),hand(6,b,.5,true)]);
+  await send([hand(5,.05,target[1],false),hand(6,.95,.5,false)]);await send([hand(5,.05,target[1],false),hand(6,.95,.5,false)]);
+  await page.waitForFunction(async url=>(await (await fetch(url,{headers:{Authorization:'Bearer gesture-browser-test-only'}})).json()).explosion>0.5,stateUrl);
+  const after=await state();
+  assert.deepEqual(after.transforms,before.transforms,'the handed-over one-hand grab moved nothing');
   assert.deepEqual(errors,[]);
   console.log(`PASS: two-hand pull-apart saves only on release (0 → 100%), push-together reassembles, a fist cancels without writing, `
-    +`a flick on empty space keeps the view spinning without touching components, and pointing at “${found.name}” reaches Céline's context.`);
+    +`a flick on empty space keeps the view spinning without touching components, and pointing at “${found.name}” reaches Céline's context; a pull that starts as a one-hand grab (second hand 150 ms later) takes over and moves no part.`);
 }finally{await browser?.close();if(server&&server.exitCode===null)server.kill('SIGTERM');fs.rmSync(temp,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exit(1);});

@@ -8,7 +8,7 @@ import {setupStudyComfort} from './study-comfort.js';
 import {setupStudyMirror} from './study-mirror.js';
 import {setupStudyDiagnostics} from './study-diagnostics.js';
 import {setupHoloScene, HoloHand, HoloSound, isSoftwareRenderer} from './study-holo.js';
-import {TwoHandStretch, Spring, Coast} from './study-gestures.js';
+import {TwoHandStretch, Spring, Coast, STRETCH_START_MS} from './study-gestures.js';
 const $ = id => document.getElementById(id);
 let token = '';
 try { token = localStorage.getItem('apex_token') || ''; } catch (_) {}
@@ -405,7 +405,7 @@ const hands=new StudyHandController({
   route:(h,now)=>comfort.route(h,now),
   // Pinching empty space spins the view (with momentum); parts stay as they are.
   hit:(x,y,preferred)=>['orbit','zoom'].includes($('interaction').value)?'@view':pickHand(x,y,preferred==='@spin'?null:preferred)?.object.userData.part||'@spin',
-  begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){sound.play('grab');if(!manipulation.view)holo?.pulse(part);manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
+  begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){sound.play('grab');if(!manipulation.view)holo?.pulse(part);manipulation.input='hand';manipulation.startedAt=performance.now();manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
   paint:(h,label,target={})=>{
     const dot=$('hand-cursor');dot.hidden=!h;
     if(h){dot.style.left=h.x*100+'%';dot.style.top=h.y*100+'%';dot.dataset.state=h.pinched?'pinched':target.progress===1?'ready':'tracking';}
@@ -433,10 +433,15 @@ function handleStretch(sample,now){
   const fresh=sample.tracking&&sample.age_ms!=null&&sample.age_ms<=350;
   if(!fresh){if(stretch.engaged){stretch.cancel();targetAmount=current?.explosion||0;sound.play('cancel');}return false;}
   // The camera's zoom-out after separating may still be running; that must not block the next pull.
-  const allowed=!!current&&!manipulation&&!hands.held&&!current.rotating;
+  // Real hands never pinch in the same instant: the first pinch starts a one-hand
+  // grab (a part, or spinning the view) a moment before the second arrives. A
+  // one-hand grab that began moments ago may be taken over — it is cancelled and
+  // put back — so the two-hand pull works without delaying one-hand grabs.
+  const freshGrab=!!manipulation&&manipulation.input==='hand'&&!manipulation.committing&&performance.now()-(manipulation.startedAt||0)<=STRETCH_START_MS;
+  const allowed=!!current&&!current.rotating&&(!manipulation&&!hands.held||freshGrab);
   const r=stretch.feed(sample.hands,now,current?.explosion||0,allowed);
   if(!r)return false;
-  if(r.state==='start'){hands.reset('Two hands');coast.stop();spring.set(amount);springActive=true;sound.play('grab');}
+  if(r.state==='start'){if(manipulation){hands.reset('Two hands · one-hand grab handed over');cancelManipulation();}else hands.reset('Two hands');coast.stop();spring.set(amount);springActive=true;sound.play('grab');}
   // Make room while pulling, not only after letting go (the camera eases out once).
   if(r.amount>.2&&targetAmount<=.2&&(current?.explosion||0)<=.2){targetAmount=r.amount;fitCamera(true);}
   targetAmount=r.amount;springActive=true;
