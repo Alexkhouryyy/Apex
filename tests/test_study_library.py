@@ -1,6 +1,6 @@
 """The study library: every subject in data/assemblies is discoverable, its
-geometry matches its component list, the generated models rebuild
-byte-for-byte, and the page, API and companion all see the same subjects."""
+geometry matches its component list, the generated models rebuild apart from
+platform roundoff at zero, and the page, API and companion see the same subjects."""
 import gzip
 import importlib
 import json
@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import numpy as np
 from fastapi.testclient import TestClient
 
 import config
@@ -68,17 +69,87 @@ def test_generated_subject_geometry_matches_its_component_list(model_id):
         assert part in ids and speed > 0
 
 
-def test_generated_models_rebuild_byte_for_byte():
-    """The committed files are exactly what scripts/build_study_models.py makes."""
+def _assert_same_generated_glb(fresh, committed):
+    """Only nominal-zero float roundoff may differ; everything else is exact.
+
+    Windows and Linux math kernels differ in a few near-zero position/normal
+    components (observed maximum 5e-15). Regenerating assets on Windows would
+    just move the byte-for-byte failure to Linux. Keep metadata, nonzero floats,
+    topology and padding exact, with a 1e-14 absolute allowance only near zero.
+    """
+    assert len(fresh) == len(committed), 'GLB length changed'
+    json_length = struct.unpack_from('<I', committed, 12)[0]
+    binary_start = 28 + json_length
+    assert fresh[:binary_start] == committed[:binary_start], 'GLB metadata changed'
+    doc = json.loads(committed[20:20 + json_length])
+    normalized = bytearray(fresh)
+    for accessor in doc['accessors']:
+        if accessor['componentType'] != 5126:
+            continue
+        view = doc['bufferViews'][accessor['bufferView']]
+        assert 'byteStride' not in view  # The generated models use packed arrays.
+        offset = binary_start + view.get('byteOffset', 0) + accessor.get('byteOffset', 0)
+        count = accessor['count'] * {'VEC3': 3, 'SCALAR': 1}[accessor['type']]
+        left = np.frombuffer(fresh, dtype='<f4', count=count, offset=offset)
+        right = np.frombuffer(committed, dtype='<f4', count=count, offset=offset)
+        different = left != right
+        assert np.all(np.isfinite(left)) and np.all(np.isfinite(right)), 'Non-finite geometry'
+        assert np.all(np.abs(left[different]) <= 1e-14) and np.all(np.abs(right[different]) <= 1e-14), \
+            'Geometry changed beyond nominal-zero roundoff'
+        normalized[offset:offset + count * 4] = committed[offset:offset + count * 4]
+    assert bytes(normalized) == committed, 'GLB indices or other bytes changed'
+
+
+def test_generated_models_rebuild_with_only_zero_roundoff():
+    """Committed assets match the generator across Windows/Linux math kernels."""
     sys.path.insert(0, str(ROOT / 'scripts'))
     try:
         build = importlib.import_module('build_study_models')
         for spec in build.SUBJECTS.values():
             fresh = build.render(spec)[2]
             committed, _ = _glb(f"{spec['id']}.glb.gz")
-            assert fresh == committed, f"{spec['id']}: run scripts/build_study_models.py and bump geometry_revision"
+            try:
+                _assert_same_generated_glb(fresh, committed)
+            except AssertionError as exc:
+                raise AssertionError(f"{spec['id']}: {exc}; run scripts/build_study_models.py and bump geometry_revision") from exc
     finally:
         sys.path.remove(str(ROOT / 'scripts'))
+
+
+def _comparison_fixture():
+    doc = {'accessors': [{'componentType': 5126, 'bufferView': 0, 'count': 1, 'type': 'VEC3'},
+                         {'componentType': 5125, 'bufferView': 1, 'count': 1, 'type': 'SCALAR'}],
+           'bufferViews': [{'byteOffset': 0, 'byteLength': 12}, {'byteOffset': 12, 'byteLength': 4}]}
+    js = json.dumps(doc).encode()
+    js += b' ' * (-len(js) % 4)
+    blob = struct.pack('<fffI', 0.0, 1.0, 2.0, 0)
+    return struct.pack('<4sII', b'glTF', 2, 28 + len(js) + len(blob)) + \
+        struct.pack('<I4s', len(js), b'JSON') + js + struct.pack('<I4s', len(blob), b'BIN\0') + blob
+
+
+def test_model_comparison_accepts_only_nominal_zero_roundoff():
+    committed = _comparison_fixture()
+    fresh = bytearray(committed)
+    struct.pack_into('<f', fresh, len(fresh) - 16, -5e-15)
+    _assert_same_generated_glb(fresh, committed)
+
+
+@pytest.mark.parametrize('change', ['vertex', 'nonzero_ulp', 'index', 'metadata', 'nan'])
+def test_model_comparison_rejects_real_changes(change):
+    committed = _comparison_fixture()
+    fresh = bytearray(committed)
+    if change == 'vertex':
+        struct.pack_into('<f', fresh, len(fresh) - 16, 1e-5)
+    elif change == 'nonzero_ulp':
+        struct.pack_into('<I', fresh, len(fresh) - 12, 0x3f800001)
+    elif change == 'index':
+        struct.pack_into('<I', fresh, len(fresh) - 4, 1)
+    elif change == 'nan':
+        struct.pack_into('<f', fresh, len(fresh) - 16, float('nan'))
+    else:
+        fresh[8] ^= 1  # Header length is exact, too.
+    with pytest.raises(AssertionError):
+        _assert_same_generated_glb(fresh, committed)
 
 
 def test_motion_only_where_a_subject_has_it():
@@ -109,8 +180,12 @@ def test_api_serves_the_library_and_each_subjects_geometry(monkeypatch):
         assert c.post('/api/study/session/' + sid, json={'action': 'select', 'part': 'Crankshaft'}).json()['selected'] == 'crankshaft'
 
 
-def test_companion_can_open_any_subject_and_nothing_else():
-    from agent import core
+def test_companion_can_open_any_subject_and_nothing_else(test_db, monkeypatch):
+    from agent import core, board, board_workspaces
+    # Opening a study emits on a persisted board. Never depend on an earlier
+    # test having initialized the singleton, or open the owner's real database.
+    monkeypatch.setattr(board, '_board', None)
+    monkeypatch.setattr(board_workspaces, '_boards', {})
     tool = next(t for t in core.TOOLS if t['name'] == 'assembly_study')
     assert set(GENERATED) <= set(tool['input_schema']['properties']['model']['enum'])
     assert 'heart = Human heart' in tool['description'] and 'say so' in tool['description']

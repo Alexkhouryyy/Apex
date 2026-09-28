@@ -10,7 +10,12 @@ from agent import assembly, study_input
 
 
 @pytest.fixture(autouse=True)
-def clean():
+def clean(test_db, monkeypatch):
+    from agent import board, board_workspaces
+    # Hand-control claims touch the board; isolate it instead of relying on a
+    # singleton left behind by another test or opening the owner's database.
+    monkeypatch.setattr(board, '_board', None)
+    monkeypatch.setattr(board_workspaces, '_boards', {})
     assembly._SESSIONS.clear()
     study_input._lease = None
     yield
