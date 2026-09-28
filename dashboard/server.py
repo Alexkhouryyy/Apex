@@ -2400,8 +2400,9 @@ async def ws_board(ws: WebSocket):
             if tracker is not None:
                 cursors = tracker.latest_cursors()
                 payload["cursors"] = [
-                    {"x": round(c[0], 4), "y": round(c[1], 4), "p": 1 if c[2] else 0}
-                    for c in cursors
+                    {"x": round(c[0], 4), "y": round(c[1], 4), "p": 1 if c[2] else 0,
+                     "id": c[4] if len(c) > 4 else i}
+                    for i, c in enumerate(cursors)
                 ]
                 # The readout. A pinch that does not grab has five different
                 # causes that look identical on screen, and until now the only

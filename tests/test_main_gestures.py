@@ -25,7 +25,9 @@ class _Log:
 
 
 @pytest.fixture(autouse=True)
-def _clear_interrupt():
+def _clear_interrupt(monkeypatch):
+    from agent import board
+    monkeypatch.setattr(board, 'get_board', lambda: board.Board())
     interrupt.reset()
     yield
     interrupt.reset()

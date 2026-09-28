@@ -135,17 +135,12 @@ class FileWatcher(threading.Thread):
         if not _WATCHDOG or not self.paths:
             return
 
-        log = self.log
+        from agent.file_events import FileEvents, DEFAULT_IGNORES
+        events = FileEvents(self.log, DEFAULT_IGNORES + tuple(getattr(config, 'AWARENESS_WATCH_IGNORE_GLOBS', ())))
 
         class Handler(FileSystemEventHandler):
-            def on_modified(self, event):
-                if event.is_directory:
-                    return
-                log.add("file", f"Modified: {event.src_path}")
-            def on_created(self, event):
-                if event.is_directory:
-                    return
-                log.add("file", f"Created: {event.src_path}")
+            def on_any_event(self, event):
+                events.handle(event)
 
         self._observer = Observer()
         handler = Handler()

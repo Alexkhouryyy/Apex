@@ -81,6 +81,9 @@ def workspace_message(body, message):
             "Use the exact object ID for view transforms. Only model/image src values are prop paths for Forge; "
             "a link object's src is a web address, not a local file or evidence that its page has been read. "
             "If there is neither, ask which one. View scale does not change physical dimensions. "
+            "selected_part identifies the clicked mesh/component/surface region. A surface region is geometric, "
+            "not proof of a named engineering part; do not invent a semantic label or dimensions. "
+            "Part selection supports discussion; whole-object view transforms still move the entire model. "
             "Do not claim mesh-part selection or physical printing from a whole-object selection.")
     return message
 
@@ -115,7 +118,7 @@ async def select_object(request: Request):
         from agent import board_workspaces
         board = get_board()
         board_workspaces.check_context(board, body.get('workspace'))
-        return {"selection": board.select(body.get("id"))}
+        return {"selection": board.select(body.get("id"), body.get("part"))}
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -128,6 +131,21 @@ async def _small_json(request: Request) -> dict:
     if not isinstance(body, dict):
         raise ValueError("Expected a JSON object.")
     return body
+
+
+@router.post('/api/board/model-hits')
+async def model_hits(request: Request):
+    _check_origin(request)
+    from agent.board import get_board
+    from agent import board_workspaces
+    try:
+        body = await _small_json(request)
+        board = get_board()
+        board_workspaces.check_context(board, body.get('workspace'))
+        board.report_model_hits(body.get('hits'))
+        return {'ok': True}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/api/board/workspace")

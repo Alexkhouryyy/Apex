@@ -96,13 +96,13 @@ DEFAULT_PINCH_RATIO = 0.70
 # scale from the flat one those numbers were calibrated on: a thumb 4 cm
 # behind the index finger reads 0.47 in 3D, well under 0.70 — still a
 # "pinch". Until the board's calibration has measured YOUR hand in 3D
-# (HANDTRACK_PINCH_MEASURE=3d), 3D hands use these instead: about 3 cm
-# between the fingertips on an 8.5 cm palm starts a pinch, about 3.8 cm ends
+# (HANDTRACK_PINCH_MEASURE=3d), 3D hands use these instead: about 1.9 cm
+# between the fingertips on an 8.5 cm palm starts a pinch, about 2.7 cm ends
 # it. Estimates from ordinary hand proportions, not a measurement of anyone —
 # calibrating replaces them. They err on the strict side because a false
 # grab drags things around; a stiff pinch only asks for a firmer one.
-PINCH_3D_ENTER = 0.35
-PINCH_3D_RELEASE = 0.45
+PINCH_3D_ENTER = 0.22
+PINCH_3D_RELEASE = 0.32
 
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
              "hand_landmarker/float16/1/hand_landmarker.task")
@@ -351,7 +351,7 @@ def pinch_ratio(lms, world=None) -> Optional[float]:
             span = ((w.x - m.x) ** 2 + (w.y - m.y) ** 2) ** 0.5
     except (AttributeError, TypeError):
         return None
-    if span <= 1e-6:
+    if not math.isfinite(span) or not math.isfinite(gap) or span <= 1e-6:
         return None
     return gap / span
 
@@ -682,6 +682,65 @@ class PinchLatch:
                 del self._on[k]
 
 
+class PinchIntent:
+    """Live input gate: open first, then a stable 3D closure; never invent depth.
+
+    Classifier hysteresis remains separate so calibration can inspect raw readings.
+    Each hand arms independently. Brief missing observations preserve a hold;
+    a lost track or changed measurement requires a fresh opening.
+    """
+    DWELL = 0.10
+    GAP = 0.25
+
+    def __init__(self):
+        self.states = {}
+
+    def filter(self, cursors, details, now):
+        out, info = [], []
+        for cursor, raw in zip(cursors, details):
+            d = dict(raw)
+            key = d['id']
+            s = self.states.get(key)
+            if s is None or now-s['seen'] > self.GAP:
+                s = dict(seen=now, armed=False, since=None, frames=0, held=False, valid=now)
+                self.states[key] = s
+            s['seen'] = now
+            ratio = d.get('ratio')
+            valid = d.get('measure') == '3d' and ratio is not None and math.isfinite(ratio)
+            if not valid:
+                s['since'], s['frames'] = None, 0
+                if not s['held'] or now-s['valid'] > .15:
+                    s['held'], s['armed'] = False, False
+                reason = 'depth unavailable — show the palm to the camera'
+            elif d.get('fist'):
+                s.update(held=False, armed=False, since=None, frames=0, valid=now)
+                reason = 'fist — open your fingers before pinching'
+            elif ratio >= d['release']:
+                s.update(held=False, armed=True, since=None, frames=0, valid=now)
+                reason = 'ready'
+            elif s['held']:
+                s['valid'] = now
+                reason = 'holding pinch'
+            elif not s['armed']:
+                s['valid'] = now
+                reason = 'open your fingers once to arm this hand'
+            elif ratio < d['threshold']:
+                s['valid'] = now
+                if s['since'] is None:
+                    s['since'], s['frames'] = now, 0
+                s['frames'] += 1
+                s['held'] = now-s['since'] >= self.DWELL-1e-6 and s['frames'] >= 3
+                reason = 'holding pinch' if s['held'] else 'confirming pinch'
+            else:
+                s.update(since=None, frames=0, valid=now)
+                reason = 'ready'
+            d.update(pinch_candidate=d['pinched'], pinched=s['held'], intent=reason)
+            out.append((cursor[0], cursor[1], s['held'], bool(cursor[3]) and not s['held'], key))
+            info.append(d)
+        self.states = {k:v for k,v in self.states.items() if now-v['seen'] <= self.GAP}
+        return out, info
+
+
 class HandTracker(threading.Thread):
     """Reads the webcam, finds hands, feeds gestures into the awareness log.
 
@@ -988,6 +1047,9 @@ class HandTracker(threading.Thread):
         except Exception as e:
             print(f"[HandTrack] gesture recording failed: {e}")
         cursors, details = self._read_hands(result, now)
+        if not hasattr(self, '_intent'):
+            self._intent = PinchIntent()
+        cursors, details = self._intent.filter(cursors, details, now)
 
         # The board reads the SAME cursor list the recognizer does, rather than
         # tracking hands a second time. Two readings of one camera would drift,
@@ -1142,7 +1204,7 @@ class HandTracker(threading.Thread):
             if gesture.startswith("swipe_"):
                 ok, why = board.swipes_allowed()
                 return "" if ok else why
-            if gesture == "pinch_hold":
+            if gesture in ("pinch_hold", "wave"):
                 ok, why = board.hands_idle()
                 return "" if ok else why
         except Exception as e:
@@ -1153,7 +1215,6 @@ class HandTracker(threading.Thread):
         from agent import gestures as _g
         # Always logged, whatever the allowlist says: recognition and action are
         # separate gates, so "I waved and nothing happened" stays diagnosable.
-        self.log.add("gesture", _g.describe(gesture))
         action = _g.gesture_action(gesture)
         if action:
             blocked = self._board_blocks(gesture)
@@ -1161,8 +1222,12 @@ class HandTracker(threading.Thread):
                 # Refunded: a gesture that did nothing must not spend the
                 # cooldown the next deliberate one needs.
                 self.recognizer.refund(gesture)
-                self.log.add("gesture", f"{gesture} -> {action}: ignored ({blocked})")
+                if getattr(self, '_last_blocked', None) != (gesture, blocked):
+                    self.log.add("gesture", f"{gesture} -> {action}: ignored ({blocked})")
+                self._last_blocked = (gesture, blocked)
                 return
+        self._last_blocked = None
+        self.log.add("gesture", _g.describe(gesture))
         if action in ("stop", "listen", "wake"):
             # The board's Voice (Celine in the partner panel) hears these too:
             # stop -> she stops speaking; listen/wake -> she starts listening.

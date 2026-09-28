@@ -346,8 +346,14 @@ class TestTheRealFrameLoop:
         card.x, card.y = 0.5, 0.5
         monkeypatch.setattr(board_mod, "get_board", lambda: b)
 
-        frames = iter([frame(hand(r)) for r in WOBBLY_HOLD]
-                      + [frame(), frame(hand(0.74))])     # one missed detection
+        monkeypatch.setattr(config, 'HANDTRACK_PINCH_MEASURE', '3d')
+        def depth_frame(r):
+            f = frame(hand(r))
+            f.hand_world_landmarks = [[SimpleNamespace(x=p.x,y=p.y,z=0) for p in f.hand_landmarks[0]]]
+            return f
+        samples = [depth_frame(r) for r in [.95,.4,.4,.4] + list(WOBBLY_HOLD)]
+        samples += [frame(), depth_frame(.74)]  # one missed detection
+        frames = iter(samples)
 
         class Cap:
             def read(self):
@@ -370,7 +376,7 @@ class TestTheRealFrameLoop:
         t._cap, t._landmarker, t._mp = Cap(), Landmarker(), MP()
         monkeypatch.setattr(t, "_open", lambda now: True)
         held = []
-        for i in range(len(WOBBLY_HOLD) + 2):
+        for i in range(len(samples)):
             t._tick(100.0 + i * 0.05)
             held.append(bool(card.held_by))
         first = held.index(True)

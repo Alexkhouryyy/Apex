@@ -448,7 +448,7 @@ class TestBoardEndpoints:
         finally:
             handtrack.set_active_tracker(None)
         assert msg["tracking"] is True
-        assert msg["cursors"] == [{"x": 0.25, "y": 0.75, "p": 1}]
+        assert msg["cursors"] == [{"x": 0.25, "y": 0.75, "p": 1, "id": 0}]
         assert msg["frame"], "the backdrop must travel from Python"
 
     def test_the_socket_requires_the_token_when_one_is_set(self, monkeypatch):

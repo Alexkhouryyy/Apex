@@ -349,6 +349,8 @@ class Board:
         self._undo: list[dict] = []
         self._redo: list[dict] = []
         self._selected: str | None = None
+        self._selected_surface = None
+        self._model_hits = {}
         # What an open hand was last pointing at, and when. See
         # POINT_MEMORY_SECONDS.
         self._pointed: tuple[str, float] | None = None
@@ -772,6 +774,7 @@ class Board:
                                      "Things made with board_build can be taken apart.")
                 self._parts_mode = card_id
                 self._selected = card_id
+                self._selected_surface = None
         if card is not None:
             self.emit("parts_mode", id=card.id, title=card.title, on=card_id is not None)
         return card.as_dict() if (card is not None and card_id is not None) else None
@@ -819,15 +822,33 @@ class Board:
     def selection(self) -> dict | None:
         """Keep the last grabbed object selected after the hand releases it."""
         with self._lock:
-            return next((c.as_dict() for c in self._cards if c.id == self._selected), None)
+            card = next((c for c in self._cards if c.id == self._selected), None)
+            return self._selection_dict(card) if card else None
 
-    def select(self, card_id: str | None) -> dict | None:
+    def _selection_dict(self, card):
+        out = card.as_dict()
+        detail = getattr(self, '_selected_surface', None)
+        if detail and detail[0] == card.id and detail[1]['src'] == card.src:
+            out['selected_part'] = dict(detail[1])
+        return out
+
+    def select(self, card_id: str | None, part=None) -> dict | None:
         with self._lock:
             card = next((c for c in self._cards if c.id == card_id), None)
             if card_id is not None and card is None:
                 raise ValueError("That object is no longer on the board.")
+            if part is not None:
+                if (not card or card.kind != 'model' or not isinstance(part, dict)
+                        or part.get('src') != card.src
+                        or part.get('kind') not in ('part', 'component', 'surface')
+                        or any(type(part.get(k)) is not int or not 0 <= part[k] < 10000000
+                               for k in ('mesh', 'face'))
+                        or not isinstance(part.get('name'), str) or not 1 <= len(part['name']) <= 120):
+                    raise ValueError('Invalid or stale model part selection.')
+                part = {k: part[k] for k in ('src', 'kind', 'mesh', 'face', 'name')}
+            self._selected_surface = (card_id, part) if part else None
             self._selected = card_id
-            return card.as_dict() if card else None
+            return self._selection_dict(card) if card else None
 
     def set_hands_enabled(self, enabled: bool, *, finish_moves: bool = True) -> bool:
         """Pause board gestures without closing the camera or stopping voice.
@@ -917,7 +938,7 @@ class Board:
             card = next((c for c in self._cards if c.id == card_id), None)
             if card is None:
                 return None
-            out = card.as_dict()
+            out = self._selection_dict(card)
         out["seconds_ago"] = round(now - at, 1)
         return out
 
@@ -973,6 +994,7 @@ class Board:
             else:
                 i = len(ids) - 1
             self._selected = ids[i]
+            self._selected_surface = None
             return self._cards[i].as_dict()
 
     def _throw(self, card: "Card", pre) -> None:
@@ -1154,7 +1176,7 @@ class Board:
                         # a hand out of the camera's view lands here too, once
                         # the grace runs out, and is the most natural throw
                         # there is.
-                        released.append((c, pre, flung, tapped))
+                        released.append((c, pre, flung, tapped, probe))
                         self._last_release_at = now
                     self._trail.pop(c.id, None)
                 c.held_by = kept
@@ -1250,6 +1272,7 @@ class Board:
                     was_unheld = not target.held_by
                     target.held_by.append(idx)
                     self._selected = target.id
+                    self._selected_surface = None
                     self._grab_offset[idx] = (target.x - hx, target.y - hy)
                     if was_unheld:
                         self._pre_grab[target.id] = (
@@ -1326,7 +1349,7 @@ class Board:
 
         # Outside the lock, and only for cards a hand just let go of — the
         # whole point of committing on release rather than per frame.
-        for c, pre, thrown, tapped in released:
+        for c, pre, thrown, tapped, probe in released:
             if thrown:
                 self._throw(c, pre)
                 continue
@@ -1338,8 +1361,10 @@ class Board:
                 with self._lock:
                     self._pointed = (c.id, now)
                     self._selected = c.id
+                    self._selected_surface = None
                 self._write(c)
-                self.emit("tapped", id=c.id, title=c.title, object_kind=c.kind)
+                self.emit("tapped", id=c.id, title=c.title, object_kind=c.kind,
+                          x=probe[1], y=probe[2])
                 continue
             self._write(c)
             after = (c.x, c.y, c.scale, c.rot)
@@ -1422,6 +1447,13 @@ class Board:
         Searched newest-first so something just put up wins over one buried
         behind it — what is on top is what you are reaching for.
         """
+        # The renderer knows the actual silhouette, including parts far from
+        # the card centre. Accept only a recent hit near this hand's position.
+        hit = self._model_hits.get(hand)
+        if hit and 0 <= time.time()-hit['at'] < .35 and math.hypot(hx-hit['x'],hy-hit['y']) < .05:
+            card = next((c for c in self._cards if c.id == hit['id'] and c.src == hit['src']), None)
+            if card and len(card.held_by) < 2 and hand not in card.held_by:
+                return card
         best, best_d = None, GRAB_RADIUS
         for c in reversed(self._cards):
             if len(c.held_by) >= 2 or hand in c.held_by:
@@ -1430,6 +1462,22 @@ class Board:
             if d < best_d:
                 best, best_d = c, d
         return best
+
+    def report_model_hits(self, hits):
+        if not isinstance(hits, list) or len(hits) > 2:
+            raise ValueError('Expected up to two model hits.')
+        with self._lock:
+            accepted = {}
+            for h in hits:
+                if (not isinstance(h, dict) or type(h.get('hand')) is not int
+                        or not 0 <= h['hand'] < 10000000
+                        or any(type(h.get(k)) not in (int,float) or not math.isfinite(h[k]) or not 0 <= h[k] <= 1 for k in ('x','y'))):
+                    raise ValueError('Invalid model hit.')
+                card = next((c for c in self._cards if c.id == h.get('id') and c.kind == 'model' and c.src == h.get('src')), None)
+                if card:
+                    accepted[h['hand']] = {k:h[k] for k in ('id','src','x','y')}
+                    accepted[h['hand']]['at'] = time.time()
+            self._model_hits = accepted
 
 
 # One board per process — the dashboard and the tracker must be looking at the

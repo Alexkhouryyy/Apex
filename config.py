@@ -86,6 +86,8 @@ AWARENESS_REVIEW_INTERVAL = 60        # seconds — how often to review event lo
 AWARENESS_WATCH_PATHS = [             # file watcher dirs
     "~/Documents", "~/Desktop", "~/Downloads",
 ]
+# Extra semicolon-separated globs; bundled dependency/cache/lock ignores remain.
+AWARENESS_WATCH_IGNORE_GLOBS = [p.strip() for p in os.getenv('AWARENESS_WATCH_IGNORE_GLOBS', '').split(';') if p.strip()]
 
 # Obsidian vault (Apex's external, human-readable second brain)
 VAULT_PATH = os.getenv("VAULT_PATH", "~/Documents/Apex")

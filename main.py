@@ -111,6 +111,11 @@ def make_gesture_handler(mode: str, wake_event=None, log=None, reply=None):
 
     def on_gesture(gesture: str, action: str) -> str:
         if action in ("wake", "listen"):
+            if getattr(config, 'BOARD_ENABLED', False):
+                from agent.board import get_board
+                idle, why = get_board().hands_idle()
+                if not idle:
+                    return _say(f'{gesture}: ignored — {why}; hands are manipulating the board')
             if mode == "wake" and wake_event is not None:
                 wake_event.set()
                 return _say(f"{gesture}: listening")

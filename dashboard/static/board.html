@@ -248,6 +248,7 @@
 "use strict";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { ModelSelection } from '/static/board-selection.js';
 
 const stage = document.getElementById("stage");
 const cam = document.getElementById("cam");
@@ -300,9 +301,11 @@ async function api(path, options = {}) {
   }
   return response;
 }
-async function selectObject(id) {
-  try { await api('/api/board/select', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id,...workspaceEnvelope()})}); }
-  catch (error) { say(error.message); }
+async function selectObject(id, part = null) {
+  try {
+    const response = await api('/api/board/select', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id,part,...workspaceEnvelope()})});
+    return (await response.json()).selection;
+  } catch (error) { say(error.message); return null; }
 }
 document.getElementById('clear-selection').onclick = () => selectObject(null);
 document.getElementById('partner-toggle').onclick = event => {
@@ -387,7 +390,15 @@ function voiceFromGesture() {
 // Tap to ask: a quick pinch on an object, let go without moving it
 // (agent/board.py, TAP_SECONDS / TAP_MOVE). Celine answers about it out loud,
 // turning Voice on first if it is off.
-function askAbout(ev) {
+async function askAbout(ev) {
+  if (ev.object_kind === 'model' && Number.isFinite(ev.x) && Number.isFinite(ev.y)) {
+    const hit = modelSelection?.pick(ev.x, ev.y, ev.id);
+    if (hit) {
+      const selection = await selectObject(hit.id, hit.part);
+      if (!selection) return;
+      ev = {...ev, title: `${selection.selected_part.name} in ${ev.title}`};
+    }
+  }
   if (!voiceOn) {
     if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
       openPartner();
@@ -755,11 +766,12 @@ function renderHud(msg) {
     document.getElementById('hud-release').style.left = pos(h.release);
     state.textContent = h.fist ? 'fist · not a grab'
       : h.pinched ? `PINCHED · ${h.ratio.toFixed(2)} (lets go above ${h.release.toFixed(2)})`
+      : h.intent && h.intent !== 'ready' ? h.intent
       : `open · ${h.ratio.toFixed(2)} (pinch below ${h.threshold.toFixed(2)})`;
     state.classList.toggle('on', !!h.pinched);
   } else {
     document.getElementById('hud-bar').style.width = '0';
-    state.textContent = msg.tracking ? 'no hand' : 'tracking off';
+    state.textContent = h?.intent || (msg.tracking ? 'no hand' : 'tracking off');
     state.classList.remove('on');
   }
   renderCalibration(msg.calibration || {phase: 'idle'});
@@ -939,6 +951,33 @@ manager.setURLModifier(url => {
 const loader = new GLTFLoader(manager);
 loader.setRequestHeader({Authorization: `Bearer ${token}`});
 const models = new Map();       // card id -> { group, src }
+const modelSelection = typeof ModelSelection === 'function' ? new ModelSelection(models, () => camera3) : null;
+let latestSelection = null;
+let hitReportAt = 0, hitReportBusy = false;
+async function reportModelHits(cursors) {
+  if (!modelSelection || hitReportBusy || performance.now()-hitReportAt < 100) return;
+  hitReportAt = performance.now(); hitReportBusy = true;
+  try {
+    const hits = cursors.slice(0,2).flatMap((c,i) => {
+      const hit = modelSelection.pick(c.x,c.y,null,false);
+      return hit ? [{id:hit.id,src:hit.src,x:c.x,y:c.y,hand:c.id??i}] : [];
+    });
+    await api('/api/board/model-hits', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hits,...workspaceEnvelope()})});
+  } catch (_) { /* Center-based grabbing remains available during reconnects. */ }
+  finally { hitReportBusy = false; }
+}
+let modelPointer = null;
+document.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || event.target.closest('button,a,input,textarea,select,iframe,dialog,.card,#toolbar,#hud,#partner-panel')) return;
+  modelPointer = {x:event.clientX, y:event.clientY, id:event.pointerId};
+});
+document.addEventListener('pointercancel', () => { modelPointer = null; });
+document.addEventListener('pointerup', async event => {
+  const start = modelPointer; modelPointer = null;
+  if (!start || start.id !== event.pointerId || Math.hypot(start.x-event.clientX,start.y-event.clientY)>5) return;
+  const hit = modelSelection?.pick(event.clientX/innerWidth,event.clientY/innerHeight);
+  if (hit) modelSelection.show(await selectObject(hit.id,hit.part));
+});
 const pending = new Map();      // id -> src; discard stale loads after edits
 let currentModels = new Map();
 function dispose(group) {
@@ -1073,6 +1112,9 @@ function syncModels(cards) {
           const wrap = fitToUnitBox(gltf.scene);
           scene.add(wrap);
           models.set(c.id, { group: wrap, src: c.src, base: wrap.scale.x });
+          placeModel(wrap, c, wrap.scale.x, innerWidth/Math.max(1,innerHeight));
+          modelSelection?.index(wrap);
+          modelSelection?.show(latestSelection);
         },
         undefined,
         (err) => {
@@ -1177,6 +1219,8 @@ const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g,
 // the same sequence.
 function whyNot(hand, grab) {
   if (!hand) return "no hand in frame";
+  if (grab?.holding) return `holding ${grab.holding}`;
+  if (hand.intent && !hand.pinched && hand.intent !== 'ready') return hand.intent;
   if (hand.open_palm) return "open hand — pinch to grab";
   if (hand.ratio === null) return "hand seen but its shape was unreadable";
   if (!hand.pinched)
@@ -1262,11 +1306,15 @@ function connect() {
     handleBoardEvents(msg.events);
     const sel = msg.selection && (msg.cards || []).find(c => c.id === msg.selection.id);
     document.getElementById('selection-label').textContent = !msg.selection ? 'Pinch an object or tap its label to select it.'
+      : msg.selection.selected_part ? `Selected: ${msg.selection.selected_part.name} · ${msg.selection.title}`
       : sel?.parts_mode ? `Selected: ${msg.selection.title} · parts — pinch one to move it, P to finish`
       : `Selected: ${msg.selection.title} · whole object${sel?.kind === 'model' ? ' — P to take it apart' : ''}`;
     renderCards(msg.cards || []);
     renderHud(msg);
     syncModels(msg.cards || []);
+    latestSelection = msg.selection;
+    modelSelection?.show(latestSelection);
+    reportModelHits(msg.hands_enabled === false ? [] : (msg.cursors || []));
     renderCursors(msg.hands_enabled === false ? [] : (msg.cursors || []));
     if (!diagEl.hidden) renderDiag(msg);
 
