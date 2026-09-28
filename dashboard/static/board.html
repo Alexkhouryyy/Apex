@@ -202,7 +202,7 @@
     <dt>Quick tap</dt><dd>pinch, let go, don't move — Celine explains it</dd>
     <dt>Open hand over it</dt><dd>points at it — "make <i>this</i> blue"</dd>
     <dt data-move="throw">Flick to an edge</dt><dd data-move="throw">throw away ("undo" = back)</dd>
-    <dt>Open palm, still</dt><dd>cancel — back where it was</dd>
+    <dt>Open hand</dt><dd>release and keep the position; Undo to revert</dd>
     <dt data-move="swipe_up">Swipe up / down</dt><dd data-move="swipe_up">talk to Celine / hush her</dd>
     <dt data-move="swipe_left_right">Swipe left/right</dt><dd data-move="swipe_left_right">select previous / next</dd>
   </dl>
@@ -733,7 +733,7 @@ function hudNow(msg) {
   if (msg.board_enabled === false) return 'The board is off — set BOARD_ENABLED=true in .env and restart Apex.';
   if (msg.hands_enabled === false) return 'Hand controls are paused — choose Resume board hands when ready. Pause hands in any study window first.';
   if (!hands.length) return 'Hold a hand up in front of the camera.';
-  if (parts && parts.part) return `Moving the ${parts.part.name} — let go to save, open palm to cancel.`;
+  if (parts && parts.part) return `Moving the ${parts.part.name} — open your hand to save; Undo to revert.`;
   if (parts) return `Parts mode on ${parts.title}: pinch a part to move it. P to finish.`;
   if (held && held.hands === 2) return `Resizing ${held.title} — pull apart / together, twist to turn.`;
   if (held) return `Holding ${held.title} — move it, open your fingers to let go${msg.moves?.throw ? ', flick to throw' : ''}.`;
@@ -1177,7 +1177,7 @@ const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g,
 // the same sequence.
 function whyNot(hand, grab) {
   if (!hand) return "no hand in frame";
-  if (hand.open_palm) return "open palm — that cancels a grab";
+  if (hand.open_palm) return "open hand — pinch to grab";
   if (hand.ratio === null) return "hand seen but its shape was unreadable";
   if (!hand.pinched)
     return `not pinched — ratio ${hand.ratio.toFixed(3)} must fall below ${hand.threshold.toFixed(3)} to start`;

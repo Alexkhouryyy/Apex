@@ -14,6 +14,14 @@ from agent.board import (ARM_DWELL_SECONDS, Board, GRAB_RADIUS,
                          HAND_LOSS_GRACE_SECONDS, HandState)
 
 
+@pytest.fixture(autouse=True)
+def isolated_board(test_db, monkeypatch):
+    """Endpoint/tool tests must never load or clear the user's live board."""
+    from agent import board, board_workspaces
+    monkeypatch.setattr(board, "_board", Board())
+    monkeypatch.setattr(board_workspaces, "_boards", {})
+
+
 def _grab_now(b, cursors, t=0.0):
     """Commit a grab immediately — two identical frames, arm then commit past
     ARM_DWELL_SECONDS. A single-frame pinch only arms (see TestArmDwell for
@@ -239,10 +247,8 @@ class TestArmDwell:
             assert b.hand_state(0) == HandState.GRABBED
 
 
-class TestOpenPalmCancel:
-    """The board's escape hatch. Always available, and reverts to before the
-    hold began — not wherever the drag currently sits, which is what an
-    ordinary release already does."""
+class TestOpenPalmRelease:
+    """Opening the hand finishes a move; Undo is the deliberate way back."""
 
     def _at(self, b, x, y):
         return b.add("card", "T", x=x, y=y)
@@ -250,21 +256,17 @@ class TestOpenPalmCancel:
     def _model(self, b, x=0.5, y=0.5):
         return b.add("model", "Engine", src="models/engine.glb", x=x, y=y)
 
-    def test_cancelling_a_drag_restores_the_pre_grab_position(self):
+    def test_opening_a_hand_keeps_the_drag_position(self):
         b = Board()
         c = self._at(b, 0.30, 0.30)
         _grab_now(b, [(0.30, 0.30, True, False)])
         b.apply_hands([(0.60, 0.60, True, False)])   # dragged away
         assert c.x == pytest.approx(0.60) and c.y == pytest.approx(0.60)
-        b.apply_hands([(0.60, 0.60, False, True)])    # open palm: cancel
-        assert (c.x, c.y) == pytest.approx((0.30, 0.30)), \
-            "cancel must undo the drag, not just stop it where it is"
+        b.apply_hands([(0.60, 0.60, False, True)])    # open palm: release
+        assert (c.x, c.y) == pytest.approx((0.60, 0.60))
         assert c.held_by == []
 
-    def test_cancel_is_not_the_same_as_an_ordinary_release(self):
-        """The one behavioural difference that justifies a separate gesture at
-        all: releasing (un-pinching with a closed or neutral hand) keeps the
-        current position; only the deliberate open-palm gesture undoes it."""
+    def test_an_ordinary_release_also_keeps_the_position(self):
         b = Board()
         c = self._at(b, 0.30, 0.30)
         _grab_now(b, [(0.30, 0.30, True, False)])
@@ -273,30 +275,27 @@ class TestOpenPalmCancel:
         assert (c.x, c.y) == pytest.approx((0.60, 0.60)), \
             "an ordinary release must not revert the position"
 
-    def test_cancelling_a_two_handed_scale_restores_the_original_size(self):
+    def test_opening_one_hand_keeps_the_scale_and_other_holder(self):
         b = Board()
         c = self._model(b)
         _grab_now(b, [(0.45, 0.5, True, False), (0.55, 0.5, True, False)])
         b.apply_hands([(0.40, 0.5, True, False), (0.60, 0.5, True, False)])
         assert c.scale > 1.0, "the setup must have actually grown it"
         b.apply_hands([(0.40, 0.5, False, True), (0.60, 0.5, True, False)])
-        assert c.scale == pytest.approx(1.0, abs=1e-6)
+        assert c.scale == pytest.approx(2.0, abs=1e-6)
         assert c.rot == pytest.approx(0.0, abs=1e-6)
-        assert c.held_by == [], "cancel must release BOTH hands, not just the one that opened"
+        assert c.held_by == [1]
 
-    def test_either_hand_opening_palm_cancels_a_shared_grab(self):
-        """'Always available' means either participant in a two-handed hold
-        can end it — not only the one that grabbed first."""
+    def test_second_hand_opening_keeps_first_hand_holding(self):
         b = Board()
         c = self._model(b)
         _grab_now(b, [(0.45, 0.5, True, False), (0.55, 0.5, True, False)])
         b.apply_hands([(0.45, 0.5, True, False), (0.55, 0.5, False, True)])
-        assert c.held_by == []
+        assert c.held_by == [0]
         assert c.scale == pytest.approx(1.0, abs=1e-6)
 
     def test_open_palm_on_a_hand_holding_nothing_does_nothing_odd(self):
-        """Cancel is defined in terms of undoing a hold. A hand that opens
-        while holding nothing has nothing to cancel — it simply stays idle."""
+        """Opening an empty hand leaves the board unchanged."""
         b = Board()
         c = self._at(b, 0.5, 0.5)
         b.apply_hands([(0.9, 0.9, False, True)])
@@ -313,12 +312,12 @@ class TestOpenPalmCancel:
         b.apply_hands([(0.5, 0.5, True, False)], now=0.01)
         assert c.held_by == [], "open palm must not have pre-armed the grab"
 
-    def test_cancel_reverts_to_before_the_grab_STARTED_not_before_the_second_hand_joined(self):
+    def test_undo_restores_the_pose_before_the_first_hand_joined(self):
         """The pre-grab snapshot must be captured once, when the FIRST hand
         takes hold — not re-captured when a second hand joins later. A single
         drag-then-two-hand-scale sequence is the only way this distinction is
         observable: if the snapshot were retaken at the second hand's join,
-        cancel would only undo the scaling, leaving the drag in place."""
+        Undo would only reverse the scaling, leaving the drag in place."""
         b = Board()
         c = self._model(b, x=0.30, y=0.30)
         _grab_now(b, [(0.30, 0.30, True, False)])       # one hand grabs
@@ -333,9 +332,11 @@ class TestOpenPalmCancel:
         b.apply_hands([(0.58, 0.60, True, False), (0.64, 0.60, True, False)])
         b.apply_hands([(0.55, 0.60, True, False), (0.67, 0.60, True, False)])  # spread: scale up
         assert c.scale > 1.0, "setup: the spread must have grown it"
-        b.apply_hands([(0.55, 0.60, False, True), (0.67, 0.60, True, False)])  # cancel
+        b.apply_hands([(0.55, 0.60, False, True), (0.67, 0.60, False, True)])
+        assert c.x == pytest.approx(0.60)
+        b.undo()
         assert (c.x, c.y) == pytest.approx((0.30, 0.30)), \
-            "cancel undid only the scale, not the drag from before the second hand ever joined"
+            "Undo must reverse both the drag and the two-hand scale"
         assert c.scale == pytest.approx(1.0, abs=1e-6)
 
 
@@ -646,23 +647,15 @@ class TestUndoRedo:
         b.undo(); b.redo()
         assert (c.x, c.y) == pytest.approx((0.70, 0.70))
 
-    def test_a_cancelled_drag_leaves_nothing_to_undo(self):
-        """Cancel already put the card back, so there is nothing left to undo.
-
-        Worth being precise about WHY, because it is not the guard it looks
-        like: the cancel branch consumes the pre-grab snapshot when it reverts
-        the card, so by the time the release-commit code runs there is no
-        snapshot left to build an undo step from. Verified by reverting the
-        `before != after` guard and watching this still pass — the mechanism
-        is the consumed snapshot, not that comparison.
-        """
+    def test_open_palm_release_records_an_undo_step(self):
         b = Board()
         self._at(b, 0.30, 0.30)
         depth = len(b._undo)
         _grab_now(b, [(0.30, 0.30, True, False)])
         b.apply_hands([(0.70, 0.70, True, False)])
-        b.apply_hands([(0.70, 0.70, False, True)])   # open palm: cancel
-        assert len(b._undo) == depth, "a cancel should add no undo step"
+        b.apply_hands([(0.70, 0.70, False, True)])   # open palm: release
+        assert len(b._undo) == depth + 1
+        assert b._undo[-1]["kind"] == "transform"
 
     def test_grabbing_and_letting_go_without_moving_records_nothing(self):
         """THE case the `before != after` guard actually covers: a pinch that
@@ -836,17 +829,15 @@ class TestPersistence:
         b.apply_hands([(0.70, 0.70, False)])         # release
         assert len(writes) == 1, "release must commit exactly once"
 
-    def test_a_cancelled_drag_persists_the_REVERTED_position(self, tmp_path, monkeypatch):
-        """Cancel reverts the card, and that revert is the state worth keeping
-        — otherwise a restart would resurrect the drag the user just undid."""
+    def test_open_palm_release_persists_the_moved_position(self, tmp_path, monkeypatch):
         b = self._fresh_board(tmp_path, monkeypatch)
-        b.add("card", "CANCELLED", x=0.30, y=0.30)
+        b.add("card", "MOVED", x=0.30, y=0.30)
         _grab_now(b, [(0.30, 0.30, True, False)])
         b.apply_hands([(0.70, 0.70, True, False)])   # drag away
-        b.apply_hands([(0.70, 0.70, False, True)])   # open palm: cancel
+        b.apply_hands([(0.70, 0.70, False, True)])   # open palm: release
 
         restored = self._restart(tmp_path, monkeypatch).cards()[0]
-        assert (restored["x"], restored["y"]) == pytest.approx((0.30, 0.30))
+        assert (restored["x"], restored["y"]) == pytest.approx((0.70, 0.70))
 
     def test_clearing_the_board_clears_storage_too(self, tmp_path, monkeypatch):
         """Otherwise every cleared card comes back from the dead on restart."""
@@ -1061,3 +1052,47 @@ class TestModels:
         _grab_now(b, [(0.45, 0.5, True), (0.55, 0.5, True)],     # grab again
                   t=b._last_frame_at + 0.05)
         assert c.scale == pytest.approx(2.0, abs=0.01)
+
+
+class TestHandHandoffs:
+    def test_off_center_pair_and_return_to_one_hand_do_not_jump(self):
+        b = Board()
+        c = b.add("model", "Detailed Engine", src="engine.glb", x=.5, y=.5)
+        one = [(.46, .5, True, False, 0)]
+        _grab_now(b, one)
+        pair = one + [(.60, .5, True, False, 1)]
+        _grab_now(b, pair, t=.3)
+        b.apply_hands(pair, now=.5)
+        assert (c.x, c.y) == pytest.approx((.5, .5))
+        b.apply_hands([(.41,.55,True,False,0),(.69,.55,True,False,1)], now=.6)
+        assert (c.x,c.y,c.scale) == pytest.approx((.52,.55,2))
+        # Either hand can keep holding when the other opens.
+        b.apply_hands([(.41,.55,False,True,0),(.69,.55,True,False,1)], now=.7)
+        assert c.held_by == [1]
+        assert (c.x,c.y,c.scale) == pytest.approx((.52,.55,2))
+        b.apply_hands([(.74,.60,True,False,1)], now=.8)
+        assert (c.x,c.y) == pytest.approx((.57,.60))
+
+    def test_missing_remaining_hand_is_reanchored_when_it_returns(self):
+        b = Board()
+        c = b.add("model", "Engine", src="engine.glb", x=.5, y=.5)
+        _grab_now(b, [(.45,.5,True,False,0),(.55,.5,True,False,1)])
+        b.apply_hands([(.4,.6,True,False,0),(.7,.6,True,False,1)], now=.3)
+        pose = (c.x,c.y,c.scale)
+        b.apply_hands([(.4,.6,False,True,0)], now=.35)
+        b.apply_hands([(.71,.61,True,False,1)], now=.4)
+        assert c.held_by == [1]
+        assert (c.x,c.y,c.scale) == pytest.approx(pose)
+
+    def test_rotation_is_continuous_across_angle_wrap_and_full_turn(self):
+        import math
+        b = Board()
+        c = b.add("model", "Engine", src="engine.glb", x=.5, y=.5)
+        def hands(deg):
+            a=math.radians(deg)
+            dx,dy=.05*math.cos(a),.05*math.sin(a)
+            return [(.5-dx,.5-dy,True,False,0),(.5+dx,.5+dy,True,False,1)]
+        _grab_now(b, hands(170))
+        for n,deg in enumerate(range(175,541,5)):
+            b.apply_hands(hands(deg),now=.2+n*.02)
+            assert c.rot == pytest.approx(math.radians(deg-170))

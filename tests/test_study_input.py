@@ -94,3 +94,14 @@ def test_camera_preview_is_authenticated_and_reuses_tracker(monkeypatch):
         assert r.status_code == 200 and r.content == jpeg
         assert r.headers['cache-control'] == 'no-store'
         assert r.headers['content-type'] == 'image/jpeg'
+
+
+def test_study_cannot_take_over_an_active_board_grab(clean):
+    sid=assembly.create()['session_id']
+    card=clean.add('model','Engine',src='engine.glb',x=.5,y=.5)
+    clean.apply_hands([(.5,.5,True,False,0)],now=0)
+    clean.apply_hands([(.5,.5,True,False,0)],now=.13)
+    with pytest.raises(ValueError,match='Release'):
+        study_input.control(sid,'owner-one-12345678','claim')
+    assert clean.hands_enabled and card.held_by==[0]
+    assert study_input.active() is None

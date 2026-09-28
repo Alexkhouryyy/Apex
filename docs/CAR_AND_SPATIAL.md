@@ -72,7 +72,7 @@ car/phone/browser camera. Touch selection works even when tracking is off.
    requires the configured Blender bridge. Prefer self-contained GLB files.
 3. Pinch and hold over a model to grab it; use two hands to scale/rotate its view.
    The selection label remains after release. You can also tap an object's label
-   to select it. An open palm cancels an active hand transform as before.
+   to select it. Opening your hand releases the model at its current position. Undo reverts the move. Pausing hands also saves the current position.
 4. Release it and say “Rotate this by a quarter turn” or “Make this twice as
    large on the board.” A selection snapshot, including the exact object ID and
    model source, accompanies the message. `board_transform` supports position,

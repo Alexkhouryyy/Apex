@@ -296,14 +296,14 @@ class TestThrowingACardAway:
         back = next(x for x in b.cards() if x["id"] == c.id)
         assert round(back["x"], 3) == 0.6
 
-    def test_a_still_open_palm_still_cancels(self, db):
+    def test_a_still_open_palm_keeps_the_moved_position(self, db):
         b = Board()
         c = card_at(b, "Keep", 0.4, 0.5)
         t = grab(b, 0.4, 0.5, 100.0)
         t = drag(b, [(0.45, 0.5), (0.5, 0.5), (0.5, 0.5), (0.5, 0.5)], t)
         b.apply_hands([(0.5, 0.5, False, True)], now=t)
         back = next(x for x in b.cards() if x["id"] == c.id)
-        assert round(back["x"], 3) == 0.4
+        assert round(back["x"], 3) == 0.5
 
     def test_a_two_handed_hold_cannot_be_flicked(self, db):
         """Two hands sweeping a card fast toward the edge and letting go is a

@@ -102,9 +102,7 @@ def _open_hand(*, openness=1.0, span=0.15):
 
 
 class TestIsOpenPalm:
-    """The board's cancel gesture. Must fire on a deliberate flat hand and
-    nowhere else — a false positive here cancels a drag the user never meant
-    to abandon; a false negative leaves no escape hatch at all."""
+    """Detect extended fingers; a recognized pinch must still take priority."""
 
     def test_a_fully_open_hand_is_open(self):
         assert handtrack.is_open_palm(_open_hand(openness=1.0)) is True
@@ -115,7 +113,7 @@ class TestIsOpenPalm:
     def test_a_half_curled_hand_is_not_open(self):
         """THE margin this function exists for. A tip merely past its own PIP
         by tracking noise must not register as a deliberate open hand — that
-        would make ordinary hand wobble fire the cancel gesture at random."""
+        would make ordinary hand wobble report an open hand at random."""
         assert handtrack.is_open_palm(_open_hand(openness=0.1)) is False
 
     @pytest.mark.parametrize("finger_tip", [
@@ -930,3 +928,54 @@ class TestHandJoints:
         pts[handtrack.WRIST] = NS(x=0.5, y=0.7, z=0.0); pts[handtrack.THUMB_TIP] = NS(x=0.7, y=0.5, z=0.0)
         _c, details = t._read_hands(NS(hand_landmarks=[pts], handedness=[]), now=1.0)
         assert len(details[0]["joints"]) == 21
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+@pytest.mark.parametrize("label", ["Left", "Right"])
+def test_extended_finger_pinch_grabs_for_either_hand(mirror, label, monkeypatch):
+    from agent.board import Board, ARM_DWELL_SECONDS
+    monkeypatch.setattr(config,"HANDTRACK_MIRROR",mirror)
+    lms=_open_hand()
+    tip=lms[handtrack.INDEX_TIP]
+    lms[handtrack.THUMB_TIP]=_lm(tip.x+.01,tip.y)
+    if label=="Left":
+        lms=[_lm(1-p.x,p.y,p.z) for p in lms]
+    assert handtrack.is_open_palm(lms), "regression: raw palm and pinch overlap"
+    cur=handtrack.landmarks_to_cursor(lms,mirror=mirror)
+    assert cur[2] and not cur[3]
+    result=types.SimpleNamespace(hand_landmarks=[lms],handedness=[
+        [types.SimpleNamespace(category_name=label)]])
+    tracker=handtrack.HandTracker.__new__(handtrack.HandTracker)
+    b=Board(); card=b.add("model","Engine",src="engine.glb",x=cur[0],y=cur[1])
+    for t in (0,ARM_DWELL_SECONDS+.01):
+        cursors,details=tracker._read_hands(result,now=t)
+        assert cursors[0][2] and not cursors[0][3]
+        assert details[0]["label"]==label
+        b.apply_hands(cursors,now=t)
+    assert len(card.held_by)==1
+    # Widen slightly into the latch's hysteresis band; palm cannot override it.
+    ratio=(details[0]["threshold"]+details[0]["release"])/2
+    tip=lms[handtrack.INDEX_TIP]
+    lms[handtrack.THUMB_TIP]=_lm(tip.x+ratio*.15,tip.y)
+    cursors,_=tracker._read_hands(result,now=.2)
+    assert cursors[0][2] and not cursors[0][3]
+    b.apply_hands(cursors,now=.2)
+    assert len(card.held_by)==1
+
+
+def test_both_extended_finger_pinches_grab_even_when_detection_order_changes(monkeypatch):
+    from agent.board import Board
+    monkeypatch.setattr(config,"HANDTRACK_MIRROR",True)
+    right=_open_hand()
+    tip=right[handtrack.INDEX_TIP]
+    right[handtrack.THUMB_TIP]=_lm(tip.x+.01,tip.y)
+    left=[_lm(1-p.x,p.y,p.z) for p in right]
+    tracker=handtrack.HandTracker.__new__(handtrack.HandTracker)
+    b=Board(); c=b.add("model","Engine",src="engine.glb",x=.5,y=tip.y)
+    ids=None
+    for t,raw in ((0,[left,right]),(.13,[right,left]),(.2,[left,right])):
+        cursors,_=tracker._read_hands(types.SimpleNamespace(hand_landmarks=raw,handedness=[]),now=t)
+        assert all(h[2] and not h[3] for h in cursors)
+        b.apply_hands(cursors,now=t)
+        if t==.13: ids=set(c.held_by)
+    assert len(c.held_by)==2 and set(c.held_by)==ids

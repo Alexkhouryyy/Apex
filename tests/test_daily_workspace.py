@@ -21,9 +21,8 @@ def test_paused_hands_cannot_grab_or_point_and_resume_needs_dwell():
     assert not c.held_by
     b.apply_hands([(.5, .5, True, False, 0)], now=5 + ARM_DWELL_SECONDS + .01)
     assert c.held_by
-    with pytest.raises(ValueError, match='Release'):
-        b.set_hands_enabled(False)
-    assert b.hands_enabled
+    b.set_hands_enabled(False)
+    assert not b.hands_enabled and not c.held_by
 
 
 def test_paused_board_blocks_voice_and_other_gesture_dispatch(monkeypatch):
@@ -136,3 +135,29 @@ def test_content_routes_unicode_conflicts_and_edit_validation(monkeypatch):
         c = b.cards()[0]; b._cards[0].held_by = [0]
         with pytest.raises(ValueError, match='Release'):
             b.save_text('card', 'Busy', '', '', c['id'], c['content_revision'])
+
+
+@pytest.mark.parametrize("throw_enabled", [False, True])
+def test_pausing_a_move_saves_pose_once_and_preserves_undo(test_db, monkeypatch, throw_enabled):
+    monkeypatch.setattr(config, "BOARD_THROW_ENABLED", throw_enabled)
+    board_mod.init_db()
+    b=Board(); b.persist=True
+    c=b.add("model", "Detailed Engine", src="engine.glb", x=.3,y=.4)
+    before=len(b._undo)
+    b.apply_hands([(.3,.4,True,False,0)],now=0)
+    b.apply_hands([(.3,.4,True,False,0)],now=.13)
+    b.apply_hands([(.7,.6,True,False,0)],now=.18)
+    # Pause immediately during a fast movement, not after a long idle/stall.
+    monkeypatch.setattr(board_mod.time,"time",lambda:.19)
+    b.set_hands_enabled(False)
+    b.set_hands_enabled(False)
+    assert c.held_by == [] and b.count()==1
+    assert (c.x,c.y)==pytest.approx((.7,.6))
+    assert len(b._undo)==before+1
+    assert not any(e["type"] in ("tapped","thrown") for e in b._events)
+    fresh=Board(); fresh.restore()
+    assert (fresh.cards()[0]["x"],fresh.cards()[0]["y"])==pytest.approx((.7,.6))
+    b.undo()
+    assert (c.x,c.y)==pytest.approx((.3,.4))
+    b.redo()
+    assert (c.x,c.y)==pytest.approx((.7,.6))

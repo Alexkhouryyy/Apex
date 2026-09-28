@@ -199,7 +199,7 @@ class TestSaving:
         assert parts[1]["size"] == pytest.approx([40, 50, 40], rel=0.02)
 
 
-class TestNotSaving:
+class TestPartRelease:
     def test_a_tap_on_a_part_asks_about_it(self, rocket):
         b, card = rocket
         b.set_parts_mode(card.id)
@@ -210,14 +210,14 @@ class TestNotSaving:
         assert len(tapped) == 1 and tapped[0]["title"] == "nose of the Rocket"
         assert card.src.endswith("v1.glb") and not events(b, "part_saved")
 
-    def test_an_open_palm_cancels(self, rocket):
+    def test_an_open_palm_saves_the_part_move(self, rocket):
         b, card = rocket
         b.set_parts_mode(card.id)
         x, y, _ = drawn(b, card, "nose")
         c = ARM_DWELL_SECONDS + .01
         frames(b, [(0, x, y, True, False), (c, x, y, True, False), (c + .3, x, y - .06, True, False),
                    (c + .4, x, y - .06, False, True)])
-        assert card.src.endswith("v1.glb") and not events(b, "part_saved")
+        assert card.src.endswith("v2.glb") and events(b, "part_saved")
         assert "part" not in b.cards()[0], "the live preview must end"
 
     def test_holding_still_and_letting_go_saves_nothing(self, rocket):
@@ -276,3 +276,21 @@ class TestRoutesAndTool:
         assert b._parts_mode is None
         assert "Which model" in core._execute_tool("board_parts", {"on": True, "title": "chair"})
         assert "board_parts" in companion.DISCUSS_TOOLS
+
+
+@pytest.mark.parametrize("move", [False, True])
+def test_pausing_parts_saves_the_move_without_tapping(rocket, move):
+    b,card=rocket
+    b.set_parts_mode(card.id)
+    before=card.src
+    x,y,_=drawn(b,card,"nose")
+    b.apply_hands([(x,y,True,False,0)],now=0)
+    b.apply_hands([(x,y,True,False,0)],now=ARM_DWELL_SECONDS+.01)
+    if move:
+        b.apply_hands([(x,y-.06,True,False,0)],now=.3)
+    b.set_hands_enabled(False)
+    assert not b._part_holds and not events(b,"tapped")
+    if move:
+        assert card.src.endswith("v2.glb") and events(b,"part_saved")
+        b.undo()
+    assert card.src==before

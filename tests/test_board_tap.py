@@ -85,7 +85,7 @@ class TestNotATap:
                   (COMMIT + TAP_SECONDS + .2, .5, .5, False, False)])
         assert taps(b) == []
 
-    def test_an_open_palm_cancel_is_not_a_tap(self, board):
+    def test_an_open_palm_release_is_not_a_tap(self, board):
         b, c = board
         pinch(b, [(0, .5, .5, True, False), (COMMIT, .5, .5, True, False),
                   (COMMIT + .1, .5, .5, False, True)])

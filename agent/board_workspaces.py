@@ -87,7 +87,7 @@ def create(name, copy_current, context):
     with study_input.LOCK, board._board_lock:
         old = board.get_board(); check_context(old, context)
         if copy_current:
-            old.set_hands_enabled(False)
+            old.set_hands_enabled(False, finish_moves=False)
         workspace_id = uuid.uuid4().hex
         with old._lock:
             snapshots = [old._snapshot(c) for c in old._cards] if copy_current else []
@@ -118,9 +118,9 @@ def switch(workspace_id, context):
         if study_input.active():
             raise ValueError('Pause study hand controls before switching workspaces.')
         target = _boards.get(workspace_id) or _load(workspace_id)
-        old.set_hands_enabled(False)
+        old.set_hands_enabled(False, finish_moves=False)
         old._persist_all(strict=True)
-        target.set_hands_enabled(False)
+        target.set_hands_enabled(False, finish_moves=False)
         with longterm._conn() as db:
             db.execute("UPDATE workspace_settings SET value=? WHERE key='active'", (workspace_id,))
         target.workspace_epoch = uuid.uuid4().hex

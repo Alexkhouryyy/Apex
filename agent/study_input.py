@@ -36,7 +36,7 @@ def control(sid, owner, action, pointed=None):
             raise ValueError('Another study window controls hands. Pause it before switching.')
         if action == 'claim':
             from agent.board import get_board
-            get_board().set_hands_enabled(False)
+            get_board().set_hands_enabled(False, finish_moves=False)
         _lease = dict(session=sid, owner=owner, until=time.monotonic() + TTL)
         if action == 'sample' and pointed is not None:
             assembly.point(sid, pointed)

@@ -407,7 +407,7 @@ def is_fist(lms, world=None) -> bool:
 
 
 def is_open_palm(lms) -> Optional[bool]:
-    """A deliberate open hand — the escape gesture for the glass board.
+    """Four extended fingers. Callers must let a recognized pinch take priority.
 
     A generic technique, not read from any other project: a finger counts as
     extended when its tip sits farther from the wrist than that finger's own
@@ -415,7 +415,7 @@ def is_open_palm(lms) -> Optional[bool]:
     reaches further than a curled one, checked per-finger so a fully splayed
     hand is unambiguous. Requires all four non-thumb fingers extended
     simultaneously; a single extended finger (pointing) or two (a peace sign)
-    must not read as "open", or the board's cancel gesture would fire on
+    must not read as "open", or a board hold could release on
     ordinary pointing.
 
     Distance ratios, not raw distances, keep this working at any distance from
@@ -501,8 +501,7 @@ def landmarks_to_cursor(lms, *, mirror: bool = True,
 
     `open_palm` defaults to False on unusable landmarks (`is_open_palm` returned
     None) rather than propagating the ambiguity — a cursor is either present or
-    it is not, and "cancel" firing on a shrug of missing data would be worse
-    than "cancel" simply not firing that frame.
+    it is not; missing data must not synthesize an open-hand release.
     """
     if threshold is None:
         threshold = getattr(config, "HANDTRACK_PINCH_RATIO", DEFAULT_PINCH_RATIO)
@@ -513,7 +512,7 @@ def landmarks_to_cursor(lms, *, mirror: bool = True,
         return None
     ratio = pinch_ratio(lms)
     pinched = ratio is not None and ratio < threshold
-    open_palm = bool(is_open_palm(lms))
+    open_palm = bool(is_open_palm(lms)) and not pinched
     if mirror:
         x = 1.0 - x
     # MediaPipe normalizes to the frame, but a hand at the very edge can report
@@ -1063,7 +1062,9 @@ class HandTracker(threading.Thread):
             # keep whatever state it had).
             pinched = self._latch.update(hid, (rl + 1.0) if fist else r, e, rl)
             label = _handedness_label(result, idx) or "?"
-            cur = (cur[0], cur[1], pinched, cur[3], hid)
+            # A pinch can have four extended fingers, especially with the thumb
+            # meeting a straight index finger. The latched pinch takes priority.
+            cur = (cur[0], cur[1], pinched, bool(is_open_palm(lms)) and not pinched, hid)
             # Measured once and kept, not measured once and printed. The ratio
             # is the number that decides whether a pinch happens, and it used
             # to exist only inside a HANDTRACK_DEBUG print — a scrolling log,

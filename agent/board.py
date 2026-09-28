@@ -38,12 +38,9 @@ pinch frame (tracking is probabilistic; it happens) grabs whatever object is
 nearest, which reads as the board randomly stealing things rather than as a
 tracking hiccup.
 
-**An open palm always cancels**, on whichever hand is holding, and restores
-the object to exactly where it was before that hold began — not wherever the
-drag currently sits, which is what an ordinary release does. That difference
-is the point: a grab you did not mean to make, or a transform that went
-somewhere you did not intend, has one unambiguous way out that works
-regardless of what state the interaction is in.
+**Opening a hand releases and keeps the current pose.** Pausing hand controls
+also commits the pose. Undo is the explicit way to restore the previous pose;
+a natural release must never silently discard a move.
 
 ## Persistence, and when it is allowed to write
 
@@ -331,9 +328,7 @@ class Board:
         self._armed_since: dict[int, float] = {}
         # A card's x/y/scale/rot at the moment it was first grabbed (by
         # whichever hand grabbed it first — a second hand joining does not
-        # reset this). An open-palm cancel restores exactly these values,
-        # which is the difference between "cancel" and an ordinary release:
-        # release keeps wherever the drag currently is, cancel undoes it.
+        # reset this). Release keeps the pose; Undo restores these values.
         self._pre_grab: dict[str, tuple] = {}
         # Reported by hand_state() for tests and any future UI — see HandState.
         self._hand_state: dict[int, str] = {}
@@ -834,18 +829,21 @@ class Board:
             self._selected = card_id
             return card.as_dict() if card else None
 
-    def set_hands_enabled(self, enabled: bool) -> bool:
+    def set_hands_enabled(self, enabled: bool, *, finish_moves: bool = True) -> bool:
         """Pause board gestures without closing the camera or stopping voice.
 
-        Refuse during a hold so a pause cannot silently commit or discard work.
+        Pausing finishes active moves at their current pose, with an Undo entry.
+        Internal ownership transfers use finish_moves=False to refuse active holds.
         The pause is shared by clients of this board and resets on restart.
         """
         from agent import study_input
         with study_input.LOCK, self._lock:
             if enabled and study_input.active():
                 raise ValueError("Pause study hand controls before resuming board hands.")
-            if any(c.held_by for c in self._cards) or self._part_holds:
-                raise ValueError("Release the object before pausing hand controls.")
+            if (enabled or not finish_moves) and (any(c.held_by for c in self._cards) or self._part_holds):
+                raise ValueError("Release the object before changing hand controls.")
+            if not enabled and self.hands_enabled:
+                self.apply_hands([], finish=True)
             self.hands_enabled = enabled
             self._armed_since.clear()
             self._point_candidate.clear()
@@ -1002,10 +1000,10 @@ class Board:
         the board. KeyError is in the caught set because a dict subscripts by
         key, not position — `{}[0]` raises KeyError, not IndexError.
 
-        A 4th element (`open_palm`, the board's cancel gesture) is optional —
+        A 4th element (`open_palm`, a release without a tap) is optional —
         `agent/gestures.py` reads only the first three positions of this same
         stream and neither module needs to agree on the other's use of it, so
-        a 3-tuple source still works here, just without cancel available.
+        a 3-tuple source still works here, without open-palm feedback.
         """
         out = []
         for i, cur in enumerate(cursors or []):
@@ -1032,7 +1030,7 @@ class Board:
         identical from the outside: the hand is not pinched, the pinch has not
         held for ARM_DWELL_SECONDS yet, there is no card within GRAB_RADIUS,
         the nearest card is already held by two hands, or an open palm is
-        cancelling. Telling someone "it did not grab" is useless; telling them
+        releasing. Telling someone "it did not grab" is useless; telling them
         "nothing within reach — nearest card is 0.31 away, reach is 0.14" is
         the whole difference between a five-minute fix and giving up.
 
@@ -1070,7 +1068,7 @@ class Board:
                 })
         return out
 
-    def apply_hands(self, cursors, now: Optional[float] = None) -> None:
+    def apply_hands(self, cursors, now: Optional[float] = None, *, finish: bool = False) -> None:
         """Move, scale and rotate according to this frame's hands.
 
         `cursors` is the same `(x, y, pinched, open_palm, hand_id)` stream the
@@ -1093,7 +1091,7 @@ class Board:
         throw_on = bool(getattr(_config, "BOARD_THROW_ENABLED", False))
         if not self.hands_enabled:
             return
-        hands = self.read_cursors(cursors)
+        hands = [] if finish else self.read_cursors(cursors)
         byid = {h[4]: h for h in hands}
         with self._lock:
             if not self.hands_enabled:
@@ -1114,15 +1112,10 @@ class Board:
                 self._hand_last_seen[h[4]] = now
 
             def gone(hid) -> bool:
-                return (hid not in byid and now - self._hand_last_seen.get(
-                    hid, float("-inf")) > HAND_LOSS_GRACE_SECONDS)
+                return (finish or (hid not in byid and now - self._hand_last_seen.get(
+                    hid, float("-inf")) > HAND_LOSS_GRACE_SECONDS))
 
-            # Drop holds whose hand let go, left for good, or opened palm.
-            # Open palm on EITHER holder cancels the whole hold — restoring
-            # the pre-grab snapshot and dropping every hand on it, not just the
-            # one that opened — because "always available as escape" means the
-            # escape has to work regardless of which hand a two-handed grab's
-            # other participant is doing.
+            # A natural release keeps the pose. Undo explicitly reverts it.
             released = []
             for c in self._cards:
                 # The release frame's own hand position is part of the throw:
@@ -1135,35 +1128,29 @@ class Board:
                         self._trail[c.id].append((now, h[0], h[1]))
                 # Throwing is opt-in (config.BOARD_THROW_ENABLED): off, a fast
                 # release is an ordinary let-go.
-                flung = (throw_on and len(c.held_by) == 1
+                flung = (not finish and throw_on and len(c.held_by) == 1
                          and is_flick(self._trail.get(c.id)))
-                cancelled = any(i in byid and byid[i][3] for i in c.held_by)
-                # A hand that opens WHILE flinging is finishing a throw, not
-                # asking to cancel — and it is thrown, because the release
-                # below carries `flung` whatever this branch does. The cancel
-                # also puts the card back where it was picked up, which is
-                # exactly the spot a throw's undo should return it to.
-                if cancelled:
-                    pre = self._pre_grab.pop(c.id, None)
-                    if pre is not None:
-                        c.x, c.y, c.scale, c.rot = pre
-                    kept: list = []
-                else:
-                    kept = [i for i in c.held_by
-                            if (byid[i][2] if i in byid else not gone(i))]
+                opened = any(i in byid and byid[i][3] for i in c.held_by)
+                kept = [i for i in c.held_by
+                        if ((byid[i][2] and not byid[i][3]) if i in byid else not gone(i))]
                 if len(kept) != len(c.held_by):
                     # The pair changed, so the two-handed reference is stale.
                     self._pair_ref.pop(c.id, None)
+                    if len(c.held_by) == 2 and len(kept) == 1:
+                        # Re-anchor the remaining hand after scaling/rotation.
+                        h = byid.get(kept[0])
+                        if h is not None:
+                            self._grab_offset[kept[0]] = (c.x - h[0], c.y - h[1])
+                        else:
+                            self._grab_offset.pop(kept[0], None)
                 if not kept:
                     pre = self._pre_grab.pop(c.id, None)
                     probe = self._tap_probe.pop(c.id, None)
-                    tapped = bool(c.held_by and probe and not cancelled and not flung
+                    tapped = bool(c.held_by and probe and not opened and not finish and not flung
                                   and now - probe[0] <= TAP_SECONDS and probe[3] <= TAP_MOVE)
                     if c.held_by:
                         # Held a moment ago, held by nothing now: this is the
-                        # commit point. A cancel lands here too — it reverted
-                        # the card, and that revert is just as much the state
-                        # worth keeping as a deliberate drop would be. Flinging
+                        # commit point. Opening the palm keeps the move. Flinging
                         # a hand out of the camera's view lands here too, once
                         # the grace runs out, and is the most natural throw
                         # there is.
@@ -1173,12 +1160,14 @@ class Board:
                 c.held_by = kept
 
             # Part holds let go the same way: a hand that opened its pinch or
-            # left for longer than the grace. An open palm cancels the edit.
+            # left for longer than the grace. Opening the palm saves the edit.
             parts_done = []
             for cid, hold in list(self._part_holds.items()):
-                cancelled = any(i in byid and byid[i][3] for i in hold["hands"])
-                kept = [] if cancelled else [
-                    i for i in hold["hands"] if (byid[i][2] if i in byid else not gone(i))]
+                opened = any(i in byid and byid[i][3] for i in hold["hands"])
+                if opened or finish:
+                    hold["settle"] = True  # Release/pause is not a quick-tap request.
+                kept = [i for i in hold["hands"]
+                        if ((byid[i][2] and not byid[i][3]) if i in byid else not gone(i))]
                 for i in hold["hands"]:
                     if i not in kept:
                         hold["last"].pop(i, None)
@@ -1186,7 +1175,7 @@ class Board:
                 if not kept:
                     del self._part_holds[cid]
                     self._last_release_at = now
-                    parts_done.append((cid, hold, cancelled))
+                    parts_done.append((cid, hold))
 
             # Per-hand state for hands that are gone for good.
             for hid in [k for k in self._hand_last_seen if gone(k)]:
@@ -1318,7 +1307,7 @@ class Board:
                     probe = self._tap_probe.get(c.id)
                     if probe is not None:
                         probe[3] = max(probe[3], math.hypot(hx - probe[1], hy - probe[2]))
-                    ox, oy = self._grab_offset.get(c.held_by[0], (0.0, 0.0))
+                    ox, oy = self._grab_offset.setdefault(c.held_by[0], (c.x - hx, c.y - hy))
                     c.x = min(1.0, max(0.0, hx + ox))
                     c.y = min(1.0, max(0.0, hy + oy))
                     self._pair_ref.pop(c.id, None)
@@ -1332,8 +1321,8 @@ class Board:
                     if all(i in byid for i in c.held_by):
                         self._two_handed(c, byid)
 
-        for cid, hold, cancelled in parts_done:
-            self._finish_part(cid, hold, cancelled, now)
+        for cid, hold in parts_done:
+            self._finish_part(cid, hold, now)
 
         # Outside the lock, and only for cards a hand just let go of — the
         # whole point of committing on release rather than per frame.
@@ -1354,25 +1343,22 @@ class Board:
                 continue
             self._write(c)
             after = (c.x, c.y, c.scale, c.rot)
-            # A cancel already put the card back, so before == after and there
-            # is nothing to undo. Recording it anyway would make "undo" spend
-            # a step doing nothing visible, which reads as undo being broken.
+            # Only a changed pose needs an undo entry.
             if pre is not None and tuple(pre) != after:
                 self._record({"kind": "transform", "id": c.id, "title": c.title,
                               "before": tuple(pre), "after": after})
 
-    def _finish_part(self, card_id: str, hold: dict, cancelled: bool, now: float) -> None:
-        """A part was let go of: a cancel drops the edit, a tap asks about the
-        part, anything else is saved as the build's next version."""
+    def _finish_part(self, card_id: str, hold: dict, now: float) -> None:
+        """A quick tap asks about the part; a released edit saves a new version."""
         with self._lock:
             card = next((c for c in self._cards if c.id == card_id), None)
-        if card is None or cancelled:
+        if card is None:
             return
         recipe = self._recipe(card)
         if recipe is None:
             return
         title, parts = recipe
-        if (not hold["paired"] and now - hold["t0"] <= TAP_SECONDS and hold["max"] <= TAP_MOVE):
+        if (not hold.get("settle") and not hold["paired"] and now - hold["t0"] <= TAP_SECONDS and hold["max"] <= TAP_MOVE):
             with self._lock:
                 self._pointed = (card.id, now)
             self.emit("tapped", id=card.id, title=f"{hold['name']} of the {card.title}",
@@ -1416,16 +1402,19 @@ class Board:
             # Without a reference the object jumps to whatever scale the
             # current span happens to imply, which looks like a glitch.
             if span > 1e-6:
-                self._pair_ref[card.id] = (span, angle, card.scale, card.rot)
+                self._pair_ref[card.id] = (span, angle, card.scale, card.rot,
+                                          card.x - (ax + bx) / 2, card.y - (ay + by) / 2)
             return
 
-        ref_span, ref_angle, ref_scale, ref_rot = ref
+        ref_span, ref_angle, ref_scale, ref_rot, ox, oy = ref
         if ref_span <= 1e-6 or span <= 1e-6:
             return
         card.scale = min(MAX_SCALE, max(MIN_SCALE, ref_scale * (span / ref_span)))
-        card.rot = ref_rot + (angle - ref_angle)
-        card.x = min(1.0, max(0.0, (ax + bx) / 2))
-        card.y = min(1.0, max(0.0, (ay + by) / 2))
+        card.rot = ref_rot + math.atan2(math.sin(angle - ref_angle), math.cos(angle - ref_angle))
+        # Accumulate rotation across the angle wrap without a full-turn jump.
+        self._pair_ref[card.id] = (ref_span, angle, ref_scale, card.rot, ox, oy)
+        card.x = min(1.0, max(0.0, (ax + bx) / 2 + ox))
+        card.y = min(1.0, max(0.0, (ay + by) / 2 + oy))
 
     def _nearest(self, hx: float, hy: float, hand: int) -> Optional[Card]:
         """The closest grabbable object within reach, or None.
