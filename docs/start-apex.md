@@ -23,6 +23,12 @@ services still depend on their own settings, credentials and hardware; their
 startup diagnostics are in `%USERPROFILE%\.apex\resident.log` (or your configured
 `RESIDENT_LOG_FILE`). A healthy dashboard does not certify every integration.
 
+On Windows, a unique launch identifier links the health response to this start;
+the Python virtual environment's launcher can have a different process ID from
+the actual interpreter. Shutdown stops the owned process trees, including those
+interpreter children. If an older launcher timed out but Apex remains running,
+quit that instance from its tray before starting again.
+
 It opens Screen Companion after the dashboard responds. Click Voice and allow
 microphone/audio access in the browser when prompted. Keep Companion open for
 Celine's screen assistance. GPU warm-up can take several minutes on first start.

@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Apex">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-<link rel="icon" type="image/png" href="/static/icons/favicon-64.png">
+<link rel="icon" type="image/svg+xml" href="/static/icons/apex-mark.svg">
 <link rel="stylesheet" href="/static/styles.css?v=omni30">
 <link rel="stylesheet" href="/static/mobile.css?v=omni30"><link rel="stylesheet" href="/static/theme.css">
 <script src="/static/marked.min.js"></script>
@@ -27,11 +27,12 @@
   }
 }
 </script>
+<link rel="stylesheet" href="/static/brand.css?v=brand37">
 </head>
 <body>
 <aside id="sidebar">
   <div class="brand">
-    <div class="logo-dot"></div>
+    <img class="apex-logo" src="/static/icons/apex-mark.svg" width="32" height="32" alt="" aria-hidden="true">
     <div class="brand-text">
       <div class="brand-title">Apex Agent</div>
       <div class="brand-sub" id="ws-indicator">offline</div>
@@ -926,7 +927,7 @@
 <!-- Login overlay — shown when DASHBOARD_TOKEN is set and no valid token is stored -->
 <div id="login-overlay" style="display:none">
   <div class="login-box">
-    <div class="logo-dot login-logo"></div>
+    <img class="apex-logo login-logo" src="/static/icons/apex-mark.svg" width="32" height="32" alt="" aria-hidden="true">
     <div class="login-title">Apex Agent</div>
     <div class="login-sub">Enter your dashboard token to continue</div>
     <form id="login-form" autocomplete="off">

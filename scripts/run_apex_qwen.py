@@ -8,9 +8,11 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import uuid
 import webbrowser
 
 ROOT = Path(__file__).resolve().parents[1]
+WINDOWS = sys.platform == 'win32'
 
 
 def _dotenv_keys():
@@ -84,6 +86,19 @@ def wait_healthy(opener, url, accept, processes, label, timeout):
 
 def stop(process):
     if process is not None and process.poll() is None:
+        if WINDOWS:
+            # A Windows venv python.exe is a redirector with a real interpreter
+            # child. Terminating only the redirector leaves Apex/Qwen running.
+            result = subprocess.run(
+                ['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                capture_output=True, text=True, timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+            if result.returncode and process.poll() is None:
+                raise RuntimeError(f'Could not stop owned process tree {process.pid}. '
+                                   'Quit Apex from its tray before restarting. '
+                                   + result.stderr.strip())
+            process.wait(timeout=10)
+            return
         process.terminate()
         try:
             process.wait(timeout=10)
@@ -137,12 +152,16 @@ def main(argv=None):
             if len(starts) >= 5:
                 raise RuntimeError('Too many Apex restarts in two minutes; stopping.')
             starts.append(now)
+            # Windows venv redirectors make Popen.pid differ from os.getpid()
+            # inside Apex. Identify this particular launch across that boundary.
+            launch_id = uuid.uuid4().hex
+            env['APEX_LAUNCH_ID'] = launch_id
             print('Starting Apex' + (' resident mode' if resident else '') + '...', flush=True)
             agent = subprocess.Popen([sys.executable, str(ROOT / 'main.py'),
                                       '--resident' if resident else '--text'], cwd=ROOT, env=env)
             if dashboard_enabled:
                 wait_healthy(opener, dashboard_url + '/health',
-                             lambda h: h.get('service') == 'apex' and h.get('pid') == agent.pid
+                             lambda h: h.get('service') == 'apex' and h.get('launch_id') == launch_id
                              and h.get('agent_ready') is True,
                              [('Apex', agent), ('Celine voice', voice)], 'Apex dashboard', 180)
                 print(f'Dashboard: ready. {dashboard_url}/home\n'
@@ -168,8 +187,10 @@ def main(argv=None):
             print('Restart requested. Keeping Celine voice warm...', flush=True)
             time.sleep(2)
     finally:
-        stop(agent)
-        stop(voice)
+        try:
+            stop(agent)
+        finally:
+            stop(voice)
 
 
 if __name__ == '__main__':

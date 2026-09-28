@@ -1,0 +1,6 @@
+.apex-logo{display:inline-block;width:32px;height:32px;flex:none;vertical-align:middle;object-fit:contain}
+.brand.apex-brand{display:inline-flex;align-items:center;gap:12px;text-decoration:none;white-space:nowrap}
+.brand.apex-brand .apex-wordmark{border:0;padding:0;transform:none;background:none;border-radius:0;font-size:15px;font-weight:650;letter-spacing:.16em;color:inherit}
+.brand.apex-brand small{font-size:13px;font-weight:400;letter-spacing:0;color:#9eafb7}
+.login-logo.apex-logo{width:48px;height:48px;margin:0 auto 16px}
+@media(max-width:600px){.brand.apex-brand{gap:8px}.apex-logo{width:28px;height:28px}}

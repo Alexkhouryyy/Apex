@@ -2,7 +2,11 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -14,6 +18,7 @@ def launcher(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location('apex_launcher_test', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'WINDOWS', False)  # Fake processes in unit tests.
     monkeypatch.setattr(module, 'ROOT', tmp_path)
     monkeypatch.setattr(module.Path, 'home', staticmethod(lambda: tmp_path))
     python = tmp_path / 'apex-qwen-fast-env/Scripts/python.exe'
@@ -60,9 +65,11 @@ def test_full_start_checks_own_dashboard_and_opens_companion(launcher, monkeypat
 
     def health(opener, url, accept, processes, label, timeout):
         if label == 'Apex dashboard':
-            assert not accept({'service': 'apex', 'pid': 999, 'agent_ready': True})
-            assert not accept({'service': 'apex', 'pid': 101, 'agent_ready': False})
-            assert accept({'service': 'apex', 'pid': 101, 'agent_ready': True})
+            launch_id = spawn.call_args.kwargs['env']['APEX_LAUNCH_ID']
+            assert not accept({'service': 'apex', 'pid': 101, 'agent_ready': True})
+            assert not accept({'service': 'apex', 'launch_id': 'another-launch', 'agent_ready': True})
+            assert not accept({'service': 'apex', 'launch_id': launch_id, 'agent_ready': False})
+            assert accept({'service': 'apex', 'pid': 999, 'launch_id': launch_id, 'agent_ready': True})
         else:
             assert not accept({'service': 'apex-qwen', 'model_loaded': False})
             assert accept({'service': 'apex-qwen', 'model_loaded': True})
@@ -121,6 +128,8 @@ def test_only_explicit_restart_keeps_same_voice_process(launcher, monkeypatch, e
     monkeypatch.setattr(launcher, 'wait_healthy', Mock())
     assert launcher.main(['--fast', '--resident']) == expected
     assert spawn.call_count == len(exits) + 1
+    launch_ids = [c.kwargs['env']['APEX_LAUNCH_ID'] for c in spawn.call_args_list[1:]]
+    assert len(set(launch_ids)) == len(exits)
     assert children[0].terminated
 
 
@@ -235,8 +244,109 @@ def test_dashboard_health_identifies_process_and_agent(monkeypatch):
     import asyncio
     import os
     from dashboard import server
+    monkeypatch.setenv('APEX_LAUNCH_ID', 'test-launch-id')
     monkeypatch.setattr(server, '_agent_ref', None)
     assert asyncio.run(server.health()) == {'status': 'ok', 'service': 'apex',
-                                           'pid': os.getpid(), 'agent_ready': False}
+                                           'pid': os.getpid(), 'launch_id': 'test-launch-id',
+                                           'agent_ready': False}
     monkeypatch.setattr(server, '_agent_ref', object())
     assert asyncio.run(server.health())['agent_ready'] is True
+
+
+def test_windows_shutdown_targets_only_owned_tree(launcher, monkeypatch):
+    monkeypatch.setattr(launcher, 'WINDOWS', True)
+    monkeypatch.setattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000, raising=False)
+    process = Process(123)
+    run = Mock(return_value=Mock(returncode=0))
+    monkeypatch.setattr(subprocess, 'run', run)
+    launcher.stop(process)
+    assert run.call_args.args[0] == ['taskkill', '/PID', '123', '/T', '/F']
+    assert run.call_args.kwargs['creationflags'] == subprocess.CREATE_NO_WINDOW
+    assert not process.terminated  # Never kill just the venv redirector.
+
+
+def test_windows_shutdown_failure_is_reported(launcher, monkeypatch):
+    monkeypatch.setattr(launcher, 'WINDOWS', True)
+    monkeypatch.setattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000, raising=False)
+    monkeypatch.setattr(subprocess, 'run', Mock(return_value=Mock(returncode=1, stderr='Access denied')))
+    with pytest.raises(RuntimeError, match='Could not stop owned process tree 123'):
+        launcher.stop(Process(123))
+
+
+def test_voice_cleanup_still_runs_if_agent_cleanup_fails(launcher, monkeypatch):
+    children, _ = child_factory(launcher, monkeypatch, [None])
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock(side_effect=[None, RuntimeError('startup failed')]))
+    stop = Mock(side_effect=[RuntimeError('cannot stop agent'), None])
+    monkeypatch.setattr(launcher, 'stop', stop)
+    with pytest.raises(RuntimeError, match='cannot stop agent'):
+        launcher.main(['--fast', '--resident'])
+    assert [c.args[0] for c in stop.call_args_list] == [children[1], children[0]]
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows venv redirector regression')
+def test_real_windows_venv_health_and_tree_shutdown(tmp_path):
+    """Real child + loopback HTTP, without booting Apex, models or devices."""
+    spec = importlib.util.spec_from_file_location('apex_launcher_windows',
+        Path(__file__).resolve().parents[1] / 'scripts/run_apex_qwen.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    script = tmp_path / 'health_child.py'
+    metadata = tmp_path / 'child.json'
+    script.write_text('''import json, os, sys, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({'service': 'apex', 'pid': os.getpid(),
+            'launch_id': os.environ['APEX_LAUNCH_ID'], 'agent_ready': True}).encode()
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *args): pass
+server = HTTPServer(('127.0.0.1', 0), Handler)
+# A bounded lifetime guarantees cleanup even in sandboxes that deny taskkill.
+timer = threading.Timer(15, server.shutdown)
+timer.daemon = True
+timer.start()
+Path(sys.argv[1]).write_text(json.dumps({'pid': os.getpid(), 'port': server.server_port}))
+server.serve_forever()
+server.server_close()
+''', encoding='utf-8')
+    env = dict(os.environ, APEX_LAUNCH_ID='windows-test-launch')
+    process = subprocess.Popen([sys.executable, str(script), str(metadata)], env=env)
+    child = None
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if metadata.exists():
+                try:
+                    child = json.loads(metadata.read_text())
+                    break
+                except ValueError:
+                    pass
+            if process.poll() is not None:
+                pytest.fail('Test child exited before serving health')
+            time.sleep(.05)
+        assert child is not None, 'Test child failed to start'
+        opener = module.urllib.request.build_opener(module.urllib.request.ProxyHandler({}))
+        module.wait_healthy(opener, f"http://127.0.0.1:{child['port']}/health",
+            lambda h: h.get('launch_id') == env['APEX_LAUNCH_ID'] and h.get('agent_ready'),
+            [('test child', process)], 'test child', 5)
+        try:
+            module.stop(process)
+        except RuntimeError as exc:
+            if 'access denied' in str(exc).lower() or 'access is denied' in str(exc).lower():
+                pytest.skip('Windows sandbox denied taskkill; readiness passed, tree shutdown requires a normal terminal')
+            raise
+        assert process.poll() is not None
+        assert not module.port_in_use(child['port']), 'Real interpreter was orphaned'
+    finally:
+        # Do not leave a child behind when taskkill is unavailable. The test
+        # server's own bounded lifetime also handles a dead redirector.
+        process.wait(timeout=20)
+        if child:
+            deadline = time.monotonic() + 20
+            while module.port_in_use(child['port']) and time.monotonic() < deadline:
+                time.sleep(.05)
+            assert not module.port_in_use(child['port'])

@@ -162,7 +162,9 @@
   [hidden] {display:none!important}
   @media(max-width:650px){#partner-panel{width:calc(100vw - 24px);top:140px}.card.model-label{max-width:42vw}#board-bar{font-size:12px}}
 </style>
-<link rel="stylesheet" href="/static/workspace.css"><link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="/static/workspace.css?v=brand37"><link rel="stylesheet" href="/static/theme.css">
+<link rel="icon" type="image/svg+xml" href="/static/icons/apex-mark.svg">
+<link rel="stylesheet" href="/static/brand.css?v=brand37">
 </head>
 <body class="digital-workspace">
 <div id="workspace-atmosphere" aria-hidden="true"></div>
@@ -213,7 +215,7 @@
   <div><button id="calib-action">Cancel</button></div>
 </div>
 <header id="board-bar">
-  <a class="brand" href="/" aria-label="Apex dashboard"><span class="brand-mark">A</span>APEX<span class="brand-divider">/</span><span class="brand-sub">Workspace</span></a>
+  <a class="brand" href="/" aria-label="Apex dashboard"><img class="apex-logo" src="/static/icons/apex-mark.svg" width="32" height="32" alt="" aria-hidden="true">APEX<span class="brand-divider">/</span><span class="brand-sub">Workspace</span></a>
   <div class="header-actions"><button id="open-spaces" title="Switch named workspaces"><span id="space-name">Spaces</span> ▾</button><button id="open-study">Study ↗</button><button id="hands-toggle" aria-pressed="true" title="Pause hand actions on this Apex instance; camera stays running">Hands on</button><button id="camera-toggle" aria-pressed="false" title="Show or hide the camera background; this does not stop the camera">Camera view</button><button id="focus-toggle" aria-pressed="false" title="Hide workspace panels (F)">Focus</button><button id="hud-toggle" aria-pressed="false" title="Hand setup and instructions (H)">Hand setup</button></div>
 </header>
 <aside id="objects-panel" class="workspace-panel" aria-label="Workspace objects">
