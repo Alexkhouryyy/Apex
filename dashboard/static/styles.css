@@ -182,6 +182,13 @@ body {
 .brand-text { display: flex; flex-direction: column; }
 .brand-title { font-size: 15px; font-weight: 600; color: #fff; letter-spacing: 0.3px; }
 .brand-sub { font-size: 11px; color: var(--text-dim); }
+/* Links to the other Apex pages in the sidebar (were inline-styled pale teal). */
+.nav-link-ext { display: block; padding: 10px 14px; color: #90e6cb; text-decoration: none; }
+.nav-link-ext:hover { color: var(--text); }
+.nav-link-ext-inline { color: #90e6cb; }
+/* Daylight is the only light theme: the white title and pale teal links vanished on it. */
+:root[data-theme="daylight"] .brand-title { color: var(--text); }
+:root[data-theme="daylight"] :is(.nav-link-ext, .nav-link-ext-inline) { color: var(--accent); }
 .brand-sub.ws-on { color: var(--success); }
 .brand-sub.ws-off { color: var(--danger); }
 

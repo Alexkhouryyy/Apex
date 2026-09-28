@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="Apex">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png?v=chevron38">
 <link rel="icon" type="image/svg+xml" href="/static/icons/apex-refined.svg">
-<link rel="stylesheet" href="/static/styles.css?v=omni31">
+<link rel="stylesheet" href="/static/styles.css?v=omni32">
 <link rel="stylesheet" href="/static/mobile.css?v=omni31">
 <script src="/static/marked.min.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -43,10 +43,10 @@
 
   <nav class="sidenav" aria-label="Apex navigation">
     <div class="nav-group-label">Workspace</div>
-    <a href="/companion" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Screen companion ↗</a>
-    <a href="/board" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Spatial workspace ↗</a>
-    <a href="/home" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Apex Home ↗</a>
-    <a href="/apps" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Apps & connections ↗</a>
+    <a href="/companion" class="nav-link-ext">Screen companion ↗</a>
+    <a href="/board" class="nav-link-ext">Spatial workspace ↗</a>
+    <a href="/home" class="nav-link-ext">Apex Home ↗</a>
+    <a href="/apps" class="nav-link-ext">Apps & connections ↗</a>
     <button data-tab="overview" class="nav-btn active"><span class="icon">⊕</span>Command</button>
     <button data-tab="chat" class="nav-btn"><span class="icon">◌</span>Chat</button>
     <button data-tab="documents" class="nav-btn"><span class="icon">✍</span>Files & documents</button>
@@ -80,7 +80,7 @@
     <button data-tab="learning" class="nav-btn"><span class="icon">◔</span>Learning</button>
     <button data-tab="telemetry" class="nav-btn"><span class="icon">▤</span>Telemetry</button>
     <button data-tab="selfmod" class="nav-btn"><span class="icon">✎</span>Self-mod</button>
-    <a href="/drive" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Car companion ↗</a>
+    <a href="/drive" class="nav-link-ext">Car companion ↗</a>
     </details>
   </nav>
 
@@ -118,7 +118,7 @@
         <div id="ctl-mcp-policy" class="muted" style="margin:6px 0 10px"></div>
         <div id="ctl-mcp-list"></div>
         <div id="ctl-mcp-audit" style="margin-top:14px"></div>
-        <p style="margin-top:18px"><a href="/apps" style="color:#90e6cb">Manage apps and MCP connections ↗</a></p>
+        <p style="margin-top:18px"><a href="/apps" class="nav-link-ext-inline">Manage apps and MCP connections ↗</a></p>
       </div>
     </div></section>
 <section id="tab-plugins" class="tab"><header class="page-head"><h1>Plugins</h1><p class="page-sub">Installed skill bundles and external capabilities, with their actual activation state.</p></header><div class="controls"><button data-environment-refresh>Refresh inventory</button><button data-open-tab="repositories">Add from GitHub</button><a href="/apps">Browse app integrations ↗</a></div><div class="panel"><h3>Runtime providers</h3><p>Memory: Apex built-in · Context: Apex conversation and project continuity.</p><p>Manage memory and identity from <a href="/home">Apex Home</a>. External capabilities connect through MCP; imported skill bundles supply reusable instructions.</p></div><div id="env-plugins"></div></section>
