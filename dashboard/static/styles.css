@@ -524,70 +524,50 @@ label.checkbox { color: var(--text-mute); font-size: 12.5px; display: flex; alig
   pointer-events: none;
 }
 
+/* --- Command, minimal: every readout, button, planet and feed kept; no boxes.
+   Colours come from the theme (--accent, --text-*) so all five themes work;
+   notification counts use one cherry red on every theme. --- */
+.command-center {
+  --cmd-alert: #ff2d4a;
+  /* The Command background is always deep space, even on Daylight, so its text
+     uses its own light greys instead of the theme's text colours. */
+  --cmd-text: #e6eef4; --cmd-mute: #8d9bb0; --cmd-dim: #627085; --cmd-line: rgba(255,255,255,.10);
+}
+
 /* --- Topbar --- */
 .cmd-topbar {
   position: relative; z-index: 4;
   display: flex; justify-content: space-between; align-items: center;
-  padding: 22px 34px 6px;
+  padding: 24px 40px 0;
 }
-.cmd-title-main {
-  font-size: 21px; font-weight: 800; letter-spacing: 5px; color: #fff;
-  text-shadow: 0 0 22px rgba(95,216,255,0.55);
-}
+.cmd-title-main { font-size: 13px; font-weight: 600; letter-spacing: 7px; color: var(--cmd-text); }
 .cmd-title-sub {
-  display: block; font-size: 10px; letter-spacing: 3.5px;
-  color: var(--text-dim); text-transform: uppercase; margin-top: 4px;
+  display: block; font-size: 9px; letter-spacing: 3px;
+  color: var(--cmd-dim); text-transform: uppercase; margin-top: 4px;
 }
 .cmd-clock {
-  font-family: 'SF Mono', Menlo, monospace; font-size: 15px;
-  color: var(--accent); letter-spacing: 2px;
-  padding: 7px 14px; border: 1px solid var(--border-strong);
-  border-radius: 7px; background: rgba(10,16,28,0.7);
-  box-shadow: 0 0 16px rgba(95,216,255,0.12) inset;
+  font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
+  color: var(--cmd-mute); letter-spacing: 2px;
 }
 
-/* --- Corner HUD panels --- */
-.hud { position: absolute; z-index: 5; width: 208px; }
-.hud-tl { top: 92px;  left: 34px; }
-.hud-tr { top: 92px;  right: 34px; }
-.hud-bl { bottom: 86px; left: 34px; display: flex; flex-direction: column-reverse; gap: 10px; }
-.hud-br { bottom: 86px; right: 34px; }
-.hud-tr .hud-frame, .hud-br .hud-frame { text-align: right; }
-.hud-clickable { cursor: pointer; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
-.hud-clickable:hover { border-color: var(--accent); box-shadow: 0 0 14px rgba(102,204,255,0.22); }
-.hud-frame {
-  position: relative;
-  background: linear-gradient(160deg, rgba(16,24,42,0.92), rgba(7,11,20,0.88));
-  border: 1px solid var(--border-strong);
-  border-radius: 11px; padding: 14px 16px;
-  backdrop-filter: blur(7px);
-  box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+/* --- System readouts: one row of plain text --- */
+.cmd-stats {
+  position: relative; z-index: 5;
+  display: flex; justify-content: center; flex-wrap: wrap; gap: 14px 56px;
+  margin: 14px 40px 0;
 }
-.hud-frame::before {
-  content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  opacity: 0.8;
-}
-.hud-label {
-  font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase;
-  color: var(--text-dim);
-}
+.hud-frame { text-align: center; min-width: 0; }
+.hud-clickable { cursor: pointer; }
+.hud-clickable:hover .hud-value { color: var(--accent); }
+.hud-label { font-size: 9px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--cmd-dim); }
 .hud-value {
-  font-size: 26px; font-weight: 700; color: #fff; margin-top: 5px;
-  font-variant-numeric: tabular-nums; line-height: 1.1;
-  text-shadow: 0 0 18px rgba(95,216,255,0.3);
+  font-size: 18px; font-weight: 500; color: var(--cmd-text); margin-top: 3px;
+  font-variant-numeric: tabular-nums; line-height: 1.15;
 }
-.hud-value-sm { font-size: 15px; font-weight: 600; }
-.hud-meta { font-size: 11px; color: var(--text-mute); margin-top: 4px; }
-.hud-bar {
-  margin-top: 9px; height: 4px; background: var(--bg-4);
-  border-radius: 2px; overflow: hidden;
-}
-.hud-bar-fill {
-  height: 100%; width: 0%;
-  background: linear-gradient(90deg, var(--accent), var(--success));
-  transition: width 0.6s ease;
-}
+.hud-value-sm { font-size: 15px; }
+.hud-meta { font-size: 10.5px; color: var(--cmd-dim); margin-top: 1px; }
+.hud-bar { margin: 6px auto 0; width: 60px; height: 1px; background: var(--cmd-line); overflow: hidden; }
+.hud-bar-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.6s ease; }
 
 /* --- Central stage --- */
 .command-stage {
@@ -604,14 +584,14 @@ label.checkbox { color: var(--text-mute); font-size: 12.5px; display: flex; alig
   width: 470px; height: 470px;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(95,216,255,0.18) 0%, rgba(95,216,255,0.05) 55%, transparent 72%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 14%, transparent) 0%, color-mix(in srgb, var(--accent) 4%, transparent) 55%, transparent 72%);
   filter: blur(8px);
   z-index: 1; pointer-events: none;
   animation: globepulse 6s ease-in-out infinite;
 }
 @keyframes globepulse {
-  0%, 100% { opacity: 0.65; }
-  50%      { opacity: 1; }
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.85; }
 }
 .globe-fallback {
   width: 410px; height: 410px; border-radius: 50%;
@@ -633,158 +613,108 @@ label.checkbox { color: var(--text-mute); font-size: 12.5px; display: flex; alig
     repeating-linear-gradient(90deg, transparent 0 27px, rgba(95,216,255,0.08) 27px 28px);
 }
 
-/* --- Solar system body selector (compact overlay on globe stage) --- */
+/* --- Planet selector: the same planets, icons only --- */
 .planet-selector {
   position: absolute;
   top: 50%; right: 22px;
   transform: translateY(-50%);
   z-index: 6;
   display: flex; flex-direction: column;
-  gap: 3px;
-  background: rgba(4,8,20,0.72);
-  border: 1px solid rgba(95,216,255,0.13);
-  border-radius: 14px;
-  padding: 5px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+  gap: 4px;
 }
 .planet-btn {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
-  color: #777; cursor: pointer; font-size: 13px;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--cmd-dim); cursor: pointer; font-size: 12px;
   display: flex; align-items: center; justify-content: center;
-  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+  transition: border-color 0.15s, color 0.15s, transform 0.15s;
   padding: 0; font-family: inherit;
 }
 .planet-btn-icon { line-height: 1; pointer-events: none; }
 .planet-btn-label { display: none; }
-.planet-btn:hover {
-  background: rgba(255,255,255,0.12); color: #ddd;
-  border-color: rgba(255,255,255,0.22);
-  transform: scale(1.08);
-}
-.planet-btn.active {
-  background: rgba(95,216,255,0.16);
-  border-color: rgba(95,216,255,0.55); color: #5fd8ff;
-  box-shadow: 0 0 8px rgba(95,216,255,0.4);
-}
+.planet-btn:hover { color: var(--cmd-text); transform: scale(1.08); }
+.planet-btn.active { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
 
-/* --- Orbit rings --- */
+/* --- One faint orbit ring (the other two stay in the page, hidden) --- */
 .orbit-ring {
   position: absolute; top: 50%; left: 50%;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
-.orbit-ring-outer {
-  width: 760px; height: 760px;
-  border: 1px dashed rgba(95,216,255,0.28);
-  animation: spin 110s linear infinite;
-}
+.orbit-ring-outer, .orbit-ring-inner { display: none; }
 .orbit-ring-mid {
-  width: 640px; height: 640px;
-  border: 1px solid rgba(138,124,255,0.22);
-  box-shadow: 0 0 50px rgba(138,124,255,0.10) inset;
-  animation: spin 74s linear infinite reverse;
-}
-.orbit-ring-inner {
-  width: 500px; height: 500px;
-  border: 1px dashed rgba(95,216,255,0.20);
-  animation: spin 52s linear infinite;
+  width: 568px; height: 568px;
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
 }
 @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
 
-/* --- Feature orbit nodes --- */
+/* --- Feature buttons: icon and label, no container --- */
 .feature-orbit {
   position: absolute; top: 50%; left: 50%;
   width: 0; height: 0; z-index: 6;
 }
 .feat-node {
   position: absolute;
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  width: 88px; padding: 9px 6px;
-  background: rgba(11,17,30,0.86);
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  width: 72px; padding: 6px 0;
   cursor: pointer;
   transform: translate(-50%, -50%);
-  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
-  backdrop-filter: blur(6px);
-  animation: nodeglow 5s ease-in-out infinite;
+  border-radius: 8px;
 }
-@keyframes nodeglow {
-  0%, 100% { box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
-  50%      { box-shadow: 0 4px 22px rgba(95,216,255,0.12); }
-}
-.feat-node:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 26px rgba(95,216,255,0.4);
-  transform: translate(-50%, -50%) scale(1.13);
-  z-index: 9;
-}
+.feat-node:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .feat-node-icon {
-  font-size: 19px; color: var(--accent);
-  text-shadow: 0 0 12px rgba(95,216,255,0.6);
-  line-height: 1;
+  font-size: 17px; color: var(--accent); line-height: 1; opacity: .9;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
+  transition: color .15s, opacity .15s;
 }
-.feat-node:hover .feat-node-icon { color: #fff; }
-.feat-node-label {
-  font-size: 9.5px; letter-spacing: .4px; color: var(--text-mute);
-  text-align: center; text-transform: uppercase; font-weight: 600;
-}
-.feat-node:hover .feat-node-label { color: var(--text); }
+.feat-node:hover .feat-node-icon { color: var(--cmd-text); opacity: 1; }
+.feat-node-label { font-size: 10.5px; font-weight: 500; color: var(--cmd-mute); text-align: center; white-space: nowrap; }
+.feat-node:hover .feat-node-label { color: var(--cmd-text); }
 .feat-node-badge {
-  position: absolute; top: -8px; right: -8px;
-  min-width: 19px; height: 19px; padding: 0 5px;
+  position: absolute; top: -8px; right: 6px;
+  min-width: 15px; height: 15px; padding: 0 4px;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #04060d; font-size: 10px; font-weight: 800;
-  border-radius: 10px;
-  box-shadow: 0 0 12px rgba(95,216,255,0.55);
-  border: 1.5px solid #04060d;
+  background: var(--cmd-alert); color: #fff;
+  font-size: 9px; font-weight: 700; border-radius: 8px;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--cmd-alert) 45%, transparent);
 }
 
-/* --- Live ticker --- */
+/* --- Live feed: one quiet line --- */
 .cmd-ticker {
   position: relative; z-index: 4;
   display: flex; align-items: center; gap: 12px;
-  padding: 10px 34px 20px;
+  padding: 0 170px 18px 40px;
 }
 .cmd-ticker-label {
-  flex-shrink: 0;
-  font-size: 10px; font-weight: 800; letter-spacing: 2px;
-  color: var(--accent);
-  border: 1px solid var(--accent); border-radius: 5px;
-  padding: 4px 9px;
-  animation: tickerpulse 2s ease-in-out infinite;
+  flex-shrink: 0; position: relative;
+  font-size: 9px; font-weight: 700; letter-spacing: 2px;
+  color: var(--cmd-mute); padding-left: 12px;
 }
-@keyframes tickerpulse {
-  0%, 100% { box-shadow: 0 0 0 rgba(95,216,255,0); }
-  50%      { box-shadow: 0 0 14px rgba(95,216,255,0.5); }
+.cmd-ticker-label::before {
+  content: ""; position: absolute; left: 0; top: 50%;
+  width: 6px; height: 6px; margin-top: -3px; border-radius: 50%;
+  background: var(--cmd-alert); box-shadow: 0 0 6px var(--cmd-alert);
 }
 .cmd-ticker-track {
-  display: flex; gap: 8px; flex: 1; overflow: hidden;
+  display: flex; flex: 1; overflow: hidden;
   -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
           mask-image: linear-gradient(90deg, #000 88%, transparent);
 }
 .cmd-ticker-item {
-  flex-shrink: 0;
-  background: rgba(14,22,38,0.85);
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--accent);
-  border-radius: 5px;
-  padding: 5px 11px; font-size: 11.5px;
-  color: var(--text-mute); white-space: nowrap;
+  flex-shrink: 0; padding: 0 12px; font-size: 11px;
+  color: var(--cmd-dim); white-space: nowrap;
   animation: tickerin .35s ease;
 }
-.cmd-ticker-item .tk-src { color: var(--accent); font-weight: 700; margin-right: 6px; }
-.cmd-ticker-idle { border-left-color: var(--text-dim); color: var(--text-dim); }
+.cmd-ticker-item + .cmd-ticker-item { border-left: 1px solid var(--cmd-line); }
+.cmd-ticker-item .tk-src { color: var(--cmd-mute); font-weight: 600; margin-right: 6px; }
+.cmd-ticker-idle { color: var(--cmd-dim); }
 @keyframes tickerin {
   from { opacity: 0; transform: translateX(-10px); }
   to   { opacity: 1; transform: translateX(0); }
 }
+@media (max-width: 1180px) { .cmd-stats { gap: 12px 36px; } .hud-meta { display: none; } }
 
 /* --- Sidebar brand polish --- */
 .brand-title {
@@ -793,10 +723,15 @@ label.checkbox { color: var(--text-mute); font-size: 12.5px; display: flex; alig
 
 @media (max-width: 1280px) {
   .command-stage { transform: scale(0.82); }
-  .hud { width: 188px; }
 }
 @media (max-width: 1040px) {
   .command-stage { transform: scale(0.66); }
+}
+/* Phones: the whole ring (buttons included) fits the width; planets run along the bottom of the stage. */
+@media (max-width: 760px) {
+  .command-stage { transform: scale(0.56); }
+  .planet-selector { top: auto; bottom: -34px; right: 50%; transform: translateX(50%); flex-direction: row; }
+  .cmd-ticker { padding-right: 16px; }
 }
 
 /* === Misc === */
@@ -2021,46 +1956,29 @@ pre.md-pre code { background: none; border: none; padding: 0; }
 
 /* ── Constellation quick-ask strip on Command screen ── */
 .cst-quickask {
-  position: absolute;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 40px;
-  padding: 8px 8px 8px 18px;
-  width: min(520px, 90vw);
-  backdrop-filter: blur(12px);
-  z-index: 20;
+  /* In the page flow under the globe, so it never sits on a button. */
+  position: relative; z-index: 20; align-self: center;
+  display: flex; align-items: center; gap: 10px;
+  width: min(520px, calc(100% - 80px)); margin: 0 0 14px;
+  background: none; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 6px 0;
   transition: border-color 0.2s;
 }
-.cst-quickask:focus-within { border-color: var(--accent); }
-.cst-qa-glyph { color: var(--accent-2); font-size: 1.05rem; flex-shrink: 0; }
+.cst-quickask:focus-within { border-bottom-color: var(--accent); }
+.cst-qa-glyph { color: var(--accent); opacity: .7; font-size: 1.05rem; flex-shrink: 0; }
 .cst-quickask input {
   flex: 1;
   background: transparent;
   border: none;
-  color: var(--text);
+  color: var(--cmd-text);
   font-size: 0.88rem;
   outline: none;
   min-width: 0;
 }
-.cst-quickask input::placeholder { color: var(--muted); }
+.cst-quickask input::placeholder { color: var(--cmd-mute); }
 .cst-quickask button {
-  background: var(--accent);
-  border: none;
-  border-radius: 20px;
-  color: #fff;
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 5px 16px;
-  cursor: pointer;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  transition: opacity 0.15s;
+  background: none; border: none; color: var(--accent);
+  font-size: 0.8rem; font-weight: 600; padding: 4px 6px; cursor: pointer;
 }
 .cst-quickask button:hover { opacity: 0.85; }
 

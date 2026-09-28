@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="Apex">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png?v=chevron38">
 <link rel="icon" type="image/svg+xml" href="/static/icons/apex-refined.svg">
-<link rel="stylesheet" href="/static/styles.css?v=omni30">
-<link rel="stylesheet" href="/static/mobile.css?v=omni30"><link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="/static/styles.css?v=omni31">
+<link rel="stylesheet" href="/static/mobile.css?v=omni31">
 <script src="/static/marked.min.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
@@ -28,7 +28,8 @@
 }
 </script>
 <link rel="stylesheet" href="/static/brand.css?v=brand40">
-<link rel="stylesheet" href="/static/environment.css?v=environment41">
+<link rel="stylesheet" href="/static/environment.css?v=environment41"><link rel="stylesheet" href="/static/theme.css">
+
 </head>
 <body>
 <aside id="sidebar">
@@ -141,33 +142,28 @@
       <div class="cmd-clock" id="cmd-clock">--:--:--</div>
     </div>
 
-    <div class="hud hud-tl">
+    <!-- The five system readouts, in one quiet row (same ids as before). -->
+    <div class="cmd-stats">
       <div class="hud-frame">
         <div class="hud-label">Spend · 7d</div>
         <div class="hud-value" id="hud-cost">—</div>
         <div class="hud-meta" id="hud-cost-meta">—</div>
       </div>
-    </div>
-    <div class="hud hud-tr">
-      <div class="hud-frame">
-        <div class="hud-label">Cache Efficiency</div>
-        <div class="hud-value" id="hud-cache">—</div>
-        <div class="hud-bar"><div class="hud-bar-fill" id="hud-cache-bar"></div></div>
-      </div>
-    </div>
-    <div class="hud hud-bl">
       <div class="hud-frame">
         <div class="hud-label">API Calls · 7d</div>
         <div class="hud-value" id="hud-calls">—</div>
         <div class="hud-meta" id="hud-calls-meta">all models</div>
+      </div>
+      <div class="hud-frame">
+        <div class="hud-label">Cache Efficiency</div>
+        <div class="hud-value" id="hud-cache">—</div>
+        <div class="hud-bar"><div class="hud-bar-fill" id="hud-cache-bar"></div></div>
       </div>
       <div class="hud-frame hud-clickable" id="hud-evo-frame" title="Open Evolution">
         <div class="hud-label">Self-Improvement · 30d</div>
         <div class="hud-value" id="hud-evo">—</div>
         <div class="hud-meta" id="hud-evo-meta">—</div>
       </div>
-    </div>
-    <div class="hud hud-br">
       <div class="hud-frame">
         <div class="hud-label">Core Systems</div>
         <div class="hud-value hud-value-sm" id="hud-model">—</div>
@@ -985,7 +981,7 @@
 </div>
 
 <script src="/static/environment.js?v=environment41"></script>
-<script src="/static/app.js?v=environment41"></script>
+<script src="/static/app.js?v=environment42"></script>
 <script src="/static/voice-mobile.js?v=omni30"></script>
 <script type="module" src="/static/cst3d.js?v=omni30"></script>
 <script src="/static/team.js"></script>
