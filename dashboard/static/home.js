@@ -18,12 +18,30 @@
   function addCorrection(item={text:'',active:true}){if($('corrections').children.length>=20)throw Error('Keep at most 20 corrections.');const row=el('div');row.className='correction';const check=el('input');check.type='checkbox';check.checked=item.active;check.setAttribute('aria-label','Use this correction');const text=el('textarea');text.rows=2;text.maxLength=500;text.value=item.text;text.placeholder='For this project, remember to…';text.setAttribute('aria-label','Correction');row.append(check,text);button(row,'Remove',()=>row.remove());$('corrections').append(row);}
   async function load(){state=await api();$('login').hidden=true;$('home').hidden=false;fill($('identity-form'),state.identity.data);workspaceList();await loadProject();renderRuns();renderSkills();}
   form('login-form',async f=>{localStorage.setItem('apex_token',f.elements[0].value.trim());f.reset();await load();notice('Home unlocked.');});
-  form('identity-form',async f=>{state.identity=await api('/identity',{revision:state.identity.revision,data:readForm(f,['name','address','tone','detail','preferences'])});notice('Identity saved. It applies from the next turn.');});
-  $('project-select').onchange=()=>guard(loadProject);
-  form('project-form',async f=>{const saved=await api('/projects/'+project.id,{revision:project.revision,data:readForm(f,fields)});project={...project,...saved};notice('Project handoff saved.');});
+  form('identity-form',async f=>{state.identity=await api('/identity',{revision:state.identity.revision,data:readForm(f,['name','address','tone','detail','preferences'])});notice('Identity saved. It applies from the next turn.');refreshIdentityVersions();});
+  $('project-select').onchange=()=>guard(async()=>{await loadProject();refreshProjectVersions();});
+  form('project-form',async f=>{const saved=await api('/projects/'+project.id,{revision:project.revision,data:readForm(f,fields)});project={...project,...saved};notice('Project handoff saved.');refreshProjectVersions();});
   $('activate').onclick=()=>guard(async()=>{await request('/api/board/workspaces',{action:'switch',id:$('project-select').value,context:state.workspaces.active});state.workspaces=await request('/api/board/workspaces');workspaceList();notice('Active workspace changed. Existing conversations keep their project.');},$('activate'));
   form('new-project',async f=>{const d=await request('/api/board/workspaces',{action:'create',name:$('project-name').value,copy_current:false,context:state.workspaces.active});state.workspaces=await request('/api/board/workspaces');workspaceList();$('project-select').value=d.workspace.id;await loadProject();f.reset();notice('Workspace created. Choose Make active when you are ready to use it.');});
   $('add-correction').onclick=()=>guard(()=>addCorrection());
+  // Previous versions: every save is kept (agent/continuity.py). Restoring saves an old version as the newest.
+  function versions(id,path,current,restored,summary){
+    const box=$(id),list=box.querySelector('.version-list');
+    async function render(){
+      const d=await api(path()+'/history');list.replaceChildren();
+      if(d.versions.length<2){list.append(el('p','No earlier versions yet. Each save adds one.'));return;}
+      for(const v of d.versions){const row=el('div');row.className='version-row';const info=el('div');
+        info.append(el('p','Version '+v.revision+(v.revision===current().revision?' · current':'')),el('p',new Date(v.updated*1000).toLocaleString()),el('p',summary(v.data)));
+        info.children[1].className='when';row.append(info);
+        if(v.revision!==current().revision)button(row,'Restore',async()=>{const r=await api(path()+'/restore',{revision:v.revision,current:current().revision});restored(r);await render();notice('Version '+v.revision+' restored as the newest version.');});
+        list.append(row);}
+    }
+    box.addEventListener('toggle',()=>{if(box.open)guard(render);});
+    return ()=>box.open?guard(render):null;
+  }
+  const clip=(t,n=140)=>(t||'').length>n?t.slice(0,n)+'…':(t||'—');
+  const refreshIdentityVersions=versions('identity-versions',()=>'/identity',()=>state.identity,r=>{state.identity=r;fill($('identity-form'),r.data);},d=>d.name+' · '+clip(d.tone,90));
+  const refreshProjectVersions=versions('project-versions',()=>'/projects/'+project.id,()=>project,r=>{project={...project,...r};fill($('project-form'),r.data);},d=>'Next step: '+clip(d.next_step)+'\nDecisions: '+clip(d.decisions));
   form('corrections-form',async()=>{const items=Array.from($('corrections').children).map(r=>({text:r.querySelector('textarea').value,active:r.querySelector('input').checked}));corrections=await api('/projects/'+project.id+'/corrections',{items,revision:corrections.revision});notice('Corrections saved. Active entries guide future project turns.');});
   function labelled(form,label,name,rows=3){const l=el('label',label),n=el('textarea');n.name=name;n.rows=rows;n.required=true;n.minLength=20;n.maxLength=2500;l.append(n);form.append(l);return n;}
   function renderRuns(){const root=$('runs');root.replaceChildren();if(!state.runs.length){root.append(el('p','No team tasks yet. Start one from Team in the dashboard.'));return;}for(const run of state.runs){const box=el('details');box.className='receipt';box.append(el('summary',run.task+' · '+run.status+' · '+run.verification.status));box.append(el('p','Recorded spend: $'+Number(run.cost_usd||0).toFixed(4)+' · '+run.calls+' model calls · '+run.tools_used+' tool calls'));if(run.recovery)box.append(el('p','Continues task '+run.recovery.parent_id));if(run.error)box.append(el('p',run.error));for(const step of run.steps){const group=el('div');group.append(el('h3',step.role+' · '+step.status));if(step.result)group.append(el('p',step.result));for(const event of step.evidence){const d=el('details');d.append(el('summary',event.tool+' · '+(event.status==='outcome_unknown'?'Outcome uncertain — inspect before continuing':event.status)),el('pre',(event.input?'Requested action: '+event.input+'\n\n':'')+(event.result||'No result was recorded.')));group.append(d);}box.append(group);}
