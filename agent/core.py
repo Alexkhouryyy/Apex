@@ -7,6 +7,7 @@ from agent.memory import Memory
 from agent import longterm
 from agent import safety
 from agent import mcp_client
+from agent import plugins
 from agent import orchestrator
 from agent import knowledge
 from agent import self_mod
@@ -2130,6 +2131,8 @@ def _execute_tool(name: str, inputs: dict) -> str:
     # Record the ORIGINAL result: recovery hints are appended below, and the
     # trajectory signal must reflect what the tool actually did, not our advice.
     _elapsed_ms = int((_t.perf_counter() - _started) * 1000)
+    plugins.emit('post_tool_call', tool_name=name, args=inputs, result=result,
+                 task_id=str(getattr(telemetry, '_session_id', '') or ''), duration_ms=_elapsed_ms)
     try:
         from agent import trajectory as _traj
         _traj.record(name, result, duration_ms=_elapsed_ms, inputs=inputs)
@@ -2174,7 +2177,14 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
     if not proceed:
         return f"[BLOCKED by safety layer] {reason}"
 
+    plugin_block = plugins.emit('pre_tool_call', tool_name=name, args=inputs,
+                                task_id=str(getattr(telemetry, '_session_id', '') or ''))
+    if plugin_block:
+        return '[BLOCKED by plugin] ' + plugin_block
+
     try:
+        if name.startswith('plugin__'):
+            return plugins.call(name, inputs)
         if name == "screenshot":
             b64, size = computer.screenshot()
             # Return as a special marker — handled in run() to inject image content
@@ -3269,7 +3279,7 @@ class AgentCore:
         from agent.app_tools import DEFINITIONS
         from agent.continuity import DEFINITION
         direct = self._offered_mcp_tools()
-        return cached + DEFINITIONS + [DEFINITION] + (direct if len(direct) <= 12 else []) + self_mod.get_dynamic_tools()
+        return cached + DEFINITIONS + [DEFINITION] + (direct if len(direct) <= 12 else []) + self_mod.get_dynamic_tools() + plugins.definitions()
 
     def _offered_mcp_tools(self) -> list[dict]:
         """MCP tools from servers that are switched on.
@@ -3486,6 +3496,14 @@ class AgentCore:
         with lock, continuity.turn(channel_id), continuity.conversation(channel_id, self, memory, user_text) as memory:
             if cancel_event is not None and cancel_event.is_set():
                 return "[turn interrupted]"
+            plugin_command = plugins.slash(user_text)
+            if plugin_command:
+                if companion_mode in ('discuss', 'observe'):
+                    return 'Plugin commands require Work mode.'
+                result = _execute_tool(*plugin_command)
+                memory.add_user(user_text)
+                memory.add_assistant([{'type': 'text', 'text': result}])
+                return result
             memory.maybe_summarize(self.anthropic)
 
             # Long-term memory for companion turns (they start with an empty

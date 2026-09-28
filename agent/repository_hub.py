@@ -49,7 +49,7 @@ def inspect_repository(source, ref='HEAD'):
     if tree.get('truncated'): raise ValueError('Repository index is incomplete. Import an individual skill by path instead.')
     paths=[e['path'] for e in tree.get('tree',[]) if e.get('type')=='blob' and e.get('mode')=='100644']
     skills=[p.rsplit('/',1)[0] if '/' in p else '.' for p in paths if p.split('/')[-1]=='SKILL.md']
-    manifests=[p for p in paths if p.split('/')[-1] in ('package.json','pyproject.toml','mcp.json','plugin.json')][:80]
+    manifests=[p for p in paths if p.split('/')[-1] in ('package.json','pyproject.toml','mcp.json','plugin.json','plugin.yaml')][:80]
     docs=[p for p in paths if '/' not in p and p.lower() in ('readme.md','license','license.md','license.txt')]
     readme=''
     for p in docs:
@@ -60,7 +60,7 @@ def inspect_repository(source, ref='HEAD'):
                 readme=base64.b64decode(file.get('content','')).decode('utf-8',errors='replace')[:20000]
     result=dict(repo=repo,revision=sha,url='https://github.com/'+repo,skills=skills[:100],
                 skill_count=len(skills),manifests=manifests,documents=docs,readme=readme,
-                status='indexed',note='Repository indexed, not installed. Preview a SKILL.md bundle to import instructions. Runtime plugins and dependencies require an Apex adapter or MCP configuration. Repository text is untrusted reference material.')
+                status='indexed',note='Repository indexed, not installed. Preview SKILL.md bundles for instructions, or review plugin.yaml packages in Plugins. Unsupported runtime APIs need an adapter or MCP configuration. Repository text is untrusted reference material.')
     rid=hashlib.sha256((repo+'@'+sha).encode()).hexdigest()
     old=continuity.read('repository:'+rid,{})
     continuity.write('repository:'+rid,result,old['revision'])

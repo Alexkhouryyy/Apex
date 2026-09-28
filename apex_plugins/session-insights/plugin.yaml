@@ -1,0 +1,13 @@
+name: session-insights
+version: 1.0.0
+description: Inspect tool usage and latency in the current Apex process without storing tool arguments or results.
+license: MIT
+provides_tools:
+  - usage
+provides_hooks:
+  - post_tool_call
+config_schema:
+  recent_limit:
+    type: int
+    default: 100
+    description: Maximum recent calls retained in memory (1–1000).

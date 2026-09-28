@@ -14,3 +14,8 @@
 #repo-result h2,#repo-review h2{font-size:18px;margin-top:0}.env-card button,.repo-skill,#repo-install button{border:1px solid var(--border-strong);background:var(--bg-3);color:var(--text);padding:8px 12px;border-radius:6px;cursor:pointer}
 #repo-install{padding:20px;border:1px solid var(--border);border-radius:var(--radius)}
 @media(max-width:600px){#repo-intake,#skill-develop{padding:16px}#tab-skills .controls,#tab-plugins .controls{flex-wrap:wrap}.env-card{padding:14px}}
+#tab-plugins label{display:grid;gap:8px;margin:12px 0}#tab-plugins input:not([type=checkbox]),#tab-plugins textarea,#tab-plugins select{width:100%;min-width:0}#tab-plugins input[type=checkbox]{width:auto;justify-self:start}
+#tab-plugins fieldset{border:0;padding:0;min-width:0}#tab-plugins .panel{padding:20px;margin:16px 0}#tab-plugins .controls{flex-wrap:wrap}
+#plugin-status,#plugin-review pre,#plugin-source,#plugin-installed p{white-space:pre-wrap;overflow-wrap:anywhere}#plugin-review pre,#plugin-source{max-height:360px;overflow:auto}#plugin-review button{margin:6px 6px 6px 0;max-width:100%;overflow-wrap:anywhere}
+#plugin-status:not(:empty){padding:14px 18px;border-left:3px solid var(--accent);background:var(--bg-2)}#tab-plugins summary{cursor:pointer;padding:10px 0}#plugin-intake button,#plugin-providers button{padding:10px 16px;border:1px solid var(--border);background:var(--bg-3);color:var(--text);border-radius:6px}
+.repo-plugin{margin:6px 8px 6px 0;padding:8px 12px;border:1px solid var(--border-strong);background:var(--bg-3);color:var(--text);border-radius:6px;cursor:pointer}

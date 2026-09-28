@@ -59,6 +59,20 @@ class Memory:
         if len(self.messages) < _SUMMARY_THRESHOLD:
             return
 
+        from agent import plugins
+        import copy
+        try:
+            handled, result = plugins.provider_call('context', 'summarize', messages=copy.deepcopy(self.messages[:-_KEEP_MESSAGES]), summary=self.summary)
+            if handled:
+                if not isinstance(result, str) or not result.strip() or len(result) > 20000:
+                    raise ValueError('Context engine must return a non-empty summary of at most 20,000 characters.')
+                self.summary = result
+                self.messages = self.messages[-_KEEP_MESSAGES:]
+                return
+        except Exception as exc:
+            print(f'[Plugins] Context engine failed ({type(exc).__name__}); keeping full history.')
+            return
+
         conversation_text = "\n".join(
             f"{m['role'].upper()}: "
             + (m["content"] if isinstance(m["content"], str)

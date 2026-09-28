@@ -313,6 +313,12 @@ _REMEMBER_MAX_CHARS = 8000  # a single memory row shouldn't bloat every future r
 
 
 def remember(content: str, kind: str = "fact", importance: int = 5, tags: str = "") -> str:
+    from agent import plugins
+    handled, result = plugins.provider_call('memory', 'remember', content=content, kind=kind, importance=importance, tags=tags)
+    if handled:
+        if not isinstance(result, str):
+            raise ValueError('Plugin memory remember() must return a confirmation string.')
+        return result
     kind = kind.lower().strip()
     if kind not in {"fact", "preference", "project", "decision", "note"}:
         kind = "note"
@@ -340,6 +346,12 @@ def recall(query: str = "", limit: int = 10, kind: str = "", semantic: bool = Tr
     so cost stays bounded as the table grows (previously it loaded EVERY row + embedding
     on every call — O(n) per turn).
     """
+    from agent import plugins
+    handled, result = plugins.provider_call('memory', 'recall', query=query, limit=limit, kind=kind, semantic=semantic)
+    if handled:
+        if not isinstance(result, list) or not all(isinstance(r, dict) and isinstance(r.get('content'), str) for r in result):
+            raise ValueError('Plugin memory recall() must return memory dictionaries with content strings.')
+        return result[:max(0, limit)]
     with _conn() as c:
         if kind:
             rows = c.execute(

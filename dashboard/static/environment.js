@@ -15,6 +15,7 @@
   for(const id of ['devices-panel','access-panel']){const el=$(id);if(el)$('env-pairing').append(el)}
 
   async function load(){
+    window.ApexPlugins?.load();
     try{
       const d=await api('/api/environment');
       const mcp=await api('/api/control/mcp').catch(()=>({servers:[],detail:'MCP status unavailable'}));
@@ -35,6 +36,11 @@
       const r=await post('/api/environment/repositories',{source,ref});if(request!==serial)return;
       say('repo-status','Indexed '+r.repo+' at '+r.revision.slice(0,12)+'. Nothing has been installed.');
       $('repo-result').innerHTML=`<h2>${esc(r.repo)}</h2><p>${esc(r.note)}</p><p>Showing ${r.skills.length} of ${r.skill_count} discovered skills.</p><div>${r.skills.map(path=>`<button class="repo-skill" data-source="${esc(r.repo)}" data-revision="${esc(r.revision)}" data-path="${esc(path)}">Preview ${esc(path)}</button>`).join('')||'<p>No SKILL.md bundles found. Use the repository documentation to plan an Apex adapter or MCP integration.</p>'}</div><details><summary>Runtime manifests (${r.manifests.length})</summary><pre>${esc(r.manifests.join('\n'))}</pre></details><details><summary>README · repository content</summary><pre>${esc(r.readme||'No root README.md found.')}</pre></details>`;
+      for(const path of r.manifests.filter(p=>p.endsWith('plugin.yaml'))){
+        const button=document.createElement('button');button.className='repo-plugin';button.textContent='Review plugin: '+path;
+        button.addEventListener('click',()=>{open('plugins');window.ApexPlugins.review('preview',{source:r.repo,ref:r.revision,subdir:path.includes('/')?path.slice(0,path.lastIndexOf('/')):''})});
+        $('repo-result').append(button);
+      }
       await load();
     }catch(e){if(request===serial)say('repo-status',e.message||e)}
   }

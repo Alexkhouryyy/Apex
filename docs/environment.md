@@ -8,7 +8,7 @@ Paste or drop a public GitHub repository URL in Repositories. Select a branch/ta
 
 Preview a discovered skill. All supporting documentation, unsupported files and the upstream license are shown. Documentation-only bundles can be installed under a new name after recording compatibility notes. Imported bundles retain provenance and file hashes; edits invalidate availability. Plugins lists these bundles with enable/disable controls alongside actual MCP connection states.
 
-Arbitrary Hermes/OpenClaw runtime plugins are not interchangeable with Apex plugins. Executable repositories need an adapter or an MCP server; the intake reports this rather than claiming they are installed. Private repositories, missing root licenses, oversized indexes and unsupported executable bundles are reported explicitly.
+The Plugins page now has a separate executable plugin installer and runtime. It supports native plugin.yaml packages using Apex's documented register(ctx) interface, including a subset of Hermes conventions. See [Executable plugins](plugins.md) for tools, hooks, commands, memory/context providers, updates and compatibility limits. Arbitrary Hermes/OpenClaw runtime plugins are not interchangeable: unsupported APIs need adapters or MCP. Private repositories, missing root licenses for skill imports, oversized indexes and unsupported executable bundles are reported explicitly.
 
 ## Learn during conversation
 
