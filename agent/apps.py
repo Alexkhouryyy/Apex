@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 import threading
 import time
 from urllib.parse import urlparse
@@ -50,12 +51,40 @@ def _state():
 
 
 def _save(data, *, invalidate=True):
-    path = _path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix('.tmp')
-    temp.write_text(json.dumps(data, indent=2), encoding='utf-8')
-    temp.replace(path)
-    if invalidate: _tool_cache.clear()
+    with _lock:
+        path = _path()
+        temp = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # A private sibling file keeps replacement atomic and prevents two
+            # processes from overwriting the same apps.tmp. Close it before the
+            # rename: Windows cannot replace a file with an open writer handle.
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                    dir=path.parent, prefix='.apps-', suffix='.tmp', delete=False) as stream:
+                temp = Path(stream.name)
+                json.dump(data, stream, indent=2)
+            for attempt in range(6):
+                try:
+                    temp.replace(path)
+                    break
+                except OSError as exc:
+                    # Scanners/readers can briefly deny replacement on Windows.
+                    # Retry only the local rename, never the provider operation.
+                    if getattr(exc, 'winerror', None) not in {5, 32, 33} or attempt == 5:
+                        raise
+                    time.sleep(0.05 * (2 ** attempt))
+        except OSError as exc:
+            raise AppError('App settings could not be saved. Existing saved settings were preserved. '
+                           'Close programs locking .mcp-runtime/apps.json or check its folder permissions, '
+                           'then retry. If account authorization already opened, check its status first.') from exc
+        finally:
+            if temp is not None:
+                try:
+                    temp.unlink(missing_ok=True)
+                except OSError:
+                    pass  # A scanner may still hold the unused temporary file.
+        if invalidate:
+            _tool_cache.clear()
 
 
 def _request(method, path, *, params=None, body=None, key=None):

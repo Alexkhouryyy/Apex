@@ -1,5 +1,7 @@
 """Managed app lifecycle and execution boundaries, without external accounts."""
 import json
+import errno
+from pathlib import Path
 import time
 import pytest
 from agent import apps, app_tools, mcp_policy, mcp_client, subagent_scope
@@ -48,6 +50,79 @@ def provider(tmp_path, monkeypatch, test_db):
 
 def connected(provider):
     apps.connect('github'); provider['active']=True; apps.refresh()
+
+
+def _windows_lock(code):
+    error = PermissionError(errno.EACCES, 'file temporarily locked')
+    error.winerror = code
+    return error
+
+
+@pytest.mark.parametrize('code', [5, 32, 33])
+def test_save_retries_windows_lock_without_repeating_oauth(provider, monkeypatch, code):
+    replace = Path.replace
+    attempts, delays = [], []
+    monkeypatch.setattr(apps.time, 'sleep', delays.append)
+
+    def locked(source, target):
+        attempts.append(source)
+        if len(attempts) in (2, 3):  # Lock the second save, after OAuth link creation.
+            assert apps._state()['apps'] == {}  # Previous JSON remains valid.
+            raise _windows_lock(code)
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, 'replace', locked)
+    link = apps.connect('github')
+    assert link['redirect_url'].startswith('https://app.composio.dev/')
+    assert len([c for c in provider['calls'] if c[1].endswith('/link')]) == 1
+    assert delays == [0.05, 0.1]
+    assert len(attempts) == 4
+    assert attempts[0] != attempts[1]  # Each save owns its temporary file.
+    assert attempts[1] == attempts[2] == attempts[3]  # Rename retries reuse it.
+    assert apps._state()['apps']['github']['status'] == 'pending'
+    assert list(apps._path().parent.glob('*.tmp')) == []
+
+
+@pytest.mark.parametrize('winerror, expected_attempts', [(5, 6), (32, 6), (33, 6), (None, 1)])
+def test_save_failure_preserves_settings_and_cache(provider, monkeypatch, winerror, expected_attempts):
+    old = apps._state()
+    apps._save(old)
+    previous = apps._path().read_bytes()
+    apps._tool_cache['sentinel'] = 'unchanged'
+    attempts = []
+    monkeypatch.setattr(apps.time, 'sleep', lambda _: None)
+
+    def denied(source, target):
+        attempts.append(source)
+        if winerror is None:
+            raise OSError(errno.ENOSPC, 'disk full')
+        raise _windows_lock(winerror)
+
+    monkeypatch.setattr(Path, 'replace', denied)
+    with pytest.raises(apps.AppError, match='Existing saved settings were preserved'):
+        apps._save({**old, 'session_id': 'new-session'})
+    assert len(attempts) == expected_attempts
+    assert apps._path().read_bytes() == previous
+    assert apps._tool_cache == {'sentinel': 'unchanged'}
+    assert list(apps._path().parent.glob('*.tmp')) == []
+
+
+def test_save_serialization_failure_does_not_leave_partial_settings(provider):
+    apps._save(apps._state())
+    previous = apps._path().read_bytes()
+    with pytest.raises(TypeError):
+        apps._save({'invalid': object()})
+    assert apps._path().read_bytes() == previous
+    assert list(apps._path().parent.glob('*.tmp')) == []
+
+
+def test_save_invalidates_cache_only_when_requested(provider):
+    data = apps._state()
+    apps._tool_cache['sentinel'] = 'cached'
+    apps._save(data, invalidate=False)
+    assert apps._tool_cache == {'sentinel': 'cached'}
+    apps._save(data)
+    assert apps._tool_cache == {}
 
 
 def test_lifecycle_pagination_secrets_and_resume(provider):
