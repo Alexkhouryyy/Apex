@@ -1,7 +1,7 @@
 /* Apex service worker — offline app shell + Web Push receiver.
  * Served from the origin root (/sw.js) so its scope covers the whole app.
  */
-const CACHE = 'apex-shell-v37';
+const CACHE = 'apex-shell-v38';
 const SHELL = [
   '/',
   '/static/styles.css?v=omni30',
@@ -17,9 +17,9 @@ const SHELL = [
   '/static/cst3d.js?v=omni30',
   '/static/marked.min.js',
   '/static/brand.css?v=brand37',
-  '/static/icons/apex-mark.svg',
-  '/static/icons/icon-192.png',
-  '/static/icons/icon-512.png',
+  '/static/icons/apex-refined.svg',
+  '/static/icons/icon-192.png?v=chevron38',
+  '/static/icons/icon-512.png?v=chevron38',
   '/static/manifest.webmanifest',
 ];
 
@@ -75,8 +75,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'Apex';
   const options = {
     body: data.body || '',
-    icon: '/static/icons/icon-192.png',
-    badge: '/static/icons/icon-192.png',
+    icon: '/static/icons/icon-192.png?v=chevron38',
+    badge: '/static/icons/icon-192.png?v=chevron38',
     tag: data.tag || data.dedup_key || undefined,
     renotify: !!data.renotify,
     data: { url: data.url || '/', kind: data.kind || 'info' },

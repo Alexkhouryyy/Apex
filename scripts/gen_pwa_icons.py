@@ -1,136 +1,89 @@
-"""Generate Apex PWA icons from scratch (no source art needed).
+"""Export the approved refined double-chevron identity for web and desktop.
 
-Draws a glowing upward "apex" double-chevron mark in the dashboard's cyan→purple
-gradient on a dark radial background. Produces the icon set referenced by
-dashboard/static/manifest.webmanifest.
-
-Run: python scripts/gen_pwa_icons.py
+The same normalized geometry produces SVG, PNG and ICO assets. Run from any
+folder with: python scripts/gen_pwa_icons.py
 """
-from __future__ import annotations
-
+from pathlib import Path
 import math
-import os
+from PIL import Image, ImageDraw
 
-from PIL import Image, ImageDraw, ImageFilter
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / 'dashboard/static/icons'
+CYAN, PURPLE = (102, 204, 255), (138, 124, 255)
+# Wider upper chevron, lower at 78% width; both inside the maskable safe circle.
+CHEVRONS = (
+    ((.5,.22),(.83,.557),(.72,.557),(.5,.387),(.28,.557),(.17,.557)),
+    ((.5,.52),(.7574,.77),(.65,.77),(.5,.663),(.35,.77),(.2426,.77)),
+)
 
-OUT = os.path.join(os.path.dirname(__file__), "..", "dashboard", "static", "icons")
+def contour(vertices):
+    """Tiny corner radii, sampled identically for vector and raster exports."""
+    points = []
+    for i, (x,y) in enumerate(vertices):
+        prev, nxt = vertices[i-1], vertices[(i+1)%len(vertices)]
+        def toward(p):
+            distance = math.hypot(p[0]-x,p[1]-y)
+            amount = min(.006/distance, .15)
+            return (x+(p[0]-x)*amount, y+(p[1]-y)*amount)
+        a,b = toward(prev),toward(nxt)
+        for step in range(7):
+            t=step/6
+            points.append(((1-t)**2*a[0]+2*(1-t)*t*x+t*t*b[0],
+                           (1-t)**2*a[1]+2*(1-t)*t*y+t*t*b[1]))
+    return points
 
-BG_CENTER = (17, 22, 31)    # #11161f
-BG_EDGE = (7, 11, 20)       # #070b14
-CYAN = (102, 204, 255)      # #6cf
-PURPLE = (138, 124, 255)    # #8a7cff
+CONTOURS = tuple(contour(shape) for shape in CHEVRONS)
 
+def svg():
+    polygons='\n'.join('<polygon points="'+ ' '.join(f'{x*64:.4f},{y*64:.4f}' for x,y in shape)+'"/>' for shape in CONTOURS)
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="bg"><stop stop-color="#11161f"/><stop offset="1" stop-color="#070b14"/></radialGradient>
+    <linearGradient id="mark" x1="0" y1="14.08" x2="0" y2="49.28" gradientUnits="userSpaceOnUse"><stop stop-color="#66ccff"/><stop offset="1" stop-color="#8a7cff"/></linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <g fill="url(#mark)">{polygons}</g>
+</svg>
+'''
 
-def _radial_bg(size: int, full_bleed: bool) -> Image.Image:
-    """Dark radial gradient. full_bleed fills the whole square (maskable)."""
-    img = Image.new("RGB", (size, size), BG_EDGE)
-    px = img.load()
-    cx = cy = size / 2
-    maxd = math.hypot(cx, cy)
-    for y in range(size):
-        for x in range(size):
-            t = math.hypot(x - cx, y - cy) / maxd
-            t = min(1.0, t)
-            px[x, y] = (
-                int(BG_CENTER[0] * (1 - t) + BG_EDGE[0] * t),
-                int(BG_CENTER[1] * (1 - t) + BG_EDGE[1] * t),
-                int(BG_CENTER[2] * (1 - t) + BG_EDGE[2] * t),
-            )
-    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    if full_bleed:
-        out.paste(img, (0, 0))
-    else:
-        # Rounded-rect tile so non-maskable icons read as an app tile.
-        mask = Image.new("L", (size, size), 0)
-        ImageDraw.Draw(mask).rounded_rectangle(
-            [0, 0, size - 1, size - 1], radius=int(size * 0.22), fill=255
-        )
-        out.paste(img, (0, 0), mask)
-    return out
+def make_icon(size, maskable=False):
+    ss=size*4
+    bg=Image.new('RGBA',(ss,ss))
+    px=bg.load()
+    for y in range(ss):
+        for x in range(ss):
+            t=min(1,math.hypot(x-ss/2,y-ss/2)/(ss/2))
+            px[x,y]=tuple(round(a*(1-t)+b*t) for a,b in zip((17,22,31),(7,11,20)))+(255,)
+    if not maskable:
+        tile=Image.new('L',(ss,ss))
+        ImageDraw.Draw(tile).rounded_rectangle((0,0,ss-1,ss-1),radius=ss*14/64,fill=255)
+        bg.putalpha(tile)
+    mask=Image.new('L',(ss,ss))
+    draw=ImageDraw.Draw(mask)
+    for shape in CONTOURS:
+        draw.polygon([(x*ss,y*ss) for x,y in shape],fill=255)
+    gradient=Image.new('RGBA',(ss,ss))
+    grad=ImageDraw.Draw(gradient)
+    for y in range(ss):
+        t=max(0,min(1,(y/ss-.22)/.55))
+        color=tuple(round(a*(1-t)+b*t) for a,b in zip(CYAN,PURPLE))+(255,)
+        grad.line((0,y,ss,y),fill=color)
+    bg.paste(gradient,(0,0),mask)
+    return bg.resize((size,size),Image.Resampling.LANCZOS)
 
+def main():
+    OUT.mkdir(parents=True,exist_ok=True)
+    for name in ('apex-mark.svg','apex-refined.svg'):
+        (OUT/name).write_text(svg(),encoding='utf-8')
+    for name,size,maskable in (
+        ('icon-192.png',192,False),('icon-512.png',512,False),
+        ('icon-maskable-192.png',192,True),('icon-maskable-512.png',512,True),
+        ('apple-touch-icon.png',180,True),('favicon-64.png',64,False)):
+        make_icon(size,maskable).save(OUT/name)
+        print('wrote',name)
+    make_icon(256).save(OUT/'apex.ico',sizes=[(n,n) for n in (16,24,32,48,64,128,256)])
+    for size in (16,48,128):
+        make_icon(size).save(ROOT/f'apex-extension/icons/icon-{size}.png')
 
-def _v_gradient(size: int) -> Image.Image:
-    """Vertical cyan(top)→purple(bottom) gradient."""
-    grad = Image.new("RGBA", (size, size), (0, 0, 0, 255))
-    px = grad.load()
-    for y in range(size):
-        t = y / max(1, size - 1)
-        r = int(CYAN[0] * (1 - t) + PURPLE[0] * t)
-        g = int(CYAN[1] * (1 - t) + PURPLE[1] * t)
-        b = int(CYAN[2] * (1 - t) + PURPLE[2] * t)
-        for x in range(size):
-            px[x, y] = (r, g, b, 255)
-    return grad
-
-
-def _chevron(draw: ImageDraw.ImageDraw, size: int, cx: float, peak_y: float,
-             half_w: float, thick: float) -> None:
-    """Draw one filled upward chevron (^) centred on cx with apex at peak_y."""
-    drop = half_w  # 45° legs
-    pts = [
-        (cx, peak_y),                          # outer peak
-        (cx + half_w, peak_y + drop),          # right outer
-        (cx + half_w - thick, peak_y + drop),  # right inner
-        (cx, peak_y + thick * 1.5),            # inner peak
-        (cx - half_w + thick, peak_y + drop),  # left inner
-        (cx - half_w, peak_y + drop),          # left outer
-    ]
-    draw.polygon(pts, fill=255)
-
-
-def _glyph_mask(size: int) -> Image.Image:
-    """White double-chevron 'apex' mark on black (alpha mask)."""
-    ss = size * 4  # supersample for smooth edges
-    mask = Image.new("L", (ss, ss), 0)
-    d = ImageDraw.Draw(mask)
-    cx = ss / 2
-    half_w = ss * 0.26
-    thick = ss * 0.085
-    _chevron(d, ss, cx, ss * 0.26, half_w, thick)            # upper, larger
-    _chevron(d, ss, cx, ss * 0.50, half_w * 0.78, thick)     # lower, smaller
-    return mask.resize((size, size), Image.LANCZOS)
-
-
-def make_icon(size: int, maskable: bool) -> Image.Image:
-    bg = _radial_bg(size, full_bleed=maskable)
-    scale = 0.62 if maskable else 0.78  # maskable keeps glyph in the safe zone
-    glyph_size = int(size * scale)
-    mask = _glyph_mask(glyph_size)
-    grad = _v_gradient(glyph_size)
-
-    glyph = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    off = (size - glyph_size) // 2
-    glyph.paste(grad, (off, off), mask)
-
-    # Soft glow underneath.
-    glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    gmask = Image.new("L", (size, size), 0)
-    gmask.paste(mask, (off, off))
-    glow_color = Image.new("RGBA", (size, size), CYAN + (255,))
-    glow.paste(glow_color, (0, 0), gmask)
-    glow = glow.filter(ImageFilter.GaussianBlur(size * 0.04))
-
-    out = bg.convert("RGBA")
-    out = Image.alpha_composite(out, glow)
-    out = Image.alpha_composite(out, glyph)
-    return out
-
-
-def main() -> None:
-    os.makedirs(OUT, exist_ok=True)
-    specs = [
-        ("icon-192.png", 192, False),
-        ("icon-512.png", 512, False),
-        ("icon-maskable-192.png", 192, True),
-        ("icon-maskable-512.png", 512, True),
-        ("apple-touch-icon.png", 180, True),
-        ("favicon-64.png", 64, False),
-    ]
-    for name, size, maskable in specs:
-        img = make_icon(size, maskable)
-        img.save(os.path.join(OUT, name))
-        print(f"wrote {name} ({size}x{size}{' maskable' if maskable else ''})")
-
-
-if __name__ == "__main__":
+if __name__=='__main__':
     main()
