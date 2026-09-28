@@ -39,3 +39,12 @@ def test_command_text_does_not_use_theme_text_colours():
     assert "--cmd-text" in section and not re.search(r"var\(--text(-mute|-dim)?\)", section)
     ask = css[css.index(".cst-quickask input {"):css.index(".cst-quickask button {")]
     assert "var(--cmd-text)" in ask and "var(--muted)" not in ask
+
+
+def test_sidebar_brand_and_page_links_are_readable_on_daylight():
+    """Daylight is the only light theme; a white title and pale-teal links vanished on it."""
+    html = (STATIC / "index.html").read_text()
+    assert "color:#90e6cb" not in html and html.count('class="nav-link-ext"') == 5
+    css = (STATIC / "styles.css").read_text()
+    assert ':root[data-theme="daylight"] .brand-title { color: var(--text); }' in css
+    assert ':root[data-theme="daylight"] :is(.nav-link-ext, .nav-link-ext-inline) { color: var(--accent); }' in css
