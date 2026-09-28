@@ -979,3 +979,13 @@ def test_both_extended_finger_pinches_grab_even_when_detection_order_changes(mon
         b.apply_hands(cursors,now=t)
         if t==.13: ids=set(c.held_by)
     assert len(c.held_by)==2 and set(c.held_by)==ids
+
+
+def test_requirements_name_the_same_opencv_mediapipe_installs():
+    """requirements.txt must list opencv-contrib-python (what mediapipe pulls),
+    never another OpenCV: a second distribution overwrites the first's files."""
+    from pathlib import Path
+    lines = [l.split('#')[0].strip() for l in
+             (Path(__file__).resolve().parents[1] / 'requirements.txt').read_text().splitlines()]
+    opencvs = [l for l in lines if l.lower().startswith('opencv')]
+    assert opencvs == ['opencv-contrib-python']
