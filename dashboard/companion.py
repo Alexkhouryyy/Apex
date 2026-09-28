@@ -52,10 +52,17 @@ def workspace_message(body, message):
         study = context(body.get("study_session"))
         return message + "\n\n[Assembly study at send time: " + json.dumps(study) + (
             "]\nUse assembly_study with this exact session_id for view commands. "
-            "Explain the selected component and its connections. Distinguish verified motor principles "
-            "from this simplified illustration. Cite provided sources for sourced claims; do not invent "
-            "dimensions, exact winding geometry, performance values, or simulation results. "
-            "If no component is selected, ask which part or use the component list.")
+            "Explain the selected component and its connections. Distinguish established principles of "
+            "the subject (engineering or anatomy) from this simplified illustration. Its component notes "
+            "may be AI-drafted and unreviewed: say so when relying on them. Cite provided sources for "
+            "sourced claims; do not invent dimensions, exact geometry, performance or clinical values, or "
+            "simulation results. For anatomy, teach; do not diagnose or give medical advice. "
+            "If no component is selected, ask which part or use the component list. "
+            "pointed_part is the component the user's open hand last hovered over, with seconds_ago: "
+            "for 'this' or 'that', prefer it when recent (a few seconds), otherwise the selection; if "
+            "they disagree and the sentence does not settle it, ask which one. For 'take this apart' or "
+            "'pull this out' about a part, select it and then explode; isolate it only if they want to "
+            "see it on its own.")
     if body.get("workspace") == "board":
         from agent.board import get_board
         board = get_board()

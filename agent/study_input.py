@@ -16,7 +16,7 @@ def active():
         return dict(_lease) if _lease else None
 
 
-def control(sid, owner, action):
+def control(sid, owner, action, pointed=None):
     global _lease
     if not isinstance(owner, str) or not 16 <= len(owner) <= 80:
         raise ValueError('Invalid study controller id.')
@@ -38,6 +38,8 @@ def control(sid, owner, action):
             from agent.board import get_board
             get_board().set_hands_enabled(False)
         _lease = dict(session=sid, owner=owner, until=time.monotonic() + TTL)
+        if action == 'sample' and pointed is not None:
+            assembly.point(sid, pointed)
         from agent.handtrack import active_tracker
         tracker = active_tracker()
         sample = tracker.study_sample() if tracker else {'sequence': 0, 'age_ms': None, 'hands': []}

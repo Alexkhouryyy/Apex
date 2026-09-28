@@ -901,3 +901,32 @@ def test_finger_feedback_matches_mirroring_and_rejects_invalid_points():
     points = handtrack.fingertip_positions(h)
     assert 'thumb' not in points and 'pinky' not in points
     assert handtrack.fingertip_positions(None) == {}
+
+
+class TestHandJoints:
+    """The holographic hand draws all 21 joints: mirrored like the cursor,
+    finite, and all-or-nothing (a partial skeleton draws a broken hand)."""
+
+    def pts(self, xs):
+        from types import SimpleNamespace as NS
+        return [NS(x=x, y=0.5, z=0.0) for x in xs]
+
+    def test_all_joints_mirrored_like_the_cursor(self):
+        j = handtrack.hand_joints(self.pts([0.1 + i * 0.01 for i in range(21)]), mirror=True)
+        assert len(j) == 21 and j[0] == [0.9, 0.5] and j[20] == [0.7, 0.5]
+        assert handtrack.hand_joints(self.pts([0.1] * 21), mirror=False)[0] == [0.1, 0.5]
+
+    def test_out_of_frame_is_clamped_and_bad_data_draws_nothing(self):
+        assert handtrack.hand_joints(self.pts([-0.2] + [0.5] * 20), mirror=False)[0] == [0.0, 0.5]
+        assert handtrack.hand_joints(self.pts([float("nan")] + [0.5] * 20)) == []
+        assert handtrack.hand_joints(self.pts([0.5] * 7)) == []
+        assert handtrack.hand_joints(None) == []
+
+    def test_the_tracker_sends_them(self):
+        from types import SimpleNamespace as NS
+        t = handtrack.HandTracker.__new__(handtrack.HandTracker)
+        t._lock = __import__("threading").Lock()
+        pts = [NS(x=0.5, y=0.5, z=0.0) for _ in range(21)]
+        pts[handtrack.WRIST] = NS(x=0.5, y=0.7, z=0.0); pts[handtrack.THUMB_TIP] = NS(x=0.7, y=0.5, z=0.0)
+        _c, details = t._read_hands(NS(hand_landmarks=[pts], handedness=[]), now=1.0)
+        assert len(details[0]["joints"]) == 21

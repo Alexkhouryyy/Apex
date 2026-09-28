@@ -63,7 +63,7 @@ const root = $('companion');
     assert.equal(chats.length, 1);
     assert.equal(chats[0].workspace, 'assembly');
     assert.equal(chats[0].study_session, 'test-session');
-    assert.match(chats[0].message, /selected motor component/);
+    assert.match(chats[0].message, /selected component in detail/);
     console.log('PASS: trusted study question carries the assembly session to the server.');
     w.close(); process.exit(0);
   }

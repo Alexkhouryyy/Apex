@@ -46,7 +46,7 @@ export function setupStudyProjects({api, capture, prepareSave, restore, ready}) 
   }
   async function show() {
     if (!$('projects').open) $('projects').showModal();
-    $('project-name').value = project?.name || 'Motor study';
+    $('project-name').value = project?.name || document.querySelector('h1')?.textContent || 'Study';
     message('Saved on this Apex host. Motion pauses when saved or reopened.');
     refresh();
     try { await list(); } catch (e) { message(e.message); }

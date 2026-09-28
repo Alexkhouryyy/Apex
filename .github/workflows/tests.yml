@@ -63,6 +63,12 @@ jobs:
           node scripts/check_companion_in_board_ui.cjs
           node scripts/check_companion_in_board_ui.cjs --assembly
           node scripts/check_study_projects_ui.cjs
+          node scripts/check_study_comfort.cjs
+          node scripts/check_study_view.mjs
+          node scripts/check_study_holo.mjs
+          node scripts/check_theme_ui.cjs
+          node scripts/check_study_import.mjs
+          node scripts/check_study_gestures.mjs
           node scripts/check_study_hands.cjs
           node scripts/check_study_poll.cjs
           node scripts/check_study_mirror.cjs

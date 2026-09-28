@@ -2,9 +2,13 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {setupStudyProjects} from './study-projects.js';
+import {setupStudyImport, autoExplode} from './study-import.js';
 import {StudyHandController} from './study-hands.js';
+import {setupStudyComfort} from './study-comfort.js';
 import {setupStudyMirror} from './study-mirror.js';
 import {setupStudyDiagnostics} from './study-diagnostics.js';
+import {setupHoloScene, HoloHand, HoloSound, isSoftwareRenderer} from './study-holo.js';
+import {TwoHandStretch, Spring, Coast} from './study-gestures.js';
 const $ = id => document.getElementById(id);
 let token = '';
 try { token = localStorage.getItem('apex_token') || ''; } catch (_) {}
@@ -13,6 +17,12 @@ if (query.has('token')) { token = query.get('token'); try { localStorage.setItem
 let current = null, manifest = null, session = query.get('session'), timer = null, busy = Promise.resolve();
 let scene, camera, renderer, orbit, cameraTween = null, rotorAngle = 0, amount = 0, targetAmount = 0;
 let manipulation=null, handEnabled=false, handTimer=null, handEpoch=0, mouseUntil=0;
+// Phase 2a: the hologram look (study-holo.js). Presentation only.
+let holo=null, readyKey=null;
+const holoHand=new HoloHand($('holo-hand')), sound=new HoloSound();
+// Phase 2b: two-hand pull-apart (springy), spin momentum, and the part you point at.
+const stretch=new TwoHandStretch(), spring=new Spring(0), coast=new Coast();
+let springActive=false, pointed=null;
 const handOwner=crypto.randomUUID();
 const groups = new Map(), pickables = [], raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
 const clipping = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
@@ -43,6 +53,7 @@ const notebook = setupStudyProjects({
   }
 });
 function status(text) { $('status').textContent = text; }
+const importer = setupStudyImport({token:()=>token, api, status, beforeLeave:()=>pauseHands()});
 async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers:{Authorization:`Bearer ${token}`, 'Content-Type':'application/json', ...options.headers}});
   if (!response.ok) {
@@ -123,6 +134,7 @@ function buildMotor() {
   for(const [id,group] of groups){group.userData.center=new THREE.Box3().setFromObject(group).getCenter(new THREE.Vector3());group.traverse(o=>{if(o.isMesh){o.userData.part=id;pickables.push(o);}});}
 }
 function fitCamera(animate = false) {
+  coast.stop();
   const to = new THREE.Vector3(7.4,4.4,8.5).multiplyScalar(targetAmount > .2 ? 1.5 : 1);
   if (animate && !reducedMotion.matches) cameraTween = {from:camera.position.clone(),to,t:0};
   else { cameraTween=null; camera.position.copy(to); orbit.target.set(.45,0,0); orbit.update(); }
@@ -137,9 +149,14 @@ async function initScene(prefetched = null) {
   const rim=new THREE.DirectionalLight('#63c6c0',2);rim.position.set(-4,2,-3);scene.add(rim);
   const grid=new THREE.GridHelper(28,28,'#25424b','#152c36');grid.position.y=-3.2;scene.add(grid);
   orbit=new OrbitControls(camera,renderer.domElement);orbit.enableDamping=true;orbit.dampingFactor=.09;orbit.minDistance=2.5;orbit.maxDistance=30;fitCamera();
-  await buildLoadedModel(prefetched);
-  orbit.addEventListener('start',()=>{cameraTween=null;});
-  const resize=()=>{const r=$('viewport').getBoundingClientRect();renderer.setSize(r.width,r.height,false);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();};
+  let glName='';try{const gl=renderer.getContext(),dbg=gl.getExtension('WEBGL_debug_renderer_info');glName=dbg?gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL):'';}catch(_){}
+  holo=setupHoloScene({THREE,scene,camera,renderer,groups,reducedMotion,software:isSoftwareRenderer(glName),look:window.ApexLook?.get()||'futuristic',
+    onBloomPaused:()=>status('Glow paused · this device renders slowly, and responsive hands come first. Edges stay on.'),
+    onHoloPaused:()=>{syncHoloButtons();status('3D hologram paused for this session · rendering is too slow for responsive hands. Switch the look to Normal and back to retry.');}});
+  if(holo.startedOff)setTimeout(()=>status('3D hologram off · no graphics acceleration detected, and responsive hands come first. The rest of the futuristic look stays.'),0);
+  await buildLoadedModel(prefetched);holo.buildEdges();syncHoloButtons();
+  orbit.addEventListener('start',()=>{cameraTween=null;coast.stop();});
+  const resize=()=>{const r=$('viewport').getBoundingClientRect();renderer.setSize(r.width,r.height,false);holo.resize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();};
   new ResizeObserver(resize).observe($('viewport'));resize();
   let down=null;
   $('model').addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,id:e.pointerId};});
@@ -158,12 +175,19 @@ async function initScene(prefetched = null) {
   function draw(now){
     diagnostics.metrics.frame(now,!document.hidden);
     if(document.hidden){before=now;requestAnimationFrame(draw);return;}
-    const dt=Math.min(.05,(now-before)/1000||0);before=now;
-    amount=reducedMotion.matches?targetAmount:THREE.MathUtils.damp(amount,targetAmount,7,dt);
+    const dt=Math.min(.05,(now-before)/1000||0),realDt=Math.min(.25,(now-before)/1000||0);before=now;
+    if(reducedMotion.matches){amount=targetAmount;springActive=false;}
+    // The spring sub-steps itself, so it can follow real time even on a slow renderer.
+    else if(springActive){amount=Math.max(0,spring.step(targetAmount,realDt));if(!stretch.engaged&&spring.settled(targetAmount)){springActive=false;amount=targetAmount;}}
+    else amount=THREE.MathUtils.damp(amount,targetAmount,7,realDt);
+    const spin=reducedMotion.matches?null:coast.step(dt);
+    if(spin&&!manipulation){const sphere=new THREE.Spherical().setFromVector3(camera.position.clone().sub(orbit.target));sphere.theta+=spin.theta;sphere.phi+=spin.phi;sphere.makeSafe();camera.position.copy(orbit.target).add(new THREE.Vector3().setFromSpherical(sphere));}
     if(current?.rotating&&!reducedMotion.matches)rotorAngle+=dt*.8;
-    if(cameraTween){cameraTween.t=Math.min(1,cameraTween.t+dt/0.65);const t=cameraTween.t;camera.position.lerpVectors(cameraTween.from,cameraTween.to,t*t*(3-2*t));if(t===1)cameraTween=null;}
+    // Timed animations run on real time, so a slow renderer does not stretch them (and block hands) for seconds.
+    if(cameraTween){cameraTween.t=Math.min(1,cameraTween.t+realDt/0.65);const t=cameraTween.t;camera.position.lerpVectors(cameraTween.from,cameraTween.to,t*t*(3-2*t));if(t===1)cameraTween=null;}
+    holo.update(dt);
     for(const group of groups.values())pose(group);
-    orbit.update();renderer.render(scene,camera);
+    orbit.update();holo.render();holoHand.draw(now);
     const group=groups.get(current?.selected);const label=$('part-label');
     if(group?.visible){const centre=group.userData.center.clone().applyMatrix4(group.matrixWorld).project(camera);const r=$('viewport').getBoundingClientRect();label.hidden=centre.z< -1||centre.z>1||Math.abs(centre.x)>.92||Math.abs(centre.y)>.92;label.style.left=(centre.x+1)/2*r.width+'px';label.style.top=(-centre.y+1)/2*r.height+'px';}else label.hidden=true;
     requestAnimationFrame(draw);
@@ -184,8 +208,9 @@ function accept(state){
   if(current&&state.revision<current.revision)return;
   if(current&&state.revision===current.revision)return;
   if(manipulation && state.revision!==manipulation.revision){hands.reset('Study changed · movement cancelled');cancelManipulation();}
+  if(stretch.engaged&&current&&state.revision!==current.revision){stretch.cancel();$('hand-status').textContent='Study changed · separation cancelled';}
   const needsRoom = current && current.explosion <= .2 && state.explosion > .2;
-  current=state;targetAmount=state.explosion;
+  current=state;if(!stretch.engaged)targetAmount=state.explosion;
   if (needsRoom && orbit) fitCamera(true);
   $('separation').value=String(state.explosion*100);$('separation-value').textContent=Math.round(state.explosion*100)+'%';
   $('section').setAttribute('aria-pressed',String(state.section));$('rotate').setAttribute('aria-pressed',String(state.rotating));
@@ -194,10 +219,11 @@ function accept(state){
   $('part-purpose').textContent=selected?.purpose||'Separate the assembly, select a component, and discover how it connects to the whole.';
   $('part-details').hidden=!selected;$('isolate').disabled=!selected;$('hide-part').disabled=!selected;$('reset-part').disabled=!selected;
   $('isolate').textContent=state.isolated?'Exit isolation':'Isolate';$('part-label').textContent=selected?.name||'';
-  if(selected){$('part-connection').textContent=selected.connection;$('part-note').textContent=selected.model_note;$('part-source').href=manifest.sources.find(s=>s.id===selected.source).url;}
+  if(selected){$('part-connection').textContent=selected.connection;$('part-note').textContent=selected.model_note;const url=manifest.sources.find(s=>s.id===selected.source)?.url;$('part-source').hidden=!url;if(url)$('part-source').href=url;}
   for(const [id,g] of groups){g.visible=!state.hidden.includes(id)&&(!state.isolated||id===state.selected);g.traverse(o=>{if(o.isMesh){o.material.emissive.setHex(id===state.selected?0x1d5c57:0);o.material.emissiveIntensity=.38;o.material.clippingPlanes=state.section?[clipping]:[];}});}
-  $('study-caption').textContent=(manifest.id==='dc-motor'?'Illustrative geometry · not to scale':'Source CAD · engineering review pending')+(state.section?' · uncapped section':state.rotating?' · illustrative rotor motion':'');
-  $('rotate').disabled=manifest.id!=='dc-motor';
+  holo?.rebase();
+  $('study-caption').textContent=(manifest.caption||(manifest.id==='dc-motor'?'Illustrative geometry · not to scale':'Source CAD · engineering review pending'))+(state.section?' · uncapped section':state.rotating?' · illustrative motion':'');
+  $('rotate').disabled=!hasMotion();
   renderList();
   notebook.selection(state.selected,selected?.name);
 }
@@ -215,8 +241,20 @@ async function boot(){
   await loadModel(s.model);
   history.replaceState(null,'','/study?session='+encodeURIComponent(session)+'&model='+manifest.id);
   current=null;accept(s);
-  status(renewed?'Previous study expired; a new assembly is open.':'Ready · select a component or take the motor apart');
+  status(renewed?'Previous study expired; a new one is open.':'Ready · select a component or take it apart');
   await notebook.initialize(query.get('project'));schedulePoll();
+}
+const hasMotion=()=>manifest?.id==='dc-motor'||!!manifest?.motion;
+// The study library: every subject in data/assemblies, grouped by category.
+let library=null;
+async function fillLibrary(){
+  if(library)return;
+  try{library=(await api('/api/study/models')).models;}catch(_){return;}
+  const select=$('model-choice'),groups=new Map();select.replaceChildren();
+  for(const m of library){
+    if(!groups.has(m.category)){const g=document.createElement('optgroup');g.label=m.category;groups.set(m.category,g);select.append(g);}
+    const o=document.createElement('option');o.value=m.id;o.textContent=m.title+' · '+m.parts+' parts';o.title=m.summary||m.subtitle;groups.get(m.category).append(o);
+  }
 }
 async function loadModel(id){
   if(manifest?.id===id && renderer)return;
@@ -226,14 +264,18 @@ async function loadModel(id){
     status('Loading detailed source geometry…');
     const loader=new GLTFLoader();loader.setRequestHeader({Authorization:'Bearer '+token});prefetched=await loader.loadAsync(data.asset);
     const ids=new Set();prefetched.scene.traverse(o=>{const index=prefetched.parser.associations.get(o)?.nodes;if(index!==undefined)ids.add(index);});
-    if(data.parts.some(p=>!ids.has(p.node)))throw new Error('Source geometry does not match its component list.');
+    if(data.parts.some(p=>(p.nodes||[p.node]).some(n=>!ids.has(n))))throw new Error('Source geometry does not match its component list.');
   }
   if(scene){for(const group of groups.values()){group.traverse(o=>{if(o.isMesh){o.geometry.dispose();o.material.dispose();}});scene.remove(group);}groups.clear();pickables.length=0;}
   diagnostics.stop();manifest=data;rotorAngle=0;
-  if(!renderer)await initScene(prefetched);else await buildLoadedModel(prefetched);
-  document.querySelector('h1').textContent=manifest.title;document.querySelector('.view-title p').textContent=manifest.subtitle;$('model-choice').value=manifest.id;
+  if(!renderer)await initScene(prefetched);else {await buildLoadedModel(prefetched);holo.buildEdges();}
+  document.querySelector('h1').textContent=manifest.title;document.querySelector('.view-title p').textContent=manifest.subtitle;await fillLibrary();$('model-choice').value=manifest.id;
+  $('rotate').textContent=manifest.motion?.label||(manifest.id==='dc-motor'?'Rotor motion':'Motion');document.title=manifest.title+' · Apex study';
   $('part-count').textContent=String(manifest.parts.length);$('limitations').textContent=manifest.limitations;
-  $('sources').replaceChildren();for(const source of manifest.sources){const a=document.createElement('a');a.href=source.url;a.textContent=source.title+(source.license?' · '+source.license:'')+' ↗';a.target='_blank';a.rel='noopener noreferrer';$('sources').append(a);}
+  $('sources').replaceChildren();for(const source of manifest.sources){const label=source.title+(source.license?' · '+source.license:'');
+    if(!source.url){const span=document.createElement('p');span.textContent=label;$('sources').append(span);continue;}
+    const a=document.createElement('a');a.href=source.url;a.textContent=label+' ↗';a.target='_blank';a.rel='noopener noreferrer';$('sources').append(a);}
+  importer.show(manifest);
   $('model-revision').textContent='Model revision '+manifest.revision;
   $('validation-list').replaceChildren();for(const [label,value] of Object.entries(manifest.validation)){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;$('validation-list').append(dt,dd);}
 }
@@ -241,7 +283,7 @@ $('search').oninput=renderList;
 $('explode').onclick=()=>command('explode');$('assemble').onclick=()=>command('assemble');
 $('section').onclick=()=>command('section');$('rotate').onclick=()=>command('rotate');
 $('isolate').onclick=()=>command('isolate');$('hide-part').onclick=()=>command('hide');$('show-all').onclick=()=>command('show_all');
-$('undo').onclick=()=>command('undo');$('redo').onclick=()=>command('redo');$('reset-camera').onclick=()=>{if(orbit)fitCamera();};
+$('undo').onclick=()=>command('undo');$('redo').onclick=()=>command('redo');$('reset-camera').onclick=()=>{hands.reset('View reset · hover again');cancelManipulation();if(orbit)fitCamera();};
 $('separation').oninput=e=>{targetAmount=Number(e.target.value)/100;$('separation-value').textContent=e.target.value+'%';};
 $('separation').onchange=e=>command('explode',{amount:Number(e.target.value)/100});
 let partnerReady=false, askPending=false;
@@ -255,12 +297,18 @@ boot().catch(e=>status(e.message));
 
 function pose(group){
   const t=manipulation?.part===group.userData.id?manipulation.value:current?.transforms?.[group.userData.id];
-  const base=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),group.userData.rotating?rotorAngle:0);
+  const spin=group.userData.spin;
+  const base=new THREE.Quaternion().setFromAxisAngle(spin?.axis||new THREE.Vector3(1,0,0),group.userData.rotating?rotorAngle*(spin?.speed||1):0);
   const user=new THREE.Quaternion().setFromEuler(new THREE.Euler(...(t?.rotation||[0,0,0])));
   group.quaternion.copy(user).multiply(base);
   const center=group.userData.center;
   group.position.copy(group.userData.offset).multiplyScalar(amount).add(new THREE.Vector3(...(t?.position||[0,0,0])))
     .add(center.clone().applyQuaternion(base)).sub(center.clone().applyQuaternion(group.quaternion));
+  // Motion turns about the subject's own axis line (the motor's is the origin).
+  if(spin)group.position.add(spin.pivot.clone().sub(spin.pivot.clone().applyQuaternion(base)));
+  // Hologram: a part ready to grab rises toward you (study-holo.js). View only.
+  const lift=group.userData.holoLift||0;
+  if(lift>1e-4)group.position.add(camera.position.clone().sub(group.position.clone().add(center)).normalize().multiplyScalar(lift));
 }
 function pick(x,y){
   if(!renderer||!current)return null;
@@ -288,8 +336,15 @@ function pickHand(x,y,preferred=null){
 }
 function beginManipulation(h,part,input='mouse'){
   if(!current||manipulation||current.rotating||cameraTween||Math.abs(amount-targetAmount)>.02){status('Wait for motion to stop before moving a component.');return false;}
+  coast.stop();
+  const mode=part==='@spin'?'orbit':$('interaction').value;
+  if(mode==='orbit'||mode==='zoom'){
+    const damping=orbit.enableDamping;orbit.enableDamping=false;orbit.update();orbit.enabled=false;
+    manipulation={mode,view:true,revision:current.revision,start:{...h},position:camera.position.clone(),target:orbit.target.clone(),damping,
+      spherical:new THREE.Spherical().setFromVector3(camera.position.clone().sub(orbit.target))};
+    return true;
+  }
   const hit=input==='hand'?pickHand(h.x,h.y,part):pick(h.x,h.y);if(!hit||hit.object.userData.part!==part)return false;
-  const mode=$('interaction').value;
   const value=JSON.parse(JSON.stringify(current.transforms?.[part]||{position:[0,0,0],rotation:[0,0,0]}));
   manipulation={part,mode,revision:current.revision,start:{...h},base:JSON.parse(JSON.stringify(value)),value,
     plane:new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()),hit.point),point:hit.point.clone(),damping:orbit.enableDamping};
@@ -301,7 +356,12 @@ function beginManipulation(h,part,input='mouse'){
 }
 function moveManipulation(h){
   const m=manipulation;if(!m||m.committing)return;
-  if(m.mode==='move'){
+  if(m.view){
+    const sphere=m.spherical.clone();
+    if(m.mode==='orbit'){sphere.theta-=(h.x-m.start.x)*Math.PI*2;sphere.phi-=(h.y-m.start.y)*Math.PI;sphere.makeSafe();if(m.input==='hand')coast.track(sphere.theta,sphere.phi,performance.now());}
+    else sphere.radius=Math.max(orbit.minDistance,Math.min(orbit.maxDistance,sphere.radius*Math.exp((h.y-m.start.y)*3)));
+    camera.position.copy(m.target).add(new THREE.Vector3().setFromSpherical(sphere));orbit.update();
+  }else if(m.mode==='move'){
     raycaster.setFromCamera(new THREE.Vector2(h.x*2-1,1-h.y*2),camera);
     const p=raycaster.ray.intersectPlane(m.plane,new THREE.Vector3());
     if(p)m.value.position=new THREE.Vector3(...m.base.position).add(p.sub(m.point)).toArray().map(n=>Math.max(-20,Math.min(20,n)));
@@ -313,13 +373,18 @@ function moveManipulation(h){
   }
 }
 function cancelManipulation(reason){
-  if(manipulation?.input==='hand'&&!manipulation.committing)diagnostics.metrics.event('cancelled',manipulation.recording);
+  if(manipulation?.input==='hand'&&!manipulation.committing){diagnostics.metrics.event('cancelled',manipulation.recording);sound.play('cancel');}
+  if(manipulation?.view&&!manipulation.committing){camera.position.copy(manipulation.position);orbit.target.copy(manipulation.target);orbit.update();}
   if(manipulation&&orbit){orbit.enabled=true;orbit.enableDamping=manipulation.damping;}
   manipulation=null;if(reason)status(reason);
 }
 async function commitManipulation(){
   const m=manipulation;if(!m)return;m.committing=true;
+  if(m.input==='hand')sound.play('release');
   try{
+    if(m.view){if(m.input==='hand')diagnostics.metrics.event('applied',m.recording);
+      const spinning=m.input==='hand'&&m.mode==='orbit'&&!reducedMotion.matches&&coast.release(performance.now());
+      status(spinning?'Spinning · it slows on its own; pinch or drag to stop':'View adjusted · component positions unchanged');return;}
     if(m.mode==='select')cancelManipulation();
     const applied=await (m.mode==='select'?command('select',{part:m.part}):command('transform',{part:m.part,transform:m.value,expected_revision:m.revision}));
     if(m.input==='hand')diagnostics.metrics.event(applied?'applied':'failed',m.recording);
@@ -337,18 +402,58 @@ function paintFingers(h){
 }
 $('finger-guide-toggle').onclick=()=>{fingerGuide=!fingerGuide;$('finger-guide-toggle').textContent=fingerGuide?'Hide finger guide':'Show finger guide';$('finger-guide-toggle').setAttribute('aria-pressed',String(fingerGuide));if(!fingerGuide)$('finger-guide').hidden=true;};
 const hands=new StudyHandController({
-  hit:(x,y,preferred)=>pickHand(x,y,preferred)?.object.userData.part,
-  begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
+  route:(h,now)=>comfort.route(h,now),
+  // Pinching empty space spins the view (with momentum); parts stay as they are.
+  hit:(x,y,preferred)=>['orbit','zoom'].includes($('interaction').value)?'@view':pickHand(x,y,preferred==='@spin'?null:preferred)?.object.userData.part||'@spin',
+  begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){sound.play('grab');if(!manipulation.view)holo?.pulse(part);manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
   paint:(h,label,target={})=>{
     const dot=$('hand-cursor');dot.hidden=!h;
     if(h){dot.style.left=h.x*100+'%';dot.style.top=h.y*100+'%';dot.dataset.state=h.pinched?'pinched':target.progress===1?'ready':'tracking';}
-    const name=manifest?.parts.find(p=>p.id===target.part)?.name;
+    const held=manipulation&&!manipulation.view&&manipulation.input==='hand'?manipulation.part:null;
+    holo?.setFocus(held||target.part,held?1:target.progress,!!held);
+    holoHand.set(h,held||manipulation?.view&&manipulation.input==='hand'?'held':h?.pinched?'pinched':'tracking',performance.now());
+    const key=target.progress===1&&!held&&!target.part?.startsWith('@')?target.part:null;
+    if(key&&key!==readyKey)sound.play('ready');readyKey=key;
+    const name=target.part==='@spin'?'empty space · pinch and drag to spin':manifest?.parts.find(p=>p.id===target.part)?.name;
+    if(target.part&&target.progress===1&&!target.part.startsWith('@'))pointed=target.part;
     $('hand-status').textContent=handEnabled?`${$('interaction').selectedOptions[0].textContent} · ${label}${name?' · '+name:''}`:'Hand controls are paused · choose Enable hands';
     paintFingers(h);
   }
 });
+const comfort=setupStudyComfort({enabled:()=>handEnabled,reset:reason=>{hands.reset(reason);cancelManipulation();},paint:(h,label)=>hands.cb.paint(h,label),setMode});
+function setMode(mode){
+  sound.play('mode');
+  hands.reset('Mode changed · hover again');cancelManipulation();$('interaction').value=mode;comfort.syncMode(mode);
+  hands.cb.paint(null,'Mode selected · hover open, then pinch');
+}
+function feedStudyHands(data,now){const mapped=comfort.prepare(data,now);if(mapped&&!handleStretch(mapped,now))hands.feed(mapped,now);}
+// Two hands pinched together: pull apart to separate the model, push together
+// to reassemble; the model follows on a spring. Let go to keep it; a fist cancels.
+function handleStretch(sample,now){
+  const fresh=sample.tracking&&sample.age_ms!=null&&sample.age_ms<=350;
+  if(!fresh){if(stretch.engaged){stretch.cancel();targetAmount=current?.explosion||0;sound.play('cancel');}return false;}
+  // The camera's zoom-out after separating may still be running; that must not block the next pull.
+  const allowed=!!current&&!manipulation&&!hands.held&&!current.rotating;
+  const r=stretch.feed(sample.hands,now,current?.explosion||0,allowed);
+  if(!r)return false;
+  if(r.state==='start'){hands.reset('Two hands');coast.stop();spring.set(amount);springActive=true;sound.play('grab');}
+  // Make room while pulling, not only after letting go (the camera eases out once).
+  if(r.amount>.2&&targetAmount<=.2&&(current?.explosion||0)<=.2){targetAmount=r.amount;fitCamera(true);}
+  targetAmount=r.amount;springActive=true;
+  $('separation').value=String(Math.round(r.amount*100));$('separation-value').textContent=Math.round(r.amount*100)+'%';
+  const h=(sample.hands||[]).find(h=>h.pinched)||sample.hands?.[0];
+  holoHand.set(h,r.state==='commit'||r.state==='cancel'?'tracking':'held',performance.now());
+  $('hand-status').textContent='Two hands · '+r.label;
+  if(r.state==='commit'){sound.play('release');if(Math.abs(r.amount-(current?.explosion||0))>.005)command('explode',{amount:r.amount});}
+  if(r.state==='cancel')sound.play('cancel');
+  // The hand line updates every frame; keep the outcome readable on the status line.
+  if(r.state==='commit'||r.state==='cancel')status(r.label);
+  return true;
+}
 function pauseHands(reason='Hands paused'){
-  const sid=session;const was=handEnabled;handEnabled=false;handEpoch++;clearTimeout(handTimer);hands.reset(reason);cancelManipulation();
+  comfort.stop();
+  if(stretch.engaged){stretch.cancel();targetAmount=current?.explosion||0;}coast.stop();pointed=null;
+  const sid=session;const was=handEnabled;handEnabled=false;handEpoch++;clearTimeout(handTimer);hands.reset(reason);cancelManipulation();holoHand.clear();holo?.setFocus(null,0,false);
   $('study-hands').textContent='Enable hands';$('study-hands').setAttribute('aria-pressed','false');
   if(was)api('/api/study/session/'+sid+'/hands',{method:'POST',body:JSON.stringify({action:'release',owner:handOwner}),keepalive:true}).catch(()=>{});
 }
@@ -358,17 +463,17 @@ async function enableHands(){
   try{
     await api('/api/study/session/'+session+'/hands',{method:'POST',body:JSON.stringify({action:'claim',owner:handOwner}),signal:AbortSignal.timeout(2000)});
     if(epoch!==handEpoch)return;
-    handEnabled=true;$('study-hands').textContent='Pause hands';$('study-hands').setAttribute('aria-pressed','true');
+    handEnabled=true;comfort.show();$('study-hands').textContent='Pause hands';$('study-hands').setAttribute('aria-pressed','true');
     async function sample(){
       if(!handEnabled||epoch!==handEpoch)return;
       const requestStarted=performance.now();
       try{
-        const data=await api('/api/study/session/'+session+'/hands',{method:'POST',body:JSON.stringify({action:'sample',owner:handOwner}),signal:AbortSignal.timeout(1000)});
+        const data=await api('/api/study/session/'+session+'/hands',{method:'POST',body:JSON.stringify({action:'sample',owner:handOwner,pointed:takePointed()}),signal:AbortSignal.timeout(1000)});
         if(!handEnabled||epoch!==handEpoch)return;
         const blocked=!!(document.hidden||document.querySelector('dialog[open]')||!$('study-partner').hidden||/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)||performance.now()<mouseUntil);
         diagnostics.metrics.sample(data,performance.now()-requestStarted,blocked);
-        if(blocked)hands.reset('Hands waiting · finish the current input');
-        else hands.feed({...data,age_ms:Number.isFinite(data.age_ms)?data.age_ms+(performance.now()-requestStarted):null},performance.now());
+        if(blocked){comfort.blocked();hands.reset('Hands waiting · finish the current input');}
+        else feedStudyHands({...data,age_ms:Number.isFinite(data.age_ms)?data.age_ms+(performance.now()-requestStarted):null},performance.now());
       }catch(e){
         // An old request may fail after pause/re-enable. It must not stop the
         // new controller or pollute its diagnostics.
@@ -382,14 +487,28 @@ async function enableHands(){
   }catch(e){status(e.message);}
 }
 $('study-hands').onclick=()=>handEnabled?pauseHands():enableHands();
+// The part the open hand is hovering over, sent once per sample so Céline can
+// resolve "this" (agent/assembly.py keeps it with its age).
+function takePointed(){const p=pointed;pointed=null;return p;}
+function syncHoloButtons(){
+  document.body.dataset.holo=holo?.on?'on':'off';
+  $('sound-toggle').setAttribute('aria-pressed',String(sound.on));$('sound-toggle').textContent=sound.on?'Sound on':'Sound off';
+}
+// The header's look switch is Apex-wide (theme.js); the 3D hologram follows it.
+addEventListener('apex:look',e=>{if(!holo)return;holo.setLook(e.detail);syncHoloButtons();
+  if(e.detail==='futuristic'&&holo.software)status('3D hologram off · no graphics acceleration detected. The rest of the futuristic look is on.');});
+$('sound-toggle').onclick=()=>{sound.toggle();sound.unlock();syncHoloButtons();};
+// Audio may start only after the page is clicked or a key pressed.
+for(const kind of ['pointerdown','keydown'])addEventListener(kind,()=>sound.unlock(),{once:false,passive:true});
+syncHoloButtons();
 $('reset-part').onclick=()=>command('reset_part');
-$('interaction').onchange=()=>{hands.reset('Mode changed · hover again');cancelManipulation();$('interaction').blur();};
+$('interaction').onchange=()=>{setMode($('interaction').value);$('interaction').blur();};
 let mouseDrag=null;
 function normalized(e){const r=$('model').getBoundingClientRect();return {x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height};}
 $('model').addEventListener('pointerdown',e=>{
   hands.reset('Mouse in use');mouseUntil=performance.now()+1000;
   if(e.button!==0||$('interaction').value==='select')return;
-  const h=normalized(e),part=pick(h.x,h.y)?.object.userData.part;
+  const h=normalized(e),part=['orbit','zoom'].includes($('interaction').value)?'@view':pick(h.x,h.y)?.object.userData.part;
   if(part&&beginManipulation(h,part)){mouseDrag=e.pointerId;$('model').setPointerCapture(e.pointerId);e.stopImmediatePropagation();e.preventDefault();}
 },true);
 $('model').addEventListener('pointermove',e=>{if(mouseDrag===e.pointerId){mouseUntil=performance.now()+1000;moveManipulation(normalized(e));}},true);
@@ -408,16 +527,25 @@ async function buildLoadedModel(prefetched = null){
   const box=new THREE.Box3().setFromObject(gltf.scene),center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());
   const scale=4.5/Math.max(size.x,size.y,size.z);
   const nodes=new Map();gltf.scene.traverse(o=>{const index=gltf.parser.associations.get(o)?.nodes;if(index!==undefined)nodes.set(index,o);});
+  const built=[];
   for(const p of manifest.parts){
-    const node=nodes.get(p.node);if(!node)throw new Error('Source component missing: '+p.name);
+    // A component is one node of the file, or several (imported repeats: "Bolt ×12").
+    const members=(p.nodes||[p.node]).map(n=>nodes.get(n));if(members.some(n=>!n))throw new Error('Source component missing: '+p.name);
     const g=part(p.id,[0,0,0]);
-    node.traverse(o=>{if(!o.isMesh)return;
+    for(const node of members)node.traverse(o=>{if(!o.isMesh)return;
       const geo=o.geometry.clone().applyMatrix4(o.matrixWorld);geo.translate(-center.x,-center.y,-center.z);geo.scale(scale,scale,scale);
       const material=o.material.clone();material.side=THREE.DoubleSide;
       const item=new THREE.Mesh(geo,material);item.userData.part=p.id;g.add(item);pickables.push(item);
     });
     g.userData.center=new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3());
-    g.userData.offset.copy(g.userData.center).multiplyScalar(1.1);
+    // A subject can say where each part goes when taken apart; otherwise it moves out from the centre.
+    if(Array.isArray(p.explode))g.userData.offset.set(...p.explode).multiplyScalar(scale);
+    else g.userData.offset.copy(g.userData.center).multiplyScalar(1.1);
+    built.push(g);
+    const speed=manifest.motion?.parts?.[p.id];
+    if(speed){g.userData.rotating=true;g.userData.spin={speed,axis:new THREE.Vector3(...(manifest.motion.axis||[1,0,0])).normalize(),
+      pivot:new THREE.Vector3(...(manifest.motion.pivot||[0,0,0])).sub(center).multiplyScalar(scale)};}
   }
+  if(manifest.auto_explode)autoExplode(THREE,built.map(g=>({center:g.userData.center,offset:g.userData.offset})),size.clone().multiplyScalar(scale));
 }
 $('model-choice').onchange=()=>{pauseHands();location.assign('/study?model='+encodeURIComponent($('model-choice').value));};
