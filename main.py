@@ -20,6 +20,17 @@ load_dotenv()
 
 import config
 
+# Import the web server stack once, here, before any background thread starts.
+# MCP connections start on their own threads and import parts of the same
+# stack; when the dashboard imported uvicorn at the same moment, Python raised
+# "cannot import name 'Server' from partially initialized module
+# 'uvicorn.main'" and the dashboard never started (tools.smoke caught it).
+try:
+    import uvicorn.main  # noqa: F401
+    import mcp.client.stdio  # noqa: F401
+except ImportError:
+    pass
+
 
 # Returned by the text-mode reader when stdin is closed. A distinct object,
 # not "", because "" already means "you pressed enter" and the main loop's

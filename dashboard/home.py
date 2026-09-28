@@ -82,6 +82,28 @@ async def save_project(wid: str, request: Request):
     return await invoke(continuity.save_project, wid, d.get('data'), d.get('revision'))
 
 
+@api.get('/projects/{wid}/history')
+async def project_history(wid: str):
+    return await invoke(lambda: dict(versions=continuity.project_history(wid)))
+
+
+@api.post('/projects/{wid}/restore')
+async def restore_project(wid: str, request: Request):
+    d = await body(request)
+    return await invoke(continuity.restore_project, wid, d.get('revision'), d.get('current'))
+
+
+@api.get('/identity/history')
+async def identity_history():
+    return await invoke(lambda: dict(versions=continuity.identity_history()))
+
+
+@api.post('/identity/restore')
+async def restore_identity(request: Request):
+    d = await body(request)
+    return await invoke(continuity.restore_identity, d.get('revision'), d.get('current'))
+
+
 @api.post('/projects/{wid}/corrections')
 async def corrections(wid: str, request: Request):
     d = await body(request)

@@ -50,6 +50,33 @@ def write(key, data, revision):
     return dict(data=data, revision=revision+1, updated=now)
 
 
+HISTORY_LIMIT = 20
+
+
+def history(key, limit=HISTORY_LIMIT):
+    """Earlier saved versions of a document, newest first (the current one included).
+    Apex edits project handoffs itself (project_checkpoint), so the owner needs a
+    way to see what a save replaced and to bring it back."""
+    init_db()
+    with longterm._conn() as db:
+        rows = db.execute('SELECT data,revision,updated FROM continuity_history WHERE key=? '
+                          'ORDER BY revision DESC LIMIT ?', (key, max(1, min(int(limit), 100)))).fetchall()
+    return [dict(data=json.loads(r[0]), revision=r[1], updated=r[2]) for r in rows]
+
+
+def restore(key, revision, current_revision):
+    """Save an earlier version again as the newest one. Nothing is deleted, so a
+    restore can itself be undone from the same history."""
+    if type(revision) is not int:
+        raise ValueError('Choose a saved version to restore.')
+    init_db()
+    with longterm._conn() as db:
+        row = db.execute('SELECT data FROM continuity_history WHERE key=? AND revision=?', (key, revision)).fetchone()
+    if not row:
+        raise ValueError('That saved version no longer exists.')
+    return write(key, json.loads(row[0]), current_revision)
+
+
 def _fields(data, limits):
     if not isinstance(data, dict) or set(data) != set(limits):
         raise ValueError('Provide all document fields.')
@@ -89,6 +116,24 @@ def save_project(workspace_id, data, revision):
     _workspace(workspace_id)
     data = _fields(data, dict(brief=2500, decisions=3500, artifacts=2500, next_step=1500))
     return write('project:'+workspace_id, data, revision)
+
+
+def project_history(workspace_id):
+    _workspace(workspace_id)
+    return history('project:'+workspace_id)
+
+
+def restore_project(workspace_id, revision, current_revision):
+    _workspace(workspace_id)
+    return restore('project:'+workspace_id, revision, current_revision)
+
+
+def identity_history():
+    return history('identity')
+
+
+def restore_identity(revision, current_revision):
+    return restore('identity', revision, current_revision)
 
 
 def corrections(workspace_id):

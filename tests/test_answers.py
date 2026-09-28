@@ -315,8 +315,12 @@ def test_research_tab_exists_in_the_shell():
     assert 'data-tab="research"' in html and 'id="tab-research"' in html
     # Cache version must move with any frontend change or clients keep the old
     # bundle and the tab silently does not exist for them.
-    assert "v=omni30" in html
-    assert "apex-shell-v30" in (root / "sw.js").read_text()
+    # Checked as "present and not rolled back", not an exact number: pinning
+    # the number made every legitimate bump (v30 → v34) fail this test.
+    import re
+    assert re.search(r"v=omni\d+", html)
+    shell = re.search(r"apex-shell-v(\d+)", (root / "sw.js").read_text())
+    assert shell and int(shell.group(1)) >= 30
 
 
 def test_answer_html_is_escaped_before_formatting():

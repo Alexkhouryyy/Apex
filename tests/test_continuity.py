@@ -253,3 +253,50 @@ def test_dashboard_rehydrates_saved_thread_after_restart(isolated, monkeypatch):
     response=c.post('/api/chat',json=dict(message='Continue',thread_id=tid,chat_id='new-browser-id'))
     assert response.status_code==200
     assert len(conversations.messages(tid))==4
+
+
+def test_history_lets_the_owner_undo_a_handoff_overwrite(isolated):
+    """Apex edits the project handoff itself; every save is kept and any earlier
+    version can be brought back without losing the one it replaces."""
+    blank = continuity.project('default')['data']
+    continuity.save_project('default', {**blank, 'decisions': 'Use aluminium housing'}, 0)
+    with continuity.turn(None):   # the model overwrites the decisions during a turn
+        continuity.checkpoint({**blank, 'decisions': 'Housing TBD', 'next_step': 'Ask supplier'}, 1)
+    versions = continuity.project_history('default')
+    assert [v['revision'] for v in versions] == [2, 1], 'newest first, current included'
+    assert versions[1]['data']['decisions'] == 'Use aluminium housing'
+    restored = continuity.restore_project('default', 1, 2)
+    assert restored['revision'] == 3 and continuity.project('default')['data']['decisions'] == 'Use aluminium housing'
+    assert [v['revision'] for v in continuity.project_history('default')] == [3, 2, 1], 'the restore can itself be undone'
+    with pytest.raises(board_workspaces.Conflict):
+        continuity.restore_project('default', 2, 2)            # stale: someone saved since
+    with pytest.raises(ValueError, match='no longer exists'):
+        continuity.restore_project('default', 99, 3)
+    with pytest.raises(ValueError, match='Choose a saved version'):
+        continuity.restore_project('default', '1', 3)
+    with pytest.raises(ValueError, match='Workspace not found'):
+        continuity.project_history('missing-workspace')
+    # Histories never mix: identity versions are separate from project ones.
+    continuity.save_identity({**continuity.DEFAULT_IDENTITY, 'address': 'Alex'}, 0)
+    assert [v['data']['address'] for v in continuity.identity_history()] == ['Alex']
+
+
+def test_history_routes_are_owner_only(isolated, monkeypatch):
+    from dashboard import server
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(config, 'DASHBOARD_TOKEN', 'owner-test')
+    c = TestClient(server.app)
+    assert c.get('/api/home/projects/default/history').status_code == 401
+    c.headers['Authorization'] = 'Bearer owner-test'
+    blank = continuity.project('default')['data']
+    for rev, note in enumerate(['first', 'second']):
+        assert c.post('/api/home/projects/default', json={'revision': rev, 'data': {**blank, 'brief': note}}).status_code == 200
+    versions = c.get('/api/home/projects/default/history').json()['versions']
+    assert [v['data']['brief'] for v in versions] == ['second', 'first']
+    assert c.post('/api/home/projects/default/restore', json={'revision': 1, 'current': 2}, headers={'Origin': 'https://evil.example'}).status_code == 403
+    r = c.post('/api/home/projects/default/restore', json={'revision': 1, 'current': 2})
+    assert r.status_code == 200 and r.json()['data']['brief'] == 'first'
+    assert c.post('/api/home/projects/default/restore', json={'revision': 1, 'current': 2}).status_code == 409
+    assert c.post('/api/home/identity', json={'revision': 0, 'data': {**continuity.DEFAULT_IDENTITY, 'name': 'Jarvis'}}).status_code == 200
+    assert c.get('/api/home/identity/history').json()['versions'][0]['data']['name'] == 'Jarvis'
+    assert c.post('/api/home/identity/restore', json={'revision': 7, 'current': 1}).status_code == 400
