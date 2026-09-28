@@ -1,0 +1,16 @@
+.sidenav{overflow-y:auto;min-height:0}.sidebar-footer{flex-shrink:0}.sidebar-footer .controls{gap:6px;margin-bottom:10px}.sidebar-footer button{font-size:11px;padding:6px 8px}
+.env-card{padding:18px;margin:12px 0;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-2)}.env-card h3{margin-top:0}.env-card p{color:var(--text-mute)}
+#tab-skills label,#tab-repositories label{display:grid;gap:7px}#tab-skills input[type=checkbox]{width:auto}#tab-repositories input,#tab-skills textarea{width:100%}.repo-skill{margin:6px 8px 6px 0}
+#repo-result pre,#repo-review pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;padding:16px;background:var(--bg-2)}#repo-review details,#repo-result details{margin:12px 0}#repo-review summary,#repo-result summary{cursor:pointer;padding:10px;border:1px solid var(--border)}
+#repo-status,#skill-status,#env-model-status{white-space:pre-wrap;overflow-wrap:anywhere}#tab-documentation .panel{padding:24px;line-height:1.7}#tab-plugins>.panel{padding:20px;margin-top:16px}
+/* Capability pages share the active palette and keep long repository text contained. */
+:is(#tab-repositories,#tab-skills,#tab-plugins,#tab-models,#tab-channels,#tab-documentation){max-width:1100px}
+:is(#tab-repositories,#tab-skills,#tab-plugins,#tab-models,#tab-channels,#tab-documentation) .page-head h1{color:var(--text)}
+#repo-intake,#skill-develop{padding:24px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-2);gap:18px}
+#repo-intake>button,#skill-develop>button{align-self:flex-start;padding:10px 20px;background:var(--accent);color:var(--bg);border-radius:6px;font-weight:650}
+#repo-intake p,#skill-develop p{margin:0;color:var(--text-mute);line-height:1.6;font-size:13px}
+#repo-result,#repo-review{margin:24px 0}#repo-result:empty,#repo-review:empty{display:none}
+#repo-status:not(:empty),#skill-status:not(:empty){padding:14px 18px;border-left:3px solid var(--accent);background:var(--bg-2)}
+#repo-result h2,#repo-review h2{font-size:18px;margin-top:0}.env-card button,.repo-skill,#repo-install button{border:1px solid var(--border-strong);background:var(--bg-3);color:var(--text);padding:8px 12px;border-radius:6px;cursor:pointer}
+#repo-install{padding:20px;border:1px solid var(--border);border-radius:var(--radius)}
+@media(max-width:600px){#repo-intake,#skill-develop{padding:16px}#tab-skills .controls,#tab-plugins .controls{flex-wrap:wrap}.env-card{padding:14px}}

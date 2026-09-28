@@ -132,6 +132,8 @@ from dashboard.apps import router as apps_router
 app.include_router(apps_router)
 from dashboard.home import router as home_router
 app.include_router(home_router)
+from dashboard.environment import router as environment_router
+app.include_router(environment_router)
 
 # Allow the browser extension (chrome-extension:// / moz-extension://) to call the
 # API cross-origin. Auth is bearer-token (not cookies), so credentials stay off.

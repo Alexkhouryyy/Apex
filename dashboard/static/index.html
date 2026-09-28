@@ -28,6 +28,7 @@
 }
 </script>
 <link rel="stylesheet" href="/static/brand.css?v=brand40">
+<link rel="stylesheet" href="/static/environment.css?v=environment41">
 </head>
 <body>
 <aside id="sidebar">
@@ -47,14 +48,26 @@
     <a href="/apps" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Apps & connections ↗</a>
     <button data-tab="overview" class="nav-btn active"><span class="icon">⊕</span>Command</button>
     <button data-tab="chat" class="nav-btn"><span class="icon">◌</span>Chat</button>
-    <button data-tab="documents" class="nav-btn"><span class="icon">✍</span>Documents</button>
+    <button data-tab="documents" class="nav-btn"><span class="icon">✍</span>Files & documents</button>
     <button data-tab="constellation" class="nav-btn"><span class="icon">✷</span>Team</button>
     <button data-tab="goals" class="nav-btn"><span class="icon">◇</span>Goals</button>
     <button data-tab="memory" class="nav-btn"><span class="icon">◎</span>Memory</button>
     <button data-tab="knowledge" class="nav-btn"><span class="icon">≡</span>Knowledge base</button>
     <button data-tab="schedule" class="nav-btn"><span class="icon">◷</span>Schedule</button>
     <button data-tab="approvals" class="nav-btn"><span class="icon">✔</span>Approvals<span id="nav-approvals-badge" class="nav-badge" style="display:none"></span></button>
-    <button data-tab="control" class="nav-btn"><span class="icon">⚙</span>Control</button>
+    <button data-tab="control" class="nav-btn"><span class="icon">⚙</span>Settings & keys</button>
+    <div class="nav-group-label">Capabilities</div>
+    <button data-tab="skills" class="nav-btn"><span class="icon">◇</span>Skills</button>
+    <button data-tab="plugins" class="nav-btn"><span class="icon">⊞</span>Plugins</button>
+    <button data-tab="repositories" class="nav-btn"><span class="icon">⌥</span>Repositories</button>
+    <button data-tab="mcp" class="nav-btn"><span class="icon">⌘</span>MCP</button>
+    <button data-tab="models" class="nav-btn"><span class="icon">◈</span>Models</button>
+    <button data-tab="channels" class="nav-btn"><span class="icon">⌁</span>Channels & webhooks</button>
+    <button data-tab="pairing" class="nav-btn"><span class="icon">⊙</span>Pairing</button>
+    <button data-tab="replay" class="nav-btn"><span class="icon">▷</span>Sessions</button>
+    <button data-tab="live" class="nav-btn"><span class="icon">▤</span>Logs</button>
+    <button data-tab="system" class="nav-btn"><span class="icon">↻</span>System & updates</button>
+    <button data-tab="documentation" class="nav-btn"><span class="icon">≡</span>Documentation</button>
     <details class="nav-advanced"><summary style="padding:16px 14px;color:#a1b1ba;cursor:pointer">Advanced</summary>
     <button data-tab="research" class="nav-btn"><span class="icon">⁂</span>Research</button>
     <button data-tab="council" class="nav-btn"><span class="icon">⚖</span>Council</button>
@@ -64,9 +77,7 @@
     <button data-tab="reflections" class="nav-btn"><span class="icon">⌘</span>Reflections</button>
     <button data-tab="evolution" class="nav-btn"><span class="icon">✦</span>Evolution</button>
     <button data-tab="learning" class="nav-btn"><span class="icon">◔</span>Learning</button>
-    <button data-tab="live" class="nav-btn"><span class="icon">▣</span>Live feed</button>
     <button data-tab="telemetry" class="nav-btn"><span class="icon">▤</span>Telemetry</button>
-    <button data-tab="replay" class="nav-btn"><span class="icon">▷</span>Replay</button>
     <button data-tab="selfmod" class="nav-btn"><span class="icon">✎</span>Self-mod</button>
     <a href="/drive" style="display:block;padding:10px 14px;color:#90e6cb;text-decoration:none">Car companion ↗</a>
     </details>
@@ -75,11 +86,48 @@
   <div class="sidebar-footer">
     <div class="footer-row"><span>Model</span><span id="status-model">—</span></div>
     <div class="footer-row"><span>Tools</span><span id="status-tools">—</span></div>
+    <div class="controls"><button data-open-tab="system">Updates</button><button id="sidebar-restart">Restart Apex</button></div>
     <div class="footer-row"><span>Uptime</span><span id="status-uptime">—</span></div>
   </div>
 </aside>
 
 <main id="main-content">
+<section id="tab-system" class="tab"><header class="page-head"><h1>System & updates</h1><p class="page-sub">Inspect the installed checkout, pull updates and restart Apex.</p></header><div class="panel" style="margin-bottom:16px">
+      <div class="panel-head">
+        <h3>Version</h3>
+        <button id="ctl-update-refresh" class="ghost-btn">Check</button>
+      </div>
+      <div class="panel-body">
+        <div id="ctl-update-state" class="muted">Checking…</div>
+        <div id="ctl-update-detail" class="mono-block" style="display:none"></div>
+        <div class="controls" style="margin-top:10px">
+          <button id="ctl-update-run" disabled>Pull updates</button>
+          <button id="ctl-restart" class="danger">Restart Apex</button>
+          <span class="muted" id="ctl-restart-note"></span>
+        </div>
+      </div>
+    </div></section>
+<section id="tab-mcp" class="tab"><header class="page-head"><h1>MCP</h1><p class="page-sub">Server configuration, tools and connection policy.</p></header><div class="panel" style="margin-bottom:16px">
+      <div class="panel-head">
+        <h3>MCP servers</h3>
+        <button id="ctl-mcp-refresh" class="ghost-btn">Refresh</button>
+      </div>
+      <div class="panel-body">
+        <div id="ctl-mcp-state" class="muted">Loading…</div>
+        <div id="ctl-mcp-policy" class="muted" style="margin:6px 0 10px"></div>
+        <div id="ctl-mcp-list"></div>
+        <div id="ctl-mcp-audit" style="margin-top:14px"></div>
+        <p style="margin-top:18px"><a href="/apps" style="color:#90e6cb">Manage apps and MCP connections ↗</a></p>
+      </div>
+    </div></section>
+<section id="tab-plugins" class="tab"><header class="page-head"><h1>Plugins</h1><p class="page-sub">Installed skill bundles and external capabilities, with their actual activation state.</p></header><div class="controls"><button data-environment-refresh>Refresh inventory</button><button data-open-tab="repositories">Add from GitHub</button><a href="/apps">Browse app integrations ↗</a></div><div class="panel"><h3>Runtime providers</h3><p>Memory: Apex built-in · Context: Apex conversation and project continuity.</p><p>Manage memory and identity from <a href="/home">Apex Home</a>. External capabilities connect through MCP; imported skill bundles supply reusable instructions.</p></div><div id="env-plugins"></div></section>
+<section id="tab-repositories" class="tab"><header class="page-head"><h1>Repositories</h1><p class="page-sub">Inspect → preview a skill → record compatibility → install. A repository index does not install its runtime.</p></header><form id="repo-intake" class="add-form vertical"><label>GitHub repository<input name="source" required maxlength="300" placeholder="https://github.com/owner/repository" autocomplete="off"></label><label>Branch, tag or commit<input name="ref" maxlength="160" placeholder="HEAD"></label><button type="submit">Inspect repository</button><p>Paste or drop a public GitHub link. Apex pins the revision and discovers skills, documentation and runtime manifests.</p></form><p id="repo-status" role="status"></p><div id="repo-result"></div><div id="repo-review"></div><h2>Saved repository indexes</h2><div id="env-repositories"></div></section>
+<section id="tab-skills" class="tab"><header class="page-head"><h1>Skills</h1><p class="page-sub">Create, inspect and improve reusable capabilities while retaining the existing approval and rollback workflow.</p></header><form id="skill-develop" class="add-form vertical"><label>Capability or improvement<textarea name="description" required minlength="10" maxlength="6000" rows="3" placeholder="Build a skill that… Inputs… Expected result… How to check it…"></textarea></label><label>Improve an existing executable skill<select name="existing" id="skill-existing"><option value="">Create a new skill</option></select></label><label><input name="needs_network" type="checkbox"> Requires network access</label><button type="submit">Develop skill</button><p>Apex drafts and validates the tool, then stages it in Approvals. Offline execution tests require Docker. Network tools receive syntax validation only.</p></form><p id="skill-status" role="status"></p><p>You can also tell Celine: “Learn how to…” or “Improve the … skill.” Use procedural skills for reusable instructions.</p><div class="controls"><button data-environment-refresh>Refresh skills</button><button data-open-tab="approvals">Review pending changes</button></div><div id="env-skills"></div><pre id="skill-source" class="mono-block" hidden></pre></section>
+<section id="tab-models" class="tab"><header class="page-head"><h1>Models</h1><p class="page-sub">Choose among the providers Apex can reach.</p></header><form id="env-model-form" class="add-form"><label>Active model<select id="env-model"></select></label><button type="submit">Use model</button></form><p id="env-model-status" role="status"></p><button data-open-tab="control">Configure provider keys</button></section>
+<section id="tab-channels" class="tab"><header class="page-head"><h1>Channels & webhooks</h1><p class="page-sub"></p></header><p>Configure channel credentials and inbound webhook verification in Settings. Status below reports configuration, not a live connection test.</p><div id="env-channels"></div><button data-open-tab="control">Open settings & keys</button></section>
+<section id="tab-pairing" class="tab"><header class="page-head"><h1>Pairing</h1><p class="page-sub">Connected devices and revocable device tokens.</p></header><div id="env-pairing"></div></section>
+<section id="tab-documentation" class="tab"><header class="page-head"><h1>Documentation</h1><p class="page-sub"></p></header><div class="panel"><h2>Extend Apex</h2><ol><li>Repositories: paste a public GitHub URL and inspect its pinned revision.</li><li>Preview a discovered skill and read its files, dependencies and license.</li><li>Install compatible instruction bundles; configure external tools in MCP or Apps.</li><li>Skills: describe a missing capability, or select a skill to improve. Inspect generated changes in Approvals before activation.</li></ol><h2>Operate Apex</h2><p>System & updates shows checkout readiness and update results. Settings & keys manages configuration. Sessions replays previous turns; Logs shows live events. Pairing manages device access.</p><h2>Repository compatibility</h2><p>Importing instructions does not make Hermes or OpenClaw runtime APIs available. Repositories that supply executable plugins need an Apex adapter or MCP server. The importer reports unsupported files and preserves your installed skills.</p></div></section>
+
 
   <!-- COMMAND CENTER -->
   <section id="tab-overview" class="tab active command-center">
@@ -322,8 +370,8 @@
   <!-- TELEMETRY -->
   <section id="tab-control" class="tab">
     <header class="page-head">
-      <h1>Control</h1>
-      <div class="page-sub">Settings, appearance, MCP, update and restart — without a terminal</div>
+      <h1>Settings & keys</h1>
+      <div class="page-sub">Configuration and appearance. Manage runtime services in MCP and System & updates.</div>
     </header>
 
     <div class="panel" style="margin-bottom:16px">
@@ -337,35 +385,9 @@
       </div>
     </div>
 
-    <div class="panel" style="margin-bottom:16px">
-      <div class="panel-head">
-        <h3>Version</h3>
-        <button id="ctl-update-refresh" class="ghost-btn">Check</button>
-      </div>
-      <div class="panel-body">
-        <div id="ctl-update-state" class="muted">Checking…</div>
-        <div id="ctl-update-detail" class="mono-block" style="display:none"></div>
-        <div class="controls" style="margin-top:10px">
-          <button id="ctl-update-run" disabled>Pull updates</button>
-          <button id="ctl-restart" class="danger">Restart Apex</button>
-          <span class="muted" id="ctl-restart-note"></span>
-        </div>
-      </div>
-    </div>
 
-    <div class="panel" style="margin-bottom:16px">
-      <div class="panel-head">
-        <h3>MCP servers</h3>
-        <button id="ctl-mcp-refresh" class="ghost-btn">Refresh</button>
-      </div>
-      <div class="panel-body">
-        <div id="ctl-mcp-state" class="muted">Loading…</div>
-        <div id="ctl-mcp-policy" class="muted" style="margin:6px 0 10px"></div>
-        <div id="ctl-mcp-list"></div>
-        <div id="ctl-mcp-audit" style="margin-top:14px"></div>
-        <p style="margin-top:18px"><a href="/apps" style="color:#90e6cb">Manage apps and MCP connections ↗</a></p>
-      </div>
-    </div>
+
+
 
     <div class="panel">
       <div class="panel-head">
@@ -962,7 +984,8 @@
   <button class="ib-no" id="install-no">Not now</button>
 </div>
 
-<script src="/static/app.js?v=apps31"></script>
+<script src="/static/environment.js?v=environment41"></script>
+<script src="/static/app.js?v=environment41"></script>
 <script src="/static/voice-mobile.js?v=omni30"></script>
 <script type="module" src="/static/cst3d.js?v=omni30"></script>
 <script src="/static/team.js"></script>

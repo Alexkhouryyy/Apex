@@ -299,7 +299,7 @@ def do_update() -> dict:
     if not st.get("can_update"):
         return {"ok": False, "detail": st["detail"], "state": st["state"]}
     before_rc, before = _git("rev-parse", "HEAD")
-    rc, out = _git("pull", "origin", st["branch"], timeout=180)
+    rc, out = _git("pull", "--ff-only", "origin", st["branch"], timeout=180)
     if rc != 0:
         return {"ok": False, "state": "failed", "detail": out}
     after_rc, after = _git("rev-parse", "HEAD")

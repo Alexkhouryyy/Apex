@@ -252,6 +252,12 @@ async function loadTab(tab) {
     constellation: loadConstellation,
     research: loadResearch,
     control: loadControl,
+    skills: () => ApexEnvironment.load(), plugins: () => ApexEnvironment.load(),
+    repositories: () => ApexEnvironment.load(), models: () => ApexEnvironment.models(),
+    channels: () => ApexEnvironment.channels(),
+    pairing: () => Promise.all([loadDevices(), loadTokens()]),
+    system: () => Promise.all([_loadControlUpdate(), _loadControlSettings()]),
+    mcp: () => Promise.all([_loadControlMcp(), _loadMcpCatalog()]),
   };
   if (fns[tab]) try { await fns[tab](); } catch (e) { console.error('loadTab', tab, e); }
 }

@@ -37,11 +37,14 @@ def _github(repo, revision, path):
 
 
 def preview(source, revision, path):
-    if source not in REPOS or not isinstance(revision, str) or not re.fullmatch('[0-9a-f]{40}', revision):
-        raise ValueError('Select OpenClaw or Hermes and an immutable 40-character commit SHA.')
-    if not isinstance(path, str) or not re.fullmatch(r'skills/[A-Za-z0-9_/-]+', path) or '..' in path or len(path) > 200:
-        raise ValueError('Choose a skill directory under skills/.')
-    repo = REPOS[source]
+    from agent.repository_hub import parse_repo
+    repo = REPOS.get(source) if isinstance(source, str) and source in REPOS else parse_repo(source)
+    if not isinstance(revision, str) or not re.fullmatch('[0-9a-f]{40}', revision):
+        raise ValueError('Choose an immutable 40-character commit SHA, or inspect the repository first.')
+    if not isinstance(path, str) or len(path)>200 or (path != '.' and
+            (not re.fullmatch(r'[A-Za-z0-9_./-]+',path) or any(p in ('', '.', '..') for p in path.split('/')))):
+        raise ValueError('Choose a relative skill directory without traversal.')
+    path = '' if path == '.' else path
     files, unsupported = {}, []
     visited = 0
     started = time.monotonic()
@@ -56,9 +59,9 @@ def preview(source, revision, path):
             raise ValueError('Expected a skill directory.')
         for item in entries:
             full = item.get('path', '')
-            if not full.startswith(path+'/'):
+            if path and not full.startswith(path+'/'):
                 raise ValueError('Invalid upstream path.')
-            rel = full[len(path)+1:]
+            rel = full[len(path)+1:] if path else full
             if rel in (_MANIFEST, 'UPSTREAM-LICENSE.txt'):
                 raise ValueError('The upstream bundle uses a reserved Apex metadata filename.')
             if not all(re.fullmatch('[A-Za-z0-9_.-]+', part) and part not in ('.', '..') for part in rel.split('/')):
@@ -80,10 +83,17 @@ def preview(source, revision, path):
     fetch(path)
     if 'SKILL.md' not in files:
         raise ValueError('The selected directory has no SKILL.md.')
-    license_data = _github(repo, revision, 'LICENSE')
-    license_text = base64.b64decode(license_data['content']).decode('utf-8')
-    if len(license_text) > 30000:
-        raise ValueError('License is too large.')
+    license_text = ''
+    for filename in ('LICENSE', 'LICENSE.md', 'LICENSE.txt'):
+        try:
+            license_data = _github(repo, revision, filename)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404: continue
+            raise
+        license_text = base64.b64decode(license_data['content']).decode('utf-8')
+        if len(license_text) > 30000: raise ValueError('License is too large.')
+        break
+    if not license_text: raise ValueError('No root LICENSE, LICENSE.md or LICENSE.txt found. Review reuse rights before importing.')
     fm = skill_md._parse_frontmatter(files['SKILL.md'])
     bundle = dict(source=source, repo=repo, revision=revision, path=path, files=files,
                   license=license_text, unsupported=unsupported,

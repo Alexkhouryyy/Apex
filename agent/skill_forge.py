@@ -151,16 +151,14 @@ Output ONLY valid JSON, no markdown fences:
 
 def _validate_in_sandbox(code: str, test_inputs: dict) -> tuple[bool, str]:
     """Run the tool's test case in an isolated subprocess. Returns (passed, output)."""
-    script = textwrap.dedent(f"""\
-        import json, sys
-        inputs = {json.dumps(test_inputs)}
-        {code}
-        try:
-            result = run(inputs)
-            print(json.dumps({{"ok": True, "result": str(result)[:300]}}))
-        except Exception as e:
-            print(json.dumps({{"ok": False, "error": str(e)}}))
-    """)
+    # Keep generated indentation intact and decode JSON as data (true/null are
+    # not Python literals). This script only runs in the Docker backend below.
+    script = ("import json\n" + code + "\n"
+              "try:\n"
+              f"    result = run(json.loads({json.dumps(test_inputs)!r}))\n"
+              "    print(json.dumps({'ok': True, 'result': str(result)[:300]}))\n"
+              "except Exception as e:\n"
+              "    print(json.dumps({'ok': False, 'error': str(e)}))\n")
     try:
         from tools import sandbox
         # DECISION (a): forged code is model-written and untrusted — validate it in
@@ -294,14 +292,15 @@ Output ONLY valid JSON, no markdown fences:
 def _compile_check(code: str) -> tuple[bool, str]:
     """Compile-only validation (no execution) — used for networked skills that
     would otherwise cause real side effects when run."""
+    import ast
     try:
-        ns: dict = {}
-        exec(compile(code, "<forged>", "exec"), ns)
-    except Exception as e:
-        return False, f"compile error: {e}"
-    if "run" not in ns or not callable(ns["run"]):
-        return False, "code must define def run(inputs: dict) -> str"
-    return True, "compiled OK"
+        tree = ast.parse(code)
+        compile(tree, '<forged>', 'exec')
+    except (SyntaxError, ValueError, TypeError) as e:
+        return False, f'compile error: {e}'
+    if not any(isinstance(node, ast.FunctionDef) and node.name == 'run' for node in tree.body):
+        return False, 'code must define def run(inputs: dict) -> str'
+    return True, 'compiled OK (not executed)'
 
 
 def _propose(client, gap: str, allow_network: bool) -> Optional[dict]:
@@ -411,5 +410,27 @@ def acquire(client, description: str, *, allow_network: bool = False,
         except Exception:
             pass
     return (f"Forged a networked skill '{name}': {desc}. Because it uses the internet, "
-            f"it's staged for your one-time approval in the Skill Forge tab.{env_note} "
+            f"it's staged for your one-time approval in the Approvals tab.{env_note} "
             f"Approve it there and I can run it from then on.")
+
+
+def develop(description, existing=None, needs_network=False):
+    """Create or improve a capability from voice/chat or the Skills screen."""
+    from agent import skills, provider
+    if not isinstance(description,str) or not 10 <= len(description.strip()) <= 6000:
+        raise ValueError('Describe the capability and expected result in 10–6,000 characters.')
+    if type(needs_network) is not bool: raise ValueError('Choose whether this skill needs network access.')
+    gap=description.strip()
+    if existing:
+        skills._safe_name(existing)
+        source=skills.read_source(existing)
+        if source is None: raise ValueError('Choose an installed executable skill to improve.')
+        if len(source)>20000: raise ValueError('This skill is too large for inline improvement. Use the project coding workflow.')
+        gap += '\nImprove the existing skill below, preserving its input contract.\n'+source
+    client=provider.get_client(config.AGENT_MODEL)
+    if not existing:
+        return dict(result=acquire(client,gap,allow_network=needs_network,trigger='conversation'))
+    proposal=_propose(client,gap,needs_network)
+    if not proposal:
+        return dict(result='No change installed. Generation or validation failed; offline validation requires Docker.')
+    return dict(result=skills.create_skill(existing,proposal['description'],proposal['code'],_trigger='conversation-improvement'))

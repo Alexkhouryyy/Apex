@@ -21,6 +21,9 @@ DISCUSS_TOOLS = frozenset({
     # out — one sentence misheard should not empty the board.
     "board_present", "board_model", "board_transform", "board_undo", "board_redo",
     "board_parts",
+    # Inspect references and draft reusable tools during conversation. These
+    # routes stage generated code; they never activate it on the host.
+    "list_skills", "repository_inspect", "develop_skill",
 })
 
 
@@ -84,7 +87,9 @@ Ask a short clarifying question when 'this' has more than one plausible target.
         "No fresh screen snapshot is attached. Older images are historical; ask for a new share when needed.\n"
     ) + (
         "DISCUSS mode: only the supplied read/research tools are available. Explain, investigate, "
-        "and recommend. Do not execute commands, edit files, control devices, or claim to run tests. "
+        "and recommend. You may inspect a repository and draft a skill with develop_skill; "
+        "its isolated validation and pending approval are not activation. Report the returned status. "
+        "Do not execute host commands, edit user files, control devices, or run installed skills. "
         "If implementation or execution is needed, ask the user to switch to Work mode.\n"
         if mode == "discuss" else
         "WORK mode: use existing Apex tools for the user's requested task, with the existing "

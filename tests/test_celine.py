@@ -117,6 +117,9 @@ class TestSheRemembers:
 
     @pytest.fixture
     def agent(self, monkeypatch, test_db, vault):
+        # These tests check prompt memory, not embedding-model availability.
+        from agent import longterm
+        monkeypatch.setattr(longterm, "_embed", lambda content: None)
         monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "test-key")
         from agent import schema
         schema.init_all(log=lambda *a: None)
