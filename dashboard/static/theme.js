@@ -7,6 +7,22 @@
   'use strict';
   const KEY = 'apex.look', LOOKS = ['futuristic', 'normal'];
   const root = document.documentElement;
+  const PALETTE_KEY = 'apex_theme';
+  const PALETTES = ['midnight', 'cyberpunk', 'daylight', 'ember', 'ice'];
+  function palette(next, save = false) {
+    const id = PALETTES.includes(next) ? next : 'midnight';
+    root.dataset.theme = id;
+    const picker = document.getElementById('ctl-theme');
+    if (picker) picker.value = id;
+    if (save) { try { localStorage.setItem(PALETTE_KEY, id); } catch (_) {} }
+  }
+  let savedPalette;
+  try { savedPalette = localStorage.getItem(PALETTE_KEY); } catch (_) {}
+  palette(savedPalette);
+  window.ApexTheme = {get: () => root.dataset.theme, set: id => palette(id, true)};
+  addEventListener('storage', e => {
+    if (e.key === PALETTE_KEY || e.key === null) palette(e.newValue);
+  });
   let look = 'futuristic';
   try { const saved = localStorage.getItem(KEY); if (LOOKS.includes(saved)) look = saved; } catch (_) {}
   root.dataset.look = look;

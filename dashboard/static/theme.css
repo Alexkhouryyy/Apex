@@ -8,10 +8,10 @@
  * make a label a little wider.
  *
  * --holo is the hologram colour. The dashboard follows its chosen palette's
- * accent (Midnight, Cyberpunk, Ember…); the other pages use hologram cyan.
+ * accent (Midnight, Cyberpunk, Ember…); the other pages follow the shared brand palette.
  */
 html[data-look="futuristic"] {
-  --holo: #5fe6ff;
+  --holo: var(--apex-brand-start, #5fe6ff);
   --holo-font: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, ui-monospace, monospace;
   --holo-line: color-mix(in srgb, var(--holo) 32%, transparent);
   --holo-faint: color-mix(in srgb, var(--holo) 7%, transparent);

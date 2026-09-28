@@ -4050,7 +4050,9 @@ const _THEME_KEY = 'apex_theme';
 
 function applyTheme(id) {
   const known = THEMES.some(t => t.id === id);
-  document.documentElement.setAttribute('data-theme', known ? id : 'midnight');
+  const next = known ? id : 'midnight';
+  if (window.ApexTheme) window.ApexTheme.set(next);
+  else document.documentElement.setAttribute('data-theme', next);
 }
 
 function initTheme() {

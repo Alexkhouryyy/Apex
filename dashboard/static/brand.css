@@ -1,6 +1,17 @@
-.apex-logo{display:inline-block;width:32px;height:32px;flex:none;vertical-align:middle;object-fit:contain}
+/* Brand tokens follow the dashboard palettes on every Apex page. */
+:root{--apex-brand-start:#66ccff;--apex-brand-end:#8a7cff;--apex-brand-bg:#070b14;--apex-brand-surface:#11161f}
+:root[data-theme="cyberpunk"]{--apex-brand-start:#39ff9e;--apex-brand-end:#ff2fb9;--apex-brand-bg:#050806;--apex-brand-surface:#0a1410}
+:root[data-theme="daylight"]{--apex-brand-start:#2563eb;--apex-brand-end:#7c3aed;--apex-brand-bg:#eef0f4;--apex-brand-surface:#fff}
+:root[data-theme="ember"]{--apex-brand-start:#ff9f5a;--apex-brand-end:#ff6b6b;--apex-brand-bg:#14100d;--apex-brand-surface:#1e1815}
+:root[data-theme="ice"]{--apex-brand-start:#7dd3fc;--apex-brand-end:#a5b4fc;--apex-brand-bg:#0a0f17;--apex-brand-surface:#101823}
+.apex-logo{display:inline-block;width:32px;height:32px;flex:none;vertical-align:middle;position:relative;border-radius:22%;background:radial-gradient(circle at 50% 35%,var(--apex-brand-surface),var(--apex-brand-bg));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--apex-brand-start) 18%,transparent);transition:box-shadow .2s ease}
 .brand.apex-brand{display:inline-flex;align-items:center;gap:12px;text-decoration:none;white-space:nowrap}
 .brand.apex-brand .apex-wordmark{border:0;padding:0;transform:none;background:none;border-radius:0;font-size:15px;font-weight:650;letter-spacing:.16em;color:inherit}
 .brand.apex-brand small{font-size:13px;font-weight:400;letter-spacing:0;color:#9eafb7}
 .login-logo.apex-logo{width:48px;height:48px;margin:0 auto 16px}
 @media(max-width:600px){.brand.apex-brand{gap:8px}.apex-logo{width:28px;height:28px}}
+
+.apex-logo::before{content:"";position:absolute;inset:0;background:linear-gradient(var(--apex-brand-start) 22%,var(--apex-brand-end) 77%);-webkit-mask:url('/static/icons/apex-chevron-mask.svg') center/contain no-repeat;mask:url('/static/icons/apex-chevron-mask.svg') center/contain no-repeat}
+html[data-look="futuristic"] .apex-logo{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--apex-brand-start) 38%,transparent),0 0 18px color-mix(in srgb,var(--apex-brand-start) 24%,transparent)}
+html[data-look="futuristic"] .apex-logo::before{filter:drop-shadow(0 0 3px color-mix(in srgb,var(--apex-brand-start) 48%,transparent))}
+@media(prefers-reduced-motion:reduce){.apex-logo{transition:none}}

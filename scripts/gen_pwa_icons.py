@@ -34,8 +34,10 @@ def contour(vertices):
 
 CONTOURS = tuple(contour(shape) for shape in CHEVRONS)
 
-def svg():
+def svg(*, mask=False):
     polygons='\n'.join('<polygon points="'+ ' '.join(f'{x*64:.4f},{y*64:.4f}' for x,y in shape)+'"/>' for shape in CONTOURS)
+    if mask:
+        return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g fill="white">' + polygons + '</g></svg>\n'
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
     <radialGradient id="bg"><stop stop-color="#11161f"/><stop offset="1" stop-color="#070b14"/></radialGradient>
@@ -75,6 +77,7 @@ def main():
     OUT.mkdir(parents=True,exist_ok=True)
     for name in ('apex-mark.svg','apex-refined.svg'):
         (OUT/name).write_text(svg(),encoding='utf-8')
+    (OUT/'apex-chevron-mask.svg').write_text(svg(mask=True),encoding='utf-8')
     for name,size,maskable in (
         ('icon-192.png',192,False),('icon-512.png',512,False),
         ('icon-maskable-192.png',192,True),('icon-maskable-512.png',512,True),
