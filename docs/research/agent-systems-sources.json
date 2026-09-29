@@ -1,0 +1,886 @@
+{
+  "scope": "Selected architecture and implementation paths; not an exhaustive audit. Acquired files are not automatically reviewed.",
+  "apex_baseline": "7fa703c60f15129f60b989714a5929cb0db40be6",
+  "repositories": [
+    {
+      "name": "agent-zero",
+      "repository": "agent0ai/agent-zero",
+      "revision": "e3051fb584b1a36be2b0a0c90606f1c2c2d356ec",
+      "retrieved_at": "2026-09-28T22:44:38.315645+00:00",
+      "tree_files": 3081,
+      "license_url": "https://github.com/agent0ai/agent-zero/blob/e3051fb584b1a36be2b0a0c90606f1c2c2d356ec/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "23844ed5fb9976b15e6c0be1b617918cb1c32e13e8d70b74100dae08d40fbf23",
+          "lines": 23,
+          "url": "https://github.com/agent0ai/agent-zero/blob/e3051fb584b1a36be2b0a0c90606f1c2c2d356ec/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3ecc2e10b322ded15029eb8650a69c10f2a03d92e58a0bd330c86970eb242436",
+          "lines": 313,
+          "url": "https://github.com/agent0ai/agent-zero/blob/e3051fb584b1a36be2b0a0c90606f1c2c2d356ec/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "docs/developer/architecture.md",
+          "sha256": "fe7e91408016bf1d7d6e1c172a5beadb9681e62e7522231fbfebbb04fc9c40c5",
+          "lines": 32,
+          "url": "https://github.com/agent0ai/agent-zero/blob/e3051fb584b1a36be2b0a0c90606f1c2c2d356ec/docs/developer/architecture.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "docs/developer/plugins.md",
+          "sha256": "e33970a8ee4f9be98e95a53539fa92eaebee795a65ed585fc46fd17c7a974ba0",
+          "lines": 60,
+          "url": "https://github.com/agent0ai/agent-zero/blob/e3051fb584b1a36be2b0a0c90606f1c2c2d356ec/docs/developer/plugins.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "docs/guides/memory.md",
+          "sha256": "e34f48de422d1127e7ee98feabc53605fbaf9025d6cb04c26831861e034fe21a",
+          "lines": 142,
+          "url": "https://github.com/agent0ai/agent-zero/blob/e3051fb584b1a36be2b0a0c90606f1c2c2d356ec/docs/guides/memory.md",
+          "review_scope": "targeted excerpts supporting report"
+        }
+      ]
+    },
+    {
+      "name": "backtalk",
+      "repository": "jaredrhod/backtalk",
+      "revision": "84b3a6cd321060cabb74aad6ebe794621cf99bd3",
+      "retrieved_at": "2026-09-28T22:45:14.935815+00:00",
+      "tree_files": 24,
+      "license_url": "https://github.com/jaredrhod/backtalk/blob/84b3a6cd321060cabb74aad6ebe794621cf99bd3/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+          "lines": 661,
+          "url": "https://github.com/jaredrhod/backtalk/blob/84b3a6cd321060cabb74aad6ebe794621cf99bd3/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "10660cb5733121149427f3e2f1289faada43f0c838093f87c4a727fee23f8974",
+          "lines": 102,
+          "url": "https://github.com/jaredrhod/backtalk/blob/84b3a6cd321060cabb74aad6ebe794621cf99bd3/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "backtalk/signals.py",
+          "sha256": "97169199bc80d76d621486a67ad48f5defd4b90ff5a2bd8ca51bafd8f0404d43",
+          "lines": 219,
+          "url": "https://github.com/jaredrhod/backtalk/blob/84b3a6cd321060cabb74aad6ebe794621cf99bd3/backtalk/signals.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "backtalk/ptt.py",
+          "sha256": "ad53471c607114b46490dd56467f7cc7e7a1c4a65cd7ed241f1c23cd21b0843d",
+          "lines": 131,
+          "url": "https://github.com/jaredrhod/backtalk/blob/84b3a6cd321060cabb74aad6ebe794621cf99bd3/backtalk/ptt.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "backtalk/mouth.py",
+          "sha256": "810f133fa07b924681535c83633cb765f18e95c32ee146dd2cbf563eb8da1f82",
+          "lines": 524,
+          "url": "https://github.com/jaredrhod/backtalk/blob/84b3a6cd321060cabb74aad6ebe794621cf99bd3/backtalk/mouth.py",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "barehands",
+      "repository": "jaredrhod/barehands",
+      "revision": "eb23bed2d772f9d5a24de26fb92f46c3c76d69cf",
+      "retrieved_at": "2026-09-28T22:45:11.809795+00:00",
+      "tree_files": 28,
+      "license_url": "https://github.com/jaredrhod/barehands/blob/eb23bed2d772f9d5a24de26fb92f46c3c76d69cf/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+          "lines": 661,
+          "url": "https://github.com/jaredrhod/barehands/blob/eb23bed2d772f9d5a24de26fb92f46c3c76d69cf/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "80dade77531b6340a5ea7045d5bb95579456d078a08c2e0fe156b21545db7c8d",
+          "lines": 95,
+          "url": "https://github.com/jaredrhod/barehands/blob/eb23bed2d772f9d5a24de26fb92f46c3c76d69cf/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "server.py",
+          "sha256": "2bdc37013db75f709c0b95f716d2e0a4fe23539a870c8c89d59cfd64b7e41367",
+          "lines": 392,
+          "url": "https://github.com/jaredrhod/barehands/blob/eb23bed2d772f9d5a24de26fb92f46c3c76d69cf/server.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "stage.html",
+          "sha256": "7a9ad5620aea3ee6ed87f79cee29d2ccd15eae9334cc05721d98d92b10c9aac4",
+          "lines": 3157,
+          "url": "https://github.com/jaredrhod/barehands/blob/eb23bed2d772f9d5a24de26fb92f46c3c76d69cf/stage.html",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "bin/board-state.sh",
+          "sha256": "38e8edb113514b89be7c4f650bd4ae586bdd24d75421b90a5dd66265a99ef0e7",
+          "lines": 120,
+          "url": "https://github.com/jaredrhod/barehands/blob/eb23bed2d772f9d5a24de26fb92f46c3c76d69cf/bin/board-state.sh",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "dify",
+      "repository": "langgenius/dify",
+      "revision": "e6f1d77ed5869e659e426b5459439d44bdabdbe5",
+      "retrieved_at": "2026-09-28T22:45:07.035218+00:00",
+      "tree_files": 14156,
+      "license_url": "https://github.com/langgenius/dify/blob/e6f1d77ed5869e659e426b5459439d44bdabdbe5/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "232cf91474932d5110ed304e53b6b742a58463857c571fae803fdf2ac36d7bb3",
+          "lines": 22,
+          "url": "https://github.com/langgenius/dify/blob/e6f1d77ed5869e659e426b5459439d44bdabdbe5/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "afce272cb7afce7505843406d36c661d9b4449045379d14aade0a885bf17fc51",
+          "lines": 178,
+          "url": "https://github.com/langgenius/dify/blob/e6f1d77ed5869e659e426b5459439d44bdabdbe5/README.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "api/core/workflow/node_runtime.py",
+          "sha256": "038879dc7d54298459442b4e038278ad59c531685af56bbfac0ddbd5d4695de5",
+          "lines": 1012,
+          "url": "https://github.com/langgenius/dify/blob/e6f1d77ed5869e659e426b5459439d44bdabdbe5/api/core/workflow/node_runtime.py",
+          "review_scope": "targeted excerpts supporting report"
+        }
+      ]
+    },
+    {
+      "name": "ethan-jarvis",
+      "repository": "ethanplusai/jarvis",
+      "revision": "16e37bd801eb797798e02540665f8b3804b0fe14",
+      "retrieved_at": "2026-09-28T22:45:24.161386+00:00",
+      "tree_files": 181,
+      "license_url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "f7678c8264db789d26a2c677d81920f7a220e94d59bde0845566925f0fbdf496",
+          "lines": 33,
+          "url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "f167facd3ed495d69405f13faa8039ca4b1a05a001ee7f515277066c960c1017",
+          "lines": 478,
+          "url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/README.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "preflight.py",
+          "sha256": "6b48959866cfa726e1d424429bd0886e7cc1807999f4f72bf0467602c5fc1728",
+          "lines": 726,
+          "url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/preflight.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "run_store.py",
+          "sha256": "4452b6d2c7bc8c9eeb9bfcdd5a027332b16fcd297cea68670f078e6ed6777011",
+          "lines": 294,
+          "url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/run_store.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "run_executor.py",
+          "sha256": "de87a35fcc67dc33b2a1ff45572ab153b68762b2db328e8fdffb1d2d7e8ddfcd",
+          "lines": 938,
+          "url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/run_executor.py",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "speech.py",
+          "sha256": "47c492f96e397f322082cb3ae86f55ccf215075d5561fd5464ca52d9806fd3d8",
+          "lines": 1219,
+          "url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/speech.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "frontend/src/voice.ts",
+          "sha256": "2d06327e278f8be14ca843f12588b62701e7257b57b88666477954d05cb84337",
+          "lines": 618,
+          "url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/frontend/src/voice.ts",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "jarvis_memory.py",
+          "sha256": "4d8a91691e487d61f37c222873a0988b0891d6ca2f7eb47889d5b48538e9ffe6",
+          "lines": 749,
+          "url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/jarvis_memory.py",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "tests/test_voice_backpressure.py",
+          "sha256": "b495e388fcccd2a5885861cf6d9779314eeb3428da830833640f31660a18580b",
+          "lines": 180,
+          "url": "https://github.com/ethanplusai/jarvis/blob/16e37bd801eb797798e02540665f8b3804b0fe14/tests/test_voice_backpressure.py",
+          "review_scope": "targeted excerpts supporting report"
+        }
+      ]
+    },
+    {
+      "name": "hermes",
+      "repository": "NousResearch/hermes-agent",
+      "revision": "b9df1cccaec26a910e5f0d1d77f52a71641e3d98",
+      "retrieved_at": "2026-09-28T22:44:53.182123+00:00",
+      "tree_files": 16756,
+      "license_url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6",
+          "lines": 21,
+          "url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.es.md",
+          "sha256": "61c5c44ee5632f2a49bfdc4511eccdce16971f7a4c7c31c7c70cbcb2d3af5395",
+          "lines": 205,
+          "url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/README.es.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "c8c3009b1cf6e8d6e48e96a9b4c549d9ab0c86fdaffd91b19f3e9d9b37d93d9d",
+          "lines": 243,
+          "url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.ur-pk.md",
+          "sha256": "531a005a1ba04f8ed53eec1a1f5c409e7905fe6f87307b28e551b9e97d049883",
+          "lines": 238,
+          "url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/README.ur-pk.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.zh-CN.md",
+          "sha256": "7ab66b83f3a96be0ae099fdc2c4672bc844177ddd0f6deaf4a1ee659e1b73bfb",
+          "lines": 190,
+          "url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/README.zh-CN.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "website/docs/user-guide/features/plugins.md",
+          "sha256": "d5ba987dbdef199f2ae1cb0c81250c270798ba8557f9dc6d054f0b28a4c55b1c",
+          "lines": 960,
+          "url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/website/docs/user-guide/features/plugins.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "website/docs/user-guide/features/web-dashboard.md",
+          "sha256": "8f87683c7e1b7137a930ed3910655f86311cb12f456bd81934ccf0b92a3a8507",
+          "lines": 1237,
+          "url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/website/docs/user-guide/features/web-dashboard.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "hermes_cli/plugins_admission.py",
+          "sha256": "57426311fb5a6dce6b785f3ca5bd15823f394bde7480212dc5bbc1b30278efbe",
+          "lines": 80,
+          "url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/hermes_cli/plugins_admission.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "agent/memory_provider.py",
+          "sha256": "a4e44a293013fff831ac136ab77c556541cd18817f53bd662e97090cd80bd5a6",
+          "lines": 206,
+          "url": "https://github.com/NousResearch/hermes-agent/blob/b9df1cccaec26a910e5f0d1d77f52a71641e3d98/agent/memory_provider.py",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "jared-stack",
+      "repository": "jaredrhod/fullstack-agent",
+      "revision": "5bb159f47dbd6fa8f108651d0532a43aef16346b",
+      "retrieved_at": "2026-09-28T22:45:13.573636+00:00",
+      "tree_files": 12,
+      "license_url": "https://github.com/jaredrhod/fullstack-agent/blob/5bb159f47dbd6fa8f108651d0532a43aef16346b/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+          "lines": 661,
+          "url": "https://github.com/jaredrhod/fullstack-agent/blob/5bb159f47dbd6fa8f108651d0532a43aef16346b/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "21b9073240522ce282e531ac9b1b626b1d83bcb44ccec71367d9c3f713503d00",
+          "lines": 88,
+          "url": "https://github.com/jaredrhod/fullstack-agent/blob/5bb159f47dbd6fa8f108651d0532a43aef16346b/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "fullstack-agent.md",
+          "sha256": "27537c657b3d90f0829c7bcff41bd609f21a4ab19be712f70f08ba46c7421437",
+          "lines": 155,
+          "url": "https://github.com/jaredrhod/fullstack-agent/blob/5bb159f47dbd6fa8f108651d0532a43aef16346b/fullstack-agent.md",
+          "review_scope": "targeted excerpts supporting report"
+        }
+      ]
+    },
+    {
+      "name": "letta",
+      "repository": "letta-ai/letta-code",
+      "revision": "3f27924f7c59ff6fdb40a0cae178dddcb4b0460a",
+      "retrieved_at": "2026-09-28T22:45:02.172950+00:00",
+      "tree_files": 2402,
+      "license_url": "https://github.com/letta-ai/letta-code/blob/3f27924f7c59ff6fdb40a0cae178dddcb4b0460a/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "036e78b9d7dd33ae5b378fdda973b4aad7901c8d8371a0ae40fae1f6659a89d0",
+          "lines": 198,
+          "url": "https://github.com/letta-ai/letta-code/blob/3f27924f7c59ff6fdb40a0cae178dddcb4b0460a/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "61811b022086eeb9d0bdab91cce960f193e9b1bec544c36f64cf6a1f5eb9382c",
+          "lines": 145,
+          "url": "https://github.com/letta-ai/letta-code/blob/3f27924f7c59ff6fdb40a0cae178dddcb4b0460a/README.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "src/agent/memory-conflict-repair.ts",
+          "sha256": "d45b77562bb6954e3d265a804803de32d424f6faf31b0c5940bc8ed109d9589e",
+          "lines": 235,
+          "url": "https://github.com/letta-ai/letta-code/blob/3f27924f7c59ff6fdb40a0cae178dddcb4b0460a/src/agent/memory-conflict-repair.ts",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "src/agent/memory-constraints.ts",
+          "sha256": "e0675dcba11724bb59bf09557223bd4d853b6b124d9a77da4900c7d02d595a7a",
+          "lines": 206,
+          "url": "https://github.com/letta-ai/letta-code/blob/3f27924f7c59ff6fdb40a0cae178dddcb4b0460a/src/agent/memory-constraints.ts",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "src/agent/client-skills.ts",
+          "sha256": "a0d340599741133ede24d8e6e19d658d6501dd998c2f4c4ea26f1aaea0204137",
+          "lines": 708,
+          "url": "https://github.com/letta-ai/letta-code/blob/3f27924f7c59ff6fdb40a0cae178dddcb4b0460a/src/agent/client-skills.ts",
+          "review_scope": "targeted excerpts supporting report"
+        }
+      ]
+    },
+    {
+      "name": "librechat",
+      "repository": "LibreChat-AI/LibreChat",
+      "revision": "40bb16edfd4698b6239eaafd6714f6e57faf1bc6",
+      "retrieved_at": "2026-09-28T22:44:50.284310+00:00",
+      "tree_files": 5582,
+      "license_url": "https://github.com/LibreChat-AI/LibreChat/blob/40bb16edfd4698b6239eaafd6714f6e57faf1bc6/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "1ce5c9d51e5ab764b44142cd44d1e687f5bfe32f807c7221c14d061007309b97",
+          "lines": 21,
+          "url": "https://github.com/LibreChat-AI/LibreChat/blob/40bb16edfd4698b6239eaafd6714f6e57faf1bc6/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "75e6ba9bf506fab7d34925e102c47a4c4cfb267b51423549910cd2838bcfbf84",
+          "lines": 260,
+          "url": "https://github.com/LibreChat-AI/LibreChat/blob/40bb16edfd4698b6239eaafd6714f6e57faf1bc6/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.zh.md",
+          "sha256": "12f6ff6bfae56a655ca680c5c2c5a2ec18c50809d5c3f12ac1f3467b1b4ebdae",
+          "lines": 230,
+          "url": "https://github.com/LibreChat-AI/LibreChat/blob/40bb16edfd4698b6239eaafd6714f6e57faf1bc6/README.zh.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "api/server/routes/traces.js",
+          "sha256": "419add6df5e4ca2f26999167c2298278386ef47c522cc2a7d78617ec0a63f251",
+          "lines": 33,
+          "url": "https://github.com/LibreChat-AI/LibreChat/blob/40bb16edfd4698b6239eaafd6714f6e57faf1bc6/api/server/routes/traces.js",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "client/src/components/Chat/Trace/model.ts",
+          "sha256": "9657e910bc75c2067b0528ceb165e7171fe962a5d5f4fbe9267981abb3e13eeb",
+          "lines": 1210,
+          "url": "https://github.com/LibreChat-AI/LibreChat/blob/40bb16edfd4698b6239eaafd6714f6e57faf1bc6/client/src/components/Chat/Trace/model.ts",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "api/server/services/MCP/oauthCleanup.js",
+          "sha256": "9310d934fd41568952399b8e50a18341372d332dc583365f8c71cba4eab27d94",
+          "lines": 27,
+          "url": "https://github.com/LibreChat-AI/LibreChat/blob/40bb16edfd4698b6239eaafd6714f6e57faf1bc6/api/server/services/MCP/oauthCleanup.js",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "memory-vault",
+      "repository": "jaredrhod/ai-memory-vault",
+      "revision": "659bba9c8b351c937dd393b3042801d1ff1b502c",
+      "retrieved_at": "2026-09-28T22:45:19.831410+00:00",
+      "tree_files": 9,
+      "license_url": "https://github.com/jaredrhod/ai-memory-vault/blob/659bba9c8b351c937dd393b3042801d1ff1b502c/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5",
+          "lines": 428,
+          "url": "https://github.com/jaredrhod/ai-memory-vault/blob/659bba9c8b351c937dd393b3042801d1ff1b502c/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "1ac35b462a8a0dfa0c7ae75bbe08f060b747aa5663ac45640c14eea509210f36",
+          "lines": 57,
+          "url": "https://github.com/jaredrhod/ai-memory-vault/blob/659bba9c8b351c937dd393b3042801d1ff1b502c/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "templates/MEMORY.md",
+          "sha256": "eb7aab66bbb189c33a2c133cfd1bbe6b78f812fd309ebbfeb36a3afbf51e7f32",
+          "lines": 16,
+          "url": "https://github.com/jaredrhod/ai-memory-vault/blob/659bba9c8b351c937dd393b3042801d1ff1b502c/templates/MEMORY.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "templates/VAULT-INDEX.md",
+          "sha256": "b3c922790edc12493841bd9ca1191850fe4b6391fbd50b025e7df345f0269acf",
+          "lines": 215,
+          "url": "https://github.com/jaredrhod/ai-memory-vault/blob/659bba9c8b351c937dd393b3042801d1ff1b502c/templates/VAULT-INDEX.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "ai-memory-vault.md",
+          "sha256": "be5e2fceab4063b7a6c0d3073d5e73d65566e0e952b0efb0907ed565f60fa854",
+          "lines": 859,
+          "url": "https://github.com/jaredrhod/ai-memory-vault/blob/659bba9c8b351c937dd393b3042801d1ff1b502c/ai-memory-vault.md",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "odysseus",
+      "repository": "odysseus-dev/odysseus",
+      "revision": "3b6c169162330cd35c4ce6d14949ef15fd3208a2",
+      "retrieved_at": "2026-09-28T22:44:37.222894+00:00",
+      "tree_files": 1571,
+      "license_url": "https://github.com/odysseus-dev/odysseus/blob/3b6c169162330cd35c4ce6d14949ef15fd3208a2/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "d8a6cc31abc16b6748c7a21f21611f5a1ec33f67d22ca23d7da1c19b95496bee",
+          "lines": 235,
+          "url": "https://github.com/odysseus-dev/odysseus/blob/3b6c169162330cd35c4ce6d14949ef15fd3208a2/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "b5ad1c806384dea6d86654767d1758eeb10b76b77a4cf8b6e46d2aa7eb5c58b5",
+          "lines": 81,
+          "url": "https://github.com/odysseus-dev/odysseus/blob/3b6c169162330cd35c4ce6d14949ef15fd3208a2/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "ROADMAP.md",
+          "sha256": "07e64d208433cb82ef8789ac627ab5e89bf1fac2cc76e06cdb76e44efe070bea",
+          "lines": 87,
+          "url": "https://github.com/odysseus-dev/odysseus/blob/3b6c169162330cd35c4ce6d14949ef15fd3208a2/ROADMAP.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "specs/memory-skills.md",
+          "sha256": "ec414f67cdf1d65714e8906462f72456f27bd6aff664c476fc7ce98f7f65823d",
+          "lines": 118,
+          "url": "https://github.com/odysseus-dev/odysseus/blob/3b6c169162330cd35c4ce6d14949ef15fd3208a2/specs/memory-skills.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "services/memory/skill_importer.py",
+          "sha256": "5e7d33443587ab371d534e810be22f661cd508f9bb8936b4bbb5ad12e98d5e44",
+          "lines": 487,
+          "url": "https://github.com/odysseus-dev/odysseus/blob/3b6c169162330cd35c4ce6d14949ef15fd3208a2/services/memory/skill_importer.py",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "src/tool_approval_scopes.py",
+          "sha256": "198103d3f785f92e3913c870a7aab3d95e796dbb21d80c0ed673145a07b5c194",
+          "lines": 160,
+          "url": "https://github.com/odysseus-dev/odysseus/blob/3b6c169162330cd35c4ce6d14949ef15fd3208a2/src/tool_approval_scopes.py",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "open-webui",
+      "repository": "open-webui/open-webui",
+      "revision": "8bd8b4fac5e059578ac0c74b3c18d11139f88b7d",
+      "retrieved_at": "2026-09-28T22:44:48.407239+00:00",
+      "tree_files": 5065,
+      "license_url": "https://github.com/open-webui/open-webui/blob/8bd8b4fac5e059578ac0c74b3c18d11139f88b7d/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "5f1bd74c48bf13ab0f82e177ad9e637313b92533d20ead2593d49347a47fc232",
+          "lines": 51,
+          "url": "https://github.com/open-webui/open-webui/blob/8bd8b4fac5e059578ac0c74b3c18d11139f88b7d/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "da3d46f4d7e6c158e13ed91e5e46250d22d278b972d8d1b028f5e0bb62be612b",
+          "lines": 263,
+          "url": "https://github.com/open-webui/open-webui/blob/8bd8b4fac5e059578ac0c74b3c18d11139f88b7d/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "backend/open_webui/utils/mcp/client.py",
+          "sha256": "f46c5e7e01cf44bad0e75716f707776437aaf8e2aa7927e511185a014d0e64bb",
+          "lines": 195,
+          "url": "https://github.com/open-webui/open-webui/blob/8bd8b4fac5e059578ac0c74b3c18d11139f88b7d/backend/open_webui/utils/mcp/client.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "backend/open_webui/routers/tools.py",
+          "sha256": "b99d2970a0617a5d7728f76dde68b2b2589ed1771fe8a95464006c1becb39dd2",
+          "lines": 987,
+          "url": "https://github.com/open-webui/open-webui/blob/8bd8b4fac5e059578ac0c74b3c18d11139f88b7d/backend/open_webui/routers/tools.py",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "openclaw",
+      "repository": "openclaw/openclaw",
+      "revision": "ac59199ad3fd438f35315554b5628a6945ca400a",
+      "retrieved_at": "2026-09-28T22:44:51.987564+00:00",
+      "tree_files": 50515,
+      "license_url": "https://github.com/openclaw/openclaw/blob/ac59199ad3fd438f35315554b5628a6945ca400a/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "73571b25326281d369087f469842c02444fe39faaecebda4d82ed21ff3a1c29d",
+          "lines": 24,
+          "url": "https://github.com/openclaw/openclaw/blob/ac59199ad3fd438f35315554b5628a6945ca400a/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "322b322be5a2650ddaa2c0259721f0b71f5ec3f4634a230eb331962a5d8d2bc2",
+          "lines": 331,
+          "url": "https://github.com/openclaw/openclaw/blob/ac59199ad3fd438f35315554b5628a6945ca400a/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "docs/concepts/architecture.md",
+          "sha256": "bddb80c696f0561d3cef1d5a67562aaa1668bc69e4b3c87e75764408e3aaaada",
+          "lines": 177,
+          "url": "https://github.com/openclaw/openclaw/blob/ac59199ad3fd438f35315554b5628a6945ca400a/docs/concepts/architecture.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "docs/plugins/architecture-internals/load-pipeline.md",
+          "sha256": "083184b81284da38fae5e8977fc88e4d078980e91c3e21fdbc910f8c8436d0cd",
+          "lines": 294,
+          "url": "https://github.com/openclaw/openclaw/blob/ac59199ad3fd438f35315554b5628a6945ca400a/docs/plugins/architecture-internals/load-pipeline.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "docs/gateway/doctor/checks.md",
+          "sha256": "d58a23fbc8ccfb2e9100bebccdfdb0cba8ec53b8149bc733a1b4ebe696e2ddab",
+          "lines": 87,
+          "url": "https://github.com/openclaw/openclaw/blob/ac59199ad3fd438f35315554b5628a6945ca400a/docs/gateway/doctor/checks.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "docs/gateway/sandboxing/modes-scope-and-backend.md",
+          "sha256": "df3ce528c2ba9604ad8fbf84a357fbd201b1f1df1bd2842f964790ebb6e68da3",
+          "lines": 128,
+          "url": "https://github.com/openclaw/openclaw/blob/ac59199ad3fd438f35315554b5628a6945ca400a/docs/gateway/sandboxing/modes-scope-and-backend.md",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "openhands",
+      "repository": "OpenHands/OpenHands",
+      "revision": "f174ba8465233e46e66ab2c5667b358f1d6676d6",
+      "retrieved_at": "2026-09-28T22:44:59.112998+00:00",
+      "tree_files": 2379,
+      "license_url": "https://github.com/OpenHands/OpenHands/blob/f174ba8465233e46e66ab2c5667b358f1d6676d6/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "e1d1fa9f3a8d7bef24449d488fcd8f00f8f272cac297bb9bed161eb6175b876a",
+          "lines": 21,
+          "url": "https://github.com/OpenHands/OpenHands/blob/f174ba8465233e46e66ab2c5667b358f1d6676d6/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "275a52d19c373d22df417718f43bdedbf8a73bb453aa07c9e19a43d228be3425",
+          "lines": 158,
+          "url": "https://github.com/OpenHands/OpenHands/blob/f174ba8465233e46e66ab2c5667b358f1d6676d6/README.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "README.windows.md",
+          "sha256": "da8af1115fcdde867286df3add7967101d64966321617fe831437f46563ba5d0",
+          "lines": 29,
+          "url": "https://github.com/OpenHands/OpenHands/blob/f174ba8465233e46e66ab2c5667b358f1d6676d6/README.windows.md",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "openhands-sdk",
+      "repository": "OpenHands/software-agent-sdk",
+      "revision": "71612374a8d3c639909b03613dbecf1ff999d0bd",
+      "retrieved_at": "2026-09-28T22:45:33.394960+00:00",
+      "tree_files": 1787,
+      "license_url": "https://github.com/OpenHands/software-agent-sdk/blob/71612374a8d3c639909b03613dbecf1ff999d0bd/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "14a9b631c658eee682c6c2973525fbdf808c3457176bc47513052c559cc5ce86",
+          "lines": 21,
+          "url": "https://github.com/OpenHands/software-agent-sdk/blob/71612374a8d3c639909b03613dbecf1ff999d0bd/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "95094c9745c7cc58136d4eaa1688fb6038aafefec2be05344293f6df7e55dbf8",
+          "lines": 203,
+          "url": "https://github.com/OpenHands/software-agent-sdk/blob/71612374a8d3c639909b03613dbecf1ff999d0bd/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "openhands-sdk/openhands/sdk/conversation/event_store.py",
+          "sha256": "af721391c46a1979c45e0e414c45a82dfc42d8a92d62ac2ccea0242f725450b0",
+          "lines": 374,
+          "url": "https://github.com/OpenHands/software-agent-sdk/blob/71612374a8d3c639909b03613dbecf1ff999d0bd/openhands-sdk/openhands/sdk/conversation/event_store.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "openhands-sdk/openhands/sdk/conversation/stuck_detector.py",
+          "sha256": "3bf25f2d722404398e4744ae188f575f628463732b3606a8da6049fb8ff0039e",
+          "lines": 370,
+          "url": "https://github.com/OpenHands/software-agent-sdk/blob/71612374a8d3c639909b03613dbecf1ff999d0bd/openhands-sdk/openhands/sdk/conversation/stuck_detector.py",
+          "review_scope": "targeted excerpts supporting report"
+        }
+      ]
+    },
+    {
+      "name": "openjarvis",
+      "repository": "open-jarvis/OpenJarvis",
+      "revision": "52659ca7c221703265fe46ff28c5b0a6e2b64c4a",
+      "retrieved_at": "2026-09-28T22:45:29.909090+00:00",
+      "tree_files": 2169,
+      "license_url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "ac617ecddb7ffeb27a239c6c9c8145212306baa90e23ee694849bf3cefb10743",
+          "lines": 190,
+          "url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "bbb6c3af24d0f47ce7880e6fb53fc1407137b0a5221e888fc24278be9a3318c5",
+          "lines": 184,
+          "url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "docs/architecture/overview.md",
+          "sha256": "d71f7625f7f6564be01b9c3fda7978fa939480bbcd19e7534838babce0a3dea1",
+          "lines": 242,
+          "url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/docs/architecture/overview.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "docs/architecture/learning.md",
+          "sha256": "925a0ca3eca01ea93ab5546b54df0b28580635b2436457617bb34c700576fd85",
+          "lines": 615,
+          "url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/docs/architecture/learning.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "docs/architecture/skills.md",
+          "sha256": "76ec2fe54e829ceacd73f68e4d33dcf7727c498d94dba7823f07c43fb39d6eb4",
+          "lines": 222,
+          "url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/docs/architecture/skills.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "docs/user-guide/evaluations.md",
+          "sha256": "a14600809cc2cbd72cf0c3769da88863a6b1d448735e4b483bd2a3f38d9f8eb4",
+          "lines": 810,
+          "url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/docs/user-guide/evaluations.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "docs/architecture/security.md",
+          "sha256": "d5b6dce21bacc80a1514d700497511854bc7298da20eb9d6a6961fcf8d72c768",
+          "lines": 211,
+          "url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/docs/architecture/security.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "src/openjarvis/learning/spec_search/gate/benchmark_gate.py",
+          "sha256": "f761aaf767603bee87e90b8501a59add6de301d35095c12f199fda8820765d7d",
+          "lines": 131,
+          "url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/src/openjarvis/learning/spec_search/gate/benchmark_gate.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "src/openjarvis/skills/tool_adapter.py",
+          "sha256": "f550f2feb8d8e877972440ad4009282386c415cd370e9d9b907f9673f12a080d",
+          "lines": 196,
+          "url": "https://github.com/open-jarvis/OpenJarvis/blob/52659ca7c221703265fe46ff28c5b0a6e2b64c4a/src/openjarvis/skills/tool_adapter.py",
+          "review_scope": "targeted excerpts supporting report"
+        }
+      ]
+    },
+    {
+      "name": "ultron",
+      "repository": "modelscope/ultron",
+      "revision": "801c16233a0c83cab7b7de9467513c5e0f44bf2c",
+      "retrieved_at": "2026-09-28T22:45:31.500993+00:00",
+      "tree_files": 447,
+      "license_url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "lines": 201,
+          "url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "8ad649d9110dbbb28395fcffbbb9760141206818db2bedcf668fb36557d05157",
+          "lines": 351,
+          "url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README_zh.md",
+          "sha256": "99be5fd0537448b4db281d9c990388ed784705237192680324177be31574d537",
+          "lines": 337,
+          "url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/README_zh.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "ROADMAP.md",
+          "sha256": "fc4ae64ae3c98570da81b5098f3631b50c3286a03e879b76b5a7016e245c9a78",
+          "lines": 4,
+          "url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/ROADMAP.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "docs/en/Components/MemoryHub.md",
+          "sha256": "bcce6fc5d3edafbcb328b8a2b6c5d21237f8052fc4354dd2b3923f5a4b7c888a",
+          "lines": 402,
+          "url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/docs/en/Components/MemoryHub.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "docs/en/Components/SkillHub.md",
+          "sha256": "b46a25f4ce9ae00dc799eb1b80f37d9b01f88cb713c05cdc1f5bcfc266cc6f09",
+          "lines": 301,
+          "url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/docs/en/Components/SkillHub.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "docs/en/Components/HarnessHub.md",
+          "sha256": "623c5743512f28cb9a01fed6e189cc176a31cd221c99bc539362b42d2fd3fb83",
+          "lines": 470,
+          "url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/docs/en/Components/HarnessHub.md",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "ultron/services/skill/skill_evolution.py",
+          "sha256": "a8b334836801501425bc69f465c33b4fdbee069ca9132d46420c2d550bb9929f",
+          "lines": 444,
+          "url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/ultron/services/skill/skill_evolution.py",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "ultron/services/harness/merge.py",
+          "sha256": "b84ad06749c00a79e2548668e21ec193656ea889600696e88211fff8dd1437f5",
+          "lines": 722,
+          "url": "https://github.com/modelscope/ultron/blob/801c16233a0c83cab7b7de9467513c5e0f44bf2c/ultron/services/harness/merge.py",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    },
+    {
+      "name": "visualizer",
+      "repository": "jaredrhod/ai-visualizer",
+      "revision": "6921e1d4b06bdd4a34c5264882d5257c4d5f70fd",
+      "retrieved_at": "2026-09-28T22:45:23.200964+00:00",
+      "tree_files": 27,
+      "license_url": "https://github.com/jaredrhod/ai-visualizer/blob/6921e1d4b06bdd4a34c5264882d5257c4d5f70fd/LICENSE",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+          "lines": 661,
+          "url": "https://github.com/jaredrhod/ai-visualizer/blob/6921e1d4b06bdd4a34c5264882d5257c4d5f70fd/LICENSE",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "README.md",
+          "sha256": "37a60aaf2339d4efebcf182f52e2597eb3f4af9d487027fcf4166785b910d7b2",
+          "lines": 106,
+          "url": "https://github.com/jaredrhod/ai-visualizer/blob/6921e1d4b06bdd4a34c5264882d5257c4d5f70fd/README.md",
+          "review_scope": "acquired reference; no full review claimed"
+        },
+        {
+          "path": "core.js",
+          "sha256": "4902d24b083e44ee7b3c13d7d7e3abe4c507313f4f709c05b4f8713a440d2c67",
+          "lines": 416,
+          "url": "https://github.com/jaredrhod/ai-visualizer/blob/6921e1d4b06bdd4a34c5264882d5257c4d5f70fd/core.js",
+          "review_scope": "targeted excerpts supporting report"
+        },
+        {
+          "path": "server.py",
+          "sha256": "b96b1e986e3a378abb21d797a7e1827917bf9fda499686f80f20370343b7aa41",
+          "lines": 295,
+          "url": "https://github.com/jaredrhod/ai-visualizer/blob/6921e1d4b06bdd4a34c5264882d5257c4d5f70fd/server.py",
+          "review_scope": "acquired reference; no full review claimed"
+        }
+      ]
+    }
+  ]
+}

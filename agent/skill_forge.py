@@ -23,6 +23,39 @@ from typing import Optional, Callable
 import config
 from agent import longterm, telemetry
 
+
+def _input_contract(proposal: dict) -> dict:
+    """Validate model data without executing code or resolving remote schemas."""
+    from jsonschema import Draft202012Validator
+
+    example = proposal.get("test_case", {})
+    if not isinstance(example, dict):
+        raise ValueError("test_case must be an object")
+    schema = proposal.get("input_schema")
+    if schema is None:
+        # Older proposals have only examples. Expose those keys, without
+        # inventing required fields or types from a single observation.
+        schema = {"type": "object", "properties": {key: {} for key in example}}
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        raise ValueError("input_schema must describe an object")
+    if len(json.dumps(schema)) > 16000:
+        raise ValueError("input_schema is too large")
+
+    def check_refs(value):
+        if isinstance(value, dict):
+            if any(key in value for key in ("$ref", "$dynamicRef", "$recursiveRef")):
+                raise ValueError("Generated schemas must be self-contained without references")
+            for item in value.values():
+                check_refs(item)
+        elif isinstance(value, list):
+            for item in value:
+                check_refs(item)
+
+    check_refs(schema)
+    Draft202012Validator.check_schema(schema)
+    Draft202012Validator(schema).validate(example)
+    return schema
+
 _NOTIFY_FN: Optional[Callable] = None
 
 
@@ -54,10 +87,14 @@ def init_db() -> None:
             c.execute("ALTER TABLE forged_tools ADD COLUMN needs_network INTEGER DEFAULT 0")
         except Exception:
             pass  # column already exists
+        columns = {row[1] for row in c.execute("PRAGMA table_info(forged_tools)")}
+        for name in ("input_schema", "validation_kind"):
+            if name not in columns:
+                c.execute(f"ALTER TABLE forged_tools ADD COLUMN {name} TEXT")
 
 
 def list_forged(status: Optional[str] = None) -> list[dict]:
-    cols = "id, name, description, status, created_at, COALESCE(needs_network, 0)"
+    cols = "id, name, description, status, created_at, COALESCE(needs_network, 0), validation_kind"
     try:
         with longterm._conn() as c:
             if status:
@@ -74,7 +111,8 @@ def list_forged(status: Optional[str] = None) -> list[dict]:
         return []
     return [
         {"id": r[0], "name": r[1], "description": r[2], "status": r[3],
-         "created_at": r[4], "needs_network": bool(r[5])}
+         "created_at": r[4], "needs_network": bool(r[5]),
+         "validation_kind": r[6] or "unrecorded"}
         for r in rows
     ]
 
@@ -84,7 +122,7 @@ def approve_forged(tool_id: int) -> str:
     try:
         with longterm._conn() as c:
             row = c.execute(
-                "SELECT name, description, code FROM forged_tools "
+                "SELECT name, description, code, input_schema, test_case FROM forged_tools "
                 "WHERE id = ? AND status = 'pending'",
                 (tool_id,),
             ).fetchone()
@@ -92,16 +130,20 @@ def approve_forged(tool_id: int) -> str:
         return f"DB error: {e}"
     if not row:
         return f"Tool #{tool_id} not found or not pending."
-    name, description, code = row
+    name, description, code, schema_text, example_text = row
 
     try:
         from agent import self_mod
+        schema = _input_contract({"input_schema": json.loads(schema_text) if schema_text else None,
+                                  "test_case": json.loads(example_text)})
         result = self_mod.register_new_tool(
             name=name,
             description=description,
-            input_schema={"type": "object", "properties": {}, "required": []},
+            input_schema=schema,
             code=code,
         )
+        if not result.startswith(f"Registered dynamic tool {name!r}."):
+            return f"Registration failed; tool remains pending: {result}"
         with longterm._conn() as c:
             c.execute(
                 "UPDATE forged_tools SET status = 'approved', approved_at = ? WHERE id = ?",
@@ -136,6 +178,8 @@ Also provide:
 - tool_name: short snake_case name (e.g. "read_rss_feed", "parse_json_file")
 - description: one clear sentence describing what it does
 - test_case: a minimal inputs dict that tests the function (it will be run)
+- input_schema: a self-contained JSON Schema object describing run's inputs;
+  include properties and required fields. The test_case must satisfy it.
 - is_read_only: true if the tool only reads/computes (no writes, no network mutations)
 
 Output ONLY valid JSON, no markdown fences:
@@ -144,6 +188,7 @@ Output ONLY valid JSON, no markdown fences:
   "description": "...",
   "code": "def run(inputs: dict) -> str:\\n    ...",
   "test_case": {{}},
+  "input_schema": {{"type": "object", "properties": {{}}, "required": []}},
   "is_read_only": true
 }}
 """
@@ -168,6 +213,8 @@ def _validate_in_sandbox(code: str, test_inputs: dict) -> tuple[bool, str]:
         except sandbox.SandboxUnavailable:
             return False, "Docker sandbox required to validate a forged tool (unavailable)."
         res = backend.run_python(script, timeout=10)
+        if res.get("returncode") != 0:
+            return False, (res.get("stderr") or "sandbox did not exit successfully")[:200]
         out = (res.get("stdout") or "").strip()
         if not out:
             if res.get("returncode") == -1 and "timed out" in (res.get("stderr") or ""):
@@ -215,6 +262,12 @@ def attempt_forge(client, gap_description: str) -> Optional[dict]:
     if not name or not code or not name.isidentifier():
         return None
 
+    try:
+        input_schema = _input_contract(proposal)
+    except Exception as e:
+        print(f"[SkillForge] Invalid input contract: {e}")
+        return None
+
     passed, output = _validate_in_sandbox(code, test_case)
     if not passed:
         print(f"[SkillForge] Sandbox failed for '{name}': {output}")
@@ -225,9 +278,9 @@ def attempt_forge(client, gap_description: str) -> Optional[dict]:
         with longterm._conn() as c:
             c.execute(
                 "INSERT OR REPLACE INTO forged_tools "
-                "(name, description, code, test_case, status, created_at) "
-                "VALUES (?, ?, ?, ?, 'pending', ?)",
-                (name, description, code, json.dumps(test_case), now),
+                "(name, description, code, test_case, status, created_at, input_schema, validation_kind) "
+                "VALUES (?, ?, ?, ?, 'pending', ?, ?, 'sandbox_smoke')",
+                (name, description, code, json.dumps(test_case), now, json.dumps(input_schema)),
             )
             tool_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
     except Exception as e:
@@ -276,6 +329,8 @@ Also provide:
 - tool_name: short snake_case name (e.g. "post_to_webhook", "fetch_weather")
 - description: one clear sentence describing what it does
 - test_case: a minimal inputs dict (it will NOT be executed, only compiled)
+- input_schema: a self-contained JSON Schema object with properties and required
+  fields describing run's inputs. The test_case must satisfy it.
 - env_vars: list of environment variable names the skill expects (may be empty)
 
 Output ONLY valid JSON, no markdown fences:
@@ -284,6 +339,7 @@ Output ONLY valid JSON, no markdown fences:
   "description": "...",
   "code": "def run(inputs: dict) -> str:\\n    ...",
   "test_case": {{}},
+  "input_schema": {{"type": "object", "properties": {{}}, "required": []}},
   "env_vars": []
 }}
 """
@@ -331,6 +387,12 @@ def _propose(client, gap: str, allow_network: bool) -> Optional[dict]:
     if not name or not code or not name.isidentifier():
         return None
 
+    try:
+        input_schema = _input_contract(p)
+    except Exception as e:
+        print(f"[SkillForge] Invalid input contract: {e}")
+        return None
+
     if allow_network:
         ok, out = _compile_check(code)
     else:
@@ -340,6 +402,7 @@ def _propose(client, gap: str, allow_network: bool) -> Optional[dict]:
         return None
 
     return {"name": name, "description": description, "code": code,
+            "input_schema": input_schema,
             "test_case": p.get("test_case", {}), "output": out,
             "env_vars": p.get("env_vars", [])}
 
@@ -363,11 +426,13 @@ def acquire(client, description: str, *, allow_network: bool = False,
         return ("Couldn't forge a working skill for that — generation or validation "
                 "failed. Try describing the capability more concretely.")
     name, desc, code = prop["name"], prop["description"], prop["code"]
+    # Executable skills expose INPUT_SCHEMA; dynamic tools store it separately.
+    skill_code = code + "\nINPUT_SCHEMA = " + repr(prop["input_schema"]) + "\n"
 
     if not allow_network:
         try:
             from agent import skills as _skills
-            msg = _skills.create_skill(name, desc, code, _trigger=trigger)
+            msg = _skills.create_skill(name, desc, skill_code, _trigger=trigger)
         except Exception as e:
             return f"Forged '{name}' but installation failed: {e}"
         # create_skill gates anything whose trigger is not "manual" into
@@ -389,9 +454,10 @@ def acquire(client, description: str, *, allow_network: bool = False,
         with longterm._conn() as c:
             c.execute(
                 "INSERT OR REPLACE INTO forged_tools "
-                "(name, description, code, test_case, status, created_at, needs_network) "
-                "VALUES (?, ?, ?, ?, 'pending', ?, 1)",
-                (name, desc, code, json.dumps(prop.get("test_case", {})), now),
+                "(name, description, code, test_case, status, created_at, needs_network, input_schema, validation_kind) "
+                "VALUES (?, ?, ?, ?, 'pending', ?, 1, ?, 'syntax_only')",
+                (name, desc, code, json.dumps(prop.get("test_case", {})), now,
+                 json.dumps(prop["input_schema"])),
             )
             tool_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
     except Exception as e:
@@ -433,4 +499,5 @@ def develop(description, existing=None, needs_network=False):
     proposal=_propose(client,gap,needs_network)
     if not proposal:
         return dict(result='No change installed. Generation or validation failed; offline validation requires Docker.')
-    return dict(result=skills.create_skill(existing,proposal['description'],proposal['code'],_trigger='conversation-improvement'))
+    code = proposal['code'] + '\nINPUT_SCHEMA = ' + repr(proposal['input_schema']) + '\n'
+    return dict(result=skills.create_skill(existing,proposal['description'],code,_trigger='conversation-improvement'))

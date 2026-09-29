@@ -2606,10 +2606,12 @@ async function loadApprovals() {
     nForged = pending.length;
     forgedEl.innerHTML = pending.length ? pending.map(t => {
       const net = t.needs_network ? '<span class="apv-net">needs network</span>' : '';
+      const validation = ({sandbox_smoke:'Sandbox example ran; task correctness still needs review.',syntax_only:'Syntax checked only. This tool has not been executed.'})[t.validation_kind] || 'No validation record available for this older proposal.';
       return `<div class="apv-card" data-id="${t.id}">
         <div class="apv-head"><span class="apv-tool">${escapeHTML(t.name || '?')}</span>${net}
           <span class="apv-time">${fmtDate(t.created_at)}</span></div>
         <div class="apv-rationale">${escapeHTML(t.description || '')}</div>
+        <div class="apv-rationale">${escapeHTML(validation)}</div>
         <div class="apv-actions">
           <button class="apv-approve" data-kind="forged" data-id="${t.id}">Approve &amp; install</button>
           <button class="apv-reject" data-kind="forged" data-id="${t.id}">Reject</button>

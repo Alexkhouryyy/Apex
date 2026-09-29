@@ -1285,6 +1285,8 @@ def forged_tools_approve(tool_id: int):
     try:
         from agent import skill_forge as _forge
         result = _forge.approve_forged(tool_id)
+        if not result.startswith("Registered dynamic tool "):
+            return JSONResponse({"error": result}, status_code=409)
         return {"ok": True, "result": result}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

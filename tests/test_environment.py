@@ -68,7 +68,7 @@ def test_improvement_is_staged_and_preserves_old_skill(monkeypatch):
     skills.SKILLS_DIR.mkdir()
     path=skills.SKILLS_DIR/'worker.py';path.write_text('def run(inputs): return "old"')
     monkeypatch.setattr(provider,'get_client',lambda model:object())
-    monkeypatch.setattr(skill_forge,'_propose',lambda *args:{'name':'wrong_generated_name','description':'Improved','code':'def run(inputs): return "new"'})
+    monkeypatch.setattr(skill_forge,'_propose',lambda *args:{'name':'wrong_generated_name','description':'Improved','code':'def run(inputs): return "new"','input_schema':{'type':'object','properties':{}}})
     out=skill_forge.develop('Improve the output formatting','worker',False)
     assert 'STAGED' in out['result'] and 'old' in path.read_text()
     pending=approvals.list_pending()[0]
@@ -146,3 +146,11 @@ def test_large_existing_skill_is_not_silently_truncated(monkeypatch):
     (skills.SKILLS_DIR/'large.py').write_text('#'+'x'*20001)
     with pytest.raises(ValueError,match='too large'):
         skill_forge.develop('Improve the large existing skill','large')
+
+
+def test_forged_registration_failure_is_reported_to_browser(monkeypatch):
+    from dashboard.server import forged_tools_approve
+    monkeypatch.setattr(skill_forge, 'approve_forged', lambda tool_id: 'Registration failed; tool remains pending: invalid code')
+    response = forged_tools_approve(1)
+    assert response.status_code == 409
+    assert 'remains pending' in json.loads(response.body)['error']

@@ -69,6 +69,7 @@ GOOD = {
     "description": "Counts words in a string.",
     "code": "def run(inputs: dict) -> str:\n    return str(len(inputs.get('text','').split()))",
     "test_case": {"text": "one two three"},
+    "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
     "is_read_only": True,
 }
 
@@ -117,13 +118,14 @@ def test_approval_is_what_registers_it(forge_db, monkeypatch):
     registered = []
     from agent import self_mod
     monkeypatch.setattr(self_mod, "register_new_tool",
-                        lambda **kw: registered.append(kw) or "registered")
+                        lambda **kw: registered.append(kw) or "Registered dynamic tool 'count_words'. Available immediately.")
 
     out = skill_forge.attempt_forge(FakeClient(GOOD), "count words")
     skill_forge.approve_forged(out["id"])
 
     assert len(registered) == 1
     assert registered[0]["name"] == "count_words"
+    assert registered[0]["input_schema"] == GOOD["input_schema"]
     assert skill_forge.list_forged()[0]["status"] == "approved"
 
 
@@ -131,7 +133,7 @@ def test_approving_twice_does_not_register_twice(forge_db, monkeypatch):
     registered = []
     from agent import self_mod
     monkeypatch.setattr(self_mod, "register_new_tool",
-                        lambda **kw: registered.append(kw) or "registered")
+                        lambda **kw: registered.append(kw) or "Registered dynamic tool 'count_words'. Available immediately.")
 
     out = skill_forge.attempt_forge(FakeClient(GOOD), "count words")
     skill_forge.approve_forged(out["id"])
@@ -242,3 +244,80 @@ def test_a_failed_proposal_installs_nothing(forge_db, monkeypatch):
     msg = skill_forge.acquire(FakeClient(GOOD), "impossible", allow_network=False)
     assert "couldn't forge" in msg.lower()
     assert skill_forge.list_forged() == []
+
+
+def test_registration_error_is_not_approved(forge_db, monkeypatch):
+    from agent import self_mod
+    monkeypatch.setattr(self_mod, "register_new_tool", lambda **kw: "Reserved name: 'bash'")
+    out = skill_forge.attempt_forge(FakeClient(GOOD), "count words")
+    assert "remains pending" in skill_forge.approve_forged(out["id"])
+    assert skill_forge.list_forged()[0]["status"] == "pending"
+
+
+@pytest.mark.parametrize("schema,example", [
+    ({"type": "array"}, {}),
+    ({"type": "object", "properties": {"text": {"type": "invalid"}}}, {}),
+    (GOOD["input_schema"], {}),
+    (GOOD["input_schema"], {"text": 42}),
+    ({"type": "object", "$ref": "https://example.com/schema"}, {}),
+    ({"type": "object", "$defs": {"x": {"$ref": "#/$defs/x"}}}, {}),
+    ({"type": "object"}, []),
+])
+def test_bad_input_contract_does_not_stage_or_execute(forge_db, monkeypatch, schema, example):
+    executions = []
+    monkeypatch.setattr(skill_forge, "_validate_in_sandbox", lambda *args: executions.append(args))
+    assert skill_forge.attempt_forge(FakeClient({**GOOD, "input_schema": schema, "test_case": example}), "gap") is None
+    assert skill_forge.list_forged() == []
+    assert executions == []
+
+
+def test_legacy_pending_example_recovers_input_keys(forge_db, monkeypatch):
+    from agent import longterm, self_mod
+    with longterm._conn() as c:
+        c.execute("INSERT INTO forged_tools (name,description,code,test_case,created_at) VALUES (?,?,?,?,0)",
+                  ("legacy", "d", GOOD["code"], json.dumps(GOOD["test_case"])))
+    captured = []
+    monkeypatch.setattr(self_mod, "register_new_tool", lambda **kw: captured.append(kw) or "Registered dynamic tool 'legacy'. Available immediately.")
+    row = skill_forge.list_forged()[0]
+    assert row["validation_kind"] == "unrecorded"
+    skill_forge.approve_forged(row["id"])
+    assert captured[0]["input_schema"]["properties"] == {"text": {}}
+
+
+def test_offline_skill_contract_survives_approval(forge_db, tmp_path, monkeypatch):
+    from agent import approvals, skills
+    monkeypatch.setattr(skills, "SKILLS_DIR", tmp_path / "skills")
+    monkeypatch.setattr(skills, "_registry", {})
+    skill_forge.acquire(FakeClient(GOOD), "count words")
+    pending = [p for p in approvals.list_pending() if p["kind"] == "skill_code"][0]
+    approvals.approve(pending["id"])
+    assert skills.get_schema("count_words") == GOOD["input_schema"]
+    assert skills.run_skill("count_words", {"text": "one two"}) == "2"
+
+
+def test_validation_levels_remain_distinct(forge_db):
+    skill_forge.attempt_forge(FakeClient(GOOD), "count words")
+    assert skill_forge.list_forged()[0]["validation_kind"] == "sandbox_smoke"
+    skill_forge.acquire(FakeClient({**GOOD, "tool_name": "network_words"}), "count remotely", allow_network=True)
+    rows = {r["name"]: r for r in skill_forge.list_forged()}
+    assert rows["network_words"]["validation_kind"] == "syntax_only"
+
+
+def test_existing_database_migrates_without_losing_pending_code(test_db):
+    from agent import longterm
+    with longterm._conn() as c:
+        c.execute("CREATE TABLE forged_tools (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT, code TEXT, test_case TEXT, status TEXT DEFAULT 'pending', created_at REAL, approved_at REAL)")
+        c.execute("INSERT INTO forged_tools VALUES (1,'old','d','def run(i): return 1','{}','pending',0,NULL)")
+    skill_forge.init_db()
+    skill_forge.init_db()
+    assert skill_forge.list_forged()[0]["name"] == "old"
+    assert skill_forge.list_forged()[0]["validation_kind"] == "unrecorded"
+
+
+def test_nonzero_sandbox_exit_cannot_claim_validation_success(monkeypatch):
+    from tools import sandbox
+    class Backend:
+        def run_python(self, script, timeout):
+            return {"stdout": '{"ok": true, "result": "looks good"}', "stderr": "crashed", "returncode": 1}
+    monkeypatch.setattr(sandbox, "autonomous_backend", lambda: Backend())
+    assert skill_forge._validate_in_sandbox(GOOD["code"], GOOD["test_case"]) == (False, "crashed")

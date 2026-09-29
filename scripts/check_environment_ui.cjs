@@ -33,6 +33,7 @@ const dir=path.join(__dirname,'..','dashboard','static');
     if(p==='/api/environment/skills/formatter')result={content:'def run(inputs): return inputs'};
     if(p==='/api/models')result={current:'test-model',models:[{model:'test-model',provider:'test',available:true}]};
     if(p==='/api/devices')result={devices:[]};
+    if(p==='/api/forged-tools')result={tools:[{id:1,name:'network_example',description:'Example only',status:'pending',needs_network:true,validation_kind:'syntax_only',created_at:1},{id:2,name:'offline_example',description:'Example only',status:'pending',validation_kind:'sandbox_smoke',created_at:1},{id:3,name:'legacy_example',description:'Example only',status:'pending',created_at:1}]};
     if(p==='/api/auth/tokens')result={tokens:[]};
     return route.fulfill({json:result});
    }
@@ -77,6 +78,10 @@ const dir=path.join(__dirname,'..','dashboard','static');
   await page.locator('#skill-develop textarea').fill('Improve the formatter to handle empty strings.');await page.locator('#skill-existing').selectOption('formatter');await page.locator('#skill-develop button').click();
   await page.waitForFunction(()=>document.getElementById('skill-status').textContent.includes('staged'));
   assert(requests.some(x=>x.p==='/api/environment/develop'&&x.data.existing==='formatter'));
+  await page.locator('.nav-btn[data-tab=approvals]').click();
+  await page.getByText('Syntax checked only. This tool has not been executed.',{exact:true}).waitFor();
+  await page.getByText('Sandbox example ran; task correctness still needs review.',{exact:true}).waitFor();
+  await page.getByText('No validation record available for this older proposal.',{exact:true}).waitFor();
   for(const tab of ['system','mcp','models','channels','pairing','documentation']){
    await page.locator('.nav-btn[data-tab='+tab+']').click();await page.locator('#tab-'+tab+'.active').waitFor();
   }
