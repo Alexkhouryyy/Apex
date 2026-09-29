@@ -117,9 +117,10 @@ export function setupStudyImport({token, api, status, beforeLeave, navigate = ur
       if (!manifest?.imported) return;
       const drafted = !!manifest.notes;
       $('draft-notes').textContent = drafted ? 'Redraft notes' : 'Draft notes with AI';
+      const who = /^Built by you/.test(manifest.subtitle || '') ? 'Built by you with Apex' : 'Imported by you';
       $('import-about').textContent = drafted
-        ? 'Imported by you · notes AI-drafted, not reviewed.'
-        : 'Imported by you · parts named from the file. Draft notes to explain each part.';
+        ? who + ' · notes AI-drafted, not reviewed.'
+        : who + ' · parts named from ' + (who === 'Imported by you' ? 'the file' : 'your build') + '. Draft notes to explain each part.';
     },
   };
 }

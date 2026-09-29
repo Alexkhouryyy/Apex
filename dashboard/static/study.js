@@ -8,7 +8,8 @@ import {setupStudyComfort} from './study-comfort.js';
 import {setupStudyMirror} from './study-mirror.js';
 import {setupStudyDiagnostics} from './study-diagnostics.js';
 import {setupHoloScene, HoloHand, HoloSound, isSoftwareRenderer} from './study-holo.js';
-import {TwoHandStretch, Spring, Coast} from './study-gestures.js';
+import {TwoHandStretch, Spring, Coast, STRETCH_START_MS} from './study-gestures.js';
+import {hasTracks, advance, sampleTrack, phaseAt} from './study-motion.js';
 const $ = id => document.getElementById(id);
 let token = '';
 try { token = localStorage.getItem('apex_token') || ''; } catch (_) {}
@@ -16,6 +17,8 @@ const query = new URLSearchParams(location.search);
 if (query.has('token')) { token = query.get('token'); try { localStorage.setItem('apex_token', token); } catch (_) {} query.delete('token'); history.replaceState(null, '', location.pathname + (query.size ? '?' + query : '')); }
 let current = null, manifest = null, session = query.get('session'), timer = null, busy = Promise.resolve();
 let scene, camera, renderer, orbit, cameraTween = null, rotorAngle = 0, amount = 0, targetAmount = 0;
+// Sampled motion (study-motion.js): where in its cycle the subject is. It pauses in place.
+let motionU = 0, ghosted = false, shownPhase = null;
 let manipulation=null, handEnabled=false, handTimer=null, handEpoch=0, mouseUntil=0;
 // Phase 2a: the hologram look (study-holo.js). Presentation only.
 let holo=null, readyKey=null;
@@ -36,7 +39,7 @@ const notebook = setupStudyProjects({
   capture:()=>({session_id:session, revision:current?.revision, model_hash:manifest?.model_hash,
     view:current && {selected:current.selected,hidden:current.hidden,isolated:current.isolated,explosion:current.explosion,section:current.section,rotating:current.rotating,transforms:current.transforms},
     camera:camera && {position:coordinates(camera.position),target:coordinates(orbit.target)},
-    rotor_angle:Math.min(Math.PI*2,Math.round((rotorAngle%(Math.PI*2))*1e5)/1e5)}),
+    rotor_angle:Math.min(Math.PI*2,Math.round(((hasTracks(manifest?.motion)?motionU*Math.PI*2:rotorAngle)%(Math.PI*2))*1e5)/1e5)}),
   prepareSave:async()=>{pauseHands();cancelManipulation();await busy;if(current?.rotating)await command('rotate');if(current?.rotating)throw new Error('Pause rotor motion before saving.');cameraTween=null;},
   restore:async result=>{
     clearTimeout(timer);$('close-partner').click();
@@ -47,7 +50,7 @@ const notebook = setupStudyProjects({
     // Clear residual orbit damping before setting the saved camera again.
     const damping=orbit.enableDamping;orbit.enableDamping=false;orbit.update();
     camera.position.fromArray(result.workspace.camera.position);orbit.target.fromArray(result.workspace.camera.target);orbit.update();orbit.enableDamping=damping;
-    rotorAngle=result.workspace.rotor_angle;amount=targetAmount;
+    rotorAngle=result.workspace.rotor_angle;motionU=hasTracks(manifest.motion)?rotorAngle/(Math.PI*2)%1:0;amount=targetAmount;
     history.replaceState(null,'','/study?session='+encodeURIComponent(session)+'&model='+manifest.id);
     status('Saved study restored · rotor motion paused');schedulePoll();
   }
@@ -67,7 +70,7 @@ async function api(path, options = {}) {
 function command(action, extra = {}) {
   if(action!=='transform'){hands.reset('View changed · hover again');cancelManipulation();}
   busy = busy.catch(() => {}).then(async () => {
-    try { accept(await api('/api/study/session/' + session, {method:'POST',body:JSON.stringify({action,...extra})})); status('View updated · original geometry preserved'); return true; }
+    try { if(!accept(await api('/api/study/session/' + session, {method:'POST',body:JSON.stringify({action,...extra})})))status('View updated · original geometry preserved'); return true; }
     catch (error) { status(error.message); targetAmount = current?.explosion || 0; $('separation').value = String(targetAmount * 100); return false; }
   });
   return busy;
@@ -165,7 +168,7 @@ async function initScene(prefetched = null) {
     if($('interaction').value!=='select')return;
     if(!down||down.id!==e.pointerId||Math.hypot(e.clientX-down.x,e.clientY-down.y)>5){down=null;return;}down=null;
     const r=$('model').getBoundingClientRect();mouse.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);raycaster.setFromCamera(mouse,camera);
-    const hits=raycaster.intersectObjects(pickables,false).filter(h=>groups.get(h.object.userData.part).visible&&(!current.section||clipping.distanceToPoint(h.point)>=0));
+    const hits=raycaster.intersectObjects(pickables,false).filter(h=>groups.get(h.object.userData.part).visible&&!groups.get(h.object.userData.part).userData.ghosted&&(!current.section||clipping.distanceToPoint(h.point)>=0));
     // The transparent housing lets you pick the visible internals; select
     // the shell from the tree if it lies in front of the part you want.
     const hit=hits.find(h=>h.object.userData.part!=='housing')||hits[0];
@@ -182,11 +185,13 @@ async function initScene(prefetched = null) {
     else amount=THREE.MathUtils.damp(amount,targetAmount,7,realDt);
     const spin=reducedMotion.matches?null:coast.step(dt);
     if(spin&&!manipulation){const sphere=new THREE.Spherical().setFromVector3(camera.position.clone().sub(orbit.target));sphere.theta+=spin.theta;sphere.phi+=spin.phi;sphere.makeSafe();camera.position.copy(orbit.target).add(new THREE.Vector3().setFromSpherical(sphere));}
-    if(current?.rotating&&!reducedMotion.matches)rotorAngle+=dt*.8;
+    if(current?.rotating&&!reducedMotion.matches){if(hasTracks(manifest.motion))motionU=advance(motionU,realDt,manifest.motion);else rotorAngle+=dt*.8;}
     // Timed animations run on real time, so a slow renderer does not stretch them (and block hands) for seconds.
     if(cameraTween){cameraTween.t=Math.min(1,cameraTween.t+realDt/0.65);const t=cameraTween.t;camera.position.lerpVectors(cameraTween.from,cameraTween.to,t*t*(3-2*t));if(t===1)cameraTween=null;}
     holo.update(dt);
-    for(const group of groups.values())pose(group);
+    const live=tracksLive();
+    for(const group of groups.values())pose(group,live);
+    paintMotion(live);
     orbit.update();holo.render();holoHand.draw(now);
     const group=groups.get(current?.selected);const label=$('part-label');
     if(group?.visible){const centre=group.userData.center.clone().applyMatrix4(group.matrixWorld).project(camera);const r=$('viewport').getBoundingClientRect();label.hidden=centre.z< -1||centre.z>1||Math.abs(centre.x)>.92||Math.abs(centre.y)>.92;label.style.left=(centre.x+1)/2*r.width+'px';label.style.top=(-centre.y+1)/2*r.height+'px';}else label.hidden=true;
@@ -210,6 +215,7 @@ function accept(state){
   if(manipulation && state.revision!==manipulation.revision){hands.reset('Study changed · movement cancelled');cancelManipulation();}
   if(stretch.engaged&&current&&state.revision!==current.revision){stretch.cancel();$('hand-status').textContent='Study changed · separation cancelled';}
   const needsRoom = current && current.explosion <= .2 && state.explosion > .2;
+  const started = !!current && !current.rotating && state.rotating;
   current=state;if(!stretch.engaged)targetAmount=state.explosion;
   if (needsRoom && orbit) fitCamera(true);
   $('separation').value=String(state.explosion*100);$('separation-value').textContent=Math.round(state.explosion*100)+'%';
@@ -220,12 +226,14 @@ function accept(state){
   $('part-details').hidden=!selected;$('isolate').disabled=!selected;$('hide-part').disabled=!selected;$('reset-part').disabled=!selected;
   $('isolate').textContent=state.isolated?'Exit isolation':'Isolate';$('part-label').textContent=selected?.name||'';
   if(selected){$('part-connection').textContent=selected.connection;$('part-note').textContent=selected.model_note;const url=manifest.sources.find(s=>s.id===selected.source)?.url;$('part-source').hidden=!url;if(url)$('part-source').href=url;}
-  for(const [id,g] of groups){g.visible=!state.hidden.includes(id)&&(!state.isolated||id===state.selected);g.traverse(o=>{if(o.isMesh){o.material.emissive.setHex(id===state.selected?0x1d5c57:0);o.material.emissiveIntensity=.38;o.material.clippingPlanes=state.section?[clipping]:[];}});}
+  for(const [id,g] of groups){g.visible=!state.hidden.includes(id)&&(!state.isolated||id===state.selected);g.traverse(o=>{if(o.isMesh){restEmissive(o,id===state.selected);o.userData.motionLit=false;o.material.clippingPlanes=state.section?[clipping]:[];}});}
   holo?.rebase();
-  $('study-caption').textContent=(manifest.caption||(manifest.id==='dc-motor'?'Illustrative geometry · not to scale':'Source CAD · engineering review pending'))+(state.section?' · uncapped section':state.rotating?' · illustrative motion':'');
+  shownPhase=null;$('study-caption').textContent=captionText(null);
   $('rotate').disabled=!hasMotion();
   renderList();
   notebook.selection(state.selected,selected?.name);
+  // Starting a subject's motion says what to watch (true: the caller keeps it on screen).
+  if(started&&manifest.motion?.hint&&!state.section){status(manifest.motion.hint);return true;}
 }
 function schedulePoll(){
   clearTimeout(timer);
@@ -267,7 +275,7 @@ async function loadModel(id){
     if(data.parts.some(p=>(p.nodes||[p.node]).some(n=>!ids.has(n))))throw new Error('Source geometry does not match its component list.');
   }
   if(scene){for(const group of groups.values()){group.traverse(o=>{if(o.isMesh){o.geometry.dispose();o.material.dispose();}});scene.remove(group);}groups.clear();pickables.length=0;}
-  diagnostics.stop();manifest=data;rotorAngle=0;
+  diagnostics.stop();manifest=data;rotorAngle=0;motionU=0;ghosted=false;shownPhase=null;
   if(!renderer)await initScene(prefetched);else {await buildLoadedModel(prefetched);holo.buildEdges();}
   document.querySelector('h1').textContent=manifest.title;document.querySelector('.view-title p').textContent=manifest.subtitle;await fillLibrary();$('model-choice').value=manifest.id;
   $('rotate').textContent=manifest.motion?.label||(manifest.id==='dc-motor'?'Rotor motion':'Motion');document.title=manifest.title+' · Apex study';
@@ -295,26 +303,62 @@ $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.tri
 addEventListener('keydown',e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||$('login').open||$('projects').open)return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();command(e.shiftKey?'redo':'undo');}if(e.key==='Escape')$('close-partner').click();});
 boot().catch(e=>status(e.message));
 
-function pose(group){
+// Motion runs on the assembled subject; exploding, isolating or moving a part
+// shows its rest pose (a paused cycle comes back when you reassemble).
+function tracksLive(){
+  return hasTracks(manifest?.motion)&&!!current&&(current.rotating||motionU>0)&&!current.explosion&&!current.isolated&&!Object.keys(current.transforms||{}).length;
+}
+function pose(group,live=tracksLive()){
   const t=manipulation?.part===group.userData.id?manipulation.value:current?.transforms?.[group.userData.id];
-  const spin=group.userData.spin;
-  const base=new THREE.Quaternion().setFromAxisAngle(spin?.axis||new THREE.Vector3(1,0,0),group.userData.rotating?rotorAngle*(spin?.speed||1):0);
+  const spin=group.userData.spin,track=live?group.userData.track:null,center=group.userData.center;
+  // The motion moves the part (turn, uniform scale about a pivot, offset); your
+  // own turn then happens about where the motion put the part's centre.
+  const base=new THREE.Quaternion();let s=1;const moved=center.clone();
+  if(spin){base.setFromAxisAngle(spin.axis,group.userData.rotating?rotorAngle*(spin.speed||1):0);moved.sub(spin.pivot).applyQuaternion(base).add(spin.pivot);}
+  else if(track){const m=sampleTrack(track.data,motionU,manifest.motion.samples);base.setFromAxisAngle(track.axis,m.angle);s=m.scale;
+    moved.sub(track.pivot).multiplyScalar(s).applyQuaternion(base).add(track.pivot).add(new THREE.Vector3(...m.offset).multiplyScalar(track.unit));}
   const user=new THREE.Quaternion().setFromEuler(new THREE.Euler(...(t?.rotation||[0,0,0])));
-  group.quaternion.copy(user).multiply(base);
-  const center=group.userData.center;
+  group.quaternion.copy(user).multiply(base);group.scale.setScalar(s);
   group.position.copy(group.userData.offset).multiplyScalar(amount).add(new THREE.Vector3(...(t?.position||[0,0,0])))
-    .add(center.clone().applyQuaternion(base)).sub(center.clone().applyQuaternion(group.quaternion));
-  // Motion turns about the subject's own axis line (the motor's is the origin).
-  if(spin)group.position.add(spin.pivot.clone().sub(spin.pivot.clone().applyQuaternion(base)));
+    .add(moved).sub(center.clone().multiplyScalar(s).applyQuaternion(group.quaternion));
   // Hologram: a part ready to grab rises toward you (study-holo.js). View only.
   const lift=group.userData.holoLift||0;
   if(lift>1e-4)group.position.add(camera.position.clone().sub(group.position.clone().add(center)).normalize().multiplyScalar(lift));
+}
+// A part's resting glow: the selection tint, else whatever its file gave it.
+function restEmissive(o,selected){
+  const look=o.userData.look;
+  if(selected){o.material.emissive.setHex(0x1d5c57);o.material.emissiveIntensity=.38;}
+  else{o.material.emissive.setHex(look?.emissive??0);o.material.emissiveIntensity=look?.intensity??.38;}
+}
+// While the motion shows: parts glow on cue (a piston's power stroke, an open
+// valve), the casings the subject names turn see-through, and the caption says
+// what is happening.
+function paintMotion(live){
+  const motion=manifest?.motion;if(!hasTracks(motion))return;
+  for(const [id,g] of groups){const track=g.userData.track;if(!track?.data.glow)continue;
+    const v=live?sampleTrack(track.data,motionU,motion.samples).glow:0;
+    g.traverse(o=>{if(!o.isMesh||o.userData.holoEdge)return;
+      if(v>.01){o.material.emissive.copy(track.glow).multiplyScalar(Math.min(1,v));o.material.emissiveIntensity=1.4;o.userData.motionLit=true;}
+      else if(o.userData.motionLit){restEmissive(o,id===current?.selected);o.userData.motionLit=false;}});}
+  if(live!==ghosted){ghosted=live;
+    for(const id of motion.ghost||[]){const g=groups.get(id);if(!g)continue;g.userData.ghosted=live;
+      g.traverse(o=>{if(!o.isMesh||o.userData.holoEdge)return;const look=o.userData.look;
+        o.material.transparent=live||!!look?.transparent;o.material.opacity=live?.13:look?.opacity??1;o.material.depthWrite=!live&&(look?.depthWrite??true);o.material.needsUpdate=true;});}}
+  const phase=live?phaseAt(motion,motionU):null;
+  if(phase!==shownPhase){shownPhase=phase;$('study-caption').textContent=captionText(phase);}
+}
+function captionText(phase){
+  const base=manifest.caption||(manifest.id==='dc-motor'?'Illustrative geometry · not to scale':'Source CAD · engineering review pending');
+  if(phase)return phase+(current?.section?' · section':'')+(current?.rotating?'':' · paused');
+  if(current?.section)return base+' · uncapped section';
+  return base+(current?.rotating?' · illustrative motion':'');
 }
 function pick(x,y){
   if(!renderer||!current)return null;
   scene.updateMatrixWorld(true);camera.updateMatrixWorld(true);
   raycaster.setFromCamera(new THREE.Vector2(x*2-1,1-y*2),camera);
-  const hits=raycaster.intersectObjects(pickables,false).filter(h=>groups.get(h.object.userData.part).visible&&(!current.section||clipping.distanceToPoint(h.point)>=0));
+  const hits=raycaster.intersectObjects(pickables,false).filter(h=>groups.get(h.object.userData.part).visible&&!groups.get(h.object.userData.part).userData.ghosted&&(!current.section||clipping.distanceToPoint(h.point)>=0));
   return hits.find(h=>h.object.userData.part!=='housing')||hits[0]||null;
 }
 // A small screen-space target margin for fingers; mouse picking stays exact.
@@ -405,7 +449,7 @@ const hands=new StudyHandController({
   route:(h,now)=>comfort.route(h,now),
   // Pinching empty space spins the view (with momentum); parts stay as they are.
   hit:(x,y,preferred)=>['orbit','zoom'].includes($('interaction').value)?'@view':pickHand(x,y,preferred==='@spin'?null:preferred)?.object.userData.part||'@spin',
-  begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){sound.play('grab');if(!manipulation.view)holo?.pulse(part);manipulation.input='hand';manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
+  begin:(h,part)=>{const ok=beginManipulation(h,part,'hand');if(ok){sound.play('grab');if(!manipulation.view)holo?.pulse(part);manipulation.input='hand';manipulation.startedAt=performance.now();manipulation.recording=diagnostics.metrics.active?diagnostics.metrics.data:null;diagnostics.metrics.event('grabs');}return ok;},move:moveManipulation,commit:commitManipulation,cancel:cancelManipulation,
   paint:(h,label,target={})=>{
     const dot=$('hand-cursor');dot.hidden=!h;
     if(h){dot.style.left=h.x*100+'%';dot.style.top=h.y*100+'%';dot.dataset.state=h.pinched?'pinched':target.progress===1?'ready':'tracking';}
@@ -433,10 +477,15 @@ function handleStretch(sample,now){
   const fresh=sample.tracking&&sample.age_ms!=null&&sample.age_ms<=350;
   if(!fresh){if(stretch.engaged){stretch.cancel();targetAmount=current?.explosion||0;sound.play('cancel');}return false;}
   // The camera's zoom-out after separating may still be running; that must not block the next pull.
-  const allowed=!!current&&!manipulation&&!hands.held&&!current.rotating;
+  // Real hands never pinch in the same instant: the first pinch starts a one-hand
+  // grab (a part, or spinning the view) a moment before the second arrives. A
+  // one-hand grab that began moments ago may be taken over — it is cancelled and
+  // put back — so the two-hand pull works without delaying one-hand grabs.
+  const freshGrab=!!manipulation&&manipulation.input==='hand'&&!manipulation.committing&&performance.now()-(manipulation.startedAt||0)<=STRETCH_START_MS;
+  const allowed=!!current&&!current.rotating&&(!manipulation&&!hands.held||freshGrab);
   const r=stretch.feed(sample.hands,now,current?.explosion||0,allowed);
   if(!r)return false;
-  if(r.state==='start'){hands.reset('Two hands');coast.stop();spring.set(amount);springActive=true;sound.play('grab');}
+  if(r.state==='start'){if(manipulation){hands.reset('Two hands · one-hand grab handed over');cancelManipulation();}else hands.reset('Two hands');coast.stop();spring.set(amount);springActive=true;sound.play('grab');}
   // Make room while pulling, not only after letting go (the camera eases out once).
   if(r.amount>.2&&targetAmount<=.2&&(current?.explosion||0)<=.2){targetAmount=r.amount;fitCamera(true);}
   targetAmount=r.amount;springActive=true;
@@ -536,6 +585,7 @@ async function buildLoadedModel(prefetched = null){
       const geo=o.geometry.clone().applyMatrix4(o.matrixWorld);geo.translate(-center.x,-center.y,-center.z);geo.scale(scale,scale,scale);
       const material=o.material.clone();material.side=THREE.DoubleSide;
       const item=new THREE.Mesh(geo,material);item.userData.part=p.id;g.add(item);pickables.push(item);
+      item.userData.look={emissive:material.emissive.getHex(),intensity:material.emissive.getHex()?material.emissiveIntensity:.38,transparent:material.transparent,opacity:material.opacity,depthWrite:material.depthWrite};
     });
     g.userData.center=new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3());
     // A subject can say where each part goes when taken apart; otherwise it moves out from the centre.
@@ -545,6 +595,9 @@ async function buildLoadedModel(prefetched = null){
     const speed=manifest.motion?.parts?.[p.id];
     if(speed){g.userData.rotating=true;g.userData.spin={speed,axis:new THREE.Vector3(...(manifest.motion.axis||[1,0,0])).normalize(),
       pivot:new THREE.Vector3(...(manifest.motion.pivot||[0,0,0])).sub(center).multiplyScalar(scale)};}
+    const track=hasTracks(manifest.motion)&&manifest.motion.tracks[p.id];
+    if(track)g.userData.track={data:track,unit:scale,glow:new THREE.Color(track.glow_color||'#ffffff'),
+      axis:new THREE.Vector3(...(track.axis||[1,0,0])).normalize(),pivot:new THREE.Vector3(...(track.pivot||[0,0,0])).sub(center).multiplyScalar(scale)};
   }
   if(manifest.auto_explode)autoExplode(THREE,built.map(g=>({center:g.userData.center,offset:g.userData.offset})),size.clone().multiplyScalar(scale));
 }

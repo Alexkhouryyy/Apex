@@ -207,7 +207,7 @@ def apply(sid, action, part=None, amount=None, transform=None, expected_revision
             if not has_motion(old['model']):
                 raise ValueError('Illustrative motion is only available for subjects that include it.')
             if new['explosion'] or new['isolated'] or new['transforms']:
-                raise ValueError('Reassemble the model before showing rotor motion.')
+                raise ValueError('Reassemble the model before running its motion.')
             new['rotating'] = not new['rotating']
         elif action == 'section':
             new['section'] = not new['section']

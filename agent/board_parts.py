@@ -60,13 +60,16 @@ def recipe_for_src(src: str) -> Optional[tuple[str, list[dict]]]:
 
 
 def _key(parts: list[dict]) -> tuple:
-    return tuple((p["shape"], tuple(p["size"]), tuple(p["at"]), tuple(p["rotate"])) for p in parts)
+    return tuple((p["shape"], tuple(p["size"]), tuple(p["at"]), tuple(p["rotate"]),
+                  p.get("teeth"), p.get("hole")) for p in parts)
 
 
 @lru_cache(maxsize=32)
 def _meshes(key: tuple):
     from agent import build3d
-    parts = [{"shape": s, "size": list(z), "at": list(a), "rotate": list(r)} for s, z, a, r in key]
+    parts = [{"shape": s, "size": list(z), "at": list(a), "rotate": list(r),
+              **({"teeth": t} if t is not None else {}), **({"hole": h} if h is not None else {})}
+             for s, z, a, r, t, h in key]
     return [build3d.part_mesh(p) for p in parts]
 
 
