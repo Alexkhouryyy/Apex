@@ -238,7 +238,7 @@ def _text(value, limit, default=''):
 
 
 def import_model(raw: bytes, *, file_name: str = '', title: str = '', category: str = '', source_url: str = '',
-                 license: str = '', detail: str = 'auto', builtin_ids=()) -> dict:
+                 license: str = '', detail: str = 'auto', builtin_ids=(), built: bool = False) -> dict:
     doc = read_gltf(raw)
     parts = components(doc, 'fine' if detail == 'fine' else 'auto')
     stem = Path(file_name or 'model').stem
@@ -255,9 +255,11 @@ def import_model(raw: bytes, *, file_name: str = '', title: str = '', category: 
     single = len(parts) == 1
     manifest = {
         'id': model_id, 'revision': '1.0', 'geometry_revision': '1', 'title': title,
-        'subtitle': f'Imported model · {len(parts)} part' + ('' if single else 's'), 'category': category, 'order': 50,
+        'subtitle': ('Built by you · ' if built else 'Imported model · ') + f'{len(parts)} part' + ('' if single else 's'),
+        'category': category, 'order': 50,
         'summary': f'Imported from {_text(file_name, 120, "a glTF file")}.',
-        'fidelity': 'Imported model · shown as provided', 'caption': 'Imported model · parts named from the file',
+        'fidelity': 'Built with Apex · simple shapes' if built else 'Imported model · shown as provided',
+        'caption': 'Built by you with Apex · simple shapes' if built else 'Imported model · parts named from the file',
         'imported': {'file_name': _text(file_name, 200), 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
                      'at': int(time.time()), 'detail': 'fine' if detail == 'fine' else 'auto'},
         'asset': f'/api/study/model/{model_id}/asset', 'asset_file': f'{model_id}.glb.gz', 'auto_explode': True,

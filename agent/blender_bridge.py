@@ -78,6 +78,30 @@ COLOR_NAMES: dict[str, tuple[float, float, float, float]] = {
     "yellow": (0.85, 0.7, 0.05, 1.0),
     "orange": (0.85, 0.4, 0.05, 1.0),
     "purple": (0.4, 0.1, 0.6, 1.0),
+    # Common names people (and models) use for things they build. A build
+    # asking for "silver" used to be refused outright.
+    "silver": (0.75, 0.76, 0.78, 1.0),
+    "steel": (0.55, 0.58, 0.62, 1.0),
+    "steel_blue": (0.27, 0.45, 0.65, 1.0),
+    "gold": (0.83, 0.65, 0.2, 1.0),
+    "brass": (0.72, 0.6, 0.27, 1.0),
+    "copper": (0.72, 0.42, 0.22, 1.0),
+    "bronze": (0.6, 0.42, 0.2, 1.0),
+    "brown": (0.4, 0.24, 0.12, 1.0),
+    "wood": (0.55, 0.38, 0.22, 1.0),
+    "beige": (0.85, 0.78, 0.62, 1.0),
+    "pink": (0.9, 0.45, 0.6, 1.0),
+    "cyan": (0.1, 0.75, 0.85, 1.0),
+    "teal": (0.05, 0.5, 0.5, 1.0),
+    "navy": (0.04, 0.08, 0.35, 1.0),
+    "light_blue": (0.45, 0.7, 0.92, 1.0),
+    "dark_green": (0.03, 0.3, 0.1, 1.0),
+    "lime": (0.5, 0.85, 0.1, 1.0),
+    "dark_grey": (0.22, 0.22, 0.24, 1.0),
+    "dark_gray": (0.22, 0.22, 0.24, 1.0),
+    "light_grey": (0.78, 0.78, 0.8, 1.0),
+    "light_gray": (0.78, 0.78, 0.8, 1.0),
+    "clear": (0.8, 0.9, 1.0, 1.0),
 }
 
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
@@ -112,7 +136,7 @@ def resolve_color(color) -> Optional[tuple]:
     if color is None:
         return None
     if isinstance(color, str):
-        key = color.strip().lower().replace(" ", "_")
+        key = color.strip().lower().replace(" ", "_").replace("-", "_")
         if key in COLOR_NAMES:
             return COLOR_NAMES[key]
         m = re.fullmatch(r"#?([0-9a-fA-F]{6})", color.strip())

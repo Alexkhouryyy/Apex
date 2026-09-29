@@ -21,6 +21,9 @@ DISCUSS_TOOLS = frozenset({
     # out — one sentence misheard should not empty the board.
     "board_present", "board_model", "board_transform", "board_undo", "board_redo",
     "board_parts",
+    # Editing a build part by part, and opening it in the study: both only
+    # write a new version of Apex's own build (undoable) or a study copy.
+    "board_edit", "board_study",
     # Inspect references and draft reusable tools during conversation. These
     # routes stage generated code; they never activate it on the host.
     "list_skills", "repository_inspect", "develop_skill",

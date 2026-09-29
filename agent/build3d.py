@@ -46,7 +46,7 @@ from typing import Optional
 
 import numpy as np
 
-SHAPES = ("box", "sphere", "cylinder", "cone", "torus")
+SHAPES = ("box", "sphere", "cylinder", "cone", "torus", "tube", "gear", "wedge")
 MAX_PARTS = 80
 MIN_CM, MAX_CM = 0.05, 1000.0       # a part from half a millimetre to 10 m
 MAX_OFFSET_CM = 2000.0
@@ -81,6 +81,29 @@ def _vec(value, n: int, what: str, lo: float, hi: float, default=None,
     return out
 
 
+# Shape-specific options, kept only on the shapes that use them.
+TEETH = (6, 80, 16)        # gear: min, max, default tooth count
+HOLE = {"tube": 0.6, "gear": 0.25}   # bore diameter as a share of the outer diameter
+
+
+def _shape_params(shape: str, p: dict, where: str) -> dict:
+    out = {}
+    if shape == "gear":
+        teeth = p.get("teeth", TEETH[2])
+        if isinstance(teeth, bool) or not isinstance(teeth, (int, float)) or teeth != int(teeth) \
+                or not TEETH[0] <= teeth <= TEETH[1]:
+            raise BuildError(f"{where}: teeth must be a whole number from {TEETH[0]} to {TEETH[1]}")
+        out["teeth"] = int(teeth)
+    if shape in HOLE:
+        hole = p.get("hole", HOLE[shape])
+        lo = 0.05 if shape == "tube" else 0.0
+        if isinstance(hole, bool) or not isinstance(hole, (int, float)) or not math.isfinite(hole) \
+                or not lo <= hole <= 0.9:
+            raise BuildError(f"{where}: hole is the bore as a share of the width, {lo}..0.9")
+        out["hole"] = round(float(hole), 4)
+    return out
+
+
 def validate(parts) -> list[dict]:
     """The recipe, checked and normalised, or BuildError naming the first
     problem and the part it is in."""
@@ -107,9 +130,11 @@ def validate(parts) -> list[dict]:
         rgba = resolve_color(color)
         if rgba is None:
             raise BuildError(f"{where}: colour '{color}' — use a plain name like red or '#rrggbb'")
-        clean.append({"shape": shape, "size": size, "at": at, "rotate": rot,
-                      "color": [round(c, 4) for c in rgba], "metal": bool(p.get("metal")),
-                      "name": str(p.get("name") or shape)[:60]})
+        item = {"shape": shape, "size": size, "at": at, "rotate": rot,
+                "color": [round(c, 4) for c in rgba], "metal": bool(p.get("metal")),
+                "name": str(p.get("name") or shape)[:60]}
+        item.update(_shape_params(shape, p, where))
+        clean.append(item)
     return clean
 
 
@@ -195,7 +220,124 @@ def _torus():
     return np.array(pos), np.array(nrm), np.array(idx)
 
 
-def unit_mesh(shape: str):
+def _orient(mesh):
+    """Wind every triangle so its front faces along its vertex normals (the
+    board renders single-sided, so a backwards triangle would be invisible)."""
+    pos, nrm, idx = mesh
+    t = idx.reshape(-1, 3).copy()
+    face = np.cross(pos[t[:, 1]] - pos[t[:, 0]], pos[t[:, 2]] - pos[t[:, 0]])
+    flip = np.einsum('ij,ij->i', face, nrm[t[:, 0]] + nrm[t[:, 1]] + nrm[t[:, 2]]) < 0
+    t[flip] = t[flip][:, ::-1]
+    return pos, nrm, t.reshape(-1)
+
+
+def _tube(hole: float):
+    """A hollow cylinder: outer wall, inner wall, and flat rings top and bottom."""
+    pos, nrm, idx = [], [], []
+    ri = 0.5 * hole
+    for radius, sign in ((0.5, 1.0), (ri, -1.0)):
+        base = len(pos)
+        for s in range(SEGMENTS + 1):
+            ph = 2 * math.pi * s / SEGMENTS
+            c, sn = math.cos(ph), math.sin(ph)
+            n = np.array([sign * c, 0.0, sign * sn])
+            pos += [np.array([radius * c, -0.5, radius * sn]), np.array([radius * c, 0.5, radius * sn])]; nrm += [n, n]
+        for s in range(SEGMENTS):
+            a = base + 2 * s
+            idx += [a, a + 1, a + 2, a + 1, a + 3, a + 2] if sign > 0 else [a, a + 2, a + 1, a + 1, a + 2, a + 3]
+    for y, up in ((0.5, 1.0), (-0.5, -1.0)):
+        base = len(pos)
+        n = np.array([0.0, up, 0.0])
+        for s in range(SEGMENTS + 1):
+            ph = 2 * math.pi * s / SEGMENTS
+            pos += [np.array([0.5 * math.cos(ph), y, 0.5 * math.sin(ph)]), np.array([ri * math.cos(ph), y, ri * math.sin(ph)])]; nrm += [n, n]
+        for s in range(SEGMENTS):
+            a = base + 2 * s
+            idx += [a, a + 2, a + 1, a + 1, a + 2, a + 3] if up > 0 else [a, a + 1, a + 2, a + 1, a + 3, a + 2]
+    return np.array(pos), np.array(nrm), np.array(idx)
+
+
+def _gear(teeth: int, hole: float):
+    """A spur gear standing on its face (teeth around Y), tip diameter 1."""
+    m = 1.0 / (teeth + 2)                 # module: tip radius 0.5 = (teeth/2 + 1)·m
+    r_tip, r_root = 0.5, max(0.5 - 2.25 * m, 0.5 * hole + 0.02)
+    step = 2 * math.pi / teeth
+    outline = []
+    for k in range(teeth):                # root → flank → tip → flank per tooth
+        a = k * step
+        for frac, r in ((0.0, r_root), (0.18, r_tip), (0.42, r_tip), (0.6, r_root)):
+            outline.append((a + frac * step, r))
+    pos, nrm, idx = [], [], []
+    n_out = len(outline)
+    for i in range(n_out):                # side walls, flat-shaded quads
+        a0, r0 = outline[i]
+        a1, r1 = outline[(i + 1) % n_out]
+        p0 = np.array([r0 * math.cos(a0), 0, r0 * math.sin(a0)])
+        p1 = np.array([r1 * math.cos(a1), 0, r1 * math.sin(a1)])
+        edge = p1 - p0
+        n = np.array([edge[2], 0.0, -edge[0]])
+        n = n / (np.linalg.norm(n) or 1.0)
+        if np.dot(n, (p0 + p1) / 2) < 0:
+            n = -n
+        base = len(pos)
+        for p in (p0, p1):
+            pos += [p + [0, -0.5, 0], p + [0, 0.5, 0]]; nrm += [n, n]
+        idx += [base, base + 1, base + 2, base + 1, base + 3, base + 2] if np.dot(np.cross(p1 - p0, [0, 1, 0]), n) < 0 \
+            else [base, base + 2, base + 1, base + 1, base + 2, base + 3]
+    ri = 0.5 * hole
+    for y, up in ((0.5, 1.0), (-0.5, -1.0)):   # faces: the outline to the bore (or centre)
+        n = np.array([0.0, up, 0.0])
+        base = len(pos)
+        for a, r in outline:
+            pos += [np.array([r * math.cos(a), y, r * math.sin(a)]), np.array([ri * math.cos(a), y, ri * math.sin(a)])]; nrm += [n, n]
+        for i in range(n_out):
+            a, b = base + 2 * i, base + 2 * ((i + 1) % n_out)
+            idx += [a, b, a + 1, a + 1, b, b + 1] if up > 0 else [a, a + 1, b, a + 1, b + 1, b]
+    if hole > 0:                           # the bore wall
+        base = len(pos)
+        for s in range(SEGMENTS + 1):
+            ph = 2 * math.pi * s / SEGMENTS
+            n = np.array([-math.cos(ph), 0.0, -math.sin(ph)])
+            pos += [np.array([ri * math.cos(ph), -0.5, ri * math.sin(ph)]), np.array([ri * math.cos(ph), 0.5, ri * math.sin(ph)])]; nrm += [n, n]
+        for s in range(SEGMENTS):
+            a = base + 2 * s
+            idx += [a, a + 2, a + 1, a + 1, a + 2, a + 3]
+    return np.array(pos), np.array(nrm), np.array(idx)
+
+
+def _wedge():
+    """A ramp: full base, full back wall at -z, sloping face toward +z."""
+    v = {"bl": (-.5, -.5, -.5), "br": (.5, -.5, -.5), "fl": (-.5, -.5, .5), "fr": (.5, -.5, .5),
+         "tl": (-.5, .5, -.5), "tr": (.5, .5, -.5)}
+    faces = [(("fl", "fr", "br", "bl"), (0, -1, 0)), (("bl", "br", "tr", "tl"), (0, 0, -1)),
+             (("fr", "fl", "tl", "tr"), (0, 0.7071, 0.7071)), (("bl", "tl", "fl"), (-1, 0, 0)),
+             (("br", "fr", "tr"), (1, 0, 0))]
+    pos, nrm, idx = [], [], []
+    for names, n in faces:
+        base = len(pos)
+        pts = [np.array(v[k], float) for k in names]
+        pos += pts; nrm += [np.array(n, float)] * len(pts)
+        tri = [(0, 1, 2)] + ([(0, 2, 3)] if len(pts) == 4 else [])
+        for a, b, c in tri:
+            if np.dot(np.cross(pts[b] - pts[a], pts[c] - pts[a]), n) < 0:
+                b, c = c, b
+            idx += [base + a, base + b, base + c]
+    return np.array(pos), np.array(nrm), np.array(idx)
+
+
+def unit_mesh(shape: str, params: Optional[dict] = None):
+    params = params or {}
+    if shape == "tube":
+        return _orient(_tube(params.get("hole", HOLE["tube"])))
+    if shape == "gear":
+        p, n, i = _orient(_gear(params.get("teeth", TEETH[2]), params.get("hole", HOLE["gear"])))
+        # Tooth tips rarely land exactly on the box edges: stretch (by a few
+        # per cent at most) so `size` is the gear's true width and depth.
+        k = np.array([0.5 / np.abs(p[:, 0]).max(), 1.0, 0.5 / np.abs(p[:, 2]).max()])
+        n = n / k
+        return p * k, n / np.linalg.norm(n, axis=1, keepdims=True), i
+    if shape == "wedge":
+        return _orient(_wedge())
     if shape == "box":
         return _box()
     if shape == "sphere":
@@ -225,7 +367,7 @@ def _rotation(deg) -> np.ndarray:
 
 def part_mesh(part: dict):
     """One part's triangles, placed, in metres: (positions, normals, indices)."""
-    p, n, i = unit_mesh(part["shape"])
+    p, n, i = unit_mesh(part["shape"], part)
     scale = np.array(part["size"]) / 100.0
     R = _rotation(part["rotate"])
     positions = (p * scale) @ R.T + np.array(part["at"]) / 100.0

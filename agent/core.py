@@ -427,6 +427,37 @@ def _forge_tool(inputs: dict) -> str:
             "as a manufacturing file).")
 
 
+def _study_build(card, title, parts, notes=None):
+    """Send a build to the study library (agent/study_import.py) and open it."""
+    from agent import assembly, props, study_import
+    from agent.board import get_board
+    path = props.props_root() / card["src"]
+    try:
+        raw = path.read_bytes()
+        builtin = {m["id"] for m in assembly.library() if not m["imported"]}
+        manifest = study_import.import_model(raw, file_name=title + ".glb", title=title,
+                                             category="Built by you", builtin_ids=builtin, built=True)
+    except (OSError, ValueError) as e:
+        return f"Could not open '{title}' in the study: {e}"
+    if isinstance(notes, dict) and notes:
+        by_name = {p["name"].lower(): p["id"] for p in manifest["parts"]}
+        drafted = {by_name[k.lower()]: {"purpose": str(v)[:400]} for k, v in notes.items()
+                   if isinstance(k, str) and k.lower() in by_name and isinstance(v, str) and v.strip()}
+        if drafted:
+            import json as _json, time as _time
+            record = {"by": "ai", "at": int(_time.time()), "summary": "", "parts": drafted}
+            (study_import.study_dir() / f"{manifest['id']}.notes.json").write_text(_json.dumps(record, indent=1))
+    try:
+        refresh_study_tool()
+    except Exception:
+        pass
+    s = assembly.create(manifest["id"])
+    get_board().emit("study_open", session_id=s["session_id"])
+    return (f"'{title}' is in the study library ({len(manifest['parts'])} parts) and opening: "
+            f"/study?session={s['session_id']}&model={manifest['id']} — take it apart, select parts, keep notes. "
+            "Its notes are AI-drafted unless the user writes their own.")
+
+
 def _study_library_ids():
     from agent import assembly
     return [m["id"] for m in assembly.library()]
@@ -618,14 +649,16 @@ TOOLS = [
             "where the user picks it up with one hand and scales or turns it "
             "with two — 'build me a rocket', 'make a chair', 'show me a water "
             "molecule'. No Blender needed. Compose the object from simple "
-            "parts (box, sphere, cylinder, cone, torus): each has a size "
+            "parts (box, sphere, cylinder, cone, torus, tube, gear, wedge): each has a size "
             "[width, height, depth] in centimetres, a centre 'at' [x, y, z] in "
             "centimetres with Y up and the object standing on y=0, an optional "
             "'rotate' [x, y, z] in degrees and a colour. Use real-world sizes "
             "and enough parts to be recognisable (usually 5-40). To change "
             "something already built, call again with the SAME title and the "
             "complete revised parts list: it becomes a new version and the old "
-            "one is kept. action 'show' returns the current parts of a build."
+            "one is kept. action 'show' returns the current parts of a build. "
+            "For small changes to something already built, prefer board_edit. "
+            "Name every part for what it is ('drive gear', 'left fin'): the user edits by name."
         ),
         "input_schema": {
             "type": "object",
@@ -638,7 +671,9 @@ TOOLS = [
                     "items": {
                         "type": "object",
                         "properties": {
-                            "shape": {"type": "string", "enum": ["box", "sphere", "cylinder", "cone", "torus"]},
+                            "shape": {"type": "string", "enum": ["box", "sphere", "cylinder", "cone", "torus", "tube", "gear", "wedge"]},
+                            "teeth": {"type": "integer", "description": "Gear only: tooth count 6-80 (default 16). A gear lies flat: size [diameter, thickness, diameter]."},
+                            "hole": {"type": "number", "description": "Tube or gear: bore as a share of the width (tube 0.05-0.9, default 0.6; gear 0-0.9, default 0.25)."},
                             "size": {"type": "array", "items": {"type": "number"},
                                      "description": "[width, height, depth] cm. Torus: height is the tube thickness."},
                             "at": {"type": "array", "items": {"type": "number"}, "description": "Centre [x, y, z] cm, Y up."},
@@ -652,6 +687,58 @@ TOOLS = [
                 },
             },
             "required": ["title"],
+        },
+    },
+    {
+        "name": "board_edit",
+        "description": (
+            "Make one precise change to something built with board_build, by voice: "
+            "'make the nose red', 'move this up 5 cm', 'remove the fins', 'make the gear bigger', "
+            "'add a shaft through the gear', 'duplicate the wheel', 'make it twice as big'. "
+            "Say which part by name, by number, or 'this' (the part the user selected, or "
+            "pinch-tapped in parts mode). part 'all' means the whole build. Each edit saves a new "
+            "version, so the user can undo it; the untouched parts stay where they are. Without a "
+            "title it edits the selected or last pointed-at model. Use board_build action 'show' "
+            "to see part names and positions first when unsure."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The build's title. Optional: the selected model."},
+                "part": {"description": "Part name, number (1-based), 'this', or 'all'. Not needed for op 'add'."},
+                "every": {"type": "boolean", "description": "Allow a name to match several parts (e.g. every 'fin')."},
+                "op": {"type": "string", "enum": ["move", "resize", "scale", "rotate", "color", "metal", "rename",
+                                                 "remove", "duplicate", "add", "shape"]},
+                "by": {"type": "array", "items": {"type": "number"}, "description": "move/duplicate: [x, y, z] cm (Y up). rotate: degrees about x, y, z."},
+                "direction": {"type": "string", "enum": ["up", "down", "left", "right", "forward", "back"], "description": "move: instead of by."},
+                "amount": {"type": "number", "description": "move with direction: centimetres (default 5)."},
+                "size": {"description": "resize: [width, height, depth] cm, or one number for all three."},
+                "factor": {"description": "scale: 2 = twice as big, 0.5 = half; or [x, y, z]."},
+                "color": {"type": "string"},
+                "metal": {"type": "boolean"},
+                "name": {"type": "string", "description": "rename: the new name; duplicate: the copy's name."},
+                "shape": {"type": "string", "enum": ["box", "sphere", "cylinder", "cone", "torus", "tube", "gear", "wedge"], "description": "shape: turn the part into this shape."},
+                "teeth": {"type": "integer"},
+                "hole": {"type": "number"},
+                "new_part": {"type": "object", "description": "add: one part, as in board_build (shape, size, at, color, name)."},
+            },
+            "required": ["op"],
+        },
+    },
+    {
+        "name": "board_study",
+        "description": (
+            "Open something built with board_build in the study page, where it can be taken apart, "
+            "its parts explained and notes kept: 'study it', 'let me take this apart properly'. "
+            "It joins the study library under 'Built by you' with the build's own part names. "
+            "Optionally pass notes: for each part name, what it does, so the study explains it."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The build's title. Optional: the selected model."},
+                "notes": {"type": "object", "description": "Optional {part name: one or two sentences on what it does}."},
+            },
         },
     },
     {
@@ -2314,6 +2401,44 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                 ver = f" (v{r['version']}; v{r['parent']} is kept)" if r["revised"] else ""
                 out = (f"'{title}' built from {r['parts']} parts ({size}){ver} and on the board{where} — "
                        f"pinch to grab it, two hands to resize and turn it.")
+            _broadcast_live_event("board", out)
+            return out
+
+        elif name in ("board_edit", "board_study"):
+            from agent.board import get_board
+            from agent import board_parts, build_edit
+            board = get_board()
+            title = " ".join(str(inputs.get("title") or "").split()).lower()
+            models = [c for c in board.cards() if c["kind"] == "model"]
+            card = None
+            if title:
+                card = next((c for c in models if c["title"].lower() == title), None)
+            else:
+                sel = board.selection()
+                card = sel if sel and sel.get("kind") == "model" else (board.pointed() or None)
+                if card and card.get("kind") != "model":
+                    card = None
+            if card is None:
+                built = ", ".join(c["title"] for c in models if board_parts.recipe_for_src(c.get("src", ""))) or "none yet"
+                return f"Which build? Say its title, or select it on the board. Builds on the board: {built}."
+            recipe = board_parts.recipe_for_src(card.get("src", ""))
+            if recipe is None:
+                return f"'{card['title']}' wasn't built from parts, so it can't be edited part by part."
+            btitle, parts = recipe
+            if name == "board_study":
+                return _study_build(card, btitle, parts, inputs.get("notes"))
+            op = inputs.get("op")
+            try:
+                idx = [] if op == "add" else build_edit.resolve(parts, inputs.get("part"), board.part_referent(card["id"]),
+                                                               bool(inputs.get("every")))
+                args = dict(inputs)
+                if op == "add":
+                    args["part"] = inputs.get("new_part")
+                new_parts, what = build_edit.apply(parts, idx, op, args)
+                built = board.rebuild(card["id"], new_parts)
+            except (build_edit.EditError, ValueError) as e:
+                return f"Not changed — {e}"
+            out = f"'{btitle}': {what} — v{built['version']} (v{built['parent']} kept, so it can be undone)."
             _broadcast_live_event("board", out)
             return out
 

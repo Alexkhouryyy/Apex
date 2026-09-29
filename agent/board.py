@@ -354,6 +354,8 @@ class Board:
         # What an open hand was last pointing at, and when. See
         # POINT_MEMORY_SECONDS.
         self._pointed: tuple[str, float] | None = None
+        # The part of a build last pinch-tapped in parts mode: (card id, part index, time).
+        self._pointed_part: tuple[str, int, float] | None = None
         # Per hand: the card it is hovering over and since when, for
         # POINT_DWELL_SECONDS.
         self._point_candidate: dict = {}
@@ -1386,6 +1388,7 @@ class Board:
         if (not hold.get("settle") and not hold["paired"] and now - hold["t0"] <= TAP_SECONDS and hold["max"] <= TAP_MOVE):
             with self._lock:
                 self._pointed = (card.id, now)
+                self._pointed_part = (card.id, hold["index"], now)
             self.emit("tapped", id=card.id, title=f"{hold['name']} of the {card.title}",
                       object_kind="part", part=hold["index"])
             return
@@ -1400,6 +1403,15 @@ class Board:
         except build3d.BuildError as e:
             self.emit("part_failed", title=card.title, part=hold["name"], reason=str(e))
             return
+        self._show_version(card, before, parts, new_parts, built)
+        self.emit("part_saved", id=card.id, title=card.title, part=hold["name"],
+                  version=built["version"])
+
+    def _show_version(self, card: "Card", before: dict, parts: list, new_parts: list, built: dict) -> None:
+        """Show a new version of a build on its card, keeping the parts that did
+        not change exactly where they were on screen (the page refits every
+        model to its new bounding box). Undoable from the board's history."""
+        from agent import board_parts
         place = board_parts.compensate(before, parts, new_parts, self._aspect)
         with self._lock:
             old = (card.src, card.x, card.y, card.scale, card.rot)
@@ -1408,11 +1420,41 @@ class Board:
             card.y = min(1.0, max(0.0, place["y"]))
             card.scale = min(MAX_SCALE, max(MIN_SCALE, place["scale"]))
             new = (card.src, card.x, card.y, card.scale, card.rot)
+            self._recipes.pop(old[0], None)
         self._write(card)
         self._record({"kind": "reshape", "id": card.id, "title": card.title,
                       "before": old, "after": new})
-        self.emit("part_saved", id=card.id, title=card.title, part=hold["name"],
-                  version=built["version"])
+
+    def part_referent(self, card_id: str, now: Optional[float] = None,
+                      max_age: float = POINT_MEMORY_SECONDS) -> Optional[int]:
+        """Which part of this build "this" means: the part selected by click or
+        tap on it, else the part last pinch-tapped in parts mode (recently)."""
+        now = now if now is not None else time.time()
+        with self._lock:
+            sel = self._selected_surface
+            if sel and sel[0] == card_id and sel[1].get("kind") in ("part", "component"):
+                return sel[1]["mesh"]
+            if self._pointed_part and self._pointed_part[0] == card_id and now - self._pointed_part[2] <= max_age:
+                return self._pointed_part[1]
+        return None
+
+    def rebuild(self, card_id: str, new_parts: list) -> dict:
+        """Save an edited recipe as the next version of the build this card
+        shows, and show it without moving the untouched parts."""
+        from agent import build3d
+        with self._lock:
+            card = next((c for c in self._cards if c.id == card_id), None)
+        if card is None:
+            raise ValueError("That object is no longer on the board.")
+        recipe = self._recipe(card)
+        if recipe is None:
+            raise ValueError(f"'{card.title}' wasn't built from parts.")
+        title, parts = recipe
+        before = card.as_dict()
+        built = build3d.build(title, new_parts)
+        self._show_version(card, before, parts, new_parts, built)
+        self.emit("part_saved", id=card.id, title=card.title, part="", version=built["version"])
+        return built
 
     def _two_handed(self, card: Card, hands) -> None:
         """Scale and rotate from the span and angle between two hands."""
