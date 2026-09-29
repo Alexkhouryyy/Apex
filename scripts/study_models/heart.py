@@ -173,4 +173,66 @@ def build():
             vessel([av, his], 0.02, 0.018, seg=8),
             vessel([his, (0.3, -0.5, 0.22), (0.62, -1.0, 0.28), (0.82, -1.28, 0.28)], 0.016, 0.01, seg=8),
             vessel([his, (0.1, -0.4, 0.42), (0.35, -0.85, 0.55), (0.46, -1.02, 0.56)], 0.016, 0.01, seg=8))
-    return parts, None
+    return parts, motion()
+
+
+# --- One heartbeat, slowed down. u is the fraction of the cycle.
+BEAT_SECONDS = 1.6
+SAMPLES = 96
+LV_BASE, RV_BASE = np.array([0.30, 0.22, -0.20]), np.array([-0.32, 0.18, 0.30])
+TRICUSPID, MITRAL = np.array([-0.32, 0.12, 0.22]), np.array([0.36, 0.22, -0.2])
+
+
+def _smooth(a, b, u):
+    t = min(1.0, max(0.0, (u - a) / (b - a)))
+    return t * t * (3 - 2 * t)
+
+
+def atria_squeeze(u):
+    return _smooth(0.0, 0.07, u) * (1 - _smooth(0.11, 0.2, u))
+
+
+def ventricle_squeeze(u):
+    return _smooth(0.15, 0.3, u) * (1 - _smooth(0.4, 0.55, u))
+
+
+def av_open(u):          # tricuspid and mitral: open while the ventricles fill
+    return 1 - _smooth(0.13, 0.16, u) + _smooth(0.49, 0.53, u)
+
+
+def semilunar_open(u):   # aortic and pulmonary: open while the ventricles eject
+    return _smooth(0.19, 0.22, u) * (1 - _smooth(0.43, 0.46, u))
+
+
+def conduction(u):       # SA node fires, then the impulse reaches the ventricles
+    u %= 1.0
+    return max(math.exp(-u / 0.03), 0.8 * math.exp(-((u - 0.14) / 0.025) ** 2))
+
+
+def motion():
+    us = [i / SAMPLES for i in range(SAMPLES + 1)]
+    ventricles = (LV_BASE + RV_BASE) / 2
+    squeeze = lambda f, depth: [round(1 - depth * f(u), 5) for u in us]
+    open_ = lambda f: [round(f(u), 4) for u in us]
+    tracks = {
+        'left-ventricle': {'pivot': LV_BASE.tolist(), 'scale': squeeze(ventricle_squeeze, 0.12)},
+        'right-ventricle': {'pivot': RV_BASE.tolist(), 'scale': squeeze(ventricle_squeeze, 0.12)},
+        'septum': {'pivot': ventricles.tolist(), 'scale': squeeze(ventricle_squeeze, 0.1)},
+        'coronary-arteries': {'pivot': ventricles.tolist(), 'scale': squeeze(ventricle_squeeze, 0.06)},
+        'right-atrium': {'pivot': TRICUSPID.tolist(), 'scale': squeeze(atria_squeeze, 0.08)},
+        'left-atrium': {'pivot': MITRAL.tolist(), 'scale': squeeze(atria_squeeze, 0.08)},
+        'conduction-system': {'glow': open_(conduction), 'glow_color': '#ffd23a'},
+    }
+    for valve, f in (('tricuspid-valve', av_open), ('mitral-valve', av_open),
+                     ('aortic-valve', semilunar_open), ('pulmonary-valve', semilunar_open)):
+        tracks[valve] = {'glow': open_(f), 'glow_color': '#5dffa8'}
+    phases = [
+        (0.0, 0.15, 'Atria contract · they top up the ventricles through the open tricuspid & mitral valves'),
+        (0.15, 0.2, 'Ventricles start to squeeze · all four valves shut (the "lub")'),
+        (0.2, 0.45, 'Ventricles eject · aortic & pulmonary valves open; blood leaves for the body and lungs'),
+        (0.45, 0.5, 'Ventricles relax · all four valves shut (the "dub")'),
+        (0.5, 1.0, 'Filling · blood flows from the atria through the open tricuspid & mitral valves'),
+    ]
+    return {'label': 'Beat', 'cycle_seconds': BEAT_SECONDS, 'samples': SAMPLES, 'tracks': tracks,
+            'hint': 'Beating, slowed down · turn on Section to cut the heart open and watch the valves light as they open',
+            'phases': [{'from': a, 'to': b, 'text': t} for a, b, t in phases]}

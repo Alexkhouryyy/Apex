@@ -39,8 +39,8 @@ def test_library_lists_every_subject_with_what_the_picker_needs():
     assert [m['id'] for m in assembly.library()][:3] == list(GENERATED), 'the new subjects come first'
     for m in lib.values():
         assert m['title'] and m['fidelity'] and m['parts'] > 0 and m['category']
-    assert lib['jet-engine']['motion'] and lib['dc-motor']['motion']
-    assert not lib['heart']['motion'] and not lib['openmotor-125']['motion']
+    assert lib['jet-engine']['motion'] and lib['dc-motor']['motion'] and lib['heart']['motion'] and lib['car-engine']['motion']
+    assert not lib['openmotor-125']['motion']
 
 
 @pytest.mark.parametrize('bad', ['../secrets', 'Heart', 'heart.json', '', 'a/b', 'x' * 80, None, 'missing-subject'])
@@ -155,7 +155,7 @@ def test_model_comparison_rejects_real_changes(change):
 def test_motion_only_where_a_subject_has_it():
     sid = assembly.create('jet-engine')['session_id']
     assert assembly.apply(sid, 'rotate')['rotating'] is True
-    sid = assembly.create('heart')['session_id']
+    sid = assembly.create('openmotor-125')['session_id']
     with pytest.raises(ValueError, match='only available'):
         assembly.apply(sid, 'rotate')
 
