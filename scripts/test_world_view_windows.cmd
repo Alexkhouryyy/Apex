@@ -14,13 +14,12 @@ if not defined APEX_TEST_PYTHON (
   if exist "..\Apex\venv\Scripts\python.exe" set "APEX_TEST_PYTHON=%CD%\..\Apex\venv\Scripts\python.exe"
 )
 if not defined APEX_TEST_PYTHON set "APEX_TEST_PYTHON=python"
+set "APEX_TEST_ENV_FILE=%CD%\.env"
 if not exist ".env" (
-  if exist "..\Apex\.env" (
-    "%APEX_TEST_PYTHON%" -c "from dotenv import load_dotenv; load_dotenv(r'..\Apex\.env'); import runpy,sys; sys.argv=['main.py','--text']; runpy.run_path('main.py',run_name='__main__')"
-    goto finished
-  )
+  if exist "..\Apex\.env" set "APEX_TEST_ENV_FILE=%CD%\..\Apex\.env"
 )
-"%APEX_TEST_PYTHON%" main.py --text
+rem Load exactly one Apex file, then prevent main/config from searching parents.
+"%APEX_TEST_PYTHON%" -c "import os,runpy,sys; from dotenv import load_dotenv; load_dotenv(os.environ['APEX_TEST_ENV_FILE'],encoding='utf-8-sig'); os.environ['PYTHON_DOTENV_DISABLED']='1'; sys.argv=['main.py','--text']; runpy.run_path('main.py',run_name='__main__')"
 :finished
 if errorlevel 1 (
   echo Apex did not start successfully. Keep this output for diagnosis.

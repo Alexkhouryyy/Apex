@@ -235,7 +235,10 @@ sizes, and three reopen cycles under four-times CPU throttling. No layer request
 continued after closure. The final targeted backend suite passed all 42 checks;
 aircraft/core DOM checks passed. Earlier complete checks passed 3,269 Python tests
 and 43 Node checks; four new address-validation cases are included in the final
-CI run. The Windows launcher itself still needs its first run on the Lenovo.
+CI run. The first Windows launch exposed a second dotenv search that could load a broken
+parent file. The corrected bootstrap passes five regression cases using real
+python-dotenv; the previous bootstrap reproduces the null-character failure.
+The corrected CMD launcher still needs its Windows retry.
 
 Test the complete `feat/world-satellites` branch in a separate Windows worktree
 so the existing checkout stays intact. Stop the old Apex process first so port
@@ -250,8 +253,11 @@ cd /d "%USERPROFILE%\Apex-world-test"
 scripts\test_world_view_windows.cmd
 ```
 
-The launcher reuses a local Python environment when found and reads the existing
-Apex `.env` without copying or printing it. An explicit `APEX_TEST_PYTHON` path
+The launcher reuses a local Python environment when found and reads only the
+worktree `.env`, or the existing sibling Apex `.env` if the worktree has none.
+It then disables automatic dotenv discovery in the launched process so main and
+config cannot accidentally load a different parent `.env`. It does not copy,
+modify or print credentials. Python-dotenv 1.2 or later is required. An explicit `APEX_TEST_PYTHON` path
 can override environment detection. Open `http://127.0.0.1:7860` and use
 **Open World View**. Keep the Command Prompt running. World View uses mouse,
 touchpad and keyboard controls; hand/voice globe navigation is a later milestone.
