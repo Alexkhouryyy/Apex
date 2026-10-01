@@ -12,7 +12,7 @@
   const controls = [...document.querySelectorAll('button[data-place]'), $('world-reset'),
     $('world-search-button'), $('world-map')];
   let viewer = null, enginePromise = null, selected = null, map = 'satellite';
-  let earthquakes = null, flights = null;
+  let earthquakes = null, flights = null, satellites = null;
   let engineReady = Boolean(window.Cesium);
   let initializing = false, disposed = false, searchId = 0, searchController = null;
   let mapId = 0, removeMapErrors = null, tileErrors = 0, saved = null;
@@ -76,7 +76,7 @@
   }
   function setLocation(location, fly = true) {
     if (!viewer || !validLocation(location)) return;
-    earthquakes?.clearSelection(); flights?.clearSelection();
+    earthquakes?.clearSelection(); flights?.clearSelection(); satellites?.clearSelection();
     selected = {lat: location.lat, lng: location.lng, label: String(location.label || 'Selected location').slice(0, 240)};
     viewer.entities.removeAll();
     viewer.entities.add({position: Cesium.Cartesian3.fromDegrees(selected.lng, selected.lat),
@@ -88,6 +88,15 @@
     if (fly) viewer.camera.flyTo({destination: Cesium.Cartesian3.fromDegrees(selected.lng, selected.lat, 90000),
       duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1.2});
     viewer.scene.requestRender(); save();
+  }
+  function updateLocation(location) {
+    if (!viewer || !selected || !validLocation(location)) return;
+    selected = {lat: location.lat, lng: location.lng, label: String(location.label || selected.label).slice(0,240)};
+    const pin = viewer.entities.values[0];
+    if (pin) pin.position = Cesium.Cartesian3.fromDegrees(selected.lng, selected.lat);
+    $('world-selected-name').textContent = selected.label;
+    $('world-selected-coords').textContent = `${selected.lat.toFixed(5)}°, ${selected.lng.toFixed(5)}°`;
+    viewer.scene.requestRender();
   }
   async function changeMap(next, fallback = false) {
     if (!viewer || !['satellite', 'streets', 'outline'].includes(next)) return;
@@ -143,7 +152,8 @@
       viewer.screenSpaceEventHandler.setInputAction(event => {
         // The selected place pin can cover an event marker. Inspect the small,
         // bounded pick stack so a second click still opens the event details.
-        if ((flights || earthquakes) && viewer.scene.drillPick(event.position, 8).some(picked => flights?.pick(picked) || earthquakes?.pick(picked))) return;
+        const picks = (satellites || flights || earthquakes) ? viewer.scene.drillPick(event.position, 8) : [];
+        if (satellites?.pickStack(picks) || picks.some(picked => flights?.pick(picked) || earthquakes?.pick(picked))) return;
         const hit = viewer.camera.pickEllipsoid(event.position, viewer.scene.globe.ellipsoid);
         if (!hit) return;
         const pos = Cesium.Cartographic.fromCartesian(hit);
@@ -163,6 +173,8 @@
           const c = hit ? Cesium.Cartographic.fromCartesian(hit) : viewer.camera.positionCartographic;
           return {lat: Cesium.Math.toDegrees(c.latitude), lng: Cesium.Math.toDegrees(c.longitude)};
         }}) || null;
+      satellites = window.ApexSatellites?.create({viewer, Cesium, selectLocation: setLocation,
+        updateLocation, reportState: window.ApexLayerStatus}) || null;
       controls.forEach(el => { el.disabled = false; });
       $('world-loading').querySelector('p').textContent = 'Preparing Earth geometry and map tiles…';
       // Engine load does not mean the terrain workers have produced a globe.
@@ -177,12 +189,12 @@
       viewer.scene.renderError.addEventListener(() => {
         status('Globe rendering stopped. Reload World View to retry.');
         controls.forEach(el => { el.disabled = true; });
-        earthquakes?.destroy(); earthquakes = null; flights?.destroy(); flights = null;
+        earthquakes?.destroy(); earthquakes = null; flights?.destroy(); flights = null; satellites?.destroy(); satellites = null;
       });
       await changeMap(saved?.map || 'satellite');
       syncVisibility();
     } catch (error) {
-      earthquakes?.destroy(); earthquakes = null; flights?.destroy(); flights = null;
+      earthquakes?.destroy(); earthquakes = null; flights?.destroy(); flights = null; satellites?.destroy(); satellites = null;
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
       viewer = null;
       $('world-loading').hidden = false;
@@ -194,7 +206,7 @@
   function syncVisibility() {
     if (!viewer || viewer.isDestroyed()) return;
     viewer.useDefaultRenderLoop = !document.hidden;
-    earthquakes?.setVisible(!document.hidden); flights?.setVisible(!document.hidden);
+    earthquakes?.setVisible(!document.hidden); flights?.setVisible(!document.hidden); satellites?.setVisible(!document.hidden);
     if (!document.hidden) { viewer.resize(); viewer.scene.requestRender(); }
   }
   function invalidateSearch() {
@@ -249,7 +261,7 @@
   }));
   $('world-map').addEventListener('change', () => changeMap($('world-map').value));
   $('world-clear').addEventListener('click', () => {
-    earthquakes?.clearSelection(); flights?.clearSelection();
+    earthquakes?.clearSelection(); flights?.clearSelection(); satellites?.clearSelection();
     selected = null; viewer?.entities.removeAll(); document.querySelector('.world-readout').hidden = true;
     viewer?.scene.requestRender(); save();
   });
@@ -269,10 +281,10 @@
   document.addEventListener('visibilitychange', syncVisibility);
   window.addEventListener('pagehide', event => {
     save(); invalidateSearch();
-    earthquakes?.setVisible(false); flights?.setVisible(false);
+    earthquakes?.setVisible(false); flights?.setVisible(false); satellites?.setVisible(false);
     if (event.persisted) { if (viewer) viewer.useDefaultRenderLoop = false; return; }
     disposed = true; ++mapId; removeMapErrors?.();
-    earthquakes?.destroy(); earthquakes = null; flights?.destroy(); flights = null;
+    earthquakes?.destroy(); earthquakes = null; flights?.destroy(); flights = null; satellites?.destroy(); satellites = null;
     if (viewer && !viewer.isDestroyed()) viewer.destroy();
     viewer = null;
   });

@@ -86,6 +86,47 @@ limit and five-second spacing for uncached areas bound requests. Provider 429
 responses apply a shared cooldown, respecting numeric Retry-After up to 24 hours.
 There is no persistent aircraft database or history export.
 
+## Milestone 2c: station orbit estimates
+
+Enable **Satellites · space stations** in **Live layers**. It starts off. It loads
+CelesTrak's `stations` group in OMM JSON format and uses pinned satellite.js 6.0.2
+for SGP4 propagation. Positions are **calculated estimates**, not observations.
+The library loads locally only when enabled. Names are from the source group,
+which can include docked craft, cargo vehicles and other associated objects.
+
+- Positions update once a second while visible. Select a point to inspect it
+  without moving the camera, or choose a station from the list to fly to it.
+- Only the selected object's next orbit is drawn. The 121-point path is predicted
+  from the same elements and recalculated each minute. No historical track or
+  satellite video is presented.
+- Details distinguish element epoch, element age, Apex fetch time and calculation
+  time. Altitude uses kilometers above the reference ellipsoid; speed uses inertial
+  kilometers per second. The period is derived from mean motion.
+- Elements older than three days receive an age warning. Propagation beyond 14
+  days from epoch, a decayed solution or invalid output removes its position/path.
+  Failed fetches preserve the original elements and fetch timestamp and show stale
+  status. The age threshold is an app warning, not an accuracy guarantee.
+- Disabling satellites removes their markers and orbit without affecting aircraft
+  or earthquakes. Hiding/closing the view stops propagation, source polling and
+  in-flight requests. Camera position is not moved by station updates.
+- CelesTrak attribution and per-object element links are visible. OMM JSON supports
+  up to nine-digit catalog IDs; no legacy five-digit TLE conversion is used.
+
+The authenticated `/api/world/layers/satellites` route uses one fixed HTTPS source,
+no redirects or forwarded credentials, a 512 KiB stream bound, at most 256 parsed
+records and 64 returned objects. Validated elements and a two-hour source cooldown
+are saved beside the memory database as `*.world-stations.json`. Set
+`APEX_WORLD_STATIONS_CACHE` to override this public-data cache location. An Apex
+restart reuses it; a failed storage write prevents a source request. The dashboard
+server's single process shares a lock across windows. Deployments with separate
+hosts/processes need a shared source broker before adding more workers.
+
+CelesTrak's usage policy requires reusing data and stopping queries on errors:
+<https://celestrak.org/usage-policy.php>. Every source error pauses automatic
+upstream requests. **Retry source** explicitly resumes via an authenticated POST,
+while preserving the original two-hour cooldown. Corrupt cache files require
+storage repair rather than silently re-downloading.
+
 ## Dependencies and integration
 
 CesiumJS **1.124.0** and its assets are loaded from jsDelivr only when World View
@@ -134,10 +175,11 @@ USGS generated times are preserved even when the service returns older data.
 
 ```sh
 python -m pytest tests/test_world_view.py -q
-python -m pytest tests/test_world_layers.py tests/test_world_flights.py -q
+python -m pytest tests/test_world_layers.py tests/test_world_flights.py tests/test_world_satellites.py -q
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_view_ui.cjs
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_earthquakes_ui.cjs
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_flights_ui.cjs
+NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_satellites_ui.cjs
 ```
 
 Backend checks cover auth, input validation, malformed provider records,
@@ -170,6 +212,14 @@ regression checks aircraft picking, unit labels, retained stale snapshots,
 coexisting layers and mobile detail access. Real Cesium entity picking is
 checked independently of the location-selection marker.
 
+Satellite DOM checks use the actual vendored SGP4 library and test a published
+reference vector, OMM/TLE agreement, kilometer-to-meter rendering, element age
+limits, a single predicted orbit, source failure retention, layer coexistence,
+late response cancellation and hidden-page disposal. The real browser uses a
+deterministic OMM by default. Set `APEX_TEST_STATIONS_CACHE` to a valid saved source
+cache for the actual backend/real-source-data path; this avoids downloading the
+same CelesTrak group again during repeated verification.
+
 Before calling this Lenovo-verified, open it there and check wheel/pinch/tilt,
 search a new landmark, close/reopen, reload, resize to phone dimensions, disable
 network access, and confirm that provider credits remain accessible and GPU
@@ -177,9 +227,7 @@ activity drops when World View is closed.
 
 ## Next milestones
 
-1. Propagated satellites with
-   explicit timestamps, unavailable/stale states and independent layer switches.
-2. Structured scene context and confirmed commands for Apex's assistant.
-3. Comfortable opt-in hand navigation using Apex's existing tracking pipeline.
-4. Additional provider layers and photorealistic sources after their terms,
+1. Structured scene context and confirmed commands for Apex's assistant.
+2. Comfortable opt-in hand navigation using Apex's existing tracking pipeline.
+3. Additional provider layers and photorealistic sources after their terms,
    configuration and performance have been checked.
