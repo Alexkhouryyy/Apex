@@ -23,7 +23,9 @@
     }
     return {...data, events: [...records.values()].sort((a, b) => b.time - a.time)};
   }
-  window.ApexEarthquakes = {create({viewer, Cesium, selectLocation}) {
+  window.ApexEarthquakes = {create({viewer, Cesium, selectLocation, reportState = (name, state) => {
+    $('world-layer-summary').textContent = state ? `Live layers · ${name} ${state}` : 'Live layers';
+  }}) {
     const toggle = $('quake-toggle'), refreshButton = $('quake-refresh');
     const source = new Cesium.CustomDataSource('Apex earthquakes');
     viewer.dataSources.add(source);
@@ -52,9 +54,8 @@
     }
     function updateStatus() {
       const el = $('quake-status');
-      $('world-layer-summary').textContent = !enabled ? 'Live layers' : isStale() ?
-        'Live layers · Earthquakes · stale' : !snapshot && notice && !busy ?
-        'Live layers · Earthquakes · unavailable' : 'Live layers · Earthquakes on';
+      reportState('Earthquakes', !enabled ? '' : isStale() ? 'stale' :
+        !snapshot && notice && !busy ? 'unavailable' : 'on');
       refreshButton.disabled = !enabled || busy || !visible;
       el.dataset.state = isStale() ? 'stale' : 'current';
       el.textContent = !enabled ? 'Off · enable to load the USGS feed.' : busy ?
@@ -158,7 +159,7 @@
       },
       destroy() {
         if (disposed) return;
-        disposed = true; stop();
+        disposed = true; stop(); reportState('Earthquakes', '');
         toggle.removeEventListener('change', toggleLayer); refreshButton.removeEventListener('click', refresh);
         toggle.disabled = true; refreshButton.disabled = true;
         if (!viewer.isDestroyed()) viewer.dataSources.remove(source, true);

@@ -56,6 +56,15 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
   return route.fulfill({contentType:'application/json',body:JSON.stringify({source:'USGS',generated_at:now,fetched_at:now,stale:false,refresh_failed:false,
    events:[{id:'us-browser-test',lat:34.12,lng:35.65,depth_km:12,magnitude:4.2,place:'Browser test event',time:now-60000,updated:now,review_status:'reviewed'}]})});
  });
+ const liveFlights=process.env.APEX_TEST_LIVE_FLIGHTS==='1';let flightOutage=false,flightCalls=0;
+ await ctx.route('**/api/world/layers/flights?*',async route=>{
+  ++flightCalls;assert.equal(route.request().headers().authorization,'Bearer '+token);
+  if(flightOutage)return route.fulfill({status:503,contentType:'application/json',body:'{}'});
+  if(liveFlights)return route.continue();
+  const u=new URL(route.request().url()),now=Date.now();
+  return route.fulfill({contentType:'application/json',body:JSON.stringify({source:'ADSB.lol',generated_at:now,fetched_at:now,area:{lat:Number(u.searchParams.get('lat')),lng:Number(u.searchParams.get('lng')),radius_nm:250},
+   aircraft:[{id:'abc123',callsign:'MEA TEST',registration:'OD-TEST',aircraft_type:'A320',lat:34.13,lng:35.67,position_at:now-1500,on_ground:false,altitude_ft:35000,altitude_kind:'barometric',speed_knots:440,track_deg:180,position_source:'adsb_icao'}]})});
+ });
  const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')console.log('Console:',m.text().slice(0,500));});page.on('requestfailed',r=>console.log('Failed request:',r.url().split('?')[0],r.failure()?.errorText));
  await ctx.route('**/static/world-view.js*',route=>route.fulfill({contentType:'application/javascript',body:fs.readFileSync(path.join(root,'dashboard/static/world-view.js'),'utf8').replace('viewer = new Cesium.Viewer','viewer = window.__viewer = new Cesium.Viewer')}));
  await page.goto(origin+'/world');await page.bringToFront();
@@ -105,6 +114,41 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  await page.waitForFunction(()=>document.querySelector('#quake-status').textContent.includes('Stale snapshot'));
  assert.equal(await page.locator('#quake-times').innerText(),quakeTimes);
  assert.equal(await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex earthquakes')[0].entities.values.length),retainedMarkers);
+ assert.equal(flightCalls,0,'aircraft must start off');
+ await page.locator('#flight-toggle').check();await page.locator('#flight-events button').first().waitFor({timeout:20000});
+ await page.locator('#flight-events button').first().click();await page.locator('#flight-details').waitFor({state:'visible'});
+ assert.equal(await page.locator('#quake-details').isVisible(),false);
+ assert.match(await page.locator('#world-layer-summary').innerText(),/Earthquakes stale.*Flights/);
+ const flightId=(await page.locator('#flight-icao').innerText()).toLowerCase();
+ assert.match(await page.locator('#flight-position-time').innerText(),/UTC$/);
+ assert.match(await page.locator('#flight-speed').innerText(),/kn|Unknown/);
+ await page.waitForTimeout(1500);await page.waitForFunction(()=>window.__viewer.scene.globe.tilesLoaded,null,{timeout:60000});
+ await page.locator('#world-clear').click();
+ const flightPoint=await page.evaluate(id=>{
+  const v=window.__viewer,e=v.dataSources.getByName('Apex flights')[0].entities.getById('flight:'+id);
+  const p=Cesium.SceneTransforms.worldToWindowCoordinates(v.scene,e.position.getValue(Cesium.JulianDate.now()));return {x:p.x,y:p.y};
+ },flightId);
+ await page.locator('#world-globe canvas').click({position:flightPoint});await page.locator('#flight-details').waitFor({state:'visible'});
+ assert.equal((await page.locator('#flight-icao').innerText()).toLowerCase(),flightId);
+ await page.locator('#world-globe canvas').click({position:flightPoint});await page.locator('#flight-details').waitFor({state:'visible'});
+ if(shots)await page.screenshot({path:path.join(shots,'world-view-flights.png')});
+ await page.setViewportSize({width:390,height:844});
+ const flightTools=await page.locator('.world-tools').boundingBox(),flightDetails=await page.locator('.world-readout').boundingBox();
+ assert.ok(flightTools.y+flightTools.height<=flightDetails.y);
+ if(shots)await page.screenshot({path:path.join(shots,'world-view-flights-mobile.png')});
+ await page.setViewportSize({width:1440,height:1000});
+ const flightTimes=await page.locator('#flight-times').innerText();
+ const flightCount=await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex flights')[0].entities.values.length);
+ flightOutage=true;await page.locator('#flight-refresh').click();
+ await page.waitForFunction(()=>document.querySelector('#flight-status').textContent.includes('Stale snapshot'));
+ assert.equal(await page.locator('#flight-times').innerText(),flightTimes);
+ assert.equal(await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex flights')[0].entities.values.length),flightCount);
+ await page.locator('#flight-toggle').uncheck();
+ assert.equal(await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex flights')[0].entities.values.length),0);
+ assert.equal(await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex earthquakes')[0].entities.values.length),retainedMarkers);
+ assert.match(await page.locator('#world-layer-summary').innerText(),/Earthquakes stale/);
+ assert.doesNotMatch(await page.locator('#world-layer-summary').innerText(),/Flights/);
+ console.log('Aircraft:',liveFlights?'live ADSB.lol':'deterministic feed','; real markers, picking, stale fallback, units and independent layers passed.');
  await page.locator('#quake-toggle').uncheck();
  assert.equal(await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex earthquakes')[0].entities.values.length),0);
  await page.getByRole('button',{name:'Byblos',exact:true}).click();
@@ -142,6 +186,6 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  await page.locator('.world-dialog iframe').waitFor({state:'detached'});
  assert.equal(await page.evaluate(()=>document.activeElement.id),'world-open');
  console.log('Escape closes and focus returns',await page.evaluate(()=>document.activeElement.id));
- console.log('PASS: real Earth renders; navigation, earthquake layer, restoration, mobile fit, Command open/close, disposal and focus.');
+ console.log('PASS: real Earth renders; navigation, earthquake/aircraft layers, restoration, mobile fit, Command open/close, disposal and focus.');
 }finally{if(b)await b.close();await stop();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
