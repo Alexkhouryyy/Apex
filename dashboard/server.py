@@ -126,6 +126,8 @@ from dashboard.study import router as study_router
 from dashboard.workspaces import router as workspaces_router
 app.include_router(workspaces_router)
 app.include_router(study_router)
+from dashboard.world import router as world_router
+app.include_router(world_router)
 from dashboard.team import router as team_router
 app.include_router(team_router)
 from dashboard.apps import router as apps_router
@@ -209,7 +211,7 @@ async def _auth(request: Request, call_next):
     # NOT exempt, so this must stay an exact match: `path.startswith("/board")`
     # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
-            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home"
+            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home" or path == "/world"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
     # Inbound webhooks can't present a bearer token, so they authenticate
