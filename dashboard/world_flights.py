@@ -40,7 +40,9 @@ def _snapshot(payload, fetched_at, area):
         identity = raw.get('hex')
         lat, lng, age = raw.get('lat'), raw.get('lon'), raw.get('seen_pos')
         if (not isinstance(identity, str) or not re.fullmatch(r'[0-9a-fA-F]{6}', identity)
-                or raw.get('type') not in ('adsb_icao', 'adsb_icao_nt', 'mlat', 'mode_s', 'other')
+                or raw.get('type') not in ('adsb_icao', 'adsb_icao_nt', 'adsr_icao', 'tisb_icao', 'adsc',
+                                            'mlat', 'other', 'mode_s', 'adsb_other', 'adsr_other',
+                                            'tisb_other', 'tisb_trackfile')
                 or not _number(lat, -90, 90) or not _number(lng, -180, 180)
                 or not _number(age, 0, 120)):
             continue

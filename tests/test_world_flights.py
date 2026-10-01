@@ -123,3 +123,11 @@ def test_provider_rate_limit_applies_across_regions(rig, monkeypatch):
     response = client.get('/api/world/layers/flights?lat=1&lng=1', headers=headers)
     assert response.status_code == 503 and response.headers['retry-after'] == '140'
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('reception', ['adsb_icao', 'adsb_icao_nt', 'adsr_icao', 'tisb_icao',
+                                     'adsc', 'mlat', 'other', 'mode_s', 'adsb_other',
+                                     'adsr_other', 'tisb_other', 'tisb_trackfile'])
+def test_documented_reception_types_keep_valid_positions(reception):
+    data = flights._snapshot(feed([aircraft(type=reception)]), NOW, (34.1, 35.6))
+    assert data['aircraft'][0]['position_source'] == reception
