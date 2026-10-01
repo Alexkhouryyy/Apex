@@ -13,7 +13,7 @@
       throw new Error('Invalid aircraft snapshot.');
     const records = new Map(), text = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
     for (const a of data.aircraft.slice(0, 500)) {
-      if (!a || typeof a.id !== 'string' || !/^[0-9a-f]{6}$/.test(a.id) || !num(a.lat, -90, 90) || !num(a.lng, -180, 180) ||
+      if (!a || typeof a.id !== 'string' || !/^~?[0-9a-f]{6}$/.test(a.id) || !num(a.lat, -90, 90) || !num(a.lng, -180, 180) ||
           !num(a.position_at, data.generated_at - 120000, data.generated_at)) continue;
       records.set(a.id, {...a, callsign: text(a.callsign, 16), registration: text(a.registration, 20),
         aircraft_type: text(a.aircraft_type, 12), position_source: text(a.position_source, 24),
@@ -47,6 +47,7 @@
       if (!selection) return;
       const a = selection;
       for (const [id, value] of Object.entries({
+        'flight-address-label': a.id.startsWith('~') ? 'Non-ICAO address' : 'ICAO',
         'flight-icao': a.id.toUpperCase(), 'flight-registration': a.registration || 'Unknown',
         'flight-type': a.aircraft_type || 'Unknown',
         'flight-altitude': a.on_ground ? 'On ground' : a.altitude_ft === null ? 'Unknown' : `${Math.round(a.altitude_ft).toLocaleString()} ft · ${a.altitude_kind}`,

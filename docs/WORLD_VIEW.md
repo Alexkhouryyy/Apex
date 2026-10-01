@@ -45,7 +45,7 @@ requested until it is enabled. It uses the official USGS summary feed:
   or clearing the selection removes the event details. Reopening restores the
   generic selected location, not a saved copy of the feed's event metadata.
 
-No flight, satellite, weather, vessel or camera feeds are enabled yet.
+All layers start off by default. Weather, vessel and camera feeds are not implemented.
 
 ## Milestone 2b: regional aircraft
 
@@ -220,10 +220,63 @@ deterministic OMM by default. Set `APEX_TEST_STATIONS_CACHE` to a valid saved so
 cache for the actual backend/real-source-data path; this avoids downloading the
 same CelesTrak group again during repeated verification.
 
-Before calling this Lenovo-verified, open it there and check wheel/pinch/tilt,
-search a new landmark, close/reopen, reload, resize to phone dimensions, disable
-network access, and confirm that provider credits remain accessible and GPU
-activity drops when World View is closed.
+## Lenovo comfort check before merge
+
+The optional `APEX_TEST_COMFORT=1` browser run checks 1920×1080 and 1366×768
+layout, reduced-motion camera navigation, idle rendering, one-second orbit
+updates without camera movement, and three open/close cycles under four-times
+CPU throttling. These checks use headless software WebGL in the cloud. They do
+not establish Lenovo frame rate, battery use, fan noise or physical comfort.
+
+On 2026-10-01 the cloud run passed with zero page errors: zero rendered frames
+during four seconds idle, 15 rendered frames during three seconds of satellite
+updates with a fixed camera, immediate reduced-motion navigation, both desktop
+sizes, and three reopen cycles under four-times CPU throttling. No layer requests
+continued after closure. The final targeted backend suite passed all 42 checks;
+aircraft/core DOM checks passed. Earlier complete checks passed 3,269 Python tests
+and 43 Node checks; four new address-validation cases are included in the final
+CI run. The Windows launcher itself still needs its first run on the Lenovo.
+
+Test the complete `feat/world-satellites` branch in a separate Windows worktree
+so the existing checkout stays intact. Stop the old Apex process first so port
+7860 is free. With the usual checkout at `%USERPROFILE%\Apex`, run in Command
+Prompt:
+
+```bat
+cd /d "%USERPROFILE%\Apex"
+git fetch origin
+git worktree add "%USERPROFILE%\Apex-world-test" origin/feat/world-satellites
+cd /d "%USERPROFILE%\Apex-world-test"
+scripts\test_world_view_windows.cmd
+```
+
+The launcher reuses a local Python environment when found and reads the existing
+Apex `.env` without copying or printing it. An explicit `APEX_TEST_PYTHON` path
+can override environment detection. Open `http://127.0.0.1:7860` and use
+**Open World View**. Keep the Command Prompt running. World View uses mouse,
+touchpad and keyboard controls; hand/voice globe navigation is a later milestone.
+
+Spend at least five minutes on the Lenovo:
+
+1. With layers off, drag, wheel/pinch zoom and right-drag tilt. Check for jumps,
+   fatigue and readable controls at normal Windows scaling. Visit Byblos and
+   enter another city or coordinates. Confirm provider credits are reachable.
+2. Enable earthquakes, regional aircraft and station satellites. Inspect one of
+   each, switch selections and turn layers off/on. Camera updates must not pull
+   you away. Readouts should stay reachable and stale warnings understandable.
+3. Close/reopen three times; use Escape from the search field. Confirm focus
+   returns to Command, your location/map are restored, and nothing gets stuck.
+4. Watch Task Manager's browser CPU/GPU before opening, while navigating, after
+   30 seconds idle, and after closing. Compare with the same Command baseline;
+   GPU activity should settle and no World View frame should remain after close.
+5. Return to Board/Study and try the existing hand controls for a minute. Check
+   that opening/closing World View has not made those controls less comfortable.
+   Note visible stalls, fan changes, warmth, and any wrist/shoulder strain.
+
+Record browser, Windows display scaling, plugged-in/battery status, smoothness,
+selection comfort, idle/closed behavior, and any issue with its exact action.
+Physical Lenovo results are pending until the user reports them. Merge #23,
+then #24, then #25 only after that check passes, and re-check main CI afterward.
 
 ## Next milestones
 

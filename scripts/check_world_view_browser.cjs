@@ -6,6 +6,8 @@ const root=path.resolve(__dirname,'..');
 const origin='http://127.0.0.1:8792';
 const token='world-browser-test-only';
 const shots=process.env.APEX_WORLD_SCREENSHOTS;
+const comfort=process.env.APEX_TEST_COMFORT==='1';
+const comfortResults={renderer:'headless software WebGL; not Lenovo measurements'};
 if(shots)fs.mkdirSync(shots,{recursive:true});
 const boot=`import sys, os
 if os.getenv("APEX_TEST_STATIONS_CACHE"):
@@ -34,7 +36,7 @@ let b;
 try{
 await start();
 b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:process.env.APEX_CHROMIUM_PATH}:{}),args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
- const ctx=await b.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block'});
+ const ctx=await b.newContext({viewport:comfort?{width:1920,height:1080}:{width:1440,height:1000},serviceWorkers:'block',reducedMotion:comfort?'reduce':'no-preference'});
  const cache=new Map();
  // Optional Node proxy transport uses the same TLS verification and runtime
  // proxy policy as fetch. Native Chromium network is the default.
@@ -82,10 +84,21 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  await page.locator('#world-reset:enabled').waitFor({timeout:60000});
  await page.waitForFunction(()=>window.__viewer.scene.globe.tilesLoaded,null,{timeout:60000});
  assert.equal(await page.locator('#world-loading').isVisible(),false);
+ if(comfort){
+  await page.waitForTimeout(500);
+  await page.evaluate(()=>{window.__frames=0;window.__viewer.scene.postRender.addEventListener(()=>++window.__frames);});
+  await page.waitForTimeout(4000);
+  comfortResults.idleFramesIn4Seconds=await page.evaluate(()=>window.__frames);
+  assert.ok(comfortResults.idleFramesIn4Seconds<=4,'idle globe should not render continuously');
+  await page.evaluate(()=>{const camera=window.__viewer.camera,fly=camera.flyTo.bind(camera);camera.flyTo=options=>{window.__flyDuration=options.duration;return fly(options);};});
+ }
+
  if(shots)await page.screenshot({path:path.join(shots,'world-view-desktop.png')});
  await page.getByRole('button',{name:'Byblos',exact:true}).click();
  await page.waitForFunction(()=>window.__viewer.camera.positionCartographic.height<100000,null,{timeout:10000});await page.waitForFunction(()=>window.__viewer.scene.globe.tilesLoaded,null,{timeout:60000});
  console.log('Selected',await page.locator('#world-selected-coords').innerText());
+ if(comfort){assert.equal(await page.evaluate(()=>window.__flyDuration),0,'reduced motion should remove camera flights');comfortResults.reducedMotionFlightDuration=0;}
+
  if(shots)await page.screenshot({path:path.join(shots,'world-view-byblos.png')});
  assert.equal(quakeCalls,0,'earthquakes must start off');
  await page.locator('.world-layers summary').click();await page.locator('#quake-toggle').check();
@@ -182,6 +195,24 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  assert.ok(satTools.y+satTools.height<=satDetails.y);
  if(shots)await page.screenshot({path:path.join(shots,'world-view-satellites-mobile.png')});
  await page.setViewportSize({width:1440,height:1000});
+
+ if(comfort){
+  for(const size of [{width:1920,height:1080},{width:1366,height:768}]){
+   await page.setViewportSize(size);
+   const tools=await page.locator('.world-tools').boundingBox(),details=await page.locator('.world-readout').boundingBox();
+   assert.ok(tools.x+tools.width<details.x,'desktop panels should leave the globe accessible');
+   assert.ok(details.y>=0&&details.y+details.height<=size.height,'details must fit the viewport');
+   assert.equal(await page.evaluate(()=>document.body.scrollWidth<=innerWidth),true);
+  }
+  await page.setViewportSize({width:1920,height:1080});
+  await page.waitForTimeout(500);
+  const cameraBefore=await page.evaluate(()=>{window.__frames=0;return window.__viewer.camera.position.toString();});
+  await page.waitForTimeout(3000);
+  comfortResults.satelliteFramesIn3Seconds=await page.evaluate(()=>window.__frames);
+  assert.ok(comfortResults.satelliteFramesIn3Seconds>=2&&comfortResults.satelliteFramesIn3Seconds<=15,'one-second propagation should not trigger continuous rendering');
+  assert.equal(await page.evaluate(()=>window.__viewer.camera.position.toString()),cameraBefore,'satellite updates must leave the camera still');
+  comfortResults.desktopViewports=['1920x1080','1366x768'];
+ }
  const satTimes=await page.locator('#sat-times').innerText();satOutage=true;await page.locator('#sat-refresh').click();
  await page.waitForFunction(()=>document.querySelector('#sat-status').textContent.includes('Stale source'));
  assert.equal(await page.locator('#sat-times').innerText(),satTimes);
@@ -233,6 +264,27 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  await page.locator('.world-dialog iframe').waitFor({state:'detached'});
  assert.equal(await page.evaluate(()=>document.activeElement.id),'world-open');
  console.log('Escape closes and focus returns',await page.evaluate(()=>document.activeElement.id));
+ if(comfort){
+  // Exercise slower CPU scheduling, then verify disposal with an enabled layer.
+  satOutage=false;
+  const cdp=await ctx.newCDPSession(page);await cdp.send('Emulation.setCPUThrottlingRate',{rate:4});
+  for(let n=0;n<3;n++){
+   await page.getByRole('link',{name:'Open World View'}).click();
+   iframe=page.frameLocator('iframe[title="Apex World View"]');await iframe.locator('#world-reset:enabled').waitFor({timeout:30000});
+   assert.equal(await page.locator('.world-dialog iframe').count(),1);
+   await iframe.locator('.world-layers summary').click();await iframe.locator('#sat-toggle').check();
+   await iframe.locator('#sat-events button:enabled').first().waitFor({timeout:20000});
+   await iframe.locator('#world-query').focus();await page.keyboard.press('Escape');
+   await page.locator('.world-dialog iframe').waitFor({state:'detached'});
+   assert.equal(await page.evaluate(()=>document.activeElement.id),'world-open');
+  }
+  const callsAtClose={quakeCalls,flightCalls,satCalls};await page.waitForTimeout(3200);
+  assert.deepEqual({quakeCalls,flightCalls,satCalls},callsAtClose,'closed panels must stop layer requests');
+  comfortResults.reopenCyclesAt4xCpuThrottle=3;comfortResults.closedLayerRequests=0;
+  await cdp.send('Emulation.setCPUThrottlingRate',{rate:1});
+  assert.deepEqual(errors,[]);console.log('COMFORT CHECKS:',JSON.stringify(comfortResults));
+ }
+
  console.log('PASS: real Earth renders; navigation, earthquake/aircraft/satellite layers, restoration, mobile fit, Command open/close, disposal and focus.');
 }finally{if(b)await b.close();await stop();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
