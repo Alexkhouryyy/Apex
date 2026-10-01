@@ -141,7 +141,9 @@
       viewer.scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
       viewer.camera.moveEnd.addEventListener(save);
       viewer.screenSpaceEventHandler.setInputAction(event => {
-        if (earthquakes?.pick(viewer.scene.pick(event.position))) return;
+        // The selected place pin can cover an event marker. Inspect the small,
+        // bounded pick stack so a second click still opens the event details.
+        if (earthquakes && viewer.scene.drillPick(event.position, 8).some(picked => earthquakes.pick(picked))) return;
         const hit = viewer.camera.pickEllipsoid(event.position, viewer.scene.globe.ellipsoid);
         if (!hit) return;
         const pos = Cesium.Cartographic.fromCartesian(hit);

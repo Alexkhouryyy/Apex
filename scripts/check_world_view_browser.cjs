@@ -96,6 +96,9 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  await page.locator('#world-globe canvas').click({position:point});
  await page.locator('#quake-details').waitFor({state:'visible'});
  assert.equal(await page.locator('#world-selected-name').innerText(),quakeName);
+ await page.locator('#world-globe canvas').click({position:point});
+ await page.locator('#quake-details').waitFor({state:'visible'});
+ assert.equal(await page.locator('#world-selected-name').innerText(),quakeName,'the selected-location pin must not swallow repeated event clicks');
  const quakeTimes=await page.locator('#quake-times').innerText();
  const retainedMarkers=await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex earthquakes')[0].entities.values.length);
  quakeOutage=true;await page.locator('#quake-refresh').click();

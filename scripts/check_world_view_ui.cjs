@@ -6,7 +6,7 @@ const html = fs.readFileSync(path.join(dir, 'world.html'), 'utf8');
 const code = fs.readFileSync(path.join(dir, 'world-view.js'), 'utf8');
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 
-function open(state, failMap = false, noEngine = false) {
+function open(state, failMap = false, noEngine = false, eventLayer = false) {
   const dom = new JSDOM(html, {url:'https://apex.test/world', runScripts:'outside-only'});
   const w = dom.window, $ = id => w.document.getElementById(id);
   if (state) w.localStorage.setItem('apex.world.view.v1', state);
@@ -42,6 +42,16 @@ function open(state, failMap = false, noEngine = false) {
   w.fetch = async () => new Response(JSON.stringify({results:[]}));
   const cesium = w.Cesium;
   if (noEngine) delete w.Cesium;
+  if (eventLayer) w.ApexEarthquakes = {create({viewer, selectLocation}) {
+    viewer.scene.drillPick = (_position, limit) => {
+      assert.equal(limit, 8);
+      return [{id:'place-pin'}, {id:'quake-marker'}];
+    };
+    return {clearSelection(){},setVisible(){},destroy(){},pick(picked){
+      if (picked.id !== 'quake-marker') return false;
+      selectLocation({lat:34.12,lng:35.65,label:'M 4.2 · Event'},false);return true;
+    }};
+  }};
   w.eval(code);
   return {w,$,dom,cesium,get viewer(){return viewer;},get destroyed(){return destroyed;},get layers(){return layers;},flights,click:() => clicks({position:{}})};
 }
@@ -64,6 +74,9 @@ function open(state, failMap = false, noEngine = false) {
   p.$('world-query').value = '34.2, 35.7'; p.$('world-search').dispatchEvent(new p.w.Event('submit'));
   assert.equal(p.flights.at(-1).destination.lat, 34.2);
   p.click(); assert.equal(p.$('world-selected-name').textContent, 'Selected location');
+  const overlap = open(null,false,false,true); await tick();
+  overlap.click(); overlap.click();
+  assert.equal(overlap.$('world-selected-name').textContent,'M 4.2 · Event','a covering place pin must not replace earthquake inspection');
 
   // An older provider response must not replace a newer local selection.
   let finish;
@@ -123,6 +136,6 @@ function open(state, failMap = false, noEngine = false) {
   assert.equal(c.document.querySelectorAll('iframe').length,0);
   assert.equal(c.document.activeElement.id,'world-open');
   c.close();
-  for(const x of [p,restored,fallback,badState,missingEngine])x.dom.window.close();
+  for(const x of [p,restored,fallback,badState,missingEngine,overlap])x.dom.window.close();
   console.log('World View controls: navigation, state, search races, text escaping, failure recovery and disposal pass.');
 })().catch(error => {console.error(error);process.exitCode=1;});
