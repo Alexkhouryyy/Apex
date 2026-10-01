@@ -7,6 +7,12 @@ the WAV route still works for callers that cannot stream.
 """
 from __future__ import annotations
 
+from pathlib import Path
+from scripts.voice_library import Voice as _Voice
+_CELINE = _Voice('celine', 'CELINE', Path('celine.ogg'), 'Hello.', 1.0, folder=False)
+_LIB = lambda: [_CELINE]
+
+
 import importlib.util
 import io
 import threading
@@ -29,7 +35,7 @@ class FakeVoice:
         self.chunks, self.gate, self.fail_after = chunks, gate, fail_after
         self.calls = []
 
-    def stream(self, text):
+    def stream(self, text, voice=None):
         self.calls.append(text)
         for i in range(self.chunks):
             if self.fail_after is not None and i == self.fail_after:
@@ -40,7 +46,7 @@ class FakeVoice:
 
 
 def client(voice):
-    return TestClient(fast.create_app(voice), base_url="http://127.0.0.1")
+    return TestClient(fast.create_app(voice, _LIB), base_url="http://127.0.0.1")
 
 
 class live:
@@ -53,7 +59,7 @@ class live:
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             self.port = s.getsockname()[1]
-        self.server = uvicorn.Server(uvicorn.Config(fast.create_app(voice), host="127.0.0.1",
+        self.server = uvicorn.Server(uvicorn.Config(fast.create_app(voice, _LIB), host="127.0.0.1",
                                                     port=self.port, log_level="error"))
         self.thread = threading.Thread(target=self.server.run, daemon=True)
 
@@ -152,7 +158,7 @@ def test_guards():
     assert c.post("/generate/pcm", json={"text": "hi", "profile_id": "other"}).status_code == 400
     assert c.post("/generate/pcm", content=b"{nope").status_code == 400
     assert c.post("/generate/pcm", json={"text": "hi"}, headers={"Origin": "https://evil.example"}).status_code == 403
-    remote = TestClient(fast.create_app(FakeVoice()), base_url="http://192.168.1.5")
+    remote = TestClient(fast.create_app(FakeVoice(), _LIB), base_url="http://192.168.1.5")
     assert remote.get("/health").status_code == 403
 
 

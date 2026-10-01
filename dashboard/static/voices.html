@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><script src="/static/theme.js"></script><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Apex · Voices</title>
+  <link rel="icon" href="/static/icons/apex-refined.svg">
+  <link rel="stylesheet" href="/static/voices.css">
+  <script src="/static/voices.js" defer></script>
+<link rel="stylesheet" href="/static/brand.css?v=brand40"><link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+<main id="voices">
+  <header><a href="/" class="brand apex-brand" aria-label="Open Apex dashboard"><span class="apex-logo" aria-hidden="true"></span><span class="apex-wordmark">APEX</span><small>VOICES</small></a>
+    <nav><a href="/companion">Companion</a></nav></header>
+
+  <section class="intro">
+    <h1>Voices</h1>
+    <p>Apex can speak in any voice you record here: yours, Celine's, anyone who agrees. Each one is about 25 seconds of natural speech and the exact words said. Everything stays on this computer.</p>
+    <p id="server" class="server" role="status">Checking the voice server…</p>
+  </section>
+
+  <section class="card">
+    <h2>Your voices</h2>
+    <ul id="list" class="list"><li class="muted">Loading…</li></ul>
+    <p class="fine">Folder: <code id="folder">…</code></p>
+  </section>
+
+  <section class="card" id="new">
+    <h2>New voice</h2>
+    <ol class="steps">
+      <li><label>Name <input id="name" maxlength="40" placeholder="Alex" autocomplete="off"></label></li>
+      <li><label for="script">Read this out loud, the way you want the voice to sound</label>
+        <textarea id="script" rows="5" maxlength="2000"></textarea>
+        <p class="fine">Warm and relaxed in, warm and relaxed out: the clone copies the tone of the recording. Quiet room, no music, phone or mic about a hand's width away. You can change the words, as long as the box matches exactly what you say.</p></li>
+      <li>
+        <div class="recorder">
+          <button id="record" class="primary">● Record</button>
+          <span id="timer" class="timer">0:00</span>
+          <div class="meter" aria-hidden="true"><i id="level"></i></div>
+          <label class="upload">or upload a recording <input id="upload" type="file" accept="audio/*"></label>
+        </div>
+        <audio id="playback" controls hidden></audio>
+      </li>
+    </ol>
+    <div id="report" class="report" hidden></div>
+    <label class="check"><input type="checkbox" id="consent"> This is my voice, or the person agreed to have their voice cloned.</label>
+    <label class="check" id="replace-row" hidden><input type="checkbox" id="replace"> Replace the existing voice with this name</label>
+    <div class="actions"><button id="recheck" disabled>Check again</button><button id="save" class="primary" disabled>Save voice</button></div>
+    <p id="message" class="message" role="status"></p>
+  </section>
+
+  <dialog id="login"><form id="login-form"><h2>Apex token</h2><p>Enter your dashboard token to manage voices.</p><input id="token" type="password" autocomplete="current-password"><p id="login-error" class="message error"></p><button class="primary">Continue</button></form></dialog>
+</main>
+</body>
+</html>

@@ -10,6 +10,9 @@ Start Apex with **`Start-Apex-Celine-Fast.cmd`** and wait for
 `CELINE READY (streaming)`. Open `http://127.0.0.1:7860/companion` and press
 **Ctrl+F5** once after each update.
 
+
+More voices, including yours: record them on the Voices page (`/voices`). See [VOICES.md](VOICES.md).
+
 ---
 
 ## Voice mode: talk only

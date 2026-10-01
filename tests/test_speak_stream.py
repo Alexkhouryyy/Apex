@@ -6,6 +6,12 @@ is fake.
 """
 from __future__ import annotations
 
+from pathlib import Path
+from scripts.voice_library import Voice as _Voice
+_CELINE = _Voice('celine', 'CELINE', Path('celine.ogg'), 'Hello.', 1.0, folder=False)
+_LIB = lambda: [_CELINE]
+
+
 import importlib.util
 import json
 import socket
@@ -30,7 +36,7 @@ class FakeVoice:
     def __init__(self, gate=None):
         self.gate = gate
 
-    def stream(self, text):
+    def stream(self, text, voice=None):
         for i in range(3):
             yield np.full(2400, 0.25, dtype=np.float32)
             if i == 0 and self.gate is not None:
@@ -69,7 +75,7 @@ def apex(monkeypatch):
 
 def voice_at(monkeypatch, voice):
     import config
-    srv, port = _serve(fast.create_app(voice))
+    srv, port = _serve(fast.create_app(voice, _LIB))
     monkeypatch.setattr(config, "VOICEBOX_URL", f"http://127.0.0.1:{port}", raising=False)
     return srv
 
