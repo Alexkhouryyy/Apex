@@ -2619,9 +2619,32 @@ async function loadApprovals() {
     }).join('') : '<div class="apv-empty">No forged tools waiting. ✓</div>';
   } catch (e) { forgedEl.innerHTML = '<div class="apv-empty">Could not load forged tools.</div>'; }
 
+  // Memories, notes, skills and goal proposals staged by agent/approvals.py,
+  // including memories an outside AI tool suggested through Apex's MCP server.
+  // Emails have their own place in the inbox.
+  let nWrites = 0;
+  const writesEl = document.getElementById('apv-writes');
+  try {
+    const d = await api('/api/staged-writes');
+    const writes = (d.writes || []).filter(w => w.kind !== 'email');
+    nWrites = writes.length;
+    const label = {remember: 'Memory from an outside AI tool', memory: 'Memory', note: 'Note', skill: 'Skill',
+                   skill_code: 'Skill code rewrite', goal_proposal: 'Suggested goal'};
+    if (writesEl) writesEl.innerHTML = writes.length ? writes.map(w => `<div class="apv-card" data-id="${w.id}">
+        <div class="apv-head"><span class="apv-tool">${escapeHTML(label[w.kind] || w.kind)}</span>
+          <span class="apv-time">${fmtDate(w.ts)}</span></div>
+        <div class="apv-rationale">${escapeHTML(w.summary || '')}</div>
+        <div class="apv-actions">
+          <button class="apv-approve" data-kind="write" data-id="${w.id}">Approve &amp; save</button>
+          <button class="apv-reject" data-kind="write" data-id="${w.id}">Reject</button>
+        </div></div>`).join('') : '<div class="apv-empty">Nothing waiting to be saved. ✓</div>';
+  } catch (e) { if (writesEl) writesEl.innerHTML = '<div class="apv-empty">Could not load staged writes.</div>'; }
+
   document.getElementById('apv-actions-count').textContent = nActions;
   document.getElementById('apv-forged-count').textContent = nForged;
-  _updateApprovalsBadge(nActions + nForged);
+  const writesCount = document.getElementById('apv-writes-count');
+  if (writesCount) writesCount.textContent = nWrites;
+  _updateApprovalsBadge(nActions + nForged + nWrites);
 
   document.querySelectorAll('#tab-approvals .apv-approve, #tab-approvals .apv-reject').forEach(b => {
     b.addEventListener('click', () => _decideApproval(b.dataset.kind, b.dataset.id,
@@ -2630,7 +2653,7 @@ async function loadApprovals() {
 }
 
 async function _decideApproval(kind, id, decision, btn) {
-  const base = kind === 'forged' ? '/api/forged-tools' : '/api/pending-actions';
+  const base = kind === 'forged' ? '/api/forged-tools' : kind === 'write' ? '/api/staged-writes' : '/api/pending-actions';
   btn.disabled = true; btn.textContent = decision === 'approve' ? 'Working…' : 'Rejecting…';
   try {
     await api(`${base}/${id}/${decision}`, { method: 'POST', body: {} });
@@ -2651,8 +2674,10 @@ function _updateApprovalsBadge(n) {
 // Keep the nav badge fresh even when the tab isn't open (cheap poll on other loads).
 async function refreshApprovalsBadge() {
   try {
-    const [a, f] = await Promise.all([api('/api/pending-actions'), api('/api/forged-tools')]);
-    const n = (a.actions || []).length + (f.tools || []).filter(t => t.status === 'pending').length;
+    const [a, f, w] = await Promise.all([api('/api/pending-actions'), api('/api/forged-tools'),
+                                         api('/api/staged-writes').catch(() => ({writes: []}))]);
+    const n = (a.actions || []).length + (f.tools || []).filter(t => t.status === 'pending').length
+      + (w.writes || []).filter(x => x.kind !== 'email').length;
     _updateApprovalsBadge(n);
   } catch (_) {}
 }
