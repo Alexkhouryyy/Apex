@@ -46,6 +46,16 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  });
  await ctx.addInitScript(t=>localStorage.setItem('apex_token',t),token);
  const page=await ctx.newPage();
+ const liveQuakes=process.env.APEX_TEST_LIVE_QUAKES==='1';
+ let quakeOutage=false,quakeCalls=0;
+ await ctx.route('**/api/world/layers/earthquakes',async route=>{
+  ++quakeCalls;assert.equal(route.request().headers().authorization,'Bearer '+token);
+  if(quakeOutage)return route.fulfill({status:503,contentType:'application/json',body:'{}'});
+  if(liveQuakes)return route.continue();
+  const now=Date.now();
+  return route.fulfill({contentType:'application/json',body:JSON.stringify({source:'USGS',generated_at:now,fetched_at:now,stale:false,refresh_failed:false,
+   events:[{id:'us-browser-test',lat:34.12,lng:35.65,depth_km:12,magnitude:4.2,place:'Browser test event',time:now-60000,updated:now,review_status:'reviewed'}]})});
+ });
  const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')console.log('Console:',m.text().slice(0,500));});page.on('requestfailed',r=>console.log('Failed request:',r.url().split('?')[0],r.failure()?.errorText));
  await ctx.route('**/static/world-view.js*',route=>route.fulfill({contentType:'application/javascript',body:fs.readFileSync(path.join(root,'dashboard/static/world-view.js'),'utf8').replace('viewer = new Cesium.Viewer','viewer = window.__viewer = new Cesium.Viewer')}));
  await page.goto(origin+'/world');await page.bringToFront();
@@ -57,6 +67,46 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  await page.waitForFunction(()=>window.__viewer.camera.positionCartographic.height<100000,null,{timeout:10000});await page.waitForFunction(()=>window.__viewer.scene.globe.tilesLoaded,null,{timeout:60000});
  console.log('Selected',await page.locator('#world-selected-coords').innerText());
  if(shots)await page.screenshot({path:path.join(shots,'world-view-byblos.png')});
+ assert.equal(quakeCalls,0,'earthquakes must start off');
+ await page.locator('.world-layers summary').click();await page.locator('#quake-toggle').check();
+ await page.locator('#quake-events button').first().waitFor({timeout:20000});
+ await page.locator('#quake-events button').first().click();
+ await page.locator('#quake-details').waitFor({state:'visible'});
+ assert.match(await page.locator('#quake-occurred').innerText(),/UTC$/);
+ assert.equal(new URL(await page.locator('#quake-source').getAttribute('href')).hostname,'earthquake.usgs.gov');
+ await page.waitForTimeout(1500);
+ await page.waitForFunction(()=>window.__viewer.scene.globe.tilesLoaded,null,{timeout:60000});
+ const markers=await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex earthquakes')[0].entities.values.length);
+ assert.ok(markers>0&&markers<=300);
+ const quakeName=await page.locator('#world-selected-name').innerText();
+ const quakeId=new URL(await page.locator('#quake-source').getAttribute('href')).pathname.split('/').at(-1);
+ if(shots)await page.screenshot({path:path.join(shots,'world-view-earthquakes.png')});
+ await page.setViewportSize({width:390,height:844});
+ const toolsBox=await page.locator('.world-tools').boundingBox(),readoutBox=await page.locator('.world-readout').boundingBox();
+ assert.ok(toolsBox.y+toolsBox.height<=readoutBox.y,'mobile layer controls must leave selected-event details accessible');
+ if(shots)await page.screenshot({path:path.join(shots,'world-view-earthquakes-mobile.png')});
+ await page.setViewportSize({width:1440,height:1000});
+ // Clear the place pin, then pick the actual earthquake entity through Cesium.
+ await page.locator('#world-clear').click();
+ const point=await page.evaluate(id=>{
+  const v=window.__viewer,e=v.dataSources.getByName('Apex earthquakes')[0].entities.getById('earthquake:'+id);
+  const p=Cesium.SceneTransforms.worldToWindowCoordinates(v.scene,e.position.getValue(Cesium.JulianDate.now()));
+  return {x:p.x,y:p.y};
+ },quakeId);
+ await page.locator('#world-globe canvas').click({position:point});
+ await page.locator('#quake-details').waitFor({state:'visible'});
+ assert.equal(await page.locator('#world-selected-name').innerText(),quakeName);
+ const quakeTimes=await page.locator('#quake-times').innerText();
+ const retainedMarkers=await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex earthquakes')[0].entities.values.length);
+ quakeOutage=true;await page.locator('#quake-refresh').click();
+ await page.waitForFunction(()=>document.querySelector('#quake-status').textContent.includes('Stale snapshot'));
+ assert.equal(await page.locator('#quake-times').innerText(),quakeTimes);
+ assert.equal(await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex earthquakes')[0].entities.values.length),retainedMarkers);
+ await page.locator('#quake-toggle').uncheck();
+ assert.equal(await page.evaluate(()=>window.__viewer.dataSources.getByName('Apex earthquakes')[0].entities.values.length),0);
+ await page.getByRole('button',{name:'Byblos',exact:true}).click();
+ await page.locator('.world-layers summary').click();
+ console.log('Earthquakes:',liveQuakes?'live USGS':'deterministic feed','; actual marker picking, event details, stale fallback and toggle removal passed.');
  await page.selectOption('#world-map','outline');
  await page.reload();
  await page.locator('#world-reset:enabled').waitFor({timeout:60000});
@@ -89,6 +139,6 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  await page.locator('.world-dialog iframe').waitFor({state:'detached'});
  assert.equal(await page.evaluate(()=>document.activeElement.id),'world-open');
  console.log('Escape closes and focus returns',await page.evaluate(()=>document.activeElement.id));
- console.log('PASS: real Earth renders; navigation, restoration, mobile fit, Command open/close, disposal and focus.');
+ console.log('PASS: real Earth renders; navigation, earthquake layer, restoration, mobile fit, Command open/close, disposal and focus.');
 }finally{if(b)await b.close();await stop();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

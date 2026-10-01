@@ -84,6 +84,8 @@ jobs:
           node scripts/check_team_ui.cjs
           node --check dashboard/static/world-view.js
           node scripts/check_world_view_ui.cjs
+          node --check dashboard/static/world-earthquakes.js
+          node scripts/check_world_earthquakes_ui.cjs
 
       - name: Structural audits (informational — never fails the build)
         env:

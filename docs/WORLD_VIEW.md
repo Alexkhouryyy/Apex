@@ -18,9 +18,34 @@ standalone page is `/world`; modifier-clicking the entry can open another tab.
   survive reopening/reloading. Reset globe recenters the camera; Clear selection
   removes the marker.
 
-No flight, satellite, earthquake, weather, vessel or camera feeds are enabled in
-this milestone. Voice and hand control are later stages. This is a globe and
-reference imagery, not photorealistic 3D buildings or live satellite video.
+Voice and hand control are later stages. This is a globe and reference imagery,
+not photorealistic 3D buildings or live satellite video.
+
+## Milestone 2a: USGS earthquakes
+
+Open **Live layers** and enable **Earthquakes · M2.5+ · past day**. The layer
+starts off. Its enabled preference is remembered in this browser; no feed is
+requested until it is enabled. It uses the official USGS summary feed:
+<https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson>.
+
+- Markers show surface epicenters, with size following magnitude. Depth is
+  reported in the selected event's details, not used to place symbols underground.
+- Select a marker without moving the camera, or choose one of the eight latest
+  events to fly to it. The detail card shows magnitude, depth, occurrence and
+  revision times in UTC, review status, and a link to the official USGS event.
+- Feed generation and Apex fetch times are distinct. A snapshot older than five
+  minutes, or a failed refresh, is visibly stale. On failure the last successful
+  snapshot keeps its original timestamps. With no snapshot, the UI reports that
+  the feed is unavailable; an empty successful feed reports zero events.
+- Refreshes run once per minute while enabled and visible. Hidden pages pause
+  requests; switching off aborts pending work and removes markers. Closing World
+  View disposes the layer. Late responses cannot turn it back on.
+- The current browser retains a selected event snapshot when the layer is off
+  or the event leaves the feed, with that state labeled. Choosing another place
+  or clearing the selection removes the event details. Reopening restores the
+  generic selected location, not a saved copy of the feed's event metadata.
+
+No flight, satellite, weather, vessel or camera feeds are enabled yet.
 
 ## Dependencies and integration
 
@@ -58,17 +83,30 @@ does not follow redirects or forward credentials, validates returned points,
 caches up to 128 searches for 10 minutes and spaces uncached requests by at
 least one second. It does not accept a provider URL from the user.
 
+`/api/world/layers/earthquakes` also requires dashboard authentication. It streams
+one fixed HTTPS source with a 10-second timeout, no redirects and no forwarded
+credentials. Responses are capped at 2 MiB, processing at 1,500 records, and
+rendering at the 300 latest validated events. IDs, geometry, timestamps, magnitude
+and depth are validated; event links are built from the validated ID. A shared
+lock and a 60-second cache/retry interval bound requests across multiple windows.
+USGS generated times are preserved even when the service returns older data.
+
 ## Verification
 
 ```sh
 python -m pytest tests/test_world_view.py -q
+python -m pytest tests/test_world_layers.py -q
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_view_ui.cjs
+NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_earthquakes_ui.cjs
 ```
 
 Backend checks cover auth, input validation, malformed provider records,
 credential isolation, caching, request spacing and provider outage responses.
 DOM checks cover navigation, camera/selection restoration, coordinate bounds,
 stale search results, escaped labels, fallback, visibility pause and disposal.
+Earthquake checks cover opt-in, auth, malformed records, bounded streams and
+refreshes, safe source links, marker/detail selection, retained stale snapshots,
+cache aging, hidden-page pause, canceled responses and disposal.
 
 An optional real Cesium/WebGL regression starts an isolated dashboard process:
 
@@ -83,6 +121,11 @@ screenshots. In environments where Chromium needs the runtime's Node proxy
 transport, use `APEX_TEST_PROXY_FETCH=1 NODE_USE_ENV_PROXY=1`; TLS verification
 remains enabled. The test uses real Cesium and imagery, with unrelated Command
 API responses stubbed; it does not call the assistant or use a real account.
+The earthquake response is deterministic by default. Set
+`APEX_TEST_LIVE_QUAKES=1` to exercise the real USGS route and live provider. It
+then injects a refresh failure to verify that event markers and original
+timestamps remain available with a stale label. Real Cesium entity picking is
+checked independently of the location-selection marker.
 
 Before calling this Lenovo-verified, open it there and check wheel/pinch/tilt,
 search a new landmark, close/reopen, reload, resize to phone dimensions, disable
@@ -91,7 +134,7 @@ activity drops when World View is closed.
 
 ## Next milestones
 
-1. Source-aware live flights, propagated satellites and earthquakes, each with
+1. Source-aware live flights and propagated satellites, each with
    explicit timestamps, unavailable/stale states and independent layer switches.
 2. Structured scene context and confirmed commands for Apex's assistant.
 3. Comfortable opt-in hand navigation using Apex's existing tracking pipeline.
