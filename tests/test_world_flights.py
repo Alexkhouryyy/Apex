@@ -131,3 +131,12 @@ def test_provider_rate_limit_applies_across_regions(rig, monkeypatch):
 def test_documented_reception_types_keep_valid_positions(reception):
     data = flights._snapshot(feed([aircraft(type=reception)]), NOW, (34.1, 35.6))
     assert data['aircraft'][0]['position_source'] == reception
+
+@pytest.mark.parametrize('source', ['adsb_other', 'adsr_other', 'tisb_other', 'tisb_trackfile'])
+def test_non_icao_prefix_preserves_distinct_addresses(source):
+    records = [aircraft(), aircraft(hex='~ABC123', type=source),
+               aircraft(hex='~~ABC123', type=source), aircraft(hex='~abc12', type=source)]
+    data = flights._snapshot(feed(records), NOW, (34.1, 35.6))
+    byid = {a['id']: a for a in data['aircraft']}
+    assert set(byid) == {'abc123', '~abc123'}
+    assert byid['~abc123']['position_source'] == source

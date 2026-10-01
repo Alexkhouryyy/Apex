@@ -43,6 +43,13 @@ const feed=(records=[aircraft()],extra={})=>({source:'ADSB.lol',generated_at:NOW
  assert.match($('flight-region').textContent,/10.0°, 20.0°/);assert.equal(source.entities.values.length,1);
  w.fetch=async()=>Response.json(feed());$('flight-refresh').click();await tick();assert.match($('flight-status').textContent,/another area/);
  assert.match($('flight-region').textContent,/10.0°, 20.0°/);runtime.clearSelection();assert.equal($('flight-details').hidden,true);
+ w.fetch=async()=>Response.json(feed([aircraft(),aircraft({id:'~abc123',callsign:'NON ICAO',position_source:'adsb_other'}),aircraft({id:'~~abc123'})],{area:{lat:10,lng:20,radius_nm:250}}));
+ $('flight-refresh').click();await tick();
+ assert.equal(source.entities.values.length,2,'ICAO and prefixed addresses must coexist without colliding');
+ assert.equal(runtime.pick({id:source.entities.getById('flight:~abc123')}),true);
+ assert.equal($('flight-address-label').textContent,'Non-ICAO address');assert.equal($('flight-icao').textContent,'~ABC123');
+ assert.equal($('flight-position-source').textContent,'adsb_other');
+ assert.equal(runtime.pick({id:source.entities.getById('flight:abc123')}),true);assert.equal($('flight-address-label').textContent,'ICAO');
  runtime.destroy();assert.equal(removed,1);assert.equal(timers.size,0);assert.equal($('flight-toggle').disabled,true);
  dom.window.close();console.log('PASS: regional aircraft, units, position aging, layer coexistence, outage, region isolation, late responses and disposal.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
