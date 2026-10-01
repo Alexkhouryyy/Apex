@@ -5,6 +5,12 @@ import threading
 import wave
 from concurrent.futures import ThreadPoolExecutor
 
+from pathlib import Path
+from scripts.voice_library import Voice as _Voice
+_CELINE = _Voice('celine', 'CELINE', Path('celine.ogg'), 'Hello.', 1.0, folder=False)
+_LIB = lambda: [_CELINE]
+
+
 from fastapi.testclient import TestClient
 
 spec = importlib.util.spec_from_file_location('qwen_server', Path(__file__).parents[1] / 'scripts/qwen_server.py')
@@ -14,7 +20,7 @@ spec.loader.exec_module(server)
 class FakeVoice:
     def __init__(self):
         self.calls = []
-    def generate(self, text):
+    def generate(self, text, voice=None):
         self.calls.append(text)
         buf = io.BytesIO()
         with wave.open(buf, 'wb') as wav:
@@ -25,7 +31,7 @@ class FakeVoice:
         return buf.getvalue()
 
 def client(voice):
-    return TestClient(server.create_app(voice), base_url='http://127.0.0.1')
+    return TestClient(server.create_app(voice, _LIB), base_url='http://127.0.0.1')
 
 def test_protocol_and_repeated_generation():
     voice = FakeVoice()
@@ -52,7 +58,7 @@ def test_guards():
 def test_failure_releases_lock():
     voice = FakeVoice()
     original = voice.generate
-    voice.generate = lambda text: (_ for _ in ()).throw(RuntimeError('GPU failed'))
+    voice.generate = lambda text, voice=None: (_ for _ in ()).throw(RuntimeError('GPU failed'))
     with client(voice) as c:
         assert c.post('/generate/stream', json={'text':'hello'}).status_code == 503
         voice.generate = original
@@ -62,7 +68,7 @@ def test_overlapping_generation_is_rejected():
     entered, release = threading.Event(), threading.Event()
     voice = FakeVoice()
     original = voice.generate
-    def blocking(text):
+    def blocking(text, voice=None):
         entered.set()
         assert release.wait(5)
         return original(text)

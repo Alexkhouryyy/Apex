@@ -9,7 +9,7 @@ Runs in %USERPROFILE%\\apex-qwen-fast-env (Test-Apex-Fast-Voice.cmd installs
 it). Same loopback-only rules and the same routes as qwen_server.py, plus one:
 
     GET  /health            {"model_loaded": true, "streaming": true} once warm
-    GET  /profiles          [CELINE]
+    GET  /profiles          every voice in the library (scripts/voice_library.py)
     POST /generate/stream   a complete WAV — what Apex's Voicebox adapter reads
     POST /generate/pcm      raw 16-bit mono PCM, sent as it is generated;
                             the sample rate is in the X-Sample-Rate header
@@ -27,9 +27,11 @@ import threading
 from pathlib import Path
 
 try:
-    from qwen_server import PROFILE, TRANSCRIPT
+    from qwen_server import TRANSCRIPT
+    import voice_library
 except ImportError:                              # run from the repo root
-    from scripts.qwen_server import PROFILE, TRANSCRIPT
+    from scripts.qwen_server import TRANSCRIPT
+    from scripts import voice_library
 
 WARMUP_TEXT = "Hi. I'm warming up, and I'll be ready in a moment."
 MAX_CHARS = 4000
@@ -43,49 +45,65 @@ def pcm16(chunk) -> bytes:
 
 
 class FastVoice:
-    """The faster engine, warmed up, with Celine's reference prompt cached."""
+    """The faster engine, loaded once and warmed up; any voice in the library.
+    Each voice's clone prompt is built on its first sentence (about a second)
+    and cached by the engine from then on."""
 
-    def __init__(self, reference: Path, transcript: str, chunk_size: int = 8):
+    def __init__(self, chunk_size: int = 8):
         import torch
-        import numpy as np
-        import soundfile as sf
         from faster_qwen3_tts import FasterQwen3TTS
         if not torch.cuda.is_available():
             raise RuntimeError('CUDA unavailable. Use the apex-qwen-fast-env Python.')
-        audio, rate = sf.read(str(reference), dtype='float32')
-        if audio.ndim > 1:
-            audio = audio.mean(axis=1)
-        if not 0 < len(audio) / rate <= 120 or not np.isfinite(audio).all():
-            raise ValueError('Reference audio must be valid and at most 120 seconds.')
-        # The engine caches the voice prompt keyed on the reference PATH and
-        # transcript, so one stable WAV path means the clone is built once.
-        self.reference = Path.home() / 'apex-fast-voice-results' / 'celine-reference.wav'
-        self.reference.parent.mkdir(exist_ok=True)
-        sf.write(self.reference, audio, rate)
-        self.transcript = transcript
         self.chunk_size = chunk_size
+        self.prepared: dict[str, tuple[float, Path]] = {}
         self.model = FasterQwen3TTS.from_pretrained('Qwen/Qwen3-TTS-12Hz-1.7B-Base')
         self.sample_rate = int(getattr(self.model, 'sample_rate', 0) or 24000)
 
-    def stream(self, text: str):
+    def reference(self, voice) -> Path:
+        """The voice's recording as a mono WAV at one stable path. The engine
+        caches the clone prompt keyed on the reference PATH and transcript, so
+        the path changes when the recording does (a re-recorded voice is not
+        served from the old prompt)."""
+        import numpy as np
+        import soundfile as sf
+        known = self.prepared.get(voice.id)
+        if known and known[0] == voice.stamp and known[1].is_file():
+            return known[1]
+        audio, rate = sf.read(str(voice.reference), dtype='float32')
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        if not 0 < len(audio) / rate <= 120 or not np.isfinite(audio).all():
+            raise ValueError(f'The {voice.name} recording must be valid audio of at most 120 seconds.')
+        folder = Path.home() / 'apex-fast-voice-results'
+        folder.mkdir(exist_ok=True)
+        path = folder / (f'{voice.id}-reference.wav' if voice.id == 'celine' and not voice.folder
+                         else f'{voice.id}-{int(voice.stamp)}-reference.wav')
+        sf.write(path, audio, rate)
+        self.prepared[voice.id] = (voice.stamp, path)
+        return path
+
+    def stream(self, text: str, voice):
         """Yield float32 chunks as they are generated."""
         import torch
+        reference = self.reference(voice)
         with torch.inference_mode():
             for chunk, rate, _info in self.model.generate_voice_clone_streaming(
-                    text=text, language='English', ref_audio=str(self.reference),
-                    ref_text=self.transcript, chunk_size=self.chunk_size,
+                    text=text, language='English', ref_audio=str(reference),
+                    ref_text=voice.transcript, chunk_size=self.chunk_size,
                     max_new_tokens=2048):
                 if int(rate) != self.sample_rate:
                     raise RuntimeError(f'sample rate changed mid-stream: {rate} != {self.sample_rate}')
                 yield chunk
 
-    def warm_up(self) -> None:
-        for _ in self.stream(WARMUP_TEXT):
+    def warm_up(self, voice) -> None:
+        for _ in self.stream(WARMUP_TEXT, voice):
             pass
 
 
-def create_app(voice):
-    """`voice` needs .sample_rate and .stream(text) -> iterable of float chunks."""
+def create_app(voice, voices=None):
+    """`voice` needs .sample_rate and .stream(text, chosen) -> float chunks.
+    `voices()` lists the library (scripts/voice_library.py), read per request."""
+    voices = voices or (lambda: voice_library.discover())
     from fastapi import FastAPI, HTTPException, Request, Response
     from fastapi.responses import StreamingResponse
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -101,15 +119,16 @@ def create_app(voice):
 
     @app.get('/health')
     def health():
+        found = voices()
         return {'status': 'healthy', 'service': 'apex-qwen', 'model_loaded': True,
-                'profile': 'celine', 'streaming': True, 'engine': 'faster-qwen3-tts',
-                'sample_rate': voice.sample_rate}
+                'profile': found[0].id if found else None, 'voices': [v.id for v in found],
+                'streaming': True, 'engine': 'faster-qwen3-tts', 'sample_rate': voice.sample_rate}
 
     @app.get('/profiles')
     def profiles():
-        return [PROFILE]
+        return [v.profile() for v in voices()]
 
-    async def read_text(request) -> str:
+    async def read_text(request):
         raw = bytearray()
         async for chunk in request.stream():
             raw.extend(chunk)
@@ -124,24 +143,29 @@ def create_app(voice):
         text = body.get('text')
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_CHARS:
             raise HTTPException(400, f'Speech must contain 1-{MAX_CHARS} characters')
-        if body.get('profile_id', 'celine') != 'celine' or body.get('engine', 'qwen') != 'qwen':
-            raise HTTPException(400, 'Select CELINE in the Apex voice picker')
-        return text.strip()
+        wanted = body.get('profile_id', '')
+        if not isinstance(wanted, str) or len(wanted) > 200 or body.get('engine', 'qwen') != 'qwen':
+            raise HTTPException(400, 'Choose a voice in the Apex voice picker')
+        try:
+            chosen = voice_library.choose(voices(), wanted)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return text.strip(), chosen
 
     def take_gpu():
         if not gate.acquire(blocking=False):
-            raise HTTPException(409, 'Celine is generating another section; try again shortly')
+            raise HTTPException(409, 'The voice is generating another section; try again shortly')
 
     @app.post('/generate/stream')
     async def generate_wav(request: Request):
         """The whole section as one WAV — for callers that cannot stream."""
-        text = await read_text(request)
+        text, chosen = await read_text(request)
         take_gpu()
 
         def run():
             import wave
             try:
-                frames = b''.join(pcm16(c) for c in voice.stream(text))
+                frames = b''.join(pcm16(c) for c in voice.stream(text, chosen))
             finally:
                 gate.release()
             if not frames:
@@ -167,7 +191,7 @@ def create_app(voice):
         """Audio as it is made. The GPU lock is held until generation ends —
         even if the listener hangs up — because stopping the HTTP response
         does not stop the GPU, and a second generation would fight it."""
-        text = await read_text(request)
+        text, chosen = await read_text(request)
         take_gpu()
         import anyio
         import queue as _queue
@@ -176,7 +200,7 @@ def create_app(voice):
 
         def produce():
             try:
-                for chunk in voice.stream(text):
+                for chunk in voice.stream(text, chosen):
                     q.put(pcm16(chunk))
                 q.put(DONE)
             except Exception:
@@ -206,20 +230,25 @@ def create_app(voice):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('--reference', type=Path, default=Path.home() / 'Downloads' / 'celine.ogg')
+    parser.add_argument('--reference', type=Path, default=Path.home() / 'Downloads' / 'celine.ogg',
+                        help="Celine's original recording; used when there is no celine folder")
     parser.add_argument('--transcript', type=Path, help='Optional UTF-8 transcript matching the reference')
     parser.add_argument('--port', type=int, default=17494)
     args = parser.parse_args()
-    if not args.reference.is_file():
-        parser.error(f'Recording missing: {args.reference}')
     transcript = args.transcript.read_text(encoding='utf-8-sig') if args.transcript else TRANSCRIPT
-    print('Loading the fast Qwen engine and preparing Celine. Keep this console open.', flush=True)
-    voice = FastVoice(args.reference, transcript)
+    library = lambda: voice_library.discover(legacy=args.reference, legacy_transcript=transcript)
+    found = library()
+    if not found:
+        parser.error(f'No voices: {args.reference} is missing and {voice_library.voices_dir()} has none. '
+                     'Record one on the Voices page in Apex.')
+    print('Loading the fast Qwen engine. Keep this console open.', flush=True)
+    print('Voices: ' + ', '.join(v.name for v in found), flush=True)
+    voice = FastVoice()
     print('Warming up (one time per start, about 1-2 minutes on the first run)...', flush=True)
-    voice.warm_up()
-    print('CELINE READY (streaming): first audio in about a second from here on.', flush=True)
+    voice.warm_up(found[0])
+    print(f'{found[0].name} READY (streaming): first audio in about a second from here on.', flush=True)
     import uvicorn
-    uvicorn.run(create_app(voice), host='127.0.0.1', port=args.port)
+    uvicorn.run(create_app(voice, library), host='127.0.0.1', port=args.port)
 
 
 if __name__ == '__main__':

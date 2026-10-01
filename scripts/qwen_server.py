@@ -11,39 +11,58 @@ from fastapi import FastAPI, HTTPException, Request, Response
 TRANSCRIPT = """Hey Alex, I'm here. What are we working on today? Let's take a moment to understand the problem before we jump into a solution. Your idea makes sense, although there's one detail I'd check first. Did that change actually fix the issue, or did it just make the error disappear? Give me a second to look through the results. Okay, that's promising. We've made progress, and the next step is clear."""
 PROFILE = dict(id='celine', name='CELINE', voice_type='cloned', language='en', default_engine='qwen')
 
+try:
+    import voice_library
+except ImportError:                              # imported from the repo root
+    from scripts import voice_library
+
 
 class QwenVoice:
-    def __init__(self, reference, transcript):
+    """The model, loaded once; any voice in the library. Each voice's clone
+    prompt is built on its first use and kept until its recording changes."""
+
+    def __init__(self):
         import torch
-        import soundfile as sf
         from qwen_tts import Qwen3TTSModel
         if not torch.cuda.is_available():
             raise RuntimeError('CUDA unavailable. Use the GPU-enabled apex-qwen-env Python.')
-        audio, rate = sf.read(str(reference), dtype='float32')
-        if audio.ndim > 1:
-            audio = audio.mean(axis=1)
-        if not 0 < len(audio) / rate <= 120:
-            raise ValueError('Reference audio must be nonempty and at most 120 seconds.')
         self.model = Qwen3TTSModel.from_pretrained(
             'Qwen/Qwen3-TTS-12Hz-1.7B-Base', device_map='cuda:0',
             dtype=torch.bfloat16, attn_implementation='sdpa')
-        with torch.inference_mode():
-            self.prompt = self.model.create_voice_clone_prompt(
-                ref_audio=(audio, rate), ref_text=transcript, x_vector_only_mode=False)
+        self.prompts: dict[str, tuple[float, object]] = {}
 
-    def generate(self, text):
+    def prompt(self, voice):
         import torch
         import soundfile as sf
+        known = self.prompts.get(voice.id)
+        if known and known[0] == voice.stamp:
+            return known[1]
+        audio, rate = sf.read(str(voice.reference), dtype='float32')
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        if not 0 < len(audio) / rate <= 120:
+            raise ValueError(f'The {voice.name} recording must be nonempty and at most 120 seconds.')
+        with torch.inference_mode():
+            prompt = self.model.create_voice_clone_prompt(
+                ref_audio=(audio, rate), ref_text=voice.transcript, x_vector_only_mode=False)
+        self.prompts[voice.id] = (voice.stamp, prompt)
+        return prompt
+
+    def generate(self, text, voice):
+        import torch
+        import soundfile as sf
+        prompt = self.prompt(voice)
         with torch.inference_mode():
             wavs, rate = self.model.generate_voice_clone(
-                text=text, language='English', voice_clone_prompt=self.prompt,
+                text=text, language='English', voice_clone_prompt=prompt,
                 max_new_tokens=4096)
         output = io.BytesIO()
         sf.write(output, wavs[0], rate, format='WAV', subtype='PCM_16')
         return output.getvalue()
 
 
-def create_app(voice):
+def create_app(voice, voices=None):
+    voices = voices or (lambda: voice_library.discover())
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     gate = threading.Lock()
 
@@ -57,11 +76,13 @@ def create_app(voice):
 
     @app.get('/health')
     def health():
-        return {'status': 'healthy', 'service': 'apex-qwen', 'model_loaded': True, 'profile': 'celine'}
+        found = voices()
+        return {'status': 'healthy', 'service': 'apex-qwen', 'model_loaded': True,
+                'profile': found[0].id if found else None, 'voices': [v.id for v in found]}
 
     @app.get('/profiles')
     def profiles():
-        return [PROFILE]
+        return [v.profile() for v in voices()]
 
     @app.post('/generate/stream')
     async def generate(request: Request):
@@ -79,13 +100,18 @@ def create_app(voice):
         text = body.get('text')
         if not isinstance(text, str) or not text.strip() or len(text) > 4000:
             raise HTTPException(400, 'Speech must contain 1-4000 characters')
-        if body.get('profile_id', 'celine') != 'celine' or body.get('engine', 'qwen') != 'qwen':
-            raise HTTPException(400, 'Select CELINE in the Apex voice picker')
+        wanted = body.get('profile_id', '')
+        if not isinstance(wanted, str) or len(wanted) > 200 or body.get('engine', 'qwen') != 'qwen':
+            raise HTTPException(400, 'Choose a voice in the Apex voice picker')
+        try:
+            chosen = voice_library.choose(voices(), wanted)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         if not gate.acquire(blocking=False):
-            raise HTTPException(409, 'Celine is generating another reply; try again shortly')
+            raise HTTPException(409, 'The voice is generating another reply; try again shortly')
         def run():
             try:
-                return voice.generate(text.strip())
+                return voice.generate(text.strip(), chosen)
             finally:
                 gate.release()
         # Shield the worker so disconnects cannot release the GPU lock early.
@@ -102,18 +128,24 @@ def create_app(voice):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--reference', type=Path, default=Path.home() / 'Downloads' / 'celine.ogg')
+    parser.add_argument('--reference', type=Path, default=Path.home() / 'Downloads' / 'celine.ogg',
+                        help="Celine's original recording; used when there is no celine folder")
     parser.add_argument('--transcript', type=Path, help='Optional UTF-8 transcript matching the reference')
     parser.add_argument('--port', type=int, default=17494)
     args = parser.parse_args()
-    if not args.reference.is_file():
-        parser.error(f'Recording missing: {args.reference}')
     transcript = args.transcript.read_text(encoding='utf-8-sig') if args.transcript else TRANSCRIPT
-    print('Loading Qwen and preparing Celine once. Keep this console open.', flush=True)
-    voice = QwenVoice(args.reference, transcript)
-    print('CELINE READY: model and reference prompt will stay in memory.', flush=True)
+    library = lambda: voice_library.discover(legacy=args.reference, legacy_transcript=transcript)
+    found = library()
+    if not found:
+        parser.error(f'No voices: {args.reference} is missing and {voice_library.voices_dir()} has none. '
+                     'Record one on the Voices page in Apex.')
+    print('Loading Qwen once. Keep this console open.', flush=True)
+    print('Voices: ' + ', '.join(v.name for v in found), flush=True)
+    voice = QwenVoice()
+    voice.prompt(found[0])
+    print(f'{found[0].name} READY: model and reference prompt will stay in memory.', flush=True)
     import uvicorn
-    uvicorn.run(create_app(voice), host='127.0.0.1', port=args.port)
+    uvicorn.run(create_app(voice, library), host='127.0.0.1', port=args.port)
 
 
 if __name__ == '__main__':
