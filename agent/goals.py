@@ -242,7 +242,7 @@ def active_goals_for_prompt() -> str:
 
     try:
         from agent import world_model as _wm
-        world_state = _wm.get()
+        world_state = _wm.get_fresh()
         if world_state:
             lines.append(f"\n[Current world state:]\n  {world_state}")
     except Exception:

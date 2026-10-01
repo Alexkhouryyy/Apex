@@ -38,6 +38,24 @@ def get(key: str = "current") -> str:
         return ""
 
 
+# The paragraph says what the user is doing "right now". After Apex has been
+# off (a night, a trip), that is last week's guess presented as the present,
+# so the prompt only carries it while the 5-minute rebuild is keeping it live.
+FRESH_FOR = 1800.0
+
+
+def get_fresh(key: str = "current", max_age: float = FRESH_FOR) -> str:
+    """The world state, or "" when it was last rebuilt more than max_age ago."""
+    try:
+        with longterm._conn() as c:
+            row = c.execute(
+                "SELECT value, updated_at FROM world_state WHERE key = ?", (key,)
+            ).fetchone()
+        return row[0] if row and time.time() - row[1] <= max_age else ""
+    except Exception:
+        return ""
+
+
 def _put(key: str, value: str) -> None:
     now = time.time()
     with longterm._conn() as c:
