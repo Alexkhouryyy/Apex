@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Apex · World View</title>
+  <link rel="icon" type="image/svg+xml" href="/static/icons/apex-refined.svg">
+  <link rel="stylesheet" href="/static/world-view.css?v=world1">
+  <script src="/static/world/imagery.js?v=world1" defer></script>
+  <script src="/static/world-view.js?v=world1" defer></script>
+</head>
+<body>
+  <header class="world-header">
+    <a id="world-back" href="/">← Command</a>
+    <div><h1>World View</h1><span class="world-subtitle">APEX · EXPLORE</span></div>
+    <button id="world-reset" disabled>Reset globe</button>
+  </header>
+  <main>
+    <div id="world-globe" aria-label="Interactive globe"></div>
+    <section class="world-tools" aria-label="Globe controls">
+      <form id="world-search">
+        <label for="world-query">Go to a place</label>
+        <div class="search-row"><input id="world-query" maxlength="100" placeholder="City, landmark, or latitude, longitude" autocomplete="off" required><button id="world-search-button" disabled>Go</button></div>
+      </form>
+      <div id="world-results" aria-label="Search results"></div>
+      <div class="quick-places"><button data-place="Byblos" disabled>Byblos</button><button data-place="Beirut" disabled>Beirut</button><button data-place="Rome" disabled>Rome</button></div>
+      <label class="map-choice" for="world-map">Map <select id="world-map" disabled><option value="satellite">Satellite imagery</option><option value="streets">Street map</option><option value="outline">Globe only</option></select></label>
+      <p class="world-help">Drag to explore · Scroll or pinch to zoom · Right-drag to tilt · Click to mark a location</p>
+      <p class="world-help">Map imagery is a reference map, not live satellite video. Live data layers come next.</p>
+    </section>
+    <section class="world-readout" aria-label="Selected location" hidden>
+      <h2 id="world-selected-name">Selected location</h2><p id="world-selected-coords"></p><button id="world-clear">Clear selection</button>
+    </section>
+    <section id="world-loading" class="world-loading" role="status"><h2>Opening Earth…</h2><p>Loading the globe.</p><button id="world-retry" hidden>Try again</button></section>
+    <p id="world-status" class="world-status" role="status" aria-live="polite"></p>
+  </main>
+  <footer class="world-footer"><span id="world-position">EARTH</span><span>Built with Cesium · <a href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noopener noreferrer">God’s Eye View foundation</a></span></footer>
+</body>
+</html>

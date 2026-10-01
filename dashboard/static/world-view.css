@@ -1,0 +1,47 @@
+:root { color-scheme: dark; font-family: system-ui, sans-serif; color: #e8edf5; background: #070b14; }
+* { box-sizing: border-box; }
+body { margin: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+button, input, select { font: inherit; color: inherit; background: #10202c; border: 1px solid #35515e; border-radius: 8px; min-height: 40px; }
+button, select { cursor: pointer; padding: 8px 12px; }
+button:disabled, select:disabled { opacity: .45; cursor: default; }
+button:hover:not(:disabled), a:hover { color: #77dfff; }
+:focus-visible { outline: 2px solid #77dfff; outline-offset: 3px; }
+a { color: #a8dce9; }
+.world-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; background: #0b131d; z-index: 2; }
+.world-header a { text-decoration: none; }
+h1 { font-size: 18px; margin: 0 0 3px; font-weight: 550; }
+.world-subtitle { font-size: 10px; letter-spacing: .2em; color: #9cbdca; }
+main { position: relative; flex: 1; min-height: 0; }
+#world-globe { width: 100%; height: 100%; }
+.world-tools { position: absolute; z-index: 2; top: 20px; left: 20px; width: min(340px, calc(100% - 40px)); padding: 18px; border: 1px solid #294652; border-radius: 16px; background: rgba(9,19,29,.94); }
+.world-tools label { font-size: 13px; color: #b5d0da; }
+.search-row { display: flex; gap: 8px; margin-top: 8px; }
+.search-row input { width: 100%; min-width: 0; padding: 10px; font-size: 12px; }
+#world-results { display: grid; gap: 6px; max-height: 180px; overflow-y: auto; margin-top: 8px; }
+#world-results:empty { margin: 0; }
+#world-results button { text-align: left; font-size: 13px; }
+.quick-places { display: flex; gap: 6px; margin: 12px 0; }
+.quick-places button { font-size: 12px; flex: 1; }
+.map-choice { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.map-choice select { font-size: 12px; }
+.world-help { font-size: 12px; line-height: 1.5; color: #9db7c2; margin-bottom: 0; }
+.world-readout { position: absolute; right: 20px; bottom: 54px; max-width: min(300px, calc(100% - 40px)); padding: 16px; background: #0b1723; border: 1px solid #35515e; border-radius: 14px; }
+.world-readout h2 { font-size: 15px; overflow-wrap: anywhere; margin: 0; }
+.world-readout p { font-size: 13px; color: #b5d0da; }
+.world-loading { position: absolute; z-index: 3; top: 50%; left: 50%; transform: translate(-50%,-50%); padding: 24px; width: min(380px, calc(100% - 40px)); background: #0b1723; border: 1px solid #35515e; border-radius: 16px; text-align: center; }
+.world-loading h2 { font-size: 19px; margin: 0; }
+.world-loading p { color: #b5d0da; line-height: 1.5; }
+.world-status { position: absolute; bottom: 34px; left: 20px; max-width: calc(100% - 40px); font-size: 13px; padding: 8px 12px; background: #0b1723; border-radius: 8px; pointer-events: none; }
+.world-status:empty { display: none; }
+.world-footer { display: flex; justify-content: space-between; gap: 12px; padding: 10px 20px; font-size: 11px; color: #9db7c2; background: #0b131d; }
+[hidden] { display: none !important; }
+/* Leave Cesium's provider credits visible and interactive. */
+@media (max-width: 640px) {
+  .world-header { padding: 10px 12px; gap: 8px; }
+  .world-header a, .world-header button { font-size: 12px; }
+  .world-tools { top: 10px; left: 10px; width: calc(100% - 20px); padding: 12px; }
+  .world-help { display: none; }
+  .world-readout { bottom: 76px; right: 10px; padding: 12px; }
+  .world-footer { flex-wrap: wrap; padding: 8px 10px; }
+  .world-status { bottom: 34px; left: 10px; }
+}
