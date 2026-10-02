@@ -47,7 +47,7 @@ unconfigured relay refuses everything and says why.
     RELAY_SERVER_TOKEN     required; the shared secret the laptop presents
     RELAY_SERVER_DB        default ./relay.db
     RELAY_SERVER_HOST      default 127.0.0.1
-    RELAY_SERVER_PORT      default 8799
+    RELAY_SERVER_PORT      default 8799 (or PORT, which Railway and similar hosts set)
     RELAY_SERVER_MAX_BYTES default 67108864 (64 MiB)
 
   Call Apex while the laptop is off (docs/CALL_APEX.md). All three, or calls
@@ -58,6 +58,8 @@ unconfigured relay refuses everything and says why.
     RELAY_TWILIO_VOICE       optional; default Polly.Joanna-Neural
     RELAY_PC_URL             optional; the laptop's private Tailscale address. Calls go
                              there while it answers, and are answered here when it does not
+    RELAY_PC_PROXY           optional; an HTTP proxy that reaches the laptop (relay/start.sh
+                             sets one up when TS_AUTHKEY is given)
 
 Note what is absent: there is no key here, and there is nowhere to put one.
 """
@@ -84,6 +86,9 @@ CALLERS = os.getenv("RELAY_CALLERS", "")
 PUBLIC_URL = os.getenv("RELAY_PUBLIC_URL", "").rstrip("/")
 VOICE = os.getenv("RELAY_TWILIO_VOICE", "") or "Polly.Joanna-Neural"
 PC_URL = os.getenv("RELAY_PC_URL", "").rstrip("/")
+# On a host that is not itself on your Tailscale network (Railway), tailscaled
+# runs inside the container and offers an HTTP proxy into it (relay/start.sh).
+PC_PROXY = os.getenv("RELAY_PC_PROXY", "")
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
@@ -333,7 +338,8 @@ class Handler(BaseHTTPRequestHandler):
             PC_URL + self.path, data=raw.encode(), method="POST",
             headers={"Content-Type": "application/x-www-form-urlencoded",
                      "X-Twilio-Signature": self.headers.get("X-Twilio-Signature", "")})
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        proxies = {"http": PC_PROXY, "https": PC_PROXY} if PC_PROXY else {}
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies))
         try:
             with opener.open(request, timeout=8) as response:
                 body = response.read(65536)
@@ -830,7 +836,7 @@ PHONE_CSP = ("default-src 'none'; connect-src 'self'; "
 def serve(host: str | None = None, port: int | None = None,
           db_path: str | None = None) -> ThreadingHTTPServer:
     host = host or os.getenv("RELAY_SERVER_HOST", "127.0.0.1")
-    port = int(port if port is not None else os.getenv("RELAY_SERVER_PORT", "8799"))
+    port = int(port if port is not None else os.getenv("RELAY_SERVER_PORT") or os.getenv("PORT") or "8799")
     init_db(db_path)
     handler = type("BoundHandler", (Handler,), {"db_path": db_path or DB_PATH})
     return ThreadingHTTPServer((host, port), handler)
