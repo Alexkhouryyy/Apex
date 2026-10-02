@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Apex · World View</title>
   <link rel="icon" type="image/svg+xml" href="/static/icons/apex-refined.svg">
-  <link rel="stylesheet" href="/static/world-view.css?v=world3">
+  <link rel="stylesheet" href="/static/world-view.css?v=world4">
   <script src="/static/world/imagery.js?v=world1" defer></script>
-  <script src="/static/world-layer-status.js?v=world3" defer></script>
-  <script src="/static/world-flights.js?v=world3" defer></script>
-  <script src="/static/world-earthquakes.js?v=world3" defer></script>
-  <script src="/static/world-view.js?v=world3" defer></script>
+  <script src="/static/world-layer-status.js?v=world4" defer></script>
+  <script src="/static/world-satellites.js?v=world4" defer></script>
+  <script src="/static/world-flights.js?v=world4" defer></script>
+  <script src="/static/world-earthquakes.js?v=world4" defer></script>
+  <script src="/static/world-view.js?v=world4" defer></script>
 </head>
 <body>
   <header class="world-header">
@@ -32,6 +33,12 @@
       <p class="world-help">Map imagery is a reference map, not live satellite video.</p>
       <details class="world-layers">
         <summary id="world-layer-summary">Live layers</summary>
+        <label class="layer-toggle"><input id="sat-toggle" type="checkbox" disabled> Satellites · space stations</label>
+        <p id="sat-status" class="layer-status" role="status" aria-live="polite">Off · enable calculated station positions.</p>
+        <p id="sat-times" class="layer-times"></p><button id="sat-refresh" type="button" disabled>Retry source</button>
+        <p class="layer-note">Calculated SGP4 positions · updates each second while visible. Select a station to see its predicted next orbit.</p>
+        <p class="layer-note">Orbit elements: <a href="https://celestrak.org/" target="_blank" rel="noopener noreferrer">CelesTrak</a>. Sources refresh no more than every 2 hours. Older elements reduce accuracy.</p>
+        <div id="sat-events" aria-label="Space stations"></div>
         <label class="layer-toggle"><input id="flight-toggle" type="checkbox" disabled> Aircraft · regional</label>
         <p id="flight-status" class="layer-status" role="status" aria-live="polite">Off · enable to load regional aircraft.</p>
         <p id="flight-region" class="layer-note"></p><p id="flight-times" class="layer-times"></p>
@@ -49,6 +56,11 @@
     </section>
     <section class="world-readout" aria-label="Selected location" hidden>
       <h2 id="world-selected-name">Selected location</h2><p id="world-selected-coords"></p><button id="world-clear">Clear selection</button>
+      <div id="sat-details" hidden>
+        <dl><dt>NORAD</dt><dd id="sat-id"></dd><dt>Element epoch</dt><dd><time id="sat-epoch"></time></dd><dt>Element age</dt><dd id="sat-age"></dd><dt>Altitude</dt><dd id="sat-altitude"></dd><dt>Speed</dt><dd id="sat-speed"></dd><dt>Period</dt><dd id="sat-period"></dd><dt>Calculated at</dt><dd id="sat-calculated"></dd></dl>
+        <p id="sat-detail-status" class="layer-note"></p><p id="sat-orbit-note" class="layer-note"></p>
+        <a id="sat-source" target="_blank" rel="noopener noreferrer">Orbit elements: CelesTrak ↗</a>
+      </div>
       <div id="flight-details" hidden>
         <dl><dt id="flight-address-label">ICAO</dt><dd id="flight-icao"></dd><dt>Registration</dt><dd id="flight-registration"></dd><dt>Type</dt><dd id="flight-type"></dd><dt>Altitude</dt><dd id="flight-altitude"></dd><dt>Speed</dt><dd id="flight-speed"></dd><dt>Track</dt><dd id="flight-track"></dd><dt>Position</dt><dd><time id="flight-position-time"></time></dd><dt>Reception</dt><dd id="flight-position-source"></dd></dl>
         <p id="flight-detail-status" class="layer-note"></p>

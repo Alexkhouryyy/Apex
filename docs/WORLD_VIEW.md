@@ -45,7 +45,7 @@ requested until it is enabled. It uses the official USGS summary feed:
   or clearing the selection removes the event details. Reopening restores the
   generic selected location, not a saved copy of the feed's event metadata.
 
-No flight, satellite, weather, vessel or camera feeds are enabled yet.
+All layers start off by default. Weather, vessel and camera feeds are not implemented.
 
 ## Milestone 2b: regional aircraft
 
@@ -85,6 +85,47 @@ and returns up to 500 aircraft. A shared lock, 30-second region cache, 16-region
 limit and five-second spacing for uncached areas bound requests. Provider 429
 responses apply a shared cooldown, respecting numeric Retry-After up to 24 hours.
 There is no persistent aircraft database or history export.
+
+## Milestone 2c: station orbit estimates
+
+Enable **Satellites · space stations** in **Live layers**. It starts off. It loads
+CelesTrak's `stations` group in OMM JSON format and uses pinned satellite.js 6.0.2
+for SGP4 propagation. Positions are **calculated estimates**, not observations.
+The library loads locally only when enabled. Names are from the source group,
+which can include docked craft, cargo vehicles and other associated objects.
+
+- Positions update once a second while visible. Select a point to inspect it
+  without moving the camera, or choose a station from the list to fly to it.
+- Only the selected object's next orbit is drawn. The 121-point path is predicted
+  from the same elements and recalculated each minute. No historical track or
+  satellite video is presented.
+- Details distinguish element epoch, element age, Apex fetch time and calculation
+  time. Altitude uses kilometers above the reference ellipsoid; speed uses inertial
+  kilometers per second. The period is derived from mean motion.
+- Elements older than three days receive an age warning. Propagation beyond 14
+  days from epoch, a decayed solution or invalid output removes its position/path.
+  Failed fetches preserve the original elements and fetch timestamp and show stale
+  status. The age threshold is an app warning, not an accuracy guarantee.
+- Disabling satellites removes their markers and orbit without affecting aircraft
+  or earthquakes. Hiding/closing the view stops propagation, source polling and
+  in-flight requests. Camera position is not moved by station updates.
+- CelesTrak attribution and per-object element links are visible. OMM JSON supports
+  up to nine-digit catalog IDs; no legacy five-digit TLE conversion is used.
+
+The authenticated `/api/world/layers/satellites` route uses one fixed HTTPS source,
+no redirects or forwarded credentials, a 512 KiB stream bound, at most 256 parsed
+records and 64 returned objects. Validated elements and a two-hour source cooldown
+are saved beside the memory database as `*.world-stations.json`. Set
+`APEX_WORLD_STATIONS_CACHE` to override this public-data cache location. An Apex
+restart reuses it; a failed storage write prevents a source request. The dashboard
+server's single process shares a lock across windows. Deployments with separate
+hosts/processes need a shared source broker before adding more workers.
+
+CelesTrak's usage policy requires reusing data and stopping queries on errors:
+<https://celestrak.org/usage-policy.php>. Every source error pauses automatic
+upstream requests. **Retry source** explicitly resumes via an authenticated POST,
+while preserving the original two-hour cooldown. Corrupt cache files require
+storage repair rather than silently re-downloading.
 
 ## Dependencies and integration
 
@@ -134,10 +175,11 @@ USGS generated times are preserved even when the service returns older data.
 
 ```sh
 python -m pytest tests/test_world_view.py -q
-python -m pytest tests/test_world_layers.py tests/test_world_flights.py -q
+python -m pytest tests/test_world_layers.py tests/test_world_flights.py tests/test_world_satellites.py -q
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_view_ui.cjs
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_earthquakes_ui.cjs
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_flights_ui.cjs
+NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_satellites_ui.cjs
 ```
 
 Backend checks cover auth, input validation, malformed provider records,
@@ -170,16 +212,81 @@ regression checks aircraft picking, unit labels, retained stale snapshots,
 coexisting layers and mobile detail access. Real Cesium entity picking is
 checked independently of the location-selection marker.
 
-Before calling this Lenovo-verified, open it there and check wheel/pinch/tilt,
-search a new landmark, close/reopen, reload, resize to phone dimensions, disable
-network access, and confirm that provider credits remain accessible and GPU
-activity drops when World View is closed.
+Satellite DOM checks use the actual vendored SGP4 library and test a published
+reference vector, OMM/TLE agreement, kilometer-to-meter rendering, element age
+limits, a single predicted orbit, source failure retention, layer coexistence,
+late response cancellation and hidden-page disposal. The real browser uses a
+deterministic OMM by default. Set `APEX_TEST_STATIONS_CACHE` to a valid saved source
+cache for the actual backend/real-source-data path; this avoids downloading the
+same CelesTrak group again during repeated verification.
+
+## Lenovo comfort check before merge
+
+The optional `APEX_TEST_COMFORT=1` browser run checks 1920×1080 and 1366×768
+layout, reduced-motion camera navigation, idle rendering, one-second orbit
+updates without camera movement, and three open/close cycles under four-times
+CPU throttling. These checks use headless software WebGL in the cloud. They do
+not establish Lenovo frame rate, battery use, fan noise or physical comfort.
+
+On 2026-10-01 the cloud run passed with zero page errors: zero rendered frames
+during four seconds idle, 15 rendered frames during three seconds of satellite
+updates with a fixed camera, immediate reduced-motion navigation, both desktop
+sizes, and three reopen cycles under four-times CPU throttling. No layer requests
+continued after closure. The final targeted backend suite passed all 42 checks;
+aircraft/core DOM checks passed. Earlier complete checks passed 3,269 Python tests
+and 43 Node checks; four new address-validation cases are included in the final
+CI run. The first Windows launch exposed a second dotenv search that could load a broken
+parent file. The corrected bootstrap passes five regression cases using real
+python-dotenv; the previous bootstrap reproduces the null-character failure.
+The corrected CMD launcher still needs its Windows retry.
+
+Test the complete `feat/world-satellites` branch in a separate Windows worktree
+so the existing checkout stays intact. Stop the old Apex process first so port
+7860 is free. With the usual checkout at `%USERPROFILE%\Apex`, run in Command
+Prompt:
+
+```bat
+cd /d "%USERPROFILE%\Apex"
+git fetch origin
+git worktree add "%USERPROFILE%\Apex-world-test" origin/feat/world-satellites
+cd /d "%USERPROFILE%\Apex-world-test"
+scripts\test_world_view_windows.cmd
+```
+
+The launcher reuses a local Python environment when found and reads only the
+worktree `.env`, or the existing sibling Apex `.env` if the worktree has none.
+It then disables automatic dotenv discovery in the launched process so main and
+config cannot accidentally load a different parent `.env`. It does not copy,
+modify or print credentials. Python-dotenv 1.2 or later is required. An explicit `APEX_TEST_PYTHON` path
+can override environment detection. Open `http://127.0.0.1:7860` and use
+**Open World View**. Keep the Command Prompt running. World View uses mouse,
+touchpad and keyboard controls; hand/voice globe navigation is a later milestone.
+
+Spend at least five minutes on the Lenovo:
+
+1. With layers off, drag, wheel/pinch zoom and right-drag tilt. Check for jumps,
+   fatigue and readable controls at normal Windows scaling. Visit Byblos and
+   enter another city or coordinates. Confirm provider credits are reachable.
+2. Enable earthquakes, regional aircraft and station satellites. Inspect one of
+   each, switch selections and turn layers off/on. Camera updates must not pull
+   you away. Readouts should stay reachable and stale warnings understandable.
+3. Close/reopen three times; use Escape from the search field. Confirm focus
+   returns to Command, your location/map are restored, and nothing gets stuck.
+4. Watch Task Manager's browser CPU/GPU before opening, while navigating, after
+   30 seconds idle, and after closing. Compare with the same Command baseline;
+   GPU activity should settle and no World View frame should remain after close.
+5. Return to Board/Study and try the existing hand controls for a minute. Check
+   that opening/closing World View has not made those controls less comfortable.
+   Note visible stalls, fan changes, warmth, and any wrist/shoulder strain.
+
+Record browser, Windows display scaling, plugged-in/battery status, smoothness,
+selection comfort, idle/closed behavior, and any issue with its exact action.
+Physical Lenovo results are pending until the user reports them. Merge #23,
+then #24, then #25 only after that check passes, and re-check main CI afterward.
 
 ## Next milestones
 
-1. Propagated satellites with
-   explicit timestamps, unavailable/stale states and independent layer switches.
-2. Structured scene context and confirmed commands for Apex's assistant.
-3. Comfortable opt-in hand navigation using Apex's existing tracking pipeline.
-4. Additional provider layers and photorealistic sources after their terms,
+1. Structured scene context and confirmed commands for Apex's assistant.
+2. Comfortable opt-in hand navigation using Apex's existing tracking pipeline.
+3. Additional provider layers and photorealistic sources after their terms,
    configuration and performance have been checked.

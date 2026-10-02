@@ -85,6 +85,8 @@ jobs:
           node scripts/check_team_ui.cjs
           node --check dashboard/static/world-view.js
           node scripts/check_world_view_ui.cjs
+          node --check dashboard/static/world-satellites.js
+          node scripts/check_world_satellites_ui.cjs
           node --check dashboard/static/world-flights.js
           node --check dashboard/static/world-layer-status.js
           node scripts/check_world_flights_ui.cjs

@@ -45,7 +45,7 @@ mss
 Pillow
 beautifulsoup4
 ddgs
-python-dotenv
+python-dotenv>=1.2
 pyttsx3
 requests
 playwright

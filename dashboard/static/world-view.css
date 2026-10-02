@@ -43,12 +43,12 @@ main { position: relative; flex: 1; min-height: 0; }
 .layer-status[data-state="stale"], .layer-note[data-state="stale"] { color: #ffcf86; }
 .layer-times, .layer-note { color: #9db7c2; font-size: 11px; line-height: 1.5; }
 #quake-refresh { font-size: 12px; width: 100%; }
-#quake-events, #flight-events { display: grid; gap: 5px; max-height: 150px; overflow-y: auto; }
-#quake-events button, #flight-events button { text-align: left; font-size: 12px; overflow-wrap: anywhere; }
-#quake-details, #flight-details { border-top: 1px solid #294652; margin-top: 12px; padding-top: 4px; font-size: 12px; }
-#quake-details dl, #flight-details dl { display: grid; grid-template-columns: auto 1fr; gap: 7px 10px; }
-#quake-details dt, #flight-details dt { color: #9db7c2; }
-#quake-details dd, #flight-details dd { margin: 0; overflow-wrap: anywhere; }
+#quake-events, #flight-events, #sat-events { display: grid; gap: 5px; max-height: 150px; overflow-y: auto; }
+#quake-events button, #flight-events button, #sat-events button { text-align: left; font-size: 12px; overflow-wrap: anywhere; }
+#quake-details, #flight-details, #sat-details { border-top: 1px solid #294652; margin-top: 12px; padding-top: 4px; font-size: 12px; }
+#quake-details dl, #flight-details dl, #sat-details dl { display: grid; grid-template-columns: auto 1fr; gap: 7px 10px; }
+#quake-details dt, #flight-details dt, #sat-details dt { color: #9db7c2; }
+#quake-details dd, #flight-details dd, #sat-details dd { margin: 0; overflow-wrap: anywhere; }
 /* Leave Cesium's provider credits visible and interactive. */
 @media (max-width: 640px) {
   .world-header { padding: 10px 12px; gap: 8px; }
@@ -62,3 +62,5 @@ main { position: relative; flex: 1; min-height: 0; }
 
 .flight-actions { display: flex; gap: 6px; }
 .flight-actions button { flex: 1; font-size: 12px; }
+
+#sat-refresh { width: 100%; font-size: 12px; }
