@@ -316,6 +316,9 @@ def status():
         "exec_backend": exec_backend,
         "sandboxed": exec_backend in ("docker", "refusing"),
         "uptime_s": int(time.time() - _START_TIME),
+        # Which voices this Apex can speak with besides a local Celine server:
+        # a cloud Apex (Railway) has no GPU voice, so Voice mode falls back.
+        "voices": {"openai": bool(config.OPENAI_API_KEY)},
     }
 
 

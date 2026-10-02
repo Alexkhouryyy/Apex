@@ -57,6 +57,7 @@ jobs:
           node scripts/check_voice_stream_ui.cjs
           node scripts/check_look_now_ui.cjs
           node scripts/check_voice_mode_ui.cjs
+          node scripts/check_orb_screen_ui.cjs
           node scripts/check_barge_in_ui.cjs
           node scripts/check_build3d_glb.mjs
           node scripts/check_board_voice_ui.cjs
