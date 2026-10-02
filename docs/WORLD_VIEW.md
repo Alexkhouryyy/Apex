@@ -1,22 +1,13 @@
 # Apex World View
 
-## Milestone 1: globe navigation
+From Command, click Earth or its World View portal; the header shortcut works from any planet. Earth expands into a full-screen panel. Dragging or multi-touch navigation does not enter it. Reduced motion skips the animation. Command/Escape returns focus and unloads the world renderer. The standalone page is `/world`.
 
-From **Command**, choose **Open World View** on the planet stage. It opens a
-full-screen panel. **Command** or Escape returns to the same dashboard. The
-standalone page is `/world`; modifier-clicking the entry can open another tab.
+## Live workflow
 
-- Drag the globe, scroll/pinch to zoom, and right-drag to tilt.
-- Choose Byblos, Beirut or Rome, or enter a saved city or `latitude, longitude`.
-- Other place names use an explicit submitted search through Photon. Search
-  results are choices; the first result is never silently selected.
-- Click the Earth to mark an ellipsoid-based location. This is a coordinate
-  selection, not a live observed event or terrain survey.
-- Switch between satellite imagery, street map and globe only. Imagery failure
-  falls back to streets; a globe remains usable if imagery is unavailable.
-- Camera, map choice and selected coordinate are stored in this browser. They
-  survive reopening/reloading. Reset globe recenters the camera; Clear selection
-  removes the marker.
+1. Choose a place, then enable **Flights near view**, **Space stations** or **Earthquakes**. Feeds are off until enabled. Each layer has source, coverage, fetch time, freshness and failure status.
+2. Click an entity or find it in the searchable entity list. Inspect its ID, coordinates, altitude, event/position time and available measurements. Use Follow to follow it. Positions update from the source; Apex does not invent flight motion between observations. Flight positions older than two minutes cannot be followed.
+3. Open Ask Celine. Questions use the ordinary Apex chat service with server-resolved entity context and enabled-layer summaries. Typed commands `show flights`, `hide satellites`, `follow selected`, `stop following` and `reset globe` execute directly and confirm results. Other questions use the agent; the context explicitly tells it not to claim unexecuted scene actions.
+4. Microphone input is optional and uses the browser's speech-recognition service, which may be unavailable or use a browser vendor's remote processing. Typed questions remain available. Speak uses the existing local Voicebox/Celine service and configured voice profile; this page does not start the voice server or download voice models.
 
 Voice and hand control are later stages. This is a globe and reference imagery,
 not photorealistic 3D buildings or live satellite video.
@@ -127,41 +118,23 @@ upstream requests. **Retry source** explicitly resumes via an authenticated POST
 while preserving the original two-hour cooldown. Corrupt cache files require
 storage repair rather than silently re-downloading.
 
-## Dependencies and integration
+- **OpenSky Network:** current state vectors from a fixed HTTPS endpoint for a quantized 5° × 5° region around the view, cached for one minute. Receiver coverage is incomplete. Anonymous requests have limited provider credits; Apex budgets 300 requests per UTC day per process, or 3,000 when OAuth credentials are configured. Longer sessions may require account access. Set `OPENSKY_CLIENT_ID` and `OPENSKY_CLIENT_SECRET` on the host for OAuth; tokens are exchanged/refreshed server-side and never returned to the page. Restarting Apex resets the local budget, not the provider quota.
+- **USGS:** M2.5+ earthquake events in the past 24 hours, cached for one minute. Event time differs from feed-fetch time. Depth is reported in kilometres and is not used as a negative rendering height.
+- **CelesTrak:** the space-stations GP group, fetched at most once every two hours after successful receipt, capped at 150 rendered objects. SGP4 calculates current positions from orbital elements. These are calculated positions, not observed telemetry. Orbital epoch is always shown; epochs older than three days are marked aged and cannot be followed, and elements older than seven days are omitted. The general active-satellite catalog and orbital trails are not included yet.
+- Requests use fixed destinations, validate coordinates/data, cap decompressed responses at 2 MB, use finite timeouts and coalesce concurrent calls. No dashboard credential is forwarded. Provider retry windows are respected. An outage retains last-known records with a stale label; no response becomes an unavailable layer, never a claim that no aircraft/events exist. Disabling a layer removes its entities, cancels its request and timer, and retains saved project items. Backgrounding pauses refreshes; closing disposes rendering/audio/recognition and cancels requests.
+- Geographic search uses Photon/OpenStreetMap, with existing authenticated query validation, caching and explicit result selection. Reference imagery is not live satellite video.
 
-CesiumJS **1.124.0** and its assets are loaded from jsDelivr only when World View
-opens. No Node installation or map/API key is required on the Apex host. Internet
-access is needed to load Cesium and map imagery. If the engine fails to load,
-the page offers retry and return controls. Map-only requests go directly to the
-provider from the browser; no Apex token is attached to those requests.
+## Terrain and 3D
 
-The dedicated iframe avoids loading the globe in Command. Closing the panel
-unloads its renderer, while backgrounding the page pauses its render loop.
-Cesium uses render-on-demand and CSS-pixel resolution. The initial terrain is
-an ellipsoid; elevation and photorealistic tiles are outside this milestone.
+The flat ellipsoid is the default. Terrain is an explicit Re:Earth/Mapterhorn provider choice with credit; provider failures retain the flat globe. Optional OSM 3D buildings use Cesium ion asset 96188 and a scoped token entered for this view only; it is not saved. Ion permissions, quotas and geographic coverage apply. OSM buildings are not photorealistic Google 3D cities. No ion account is created automatically.
 
-The small imagery adapter in `dashboard/static/world/imagery.js` is adapted
-from [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view), pinned at
-`e7707d9a0f34d9fbffc300023c319f95caa5be30`, `src/maps/imagery.js`.
-It uses Cesium's browser global instead of a bundler import and omits ion
-providers. The upstream MIT license is retained beside it. The full upstream
-application, its credentials, datasets and 3D models are not bundled.
+## Projects
 
-## Sources and attribution
+Mark a location or select an entity, enter a name, and save a note. Draw route collects up to 100 clicked locations and saves a named line. Camera/map/location and up to 200 notes/routes persist in this browser. Export/import a bounded JSON project to move it elsewhere. Import validates schema and coordinates before changing the project; Undo restores earlier project changes. These are browser-local projects, not shared cloud scenes or authoritative survey data.
 
-- CesiumJS: Apache 2.0; retain its asset notices and credit widget.
-- Esri World Imagery: Esri/Maxar/Earthstar/GIS User Community attribution is
-  displayed by the provider. Service/data terms apply independently of code.
-- OpenStreetMap tiles: OSM contributor credit remains visible; use is subject
-  to the public tile service's policy. No bulk/offline tile downloader is added.
-- Photon place search: results identify Photon/OpenStreetMap. An explicit
-  remote search sends the entered place name to Photon from the Apex host.
+## Dependencies and attribution
 
-`/world` is a public empty shell like `/board`. `/api/world/search` remains
-behind existing dashboard authentication. It calls one fixed HTTPS endpoint,
-does not follow redirects or forward credentials, validates returned points,
-caches up to 128 searches for 10 minutes and spaces uncached requests by at
-least one second. It does not accept a provider URL from the user.
+CesiumJS 1.124.0 loads from jsDelivr on entry; its credit widget remains accessible. Install `sgp4>=2.24,<3` from requirements.txt for satellite propagation. No provider data is bundled. The original small imagery adapter retains the upstream God's Eye View MIT notice at `dashboard/static/world/UPSTREAM-LICENSE.txt`; new layer code is implemented for Apex from provider documentation. Cesium is Apache 2.0, SGP4 is MIT, and Re:Earth/Mapterhorn terrain is attributed CC BY 4.0. Imagery and feed terms apply independently of repository licensing.
 
 `/api/world/layers/earthquakes` also requires dashboard authentication. It streams
 one fixed HTTPS source with a 10-second timeout, no redirects and no forwarded
@@ -171,15 +144,50 @@ and depth are validated; event links are built from the validated ID. A shared
 lock and a 60-second cache/retry interval bound requests across multiple windows.
 USGS generated times are preserved even when the service returns older data.
 
+## Terrain, buildings, saved places and Ask Celine
+
+The panel on the right sits on top of the three layers above. It doesn't fetch
+any layer data itself.
+
+- **Terrain**: Re:Earth / Mapterhorn (CC BY 4.0). If you switch it off before
+  it finishes loading, the late result is ignored. With terrain on, clicking
+  marks the ground where it really is.
+- **OSM 3D buildings**: these need your own scoped Cesium ion token. It's typed
+  in each time and never saved, and without it the switch stays off.
+- **World project**: save a note at the selected place, or draw a route by
+  clicking places on the globe.
+  - Up to 200 items, with undo and export/import as JSON.
+  - Stored in this browser only.
+  - Saved notes are separate from the location pin, so moving the pin never
+    moves a note.
+- **Ask Celine** answers with the layers you have on and the record you
+  selected.
+  - The page sends only ids, such as `flights:abc123`. The server looks the
+    record up in that layer's own cache (`dashboard/world_live.py`), so
+    anything the page claims about a record is ignored.
+  - For a selected space station, the server calculates where it is now with
+    `sgp4`.
+  - Commands answered without the model: show/hide flights (or aircraft),
+    satellites (or stations) and earthquakes, and reset globe. They flip the
+    same switches you would.
+  - Spoken answers use your local Celine voice when it's running.
+
+These were merged from a parallel World View build. Its own feeds (OpenSky
+aircraft, server-calculated station dots, a second earthquake feed), its entity
+finder and its "follow" were removed so each layer exists once. Follow and a
+cross-layer finder can come back on top of the layers above.
+
 ## Verification
 
 ```sh
 python -m pytest tests/test_world_view.py -q
-python -m pytest tests/test_world_layers.py tests/test_world_flights.py tests/test_world_satellites.py -q
+python -m pytest tests/test_world_layers.py tests/test_world_flights.py tests/test_world_satellites.py tests/test_world_live.py -q
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_view_ui.cjs
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_earthquakes_ui.cjs
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_flights_ui.cjs
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_satellites_ui.cjs
+NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_live_ui.cjs
+NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_entry_ui.cjs
 ```
 
 Backend checks cover auth, input validation, malformed provider records,
@@ -190,11 +198,9 @@ Earthquake checks cover opt-in, auth, malformed records, bounded streams and
 refreshes, safe source links, marker/detail selection, retained stale snapshots,
 cache aging, hidden-page pause, canceled responses and disposal.
 
-An optional real Cesium/WebGL regression starts an isolated dashboard process:
+World backend tests cover auth, malformed records, caching/coalescing, outage/stale retention, retry windows, request budget, payload limits, OAuth isolation, SGP4 positions and server-resolved chat context. The three World View DOM suites cover navigation, race/failure behavior, entry/focus/renderer lifecycle, selection, aging/tracking, cancellation, project state and terrain races.
 
-```sh
-node scripts/check_world_view_browser.cjs
-```
+Real browser checks use Cesium and public flights/USGS feeds in an isolated loopback preview. Agent-context behavior is verified with a test agent; actual Celine audio, microphone recognition and account-backed ion buildings still need checks in running Apex. CelesTrak had TLS timeouts on this machine during this review; no fake satellite data was substituted. These checks do not certify all Lenovo hand gestures or continuous multi-hour provider availability.
 
 It needs Playwright/Chromium and Python dependencies. Set `APEX_TEST_PYTHON`
 and `APEX_CHROMIUM_PATH` if those runtimes are outside PATH. Set

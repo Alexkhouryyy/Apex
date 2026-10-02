@@ -247,7 +247,7 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  await ctx.route('**/api/**',route=>{const u=new URL(route.request().url());if(u.pathname.startsWith('/api/world/'))return route.continue();let data={};if(u.pathname==='/api/status')data={model:'test-model',tools_count:117,uptime_s:120};if(u.pathname==='/api/conversations')data={threads:[]};if(u.pathname==='/api/constellation')data={planets:[]};return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});});
  await page.setViewportSize({width:1440,height:1000});
  await page.goto(origin+'/',{waitUntil:'domcontentloaded'});
- await page.getByRole('link',{name:'Open World View'}).click();
+ await page.locator('#world-open').click();
  let iframe=page.frameLocator('iframe[title="Apex World View"]');
  await iframe.locator('#world-reset:enabled').waitFor({timeout:30000});
  console.log('Command panel opened',await page.locator('.world-dialog').evaluate(el=>el.open));
@@ -255,7 +255,7 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
  await page.waitForFunction(()=>!document.querySelector('.world-dialog').open);
  await page.locator('.world-dialog iframe').waitFor({state:'detached'});
  console.log('Panel unloaded',await page.locator('.world-dialog iframe').count());
- await page.getByRole('link',{name:'Open World View'}).click();
+ await page.locator('#world-open').click();
  iframe=page.frameLocator('iframe[title="Apex World View"]');
  await iframe.locator('#world-reset:enabled').waitFor({timeout:30000});
  console.log('Panel restored',await iframe.locator('#world-selected-name').innerText());
@@ -269,7 +269,7 @@ b=await chromium.launch({...(process.env.APEX_CHROMIUM_PATH?{executablePath:proc
   satOutage=false;
   const cdp=await ctx.newCDPSession(page);await cdp.send('Emulation.setCPUThrottlingRate',{rate:4});
   for(let n=0;n<3;n++){
-   await page.getByRole('link',{name:'Open World View'}).click();
+   await page.locator('#world-open').click();
    iframe=page.frameLocator('iframe[title="Apex World View"]');await iframe.locator('#world-reset:enabled').waitFor({timeout:30000});
    assert.equal(await page.locator('.world-dialog iframe').count(),1);
    await iframe.locator('.world-layers summary').click();await iframe.locator('#sat-toggle').check();

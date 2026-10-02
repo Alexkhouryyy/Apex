@@ -149,7 +149,7 @@
     }
     toggle.addEventListener('change', toggleLayer); refreshButton.addEventListener('click', refresh); areaButton.addEventListener('click', changeArea);
     updateStatus(); if (enabled) refresh();
-    return {clearSelection, pick(picked) {
+    return {selectedId: () => selection?.id ?? null, clearSelection, pick(picked) {
       const entity = picked?.id;
       return Boolean(enabled && entity && typeof entity.id === 'string' && entity.id.startsWith('flight:') &&
         source.entities.getById(entity.id) === entity && inspect(entity.id.slice(7), false));
