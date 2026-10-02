@@ -193,14 +193,15 @@
       // Marked, not recognised by its wording: callers that must tell "sign
       // in" from any other failure check `auth`, and a dialog that cannot
       // open must not turn this into some other error.
-      const exc = new Error('Enter your Apex dashboard token to continue.'); exc.auth = true;
+      const exc = new Error('Enter your Apex dashboard token to continue.'); exc.auth = true; exc.status = 401;
       try { if (pip) pip.close(); if (!$('login').open) $('login').showModal(); } catch (_) {}
       throw exc;
     }
     if (!response.ok) {
       let detail = `Request failed (${response.status}).`;
       try { const data = await response.json(); detail = data.detail || data.error || detail; } catch (_) {}
-      throw new Error(detail);
+      const exc = new Error(detail); exc.status = response.status;   // the server answered: not a lost connection
+      throw exc;
     }
     return response;
   }
@@ -460,7 +461,7 @@
   // proactive check-in may turn out to be NOTHING_TO_ADD, which must not be
   // half-said first).
   function canSpeakLive(automatic) {
-    return !automatic && !drive && $('spoken').checked && $('stream-speech').checked
+    return !automatic && $('spoken').checked && $('stream-speech').checked
       && ['openai', 'voicebox'].includes($('voice').value);
   }
   let live = null;
@@ -556,24 +557,60 @@
     $('jobs').replaceChildren(new Option('Choose a task…', ''));
     for (const job of data.jobs) $('jobs').append(new Option(`${job.status} · ${job.message.slice(0, 70)}`, job.id));
   }
+  // The car's turn is a durable job on the PC (it survives a dropped
+  // connection). Its text is polled and fed to the voice as it grows, so she
+  // starts speaking at the first sentence, not after the whole reply; a
+  // dropped connection is ridden out (car_link.js) instead of failing the turn.
   async function remoteEvents(turn, body, event) {
+    const link = window.ApexCarLink;
+    const onState = s => {
+      if (s === 'reconnecting') {
+        const text = 'Connection dropped · reconnecting… your task keeps running on the PC';
+        showLink({state: 'reconnecting', text}); state('thinking', text);     // voice mode shows state(), not the panel
+      } else { checkLink(); state('thinking', 'Reconnected · picking up where it was'); }
+    };
+    const patient = fetchOnce => link.patient(fetchOnce, {onState});
     let job = body.existing
-      ? await (await request(`/api/companion/jobs/${turn.id}`)).json()
-      : await (await request('/api/companion/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})).json();
+      ? await patient(async () => (await request(`/api/companion/jobs/${turn.id}`)).json())
+      // Safe to retry: the server answers a repeated turn id with the same job.
+      : await patient(async () => (await request('/api/companion/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})).json());
     event({type: 'start', thread_id: job.thread_id});
     savePending({turn_id: turn.id, existing: true, message: body.message || 'Reconnected task'});
-    let seen = 0;
+    let seen = 0, said = '';
     while (true) {
-      job = await (await request(`/api/companion/jobs/${turn.id}`)).json();
+      job = await patient(async () => (await request(`/api/companion/jobs/${turn.id}`)).json());
       for (const evidence of (job.evidence || []).slice(seen)) event(evidence);
       seen = (job.evidence || []).length;
-      event({type: 'progress', text: job.text || 'Working on your Apex host…'});
+      const {delta, reset} = link.textDelta(said, job.text || '');
+      if (delta) event({type: 'token', text: delta});
+      said = job.text || '';
+      if (!said) event({type: 'progress', text: 'Working on your Apex host…'});
+      else if (reset) event({type: 'progress', text: said});
       if (job.status !== 'running') {
         event({type: 'done', text: [job.text, job.error].filter(Boolean).join('\n\n') || 'Task ended without a reply.', interrupted: job.status !== 'done'});
         savePending(null); refreshJobs().catch(() => {}); return;
       }
-      await new Promise(resolve => setTimeout(resolve, 1200));
+      await new Promise(resolve => setTimeout(resolve, 400));
     }
+  }
+  // --- The car's link to the PC: shown, so "nothing happens" is never a mystery.
+  function showLink(view) {
+    // Made after load, so not in the element map `$` reads from.
+    const el = document.getElementById('car-link'); if (!el || !view) return;
+    el.dataset.state = view.state; el.textContent = view.text;
+  }
+  let linkTimer = null;
+  async function checkLink() {
+    if (!drive) return;
+    clearTimeout(linkTimer);
+    const started = performance.now();
+    let result;
+    try {
+      const r = await fetch('/api/companion/jobs', {headers: headers(), cache: 'no-store'});
+      result = {ok: r.ok, status: r.ok ? 0 : r.status, ms: performance.now() - started};
+    } catch (_) { result = {ok: false, status: 0, deviceOffline: navigator.onLine === false}; }
+    showLink(window.ApexCarLink.describe(result));
+    linkTimer = setTimeout(checkLink, result.ok ? 15000 : 5000);
   }
   // `look`: a hotkey / "Hey Celly" request (agent/look_now.py) — the server
   // attaches the screen it captured; no browser share is sent with it.
@@ -633,7 +670,9 @@
     }
     try {
       if (drive) {
-        const body = recovery || {message: text, thread_id: threadId, turn_id: turn.id, mode: $('mode').value};
+        // The voice rides along: in Celine's voice, Apex answers as Celine, in the car too.
+        const body = recovery || {message: text, thread_id: threadId, turn_id: turn.id, mode: $('mode').value,
+          voice: $('voice').value, voice_profile: $('voicebox-profile').value};
         savePending(body);
         await remoteEvents(turn, body, event);
       } else {
@@ -960,6 +999,25 @@
     $('welcome').querySelector('h2').textContent = 'What should we work on?';
     $('welcome').querySelector('p').textContent = 'Talk through a decision, or switch to Work and ask Apex to run a task on your computer.';
     root.querySelector('footer').firstChild.textContent = 'Tasks run on your Apex host. ';
+    // Voice first: one big button into talk-only mode (Celine, hands-free).
+    const talk = document.createElement('button');
+    talk.id = 'car-talk'; talk.className = 'car-talk'; talk.textContent = '🎙 Talk with Celine';
+    talk.onclick = () => $('voice-mode').click();
+    const link = document.createElement('p');
+    link.id = 'car-link'; link.className = 'car-link'; link.setAttribute('role', 'status'); link.dataset.state = 'checking';
+    link.textContent = 'Checking the connection to your Apex…';
+    $('remote-panel').prepend(talk, link);
+    // Car layout: what you need while driving at the top (talk, link light),
+    // and every setting folded away. Same elements as the desktop companion.
+    root.querySelector('.presence').after($('remote-panel'));
+    const settings = document.createElement('details');
+    settings.className = 'car-settings';
+    const summary = document.createElement('summary'); summary.textContent = 'Settings';
+    settings.append(summary, root.querySelector(':scope > .toolbar'), root.querySelector('.settings'), $('hands-note'), $('mode-hint'), $('capabilities'));
+    $('remote-panel').after(settings);
+    $('check-frequency').parentElement.hidden = true;     // no screen sharing in the car
+    addEventListener('online', checkLink); addEventListener('offline', checkLink);
+    checkLink();
   }
   if (workspace) {
     root.dataset.workspace = workspace;
