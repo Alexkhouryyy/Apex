@@ -28,9 +28,9 @@
 }
 </script>
 <link rel="stylesheet" href="/static/brand.css?v=brand40">
-<link rel="stylesheet" href="/static/environment.css?v=environment44"><link rel="stylesheet" href="/static/world-launch.css?v=world1"><link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="/static/environment.css?v=environment44"><link rel="stylesheet" href="/static/world-launch.css?v=world2"><link rel="stylesheet" href="/static/theme.css">
 
-<script src="/static/world-launch.js?v=world1" defer></script>
+<script src="/static/world-launch.js?v=world2" defer></script>
 </head>
 <body>
 <aside id="sidebar">
@@ -154,7 +154,7 @@
         <span class="cmd-title-main">APEX&nbsp;COMMAND</span>
         <span class="cmd-title-sub">Global Agent Operations</span>
       </div>
-      <div class="cmd-clock" id="cmd-clock">--:--:--</div>
+      <div class="cmd-topbar-actions"><a id="world-command-open" class="world-command-link" href="/world" aria-haspopup="dialog">World View</a><div class="cmd-clock" id="cmd-clock">--:--:--</div></div>
     </div>
 
     <!-- The five system readouts, in one quiet row (same ids as before). -->
@@ -191,10 +191,9 @@
       <div class="orbit-ring orbit-ring-mid"></div>
       <div class="orbit-ring orbit-ring-inner"></div>
       <div class="globe-glow"></div>
-      <div id="globe" class="globe-mount"></div>
+      <div class="world-portal" id="world-portal" data-body="earth"><div id="globe" class="globe-mount" aria-label="Earth globe. Click Earth to enter World View; drag to rotate."></div><a id="world-open" class="world-entry" href="/world" aria-haspopup="dialog"><span class="apex-logo" aria-hidden="true"></span><span><span class="world-entry-name">World View</span><span class="world-entry-hint" id="world-entry-hint">Click Earth to explore</span></span></a></div>
       <div id="feature-orbit" class="feature-orbit"></div>
       <div id="planet-selector" class="planet-selector"></div>
-      <a id="world-open" class="world-entry" href="/world" aria-haspopup="dialog">Open World View ↗</a>
     </div>
 
     <form id="cst-quickask" class="cst-quickask">
@@ -998,7 +997,7 @@
 
 <script src="/static/plugins.js?v=plugins44"></script>
 <script src="/static/environment.js?v=environment44"></script>
-<script src="/static/app.js?v=environment42"></script>
+<script src="/static/app.js?v=world2"></script>
 <script src="/static/voice-mobile.js?v=omni30"></script>
 <script type="module" src="/static/cst3d.js?v=omni30"></script>
 <script src="/static/team.js"></script>

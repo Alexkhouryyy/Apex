@@ -5,9 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Apex · World View</title>
   <link rel="icon" type="image/svg+xml" href="/static/icons/apex-refined.svg">
-  <link rel="stylesheet" href="/static/world-view.css?v=world1">
+  <link rel="stylesheet" href="/static/world-view.css?v=world3">
   <script src="/static/world/imagery.js?v=world1" defer></script>
-  <script src="/static/world-view.js?v=world1" defer></script>
+  <script src="/static/world/live.js?v=world3" defer></script>
+  <script src="/static/world-view.js?v=world3" defer></script>
 </head>
 <body>
   <header class="world-header">
@@ -26,8 +27,31 @@
       <div class="quick-places"><button data-place="Byblos" disabled>Byblos</button><button data-place="Beirut" disabled>Beirut</button><button data-place="Rome" disabled>Rome</button></div>
       <label class="map-choice" for="world-map">Map <select id="world-map" disabled><option value="satellite">Satellite imagery</option><option value="streets">Street map</option><option value="outline">Globe only</option></select></label>
       <p class="world-help">Drag to explore · Scroll or pinch to zoom · Right-drag to tilt · Click to mark a location</p>
-      <p class="world-help">Map imagery is a reference map, not live satellite video. Live data layers come next.</p>
+      <p class="world-help">Reference imagery is not live video. Enable layers below; coverage and timestamps are shown for every feed.</p>
     </section>
+    <aside class="world-live-panel" aria-label="Live world layers">
+      <details open><summary>Live layers</summary>
+        <label><input type="checkbox" data-world-layer="flights"> Flights near view</label><p id="world-feed-flights">Off · no requests</p>
+        <label><input type="checkbox" data-world-layer="satellites"> Space stations</label><p id="world-feed-satellites">Off · calculated from orbital data when enabled</p>
+        <label><input type="checkbox" data-world-layer="earthquakes"> Earthquakes · M2.5+</label><p id="world-feed-earthquakes">Off · USGS past 24 hours</p>
+        <button id="world-refresh">Refresh enabled layers</button>
+        <label for="world-entity-filter">Find an entity</label><input id="world-entity-filter" placeholder="Callsign, name or ID" maxlength="80">
+        <select id="world-entity-list" aria-label="Entities"><option value="">Enable a layer first</option></select>
+      </details>
+      <section id="world-entity" hidden aria-label="Selected entity"><h2 id="world-entity-name"></h2><p id="world-entity-details"></p><button id="world-follow">Follow</button><button id="world-entity-clear">Clear entity</button></section>
+      <details><summary>Terrain &amp; buildings</summary><label><input type="checkbox" id="world-terrain"> Terrain · Re:Earth / Mapterhorn</label>
+        <label for="world-ion-token">Cesium ion token · optional, not saved</label><input id="world-ion-token" type="password" autocomplete="off" placeholder="Scoped token for OSM buildings">
+        <label><input type="checkbox" id="world-buildings"> OSM 3D buildings</label><p>Uses Cesium ion; provider permissions and coverage apply.</p>
+      </details>
+      <details><summary>World project</summary><input id="world-note-label" maxlength="120" aria-label="Note or route name" placeholder="Note / route name">
+        <button id="world-add-note">Save note at selection</button><button id="world-route">Draw route</button><p id="world-project-count"></p>
+        <button id="world-project-undo">Undo project change</button><button id="world-project-export">Export project</button><label>Import project<input id="world-project-import" type="file" accept="application/json,.json"></label>
+      </details>
+      <details><summary>Ask Celine</summary><form id="world-ask"><label for="world-question">Question or command</label><input id="world-question" maxlength="2000" placeholder="What am I looking at?" required><button>Ask Apex</button></form>
+        <button id="world-microphone">Microphone</button><label><input id="world-speak" type="checkbox"> Speak using local Celine</label>
+        <p>Commands: show flights, hide satellites, follow selected, stop following, reset globe. Microphone uses your browser's speech recognition service.</p><p id="world-answer" role="status"></p>
+      </details><p id="world-live-message" role="status" aria-live="polite"></p>
+    </aside>
     <section class="world-readout" aria-label="Selected location" hidden>
       <h2 id="world-selected-name">Selected location</h2><p id="world-selected-coords"></p><button id="world-clear">Clear selection</button>
     </section>

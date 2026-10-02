@@ -1,4 +1,4 @@
-/* Apex World View — navigation foundation. No live telemetry or mic capture. */
+/* Apex World View: explicit live layers, navigation and local project state. */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -11,7 +11,7 @@
   };
   const controls = [...document.querySelectorAll('button[data-place]'), $('world-reset'),
     $('world-search-button'), $('world-map')];
-  let viewer = null, enginePromise = null, selected = null, map = 'satellite';
+  let viewer = null, enginePromise = null, selected = null, map = 'satellite', locationMarker = null, live = null;
   let engineReady = Boolean(window.Cesium);
   let initializing = false, disposed = false, searchId = 0, searchController = null;
   let mapId = 0, removeMapErrors = null, tileErrors = 0, saved = null;
@@ -76,10 +76,11 @@
   function setLocation(location, fly = true) {
     if (!viewer || !validLocation(location)) return;
     selected = {lat: location.lat, lng: location.lng, label: String(location.label || 'Selected location').slice(0, 240)};
-    viewer.entities.removeAll();
-    viewer.entities.add({position: Cesium.Cartesian3.fromDegrees(selected.lng, selected.lat),
+    if (locationMarker) viewer.entities.remove?.(locationMarker);
+    locationMarker = viewer.entities.add({position: Cesium.Cartesian3.fromDegrees(selected.lng, selected.lat),
       point: {pixelSize: 10, color: Cesium.Color.CYAN, outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY}});
+    live?.mark(selected);
     $('world-selected-name').textContent = selected.label;
     $('world-selected-coords').textContent = `${selected.lat.toFixed(5)}°, ${selected.lng.toFixed(5)}°`;
     document.querySelector('.world-readout').hidden = false;
@@ -138,8 +139,11 @@
       viewer.scene.screenSpaceCameraController.minimumZoomDistance = 100;
       viewer.scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
       viewer.camera.moveEnd.addEventListener(save);
+      live = window.ApexWorldLive?.(viewer);
       viewer.screenSpaceEventHandler.setInputAction(event => {
-        const hit = viewer.camera.pickEllipsoid(event.position, viewer.scene.globe.ellipsoid);
+        if (live?.pick(event)) {document.querySelector('.world-readout').hidden = true;return;}
+        const ray = viewer.camera.getPickRay?.(event.position);
+        const hit = (ray && viewer.scene.globe.pick?.(ray, viewer.scene)) || viewer.camera.pickEllipsoid(event.position, viewer.scene.globe.ellipsoid);
         if (!hit) return;
         const pos = Cesium.Cartographic.fromCartesian(hit);
         setLocation({lat: Cesium.Math.toDegrees(pos.latitude), lng: Cesium.Math.toDegrees(pos.longitude)}, false);
@@ -161,12 +165,14 @@
       });
       syncVisibility();
       viewer.scene.renderError.addEventListener(() => {
+        live?.dispose();
         status('Globe rendering stopped. Reload World View to retry.');
         controls.forEach(el => { el.disabled = true; });
       });
       await changeMap(saved?.map || 'satellite');
       syncVisibility();
     } catch (error) {
+      live?.dispose(); live = null;
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
       viewer = null;
       $('world-loading').hidden = false;
@@ -232,11 +238,11 @@
   }));
   $('world-map').addEventListener('change', () => changeMap($('world-map').value));
   $('world-clear').addEventListener('click', () => {
-    selected = null; viewer?.entities.removeAll(); document.querySelector('.world-readout').hidden = true;
+    selected = null; if (locationMarker) viewer?.entities.remove?.(locationMarker); locationMarker = null; document.querySelector('.world-readout').hidden = true;
     viewer?.scene.requestRender(); save();
   });
   $('world-reset').addEventListener('click', () => {
-    invalidateSearch(); viewer.camera.cancelFlight();
+    invalidateSearch(); live?.clearSelection(); viewer.camera.cancelFlight();
     viewer.camera.setView({destination: Cesium.Cartesian3.fromDegrees(35.65, 25, 19000000),
       orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0}});
     save(); viewer.scene.requestRender(); status('');
@@ -252,7 +258,7 @@
   window.addEventListener('pagehide', event => {
     save(); invalidateSearch();
     if (event.persisted) { if (viewer) viewer.useDefaultRenderLoop = false; return; }
-    disposed = true; ++mapId; removeMapErrors?.();
+    disposed = true; live?.dispose(); ++mapId; removeMapErrors?.();
     if (viewer && !viewer.isDestroyed()) viewer.destroy();
     viewer = null;
   });

@@ -45,3 +45,14 @@ main { position: relative; flex: 1; min-height: 0; }
   .world-footer { flex-wrap: wrap; padding: 8px 10px; }
   .world-status { bottom: 34px; left: 10px; }
 }
+
+.world-live-panel { position:absolute;z-index:2;right:20px;top:20px;width:min(320px,calc(100% - 40px));max-height:calc(100% - 80px);overflow:auto;padding:14px;border:1px solid #294652;border-radius:16px;background:rgba(9,19,29,.96);font-size:13px; }
+.world-live-panel details { border-bottom:1px solid #294652;padding:10px 0; }
+.world-live-panel summary { cursor:pointer;font-weight:600;min-height:32px; }
+.world-live-panel label { display:block;margin:10px 0 6px; }
+.world-live-panel input:not([type=checkbox]),.world-live-panel select { width:100%;padding:8px; }
+.world-live-panel input[type=checkbox] { min-height:0;accent-color:#77dfff; }
+.world-live-panel button { margin:4px 3px 0 0;font-size:12px;min-height:44px; }
+.world-live-panel p { color:#b5d0da;font-size:12px;line-height:1.5;white-space:pre-line;overflow-wrap:anywhere; }
+.world-live-panel h2 { font-size:15px;overflow-wrap:anywhere; }
+@media(max-width:760px) { .world-tools { max-height:32%;overflow:auto; } .world-live-panel { top:auto;right:10px;bottom:48px;max-height:38%;width:calc(100% - 20px); } .world-readout { bottom:auto;top:34%;right:10px;max-width:220px; } }

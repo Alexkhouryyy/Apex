@@ -13,7 +13,10 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from dashboard.world_live import router as live_router
+
 router = APIRouter()
+router.include_router(live_router)
 _cache = OrderedDict()
 _search_lock = asyncio.Lock()
 _last_search = 0.0
