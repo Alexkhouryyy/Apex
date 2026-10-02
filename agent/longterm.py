@@ -380,13 +380,15 @@ def recall(query: str = "", limit: int = 10, kind: str = "", semantic: bool = Tr
             combined.sort(reverse=True)
             top = [rows[i] for _, i in combined[:int(limit)]]
             return _format_rows(top)
-        # Fallback: LIKE
-        query_lower = f"%{query}%"
-        return _format_rows([r for r in rows if query_lower[1:-1] in r[3].lower() or query_lower[1:-1] in r[5].lower()][:int(limit)])
+        # Fallback without embeddings: a case-insensitive substring match.
+        # (It used to lowercase the memory but not the query, so any query
+        # with a capital letter — "Jeep", "Alex" — matched nothing.)
+        q = query.lower()
+        return _format_rows([r for r in rows if q in r[3].lower() or q in (r[5] or "").lower()][:int(limit)])
 
     elif query:
         q = query.lower()
-        return _format_rows([r for r in rows if q in r[3].lower() or q in r[5].lower()][:int(limit)])
+        return _format_rows([r for r in rows if q in r[3].lower() or q in (r[5] or "").lower()][:int(limit)])
 
     return _format_rows(rows[:int(limit)])
 
