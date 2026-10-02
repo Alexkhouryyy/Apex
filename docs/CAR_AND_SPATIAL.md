@@ -46,6 +46,34 @@ that HTTPS origin only when it arrives through that local proxy.
   - amber: reconnecting;
   - red: can't reach Apex, or the token is missing. It says which.
 
+## The orb screen (`/drive#orb`)
+
+For a screen in the car: an Android head unit in the dash, or a tablet or
+phone on a mount. It shows Apex's orb full screen, with its state (listening,
+thinking, speaking), the last thing said, and the link light. There are no
+menus or settings.
+
+1. Open `https://<your Apex>/drive#orb` once, enter your dashboard token, then
+   **Tap to start Apex**. A browser needs one tap before it may use the
+   microphone. After that it's hands-free, and you can talk over Apex to
+   interrupt it.
+2. The screen stays awake while the orb is open.
+3. **Stop** (or Esc) goes back to the tap-to-start screen.
+
+**With no PC: the cloud Apex on Railway.** The orb screen works on any Apex,
+including the one on Railway. Open `https://<your Railway Apex domain>/drive#orb`;
+Railway already gives it HTTPS, which the microphone needs.
+
+- **Brain:** the AI model configured on that Railway Apex.
+- **Voice:** Celine's own voice needs your PC's GPU, so a cloud Apex speaks
+  with the **cloud voice** (OpenAI text-to-speech) when the Railway Apex has
+  `OPENAI_API_KEY` set, otherwise with the device's built-in voice. The orb
+  says which one it's using.
+- **Memory:** the Railway Apex has **its own memory**, separate from your
+  PC's. It doesn't know what you told the Apex at home.
+- **Personality:** Celine's personality comes with her voice, so with the
+  cloud voice it answers as Apex.
+
 **By hand / other setups** (the original notes):
 
 
