@@ -327,6 +327,7 @@ function switchBody(key) {
   const body = SOLAR_BODIES[key];
   if (!body || !globeInstance) return;
   currentBody = key;
+  window.ApexWorldView?.setBody(key, body.label);
   document.querySelectorAll('.planet-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.body === key));
   let tex = body.texture;
@@ -461,6 +462,9 @@ function initGlobe() {
       .ringMaxRadius(4)
       .ringPropagationSpeed(1.6)
       .ringRepeatPeriod(1400);
+    globeInstance.onGlobeClick((coordinates, event) => {
+      if (currentBody === 'earth') window.ApexWorldView?.openFromGlobe(event);
+    });
     const ctrl = globeInstance.controls();
     ctrl.autoRotate = true;
     ctrl.autoRotateSpeed = 0.7;
@@ -470,6 +474,12 @@ function initGlobe() {
     mount.innerHTML = '<div class="globe-fallback"></div>';
   }
 }
+
+// The Command globe should sleep while its World View takes over.
+window.addEventListener('apex:world-visibility', event => {
+  if (event.detail.open) globeInstance?.pauseAnimation();
+  else globeInstance?.resumeAnimation();
+});
 
 // Optional graphics must not delay dashboard controls when a CDN is slow.
 document.querySelectorAll('script[async][src]').forEach(script => {

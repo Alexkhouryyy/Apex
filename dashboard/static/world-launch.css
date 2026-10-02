@@ -1,5 +1,18 @@
-.world-entry { position: absolute; z-index: 8; left: 50%; bottom: 12%; transform: translateX(-50%); padding: 9px 16px; border: 1px solid rgba(95,216,255,.45); border-radius: 24px; background: var(--bg, #070b14); color: var(--text, #e8edf5); font-size: 13px; white-space: nowrap; text-decoration: none; }
-.world-entry:focus-visible { outline: 2px solid #5fd8ff; outline-offset: 4px; }
-.world-dialog { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #070b14; }
-.world-dialog::backdrop { background: #070b14; }
+.world-portal { width: 460px; height: 460px; position: relative; z-index: 3; flex: 0 0 auto; }
+.world-portal[data-body="earth"] .globe-mount canvas { cursor: pointer; }
+.world-portal .world-entry { position: absolute; z-index: 8; left: 50%; bottom: 30px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 18px; border: 1px solid color-mix(in srgb, var(--accent, #5fd8ff) 40%, transparent); border-radius: 16px; background: color-mix(in srgb, var(--bg, #070b14) 90%, transparent); color: var(--text, #e8edf5); white-space: nowrap; text-decoration: none; box-shadow: 0 8px 24px #0005; transition: border-color .18s, box-shadow .18s; }
+.world-entry .apex-logo { width: 22px; height: 22px; flex: 0 0 22px; }
+.world-entry-name { display: block; font-size: 14px; font-weight: 600; line-height: 1.4; }
+.world-entry-hint { display: block; font-size: 11px; color: var(--text-mute, #a1b1ba); line-height: 1.5; }
+.world-entry:hover, .world-portal:has(.globe-mount:hover)[data-body="earth"] .world-entry { border-color: var(--accent, #5fd8ff); box-shadow: 0 0 22px color-mix(in srgb, var(--accent, #5fd8ff) 18%, transparent); }
+.cmd-topbar-actions { display: flex; align-items: center; gap: 22px; }
+.world-command-link { color: var(--text-mute, #a1b1ba); font-size: 12px; text-decoration: none; padding: 10px 12px; border: 1px solid var(--border, #ffffff20); border-radius: 10px; }
+.world-command-link:hover { color: var(--text, #e8edf5); border-color: var(--accent, #5fd8ff); }
+.world-entry:focus-visible, .world-command-link:focus-visible { outline: 2px solid var(--accent, #5fd8ff); outline-offset: 4px; }
+.world-dialog { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: var(--bg, #070b14); }
+.world-dialog[open] { animation: world-portal-enter .38s cubic-bezier(.2,.65,.3,1) both; }
+.world-dialog::backdrop { background: var(--bg, #070b14); }
 .world-dialog iframe { width: 100%; height: 100%; border: 0; display: block; }
+@keyframes world-portal-enter { from { opacity: .35; clip-path: circle(var(--world-portal-radius, 140px) at var(--world-portal-x, 50%) var(--world-portal-y, 50%)); } to { opacity: 1; clip-path: circle(150vmax at var(--world-portal-x, 50%) var(--world-portal-y, 50%)); } }
+@media (prefers-reduced-motion: reduce) { .world-dialog[open] { animation: none; } .world-entry { transition: none; } }
+@media (max-width: 760px) { .world-entry { zoom: 1.7; } .cmd-topbar { flex-wrap: wrap; gap: 8px; } .cmd-topbar-actions { gap: 8px; flex-basis: 100%; justify-content: space-between; } .world-command-link { min-height: 44px; display: flex; align-items: center; white-space: nowrap; } }

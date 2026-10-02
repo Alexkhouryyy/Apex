@@ -143,6 +143,7 @@
     toggle.addEventListener('change', toggleLayer); refreshButton.addEventListener('click', refresh);
     updateStatus(); if (enabled) refresh();
     return {
+      selectedId: () => selection?.id ?? null,
       clearSelection,
       pick(picked) {
         const entity = picked?.id;

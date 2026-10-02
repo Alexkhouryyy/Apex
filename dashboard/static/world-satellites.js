@@ -175,7 +175,7 @@
       return enabled&&e&&typeof e.id==='string'&&/^satellite:[1-9][0-9]{0,8}$/.test(e.id)&&
         source.entities.getById(e.id)===e ? e : null;
     }
-    return {clearSelection,pickStack(picks) {
+    return {selectedId: () => selection?.id ?? null, clearSelection,pickStack(picks) {
       const entities=picks.map(ownedStation).filter(Boolean);
       let chosen=entities.find(e=>selection&&e.id==='satellite:'+selection.id);
       // Docked vehicles can have identical elements and exceed the pick stack.

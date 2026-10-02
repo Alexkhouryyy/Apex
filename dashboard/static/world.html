@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Apex · World View</title>
   <link rel="icon" type="image/svg+xml" href="/static/icons/apex-refined.svg">
-  <link rel="stylesheet" href="/static/world-view.css?v=world4">
+  <link rel="stylesheet" href="/static/world-view.css?v=world5">
   <script src="/static/world/imagery.js?v=world1" defer></script>
-  <script src="/static/world-layer-status.js?v=world4" defer></script>
-  <script src="/static/world-satellites.js?v=world4" defer></script>
-  <script src="/static/world-flights.js?v=world4" defer></script>
-  <script src="/static/world-earthquakes.js?v=world4" defer></script>
-  <script src="/static/world-view.js?v=world4" defer></script>
+  <script src="/static/world-layer-status.js?v=world5" defer></script>
+  <script src="/static/world-satellites.js?v=world5" defer></script>
+  <script src="/static/world-flights.js?v=world5" defer></script>
+  <script src="/static/world-earthquakes.js?v=world5" defer></script>
+  <script src="/static/world/live.js?v=world5" defer></script>
+  <script src="/static/world-view.js?v=world5" defer></script>
 </head>
 <body>
   <header class="world-header">
@@ -54,6 +55,22 @@
         <div id="quake-events" aria-label="Recent earthquakes"></div>
       </details>
     </section>
+    <aside class="world-live-panel" aria-label="Terrain, saved places and Ask Celine">
+      <details id="world-tools" open><summary class="world-tools-summary">Terrain · saved places · Ask Celine</summary>
+      <details><summary>Terrain &amp; buildings</summary><label><input type="checkbox" id="world-terrain"> Terrain · Re:Earth / Mapterhorn</label>
+        <label for="world-ion-token">Cesium ion token · optional, not saved</label><input id="world-ion-token" type="password" autocomplete="off" placeholder="Scoped token for OSM buildings">
+        <label><input type="checkbox" id="world-buildings"> OSM 3D buildings</label><p>Uses Cesium ion; provider permissions and coverage apply.</p>
+      </details>
+      <details><summary>World project</summary><input id="world-note-label" maxlength="120" aria-label="Note or route name" placeholder="Note / route name">
+        <button id="world-add-note">Save note at selection</button><button id="world-route">Draw route</button><p id="world-project-count"></p>
+        <button id="world-project-undo">Undo project change</button><button id="world-project-export">Export project</button><label>Import project<input id="world-project-import" type="file" accept="application/json,.json"></label>
+      </details>
+      <details><summary>Ask Celine</summary><form id="world-ask"><label for="world-question">Question or command</label><input id="world-question" maxlength="2000" placeholder="What am I looking at?" required><button>Ask Apex</button></form>
+        <button id="world-microphone">Microphone</button><label><input id="world-speak" type="checkbox"> Speak using local Celine</label>
+        <p>Commands: show flights, hide satellites, show earthquakes, reset globe. Questions are answered with the layers you have on and what you selected. Microphone uses your browser's speech recognition service.</p><p id="world-answer" role="status"></p>
+      </details><p id="world-live-message" role="status" aria-live="polite"></p>
+      </details>
+    </aside>
     <section class="world-readout" aria-label="Selected location" hidden>
       <h2 id="world-selected-name">Selected location</h2><p id="world-selected-coords"></p><button id="world-clear">Clear selection</button>
       <div id="sat-details" hidden>
