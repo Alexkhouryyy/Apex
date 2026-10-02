@@ -9,7 +9,7 @@ for (const heading of document.querySelectorAll('h1,h2')) {
   if (heading.textContent.trim() === "GOD'S EYE VIEW") heading.textContent = 'APEX WORLD VIEW';
 }
 toolbar.id = 'apex-world-toolbar';
-toolbar.innerHTML = `<button type="button" id="apex-world-back">← Command</button><button type="button" id="apex-world-celine">Ask Celine</button><small style="align-self:center;color:#b9d1db">Powered by God’s Eye View</small>`;
+toolbar.innerHTML = `<button type="button" id="apex-world-back">← Command</button><button type="button" id="apex-world-celine">Ask Celine</button><a href="/setup" target="_top">Setup</a><small style="align-self:center;color:#b9d1db">Powered by God’s Eye View</small>`;
 const panel = document.createElement('section');
 panel.id = 'apex-world-celine-panel';
 panel.hidden = true;
@@ -20,7 +20,7 @@ panel.innerHTML = `<header><strong>Celine · World View</strong><button type="bu
 <footer><button type="button" id="apex-celine-mic">Microphone</button><button type="button" id="apex-celine-stop">Stop</button><label><input type="checkbox" id="apex-celine-speak">Speak replies</label></footer>
 <small>Uses your Apex model and local Celine voice. GEV MIC retains the original realtime voice option.</small>`;
 const style = document.createElement('style');
-style.textContent = `#apex-world-toolbar{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:1500;display:flex;gap:8px}#apex-world-toolbar button,#apex-world-celine-panel button{background:#112535;color:#d7f0ff;border:1px solid #549cbd;border-radius:6px;padding:8px;cursor:pointer}#apex-world-celine-panel{position:fixed;bottom:70px;left:12px;width:min(400px,calc(100vw - 24px));max-height:75vh;overflow:auto;z-index:1600;background:#0d1822f5;color:#e6f2fa;border:1px solid #549cbd;border-radius:12px;padding:16px;box-sizing:border-box;font:14px system-ui}#apex-world-celine-panel[hidden]{display:none}#apex-world-celine-panel header,#apex-world-celine-panel footer{display:flex;gap:10px;align-items:center;justify-content:space-between}#apex-celine-output{white-space:pre-wrap;max-height:35vh;overflow:auto;margin:16px 0}#apex-celine-question{box-sizing:border-box;width:100%;min-height:70px;background:#09121c;color:#e6f2fa;border:1px solid #549cbd;border-radius:6px}#apex-world-celine-panel small{display:block;margin-top:12px;color:#9cb8cb}`;
+style.textContent = `#apex-world-toolbar{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:1500;display:flex;gap:8px}#apex-world-toolbar button,#apex-world-toolbar a,#apex-world-celine-panel button{background:#112535;color:#d7f0ff;border:1px solid #549cbd;border-radius:6px;padding:8px;cursor:pointer}#apex-world-celine-panel{position:fixed;bottom:70px;left:12px;width:min(400px,calc(100vw - 24px));max-height:75vh;overflow:auto;z-index:1600;background:#0d1822f5;color:#e6f2fa;border:1px solid #549cbd;border-radius:12px;padding:16px;box-sizing:border-box;font:14px system-ui}#apex-world-celine-panel[hidden]{display:none}#apex-world-celine-panel header,#apex-world-celine-panel footer{display:flex;gap:10px;align-items:center;justify-content:space-between}#apex-celine-output{white-space:pre-wrap;max-height:35vh;overflow:auto;margin:16px 0}#apex-celine-question{box-sizing:border-box;width:100%;min-height:70px;background:#09121c;color:#e6f2fa;border:1px solid #549cbd;border-radius:6px}#apex-world-celine-panel small{display:block;margin-top:12px;color:#9cb8cb}`;
 document.head.append(style);
 document.body.append(toolbar, panel);
 const $ = id => document.getElementById(id);
@@ -84,7 +84,7 @@ async function ask(message) {
 $('apex-world-back').onclick = () => {
   stop();
   if (window.parent !== window) window.parent.postMessage({type:'apex.world.close'}, location.origin);
-  else location.assign('/home');
+  else location.assign('/');
 };
 $('apex-world-celine').onclick = () => {panel.hidden = false; $('apex-celine-question').focus();};
 $('apex-celine-close').onclick = () => {stop(); panel.hidden = true;};

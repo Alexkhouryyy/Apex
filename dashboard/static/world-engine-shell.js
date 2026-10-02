@@ -30,7 +30,7 @@
   }
   function close() {
     if (window.parent !== window) window.parent.postMessage({type:'apex.world.close'}, location.origin);
-    else location.assign('/home');
+    else location.assign('/');
   }
   window.addEventListener('message', event => {
     if (event.origin === location.origin && event.source === frame?.contentWindow && event.data?.type === 'apex.world.close') close();

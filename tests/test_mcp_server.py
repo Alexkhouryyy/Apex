@@ -75,9 +75,6 @@ def test_every_call_is_logged(apex):
     assert entry['tool'] == 'recall' and entry['query'] == 'Jeep' and entry['chars'] > 0
 
 
-@pytest.mark.xfail(sys.platform == 'win32', strict=False,
-                   reason='Timed out on Windows once (2026-10-02) at an unknown step; run '
-                          '"python scripts/apex_mcp.py --self-test" on the PC to see which tool stalls.')
 def test_real_stdio_server_under_a_real_client(tmp_path):
     """A real MCP client drives the real server: every tool answers, step by
     step, and a stall names its step and shows the server's own log."""
@@ -111,8 +108,6 @@ def test_real_stdio_server_under_a_real_client(tmp_path):
     try:
         asyncio.run(run())
     except BaseException as exc:
-        if step['name'] == 'done':
-            return                       # every call answered; the client library tripped while shutting down
         log = server_log.read_text(encoding='utf-8', errors='replace')[-3000:] if server_log.exists() else '(none)'
         calls = (tmp_path / '.apex' / 'mcp.log')
         done = calls.read_text() if calls.exists() else '(no tool finished)'
@@ -122,11 +117,12 @@ def test_real_stdio_server_under_a_real_client(tmp_path):
 
 def test_stdout_carries_only_protocol(tmp_path, monkeypatch):
     """Strict clients (Claude Desktop) drop a server that writes anything but
-    JSON-RPC to stdout. Apex's memory module prints while it loads (or fails to
-    load) its embedding model; that must land on stderr."""
+    JSON-RPC to stdout. Exercise Python and native stdout noise from the memory
+    callback without downloading an embedding model; both must reach stderr."""
     import sqlite3
     import subprocess
     import time
+    from concurrent.futures import ThreadPoolExecutor
     monkeypatch.setattr(longterm, 'DB_PATH', str(tmp_path / 'apex.db'))
     longterm.init_db()
     with sqlite3.connect(tmp_path / 'apex.db') as db:                  # a memory, so recall loads the embedder
@@ -139,11 +135,43 @@ def test_stdout_carries_only_protocol(tmp_path, monkeypatch):
         {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {
             'protocolVersion': '2025-06-18', 'capabilities': {}, 'clientInfo': {'name': 'test', 'version': '1'}}},
         {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
-        {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'recall', 'arguments': {'query': 'Jeep'}}},
+        {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'recall', 'arguments': {'query': 'Jeep', 'semantic': True}}},
     ]
-    proc = subprocess.run([sys.executable, str(ROOT / 'scripts' / 'apex_mcp.py')], env=env, timeout=120,
-                          input=''.join(json.dumps(m) + '\n' for m in msgs), capture_output=True, text=True)
-    lines = [line for line in proc.stdout.splitlines() if line.strip()]
-    replies = [json.loads(line) for line in lines]                     # any print would fail here
+    runner = tmp_path / 'noisy_server.py'
+    runner.write_text('import sys, os\n' + f'sys.path.insert(0, {str(ROOT)!r})\n'
+        'from agent import longterm\n'
+        'def noisy_model():\n'
+        '    print("[Memory] optional model unavailable")\n'
+        '    os.write(1, b"[Native] stdout noise\\n")\n'
+        '    return None\n'
+        'longterm._get_embed_model = noisy_model\n'
+        'from scripts.apex_mcp import main\nmain()\n', encoding='utf-8')
+    # A client keeps stdin open until replies arrive. Sending EOF with the
+    # request allows the SDK to cancel a worker before it returns its reply.
+    log = tmp_path / 'protocol-stderr.txt'
+    replies = []
+    with log.open('w', encoding='utf-8') as errlog, ThreadPoolExecutor(max_workers=1) as pool:
+        proc = subprocess.Popen([sys.executable, str(runner)], env=env,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errlog, text=True, encoding='utf-8')
+        try:
+            proc.stdin.write(json.dumps(msgs[0]) + '\n')
+            proc.stdin.flush()
+            replies.append(json.loads(pool.submit(proc.stdout.readline).result(timeout=30)))
+            proc.stdin.write(''.join(json.dumps(m) + '\n' for m in msgs[1:]))
+            proc.stdin.flush()
+            replies.append(json.loads(pool.submit(proc.stdout.readline).result(timeout=90)))
+            proc.stdin.close()
+            proc.wait(timeout=10)
+            assert not proc.stdout.read().strip(), 'Unexpected extra protocol output'
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=10)
+            proc.stdout.close()
+            if not proc.stdin.closed:
+                proc.stdin.close()
+    assert proc.returncode == 0
     assert [r.get('id') for r in replies] == [1, 2] and all(r['jsonrpc'] == '2.0' for r in replies)
-    assert '[Memory]' in proc.stderr                                    # the noise went where it belongs
+    assert 'Jeep' in str(replies[1])
+    noise = log.read_text(encoding='utf-8')
+    assert '[Memory]' in noise and '[Native]' in noise

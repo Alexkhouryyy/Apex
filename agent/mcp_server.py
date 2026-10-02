@@ -35,8 +35,10 @@ from __future__ import annotations
 
 import json
 import time
+from functools import wraps, partial
 from pathlib import Path
 
+import anyio
 from mcp.server.fastmcp import FastMCP
 
 MAX_CHARS = 12000
@@ -55,6 +57,17 @@ mcp = FastMCP(
 
 
 _ready = False
+
+
+def _tool():
+    """Keep database/import/model work off MCP's protocol event loop."""
+    def register(fn):
+        @wraps(fn)
+        async def run(**kwargs):
+            return await anyio.to_thread.run_sync(partial(fn, **kwargs))
+        mcp.tool()(run)
+        return fn  # Direct in-process callers keep the synchronous API.
+    return register
 
 
 def _tables():
@@ -108,7 +121,7 @@ def _project() -> str:
     return '\n'.join(out)
 
 
-@mcp.tool()
+@_tool()
 def context() -> str:
     """Everything Apex keeps in front of itself about the user, in one call: profile and
     preferences, important memories, active goals, the current project, what is going on
@@ -142,18 +155,20 @@ def context() -> str:
     return _out('context', '\n\n'.join(parts) or 'Apex has nothing saved about the user yet.')
 
 
-@mcp.tool()
-def recall(query: str, limit: int = 8) -> str:
+@_tool()
+def recall(query: str, limit: int = 8, semantic: bool = False) -> str:
     """Search Apex's long-term memory: facts, preferences, decisions and project notes
-    the user told Apex. Use when the user refers to something from before."""
+    the user told Apex. Use when the user refers to something from before.
+    Default text search answers without loading an embedding model. Set semantic
+    only when a similarity search is needed; its first model warm-up can be slow."""
     _tables()
     from agent import longterm
     query = (query or '').strip()[:500]
-    rows = longterm.recall(query, limit=max(1, min(int(limit), 20)))
+    rows = longterm.recall(query, limit=max(1, min(int(limit), 20)), semantic=semantic)
     return _out('recall', _memories(rows) or f'Nothing in memory about {query!r}.', query=query)
 
 
-@mcp.tool()
+@_tool()
 def lessons() -> str:
     """What Apex has measured from its own tool history: patterns that keep failing, each
     with its evidence (failures/attempts). Check before repeating a risky tool pattern."""
@@ -161,7 +176,7 @@ def lessons() -> str:
     return _out('lessons', _lessons.for_prompt() or 'No lessons with enough evidence yet.')
 
 
-@mcp.tool()
+@_tool()
 def skills() -> str:
     """Apex's procedural skills: named how-to guides the user or Apex wrote. Read one with `skill`."""
     from agent import skill_md
@@ -169,14 +184,14 @@ def skills() -> str:
     return _out('skills', '\n'.join(f"- {s['name']}: {s['description']}" for s in rows) or 'No skills yet.')
 
 
-@mcp.tool()
+@_tool()
 def skill(name: str) -> str:
     """The full text of one of Apex's skills, by name (see `skills`)."""
     from agent import skill_md
     return _out('skill', skill_md.manage('view', name=(name or '').strip()[:80]), name=name)
 
 
-@mcp.tool()
+@_tool()
 def search_files(query: str, limit: int = 5) -> str:
     """Search the files the user added to Apex's knowledge base (notes, docs, code they chose).
     Returns matching passages with their file paths."""
@@ -192,7 +207,7 @@ def search_files(query: str, limit: int = 5) -> str:
     return _out('search_files', text or f'No passages match {query!r}.', query=query)
 
 
-@mcp.tool()
+@_tool()
 def remember(content: str, kind: str = 'note', why: str = '') -> str:
     """Suggest something Apex should remember about the user or their work (a preference,
     decision, fact). It is staged for the user's approval in Apex, not saved directly.

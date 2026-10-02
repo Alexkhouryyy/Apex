@@ -44,6 +44,7 @@
     }
     frame = document.createElement('iframe');
     frame.title = 'Apex World View'; frame.src = '/world';
+    frame.allow = 'microphone; autoplay; fullscreen; usb';
     dialog.append(frame);
     try { dialog.showModal(); }
     catch (error) {frame.remove(); frame = null; location.assign('/world'); return;}
@@ -67,6 +68,7 @@
       if (event && (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)) return;
       gesture.invalid = true; open(entry);
     },
+    openFromEarthSelector() { open(entry); },
     setBody(key, label) {
       body = key; if (portal) portal.dataset.body = key;
       const hint = document.getElementById('world-entry-hint');

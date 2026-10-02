@@ -97,3 +97,7 @@ only you can save it.
   skills and goal proposals waiting for approval weren't shown anywhere in the
   dashboard, except emails in the inbox. They now appear in **Approvals →
   Waiting to be saved**.
+
+## Predictable MCP replies
+
+Text memory and approval staging do not import NumPy or the embedding runtime. MCP tools run their synchronous work on a worker thread so native imports or database work cannot block the protocol event loop. `recall` defaults to text matching; its optional `semantic: true` requests similarity search and can incur an initial model warm-up. Apex’s normal resident semantic recall is unchanged. The Windows real-client regression is required again, rather than marked as an expected failure.

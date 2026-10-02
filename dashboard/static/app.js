@@ -360,7 +360,10 @@ function renderPlanetSelector() {
   ).join('');
   sel.addEventListener('click', e => {
     const btn = e.target.closest('.planet-btn');
-    if (btn) switchBody(btn.dataset.body);
+    if (btn) {
+      switchBody(btn.dataset.body);
+      if (btn.dataset.body === 'earth') window.ApexWorldView?.openFromEarthSelector();
+    }
   });
 }
 let liveEventTimes = [];

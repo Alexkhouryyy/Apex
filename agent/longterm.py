@@ -10,15 +10,20 @@ Recall strategy:
   - semantic=False: fast LIKE search for exact keyword matching
   - Falls back to LIKE if embeddings model not loaded
 """
+from __future__ import annotations
+
 import os
 import sqlite3
 import time
 import json
 import threading
 from contextlib import contextmanager
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
-import numpy as np
+# Text memory and staging do not need the numerical/embedding runtime.
+if TYPE_CHECKING:
+    import numpy as np
+
 
 DB_PATH = os.path.expanduser(os.getenv("DB_PATH", "~/.voice_agent_memory.db"))
 
@@ -49,6 +54,7 @@ def _embed(text: str) -> Optional[bytes]:
     if model is None:
         return None
     try:
+        import numpy as np
         vec = model.encode([text], normalize_embeddings=True)[0]
         return vec.astype(np.float32).tobytes()
     except Exception:
@@ -56,6 +62,7 @@ def _embed(text: str) -> Optional[bytes]:
 
 
 def _cosine_scores(query_vec: np.ndarray, blob_list: list[bytes]) -> list[float]:
+    import numpy as np
     scores = []
     for blob in blob_list:
         if blob is None:
@@ -372,6 +379,7 @@ def recall(query: str = "", limit: int = 10, kind: str = "", semantic: bool = Tr
     if query and semantic:
         model = _get_embed_model()
         if model is not None:
+            import numpy as np
             query_vec = model.encode([query], normalize_embeddings=True)[0].astype(np.float32)
             blobs = [r[6] for r in rows]
             scores = _cosine_scores(query_vec, blobs)

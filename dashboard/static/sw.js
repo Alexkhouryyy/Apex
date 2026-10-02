@@ -1,13 +1,13 @@
 /* Apex service worker — offline app shell + Web Push receiver.
  * Served from the origin root (/sw.js) so its scope covers the whole app.
  */
-const CACHE = 'apex-shell-v47';
+const CACHE = 'apex-shell-v48';
 const SHELL = [
   '/',
   '/static/styles.css?v=omni32',
   '/static/mobile.css?v=omni31',
-  '/static/app.js?v=world2',
-  '/static/world-launch.js?v=world2',
+  '/static/app.js?v=world3',
+  '/static/world-launch.js?v=world3',
   '/static/world-launch.css?v=world2',
   '/apps',
   '/home',
@@ -51,7 +51,9 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   // Never cache API calls, websockets, or cross-origin CDN requests.
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws')) return;
+  // The engine has authenticated feeds and its own provider API namespace.
+  // Never satisfy those requests from a previous owner's offline cache.
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws') || url.pathname.startsWith('/world/engine/')) return;
 
   if (req.mode === 'navigate') {
     const pages = ['/', '/apps', '/home', '/companion', '/board', '/drive', '/study'];

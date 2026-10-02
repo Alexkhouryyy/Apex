@@ -1,6 +1,6 @@
 # Complete World View engine in Apex
 
-Apex now hosts the full God's Eye View application at `/world/engine/`, from the pinned upstream revision `e7707d9a0f34d9fbffc300023c319f95caa5be30`. Earth and the existing Command shortcut enter through `/world`. The original basic globe and its saved projects remain at `/world/basic`.
+Apex now hosts the full God's Eye View application at `/world/engine/`, from the pinned upstream revision `e7707d9a0f34d9fbffc300023c319f95caa5be30`. Selecting Earth, clicking the Earth globe, and the Command shortcut enter the full view through `/world`. The Command renderer pauses during entry; returning restores it without a separate dashboard navigation. Nested frames pass microphone, autoplay, fullscreen and USB capabilities through; the browser still asks for device permission. The original basic globe and its saved projects remain at `/world/basic`.
 
 This is the original runtime, not a feature-by-feature approximation. All runtime code, data, models, provider adapters, settings, scene tools, tests, and license notices are retained under `integrations/gods-eye-view`. Only documentation demonstration media are excluded. `APEX_INVENTORY.json` records the Git blob hash of every included upstream file; Apex modifications are separate `apex-*` adapters.
 
@@ -31,3 +31,11 @@ Real Celine audio/microphone, photorealistic cities, all credential-backed feeds
 ## Licenses
 
 The source is MIT with Bilawal Sidhu's original notice. Third-party data/models keep their individual licenses and attributions. TeleGeography cable data and the Bhote Koshi imagery/derived data include noncommercial restrictions; their presence does not turn them into MIT data. Read the included `LICENSE`, `DATA_SOURCES.md`, `THIRD_PARTY_NOTICES.md`, and model/event notices before distributing a commercial build.
+
+## Setup and updates in Apex
+
+Open `/setup` from Home, System & updates, or the World View toolbar. The owner-only setup screen reuses the original provider registry and credential store, connects the existing Composio catalog, and links to account authorizations in Apps. Inherited provider keys remain managed by their original store. Blank fields keep saved keys; values are cleared after submission and never echoed back. Browser map keys still need provider origin restrictions.
+
+Celine diagnostics contact the local health and profile endpoints only. A ready server is not a verified speaker: Test Celine generates a short local sample for you to play. The model row reports configured credentials rather than claiming a model call succeeded. Saved provider keys are not live-feed certification. Hardware permission and compatible ADS-B/SDR equipment remain required.
+
+Check God’s Eye update contacts the fixed upstream GitHub repository and compares its main revision with the installed pin. Checks are cached for 15 minutes; a failed check reports unavailable, not current. The checker does not fetch or execute new code. Apex releases are pulled through the existing fast-forward update control and need a restart; a new upstream pin also needs locked dependency setup and a production build. Neither Apex nor God’s Eye installs updates automatically. The offline worker never caches engine responses or its private APIs.

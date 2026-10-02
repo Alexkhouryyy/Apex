@@ -30,7 +30,7 @@
 <link rel="stylesheet" href="/static/brand.css?v=brand40">
 <link rel="stylesheet" href="/static/environment.css?v=environment44"><link rel="stylesheet" href="/static/world-launch.css?v=world2"><link rel="stylesheet" href="/static/theme.css">
 
-<script src="/static/world-launch.js?v=world2" defer></script>
+<script src="/static/world-launch.js?v=world3" defer></script>
 </head>
 <body>
 <aside id="sidebar">
@@ -88,7 +88,7 @@
   <div class="sidebar-footer">
     <div class="footer-row"><span>Model</span><span id="status-model">—</span></div>
     <div class="footer-row"><span>Tools</span><span id="status-tools">—</span></div>
-    <div class="controls"><button data-open-tab="system">Updates</button><button id="sidebar-restart">Restart Apex</button></div>
+    <div class="controls"><a href="/setup">Setup</a><button data-open-tab="system">Updates</button><button id="sidebar-restart">Restart Apex</button></div>
     <div class="footer-row"><span>Uptime</span><span id="status-uptime">—</span></div>
   </div>
 </aside>
@@ -96,7 +96,7 @@
 <main id="main-content">
 <section id="tab-system" class="tab"><header class="page-head"><h1>System & updates</h1><p class="page-sub">Inspect the installed checkout, pull updates and restart Apex.</p></header><div class="panel" style="margin-bottom:16px">
       <div class="panel-head">
-        <h3>Version</h3>
+        <h3>Version</h3><a href="/setup">World View & app setup →</a>
         <button id="ctl-update-refresh" class="ghost-btn">Check</button>
       </div>
       <div class="panel-body">
@@ -191,7 +191,7 @@
       <div class="orbit-ring orbit-ring-mid"></div>
       <div class="orbit-ring orbit-ring-inner"></div>
       <div class="globe-glow"></div>
-      <div class="world-portal" id="world-portal" data-body="earth"><div id="globe" class="globe-mount" aria-label="Earth globe. Click Earth to enter World View; drag to rotate."></div><a id="world-open" class="world-entry" href="/world" aria-haspopup="dialog"><span class="apex-logo" aria-hidden="true"></span><span><span class="world-entry-name">World View</span><span class="world-entry-hint" id="world-entry-hint">Click Earth to explore</span></span></a></div>
+      <div class="world-portal" id="world-portal" data-body="earth"><div id="globe" class="globe-mount" aria-label="Earth globe. Click Earth to enter World View; drag to rotate."></div><a id="world-open" class="world-entry" href="/world" aria-haspopup="dialog"><span class="apex-logo" aria-hidden="true"></span><span><span class="world-entry-name">Earth · World View</span><span class="world-entry-hint" id="world-entry-hint">Click Earth to explore</span></span></a></div>
       <div id="feature-orbit" class="feature-orbit"></div>
       <div id="planet-selector" class="planet-selector"></div>
     </div>
@@ -1002,7 +1002,7 @@
 
 <script src="/static/plugins.js?v=plugins44"></script>
 <script src="/static/environment.js?v=environment44"></script>
-<script src="/static/app.js?v=world2"></script>
+<script src="/static/app.js?v=world3"></script>
 <script src="/static/voice-mobile.js?v=omni30"></script>
 <script type="module" src="/static/cst3d.js?v=omni30"></script>
 <script src="/static/team.js"></script>

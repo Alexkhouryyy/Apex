@@ -39,6 +39,7 @@ assert.equal(w.document.querySelector('iframe'),null,'No world resources loaded 
 tap(); assert.equal(dialog.open,true,'Earth click opens World View');
 assert.equal(paused,1,'Command globe sleeps while world is open');
 assert.equal(w.document.querySelector('iframe').src,'https://apex.test/world');
+assert.equal(w.document.querySelector('iframe').allow,'microphone; autoplay; fullscreen; usb','Permissions survive the outer Command frame');
 hit({},new w.MouseEvent('click'));assert.equal(w.document.querySelectorAll('iframe').length,1,'Only one renderer');
 close();assert.equal(resumed,1);assert.equal(w.document.activeElement.id,'world-open');
 pointer('pointerdown');pointer('pointermove',1,140,100);pointer('pointerup',1,100,100);
@@ -53,6 +54,7 @@ w.switchBody('mars');tap();assert.equal(dialog.open,false,'Another planet cannot
 assert.equal($('world-entry-hint').textContent,'Explore Earth');
 $('world-command-open').click();assert.equal(dialog.open,true,'Header shortcut works from any planet');
 close();assert.equal(w.document.activeElement.id,'world-command-open');
+w.ApexWorldView.openFromEarthSelector();assert.equal(dialog.open,true,'Selecting Earth enters its World View');close();
 w.switchBody('earth');assert.equal($('world-entry-hint').textContent,'Click Earth to explore');
 // Native link keyboard activation and modifiers retain their browser behavior.
 $('world-open').click();assert.equal(dialog.open,true);close();
