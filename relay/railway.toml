@@ -1,0 +1,11 @@
+# The relay as its own Railway service (docs/RELAY_RAILWAY.md). In that
+# service: Settings -> Config-as-code -> /relay/railway.toml, and add a volume
+# mounted at /data so questions and the sealed snapshot survive redeploys.
+[build]
+builder = "dockerfile"
+dockerfilePath = "relay/Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ALWAYS"

@@ -70,6 +70,8 @@ You need:
 
 ### 2. The relay (cloud server)
 
+**On Railway?** Use [RELAY_RAILWAY.md](RELAY_RAILWAY.md), step 7, instead of this step: Railway already gives the relay a public address, and its Tailscale join replaces `tailscale funnel`.
+
 Add these to `/etc/apex-relay.env`:
 
 ```
