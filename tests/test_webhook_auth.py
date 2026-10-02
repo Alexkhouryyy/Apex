@@ -94,6 +94,7 @@ def _twilio_post(client, path, params, token=None, url=None):
 @pytest.mark.parametrize("path,module,fn", [
     ("/twilio/sms", "phone_mod", "dispatch_inbound_sms"),
     ("/twilio/voice", "phone_mod", "dispatch_inbound_voice"),
+    ("/twilio/voice/wait", "phone_mod", "dispatch_voice_wait"),
     ("/twilio/whatsapp", "whatsapp_mod", "dispatch_inbound"),
 ])
 def test_forged_twilio_request_never_reaches_the_agent(client, monkeypatch,

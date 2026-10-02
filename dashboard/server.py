@@ -189,7 +189,7 @@ if STATIC_DIR.exists():
 
 _WEBHOOK_PATHS = frozenset({
     "/telegram/webhook", "/discord/interactions",
-    "/twilio/sms", "/twilio/voice", "/twilio/whatsapp",
+    "/twilio/sms", "/twilio/voice", "/twilio/voice/wait", "/twilio/whatsapp",
     "/slack/events", "/signal/webhook", "/iot/webhook",
 })
 
@@ -732,7 +732,26 @@ async def twilio_inbound_voice(request: Request):
         return _reject(str(e))
     from_number = form.get("From", "")
     speech_result = form.get("SpeechResult", "")
-    twiml = phone_mod.dispatch_inbound_voice(from_number, speech_result or None)
+    twiml = phone_mod.dispatch_inbound_voice(from_number, speech_result or None,
+                                             call_sid=form.get("CallSid", ""))
+    return Response(content=twiml, media_type="application/xml")
+
+
+@app.post("/twilio/voice/wait")
+async def twilio_voice_wait(request: Request):
+    """Call Apex checking back on an answer still being thought about
+    (tools/phone.py). Signed by Twilio like every other webhook here; the
+    signature covers the query string, so `n` cannot be forged either."""
+    form = await request.form()
+    try:
+        webhook_auth.verify_twilio(request, dict(form))
+    except webhook_auth.WebhookRejected as e:
+        return _reject(str(e))
+    try:
+        n = max(0, min(100, int(request.query_params.get("n", "0"))))
+    except ValueError:
+        n = 0
+    twiml = phone_mod.dispatch_voice_wait(form.get("From", ""), form.get("CallSid", ""), n)
     return Response(content=twiml, media_type="application/xml")
 
 

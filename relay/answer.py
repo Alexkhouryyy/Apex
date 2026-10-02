@@ -103,6 +103,14 @@ SYSTEM = (
 )
 
 
+# A question that arrived as a phone call (relay/server.py marks it). The
+# caller may be driving, so the answer is spoken: short, no formatting.
+CALL_PREFIX = "[call] "
+SPOKEN = ("\n\nThis question came from a phone call and your answer will be read aloud. "
+          "The caller may be driving and cannot look at a screen. Answer in one to three short "
+          "spoken sentences, with no lists, headings, links or formatting.")
+
+
 def _call(path: str, method: str = "GET", body: bytes | None = None) -> bytes:
     req = urllib.request.Request(
         f"{SERVER}{path}", data=body, method=method,
@@ -128,10 +136,13 @@ def ask_model(question: str, ctx_text: str, *, call=None) -> dict:
     if not which:
         raise RuntimeError("no model key: set ANTHROPIC_API_KEY or DEEPSEEK_API_KEY")
     model = MODEL or DEFAULT_MODELS[which]
+    system = SYSTEM
+    if question.startswith(CALL_PREFIX):
+        question, system = question[len(CALL_PREFIX):], SYSTEM + SPOKEN
     user = f"What Apex knows:\n{ctx_text}\n\nQuestion: {question}"
     if which == "anthropic":
         payload = json.dumps({
-            "model": model, "max_tokens": 1024, "system": SYSTEM,
+            "model": model, "max_tokens": 1024, "system": system,
             "messages": [{"role": "user", "content": user}],
         }).encode()
         url = "https://api.anthropic.com/v1/messages"
@@ -141,7 +152,7 @@ def ask_model(question: str, ctx_text: str, *, call=None) -> dict:
         # OpenAI-compatible, as agent/provider.py reaches DeepSeek.
         payload = json.dumps({
             "model": model, "max_tokens": 1024, "stream": False,
-            "messages": [{"role": "system", "content": SYSTEM},
+            "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}],
         }).encode()
         url = f"{DEEPSEEK_BASE_URL}/chat/completions"

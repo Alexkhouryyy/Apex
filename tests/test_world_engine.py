@@ -16,6 +16,8 @@ OWNER = {'Authorization': 'Bearer world-owner', **ORIGIN}
 def client(monkeypatch, tmp_path):
     import config
     monkeypatch.setattr(config, 'DASHBOARD_TOKEN', 'world-owner')
+    from dashboard.ratelimit import AuthThrottle
+    monkeypatch.setattr(server, '_throttle', AuthThrottle())   # earlier tests' failed logins must not lock these out
     world_engine._sessions.clear()
     world_assistant._turns.clear()
     world_assistant._lock = asyncio.Lock()
