@@ -17,10 +17,15 @@ from dashboard.world_flights import router as flights_router
 from dashboard.world_satellites import router as satellites_router
 
 
+from dashboard.world_engine import router as engine_router
+from dashboard.world_assistant import router as assistant_router
+
 router = APIRouter()
 router.include_router(layers_router)
 router.include_router(flights_router)
 router.include_router(satellites_router)
+router.include_router(assistant_router)
+router.include_router(engine_router)
 _cache = OrderedDict()
 _search_lock = asyncio.Lock()
 _last_search = 0.0
@@ -29,7 +34,7 @@ _PHOTON_URL = 'https://photon.komoot.io/api/'
 
 @router.get('/world')
 async def world_view():
-    return FileResponse(Path(__file__).parent / 'static' / 'world.html')
+    return FileResponse(Path(__file__).parent / 'static' / 'world-engine.html')
 
 
 def _places(payload):

@@ -83,6 +83,11 @@ jobs:
           node scripts/check_car_link.cjs
           node scripts/check_handsfree_ui.cjs
           node scripts/check_team_ui.cjs
+          python scripts/setup_world_engine.py --verify-only
+          node --check dashboard/static/world-engine-shell.js
+          node --check integrations/gods-eye-view/apex-bridge.js
+          node --check integrations/gods-eye-view/apex-server.mjs
+          node --check integrations/gods-eye-view/apex.config.mjs
           node --check dashboard/static/world-view.js
           node scripts/check_world_view_ui.cjs
           node scripts/check_world_entry_ui.cjs

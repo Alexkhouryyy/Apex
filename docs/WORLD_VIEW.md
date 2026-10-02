@@ -1,5 +1,7 @@
 # Apex World View
 
+This guide describes the Basic globe at `/world/basic`. The main `/world` entry now opens the full pinned God's Eye View engine. See [Full World View](FULL_WORLD_VIEW.md) for its 26 layers, 30 scene actions, setup and verification limits.
+
 From Command, click Earth or its World View portal; the header shortcut works from any planet. Earth expands into a full-screen panel. Dragging or multi-touch navigation does not enter it. Reduced motion skips the animation. Command/Escape returns focus and unloads the world renderer. The standalone page is `/world`.
 
 ## Live workflow

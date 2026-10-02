@@ -38,3 +38,9 @@ barehands/
 relay/start-relay.bat
 relay/relay.db
 relay/relay.db-*
+
+# World View source is pinned; dependencies and builds remain local.
+integrations/gods-eye-view/node_modules/
+integrations/gods-eye-view/dist/
+integrations/gods-eye-view/APEX_BUILD.json
+integrations/gods-eye-view/APEX_TEST_RESULTS.log

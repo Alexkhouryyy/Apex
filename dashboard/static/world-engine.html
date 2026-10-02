@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Apex World View</title><link rel="stylesheet" href="/static/theme.css"><link rel="stylesheet" href="/static/brand.css">
+<style>html,body{margin:0;height:100%;background:var(--bg,#080e17);color:var(--text,#e1ebf5);font:15px system-ui}main{height:100%;display:grid;place-content:center;gap:16px;padding:24px;box-sizing:border-box}main[hidden]{display:none}button,input,a{font:inherit}button,input{padding:12px;border-radius:8px}a{color:var(--accent,#70c9f0)}iframe{width:100%;height:100%;border:0;display:block}#error{max-width:600px}#signin{display:none}h1{margin:0}</style></head>
+<body><main id="loading"><h1>Apex World View</h1><div id="status" role="status">Opening the complete world engine…</div>
+<div id="error" role="alert"></div><form id="signin"><label>Apex access token <input id="token" type="password" autocomplete="off" required></label><button>Open World View</button></form>
+<button id="retry" hidden>Retry</button><a href="/world/basic">Open the basic globe and existing saved projects</a><a href="/home">Back to Command</a></main>
+<script src="/static/world-engine-shell.js"></script></body></html>

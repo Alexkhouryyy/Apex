@@ -4,3 +4,6 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.bat.example text eol=crlf
+
+# Preserve pinned upstream Git blob bytes on Windows.
+integrations/gods-eye-view/** -text -whitespace

@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/bilawalsidhu/gods-eye-view",
+  "revision": "e7707d9a0f34d9fbffc300023c319f95caa5be30",
+  "excluded_nonruntime_paths": [
+    "docs/media/"
+  ]
+}

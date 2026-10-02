@@ -206,6 +206,13 @@ async def _auth(request: Request, call_next):
     if request.method == "OPTIONS":
         return await call_next(request)
     token = config.DASHBOARD_TOKEN
+    if request.url.path.startswith('/world/engine/'):
+        from dashboard.world_engine import authenticate
+        if not authenticate(request, token):
+            if request.method == 'GET' and request.url.path == '/world/engine/' and request.headers.get('sec-fetch-dest') in ('document', 'iframe'):
+                return FileResponse(STATIC_DIR / 'world-engine.html')
+            return JSONResponse({'error': 'Sign in to Apex to open World View.'}, status_code=401)
+        return await call_next(request)
     if not token:
         return await call_next(request)
     path = request.url.path
@@ -221,7 +228,7 @@ async def _auth(request: Request, call_next):
     # NOT exempt, so this must stay an exact match: `path.startswith("/board")`
     # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
-            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home" or path == "/world" or path == "/voices" or path == "/missions"
+            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home" or path == "/world" or path == "/world/basic" or path == "/voices" or path == "/missions"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
     # Inbound webhooks can't present a bearer token, so they authenticate

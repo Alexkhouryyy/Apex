@@ -17,7 +17,7 @@ def test_launcher_ignores_broken_parent_dotenv(tmp_path, selected):
     original.mkdir()
     worktree.mkdir()
     # This is outside either Apex checkout and must never be used by the test.
-    (tmp_path / '.env').write_text('WORLD_LAUNCH_TEST=bad\0value\n', encoding='utf-8')
+    (tmp_path / '.env').write_bytes(b'WORLD_LAUNCH_TEST=bad\0value\n')
     env_file = worktree / '.env' if selected == 'local_bom' else original / '.env'
     if selected != 'missing':
         env_file.write_text('WORLD_LAUNCH_TEST=selected\n',
