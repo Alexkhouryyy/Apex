@@ -30,6 +30,16 @@ Restart the tool afterwards. The tool starts the server itself when it needs
 it, and the Apex dashboard doesn't have to be running. Both read the same
 memory database on this computer.
 
+**Check it works on this PC:**
+
+```
+.venv\Scripts\python.exe scripts\apex_mcp.py --self-test
+```
+
+It starts the server the way your tools do, against your real Apex memory. It
+times each tool and says if one errors or stalls. It only reads; nothing is
+saved.
+
 **ChatGPT** isn't supported. Its connectors need a public HTTPS server with
 OAuth login, and this server only runs locally, on purpose.
 
