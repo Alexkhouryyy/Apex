@@ -146,6 +146,8 @@ from dashboard.voices import router as voices_router
 app.include_router(voices_router)
 from dashboard.missions import router as missions_router
 app.include_router(missions_router)
+from dashboard.apocalypse import router as apocalypse_router
+app.include_router(apocalypse_router)
 
 # Allow the browser extension (chrome-extension:// / moz-extension://) to call the
 # API cross-origin. Auth is bearer-token (not cookies), so credentials stay off.
@@ -228,7 +230,7 @@ async def _auth(request: Request, call_next):
     # NOT exempt, so this must stay an exact match: `path.startswith("/board")`
     # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
-            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home" or path == "/setup" or path == "/world" or path == "/world/basic" or path == "/voices" or path == "/missions"
+            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home" or path == "/setup" or path == "/apocalypse" or path == "/world" or path == "/world/basic" or path == "/voices" or path == "/missions"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
     # Inbound webhooks can't present a bearer token, so they authenticate

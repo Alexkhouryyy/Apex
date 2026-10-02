@@ -3,6 +3,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Explicit offline launches install this before providers or background workers.
+from agent.apocalypse import install_network_guard
+install_network_guard()
+
 # Model
 AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-5")
 if AGENT_MODEL == "deepseek-v4.1-flash":

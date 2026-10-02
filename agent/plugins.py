@@ -470,6 +470,9 @@ class PluginContext:
 
 
 def _load(item):
+    from agent import apocalypse
+    if apocalypse.enabled():
+        raise apocalypse.OfflineUnavailable('Plugins are paused in Apocalypse mode.')
     p = item['package']
     folder = _folder(p['id'])
     name = p['manifest']['name']
@@ -514,6 +517,9 @@ def _load(item):
 
 
 def _active():
+    from agent import apocalypse
+    if apocalypse.enabled():
+        return []
     out = []
     if not ROOT.exists():
         return out
@@ -616,7 +622,8 @@ def select_provider(kind, selected):
 
 def provider_call(provider_kind, method, **kwargs):
     """(handled, value). Re-entry uses built-in behavior so providers can delegate."""
-    if _inside_provider.get() or not ROOT.exists():
+    from agent import apocalypse
+    if apocalypse.enabled() or _inside_provider.get() or not ROOT.exists():
         return False, None
     selected = _state()['data']['providers'].get(provider_kind)
     if not selected:

@@ -56,13 +56,15 @@ class Memory:
         return self.messages
 
     def maybe_summarize(self, client: anthropic.Anthropic) -> None:
-        if len(self.messages) < _SUMMARY_THRESHOLD:
+        from agent import plugins, apocalypse
+        offline = apocalypse.enabled()
+        keep = 6 if offline else _KEEP_MESSAGES
+        if len(self.messages) < (12 if offline else _SUMMARY_THRESHOLD):
             return
-
-        from agent import plugins
         import copy
         try:
-            handled, result = plugins.provider_call('context', 'summarize', messages=copy.deepcopy(self.messages[:-_KEEP_MESSAGES]), summary=self.summary)
+            handled, result = (False, None) if apocalypse.enabled() else plugins.provider_call(
+                'context', 'summarize', messages=copy.deepcopy(self.messages[:-_KEEP_MESSAGES]), summary=self.summary)
             if handled:
                 if not isinstance(result, str) or not result.strip() or len(result) > 20000:
                     raise ValueError('Context engine must return a non-empty summary of at most 20,000 characters.')
@@ -83,6 +85,8 @@ class Memory:
             for m in self.messages
         )
 
+        if offline:
+            conversation_text = conversation_text[-18000:]
         existing_summary_block = (
             f"Existing rolling summary (extend, do not discard):\n{self.summary}\n\n"
             if self.summary else ""
@@ -98,18 +102,18 @@ class Memory:
                 client,
                 call_site="agent.memory/maybe_summarize",
                 model=config.PROACTIVE_MODEL,
-                max_tokens=1024,
+                max_tokens=512 if offline else 1024,
                 messages=[{"role": "user", "content": prompt}],
             )
-        except (anthropic.APIError, OpenAIAPIError) as e:
+        except (anthropic.APIError, OpenAIAPIError, apocalypse.OfflineUnavailable) as e:
             print(f"[Resilience] conversation summarization skipped ({type(e).__name__}); keeping full history")
             return
 
         text = resp.content[0].text.strip()
         new_summary, facts = _parse_compression_response(text)
 
-        self.summary = new_summary
-        self.messages = self.messages[-_KEEP_MESSAGES:]
+        self.summary = new_summary[:2000] if offline else new_summary
+        self.messages = self.messages[-keep:]
 
         # Flush durable facts to longterm so they survive across sessions
         for fact in facts:

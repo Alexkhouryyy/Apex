@@ -37,6 +37,9 @@ def classify(exc: Exception) -> str:
 
 def should_fallback(category: str) -> bool:
     """True for transient/capacity errors where a different provider might succeed."""
+    from agent import apocalypse
+    if apocalypse.enabled():
+        return False
     return category in {"rate_limit", "overloaded", "server_error", "network", "api_error"}
 
 
@@ -46,6 +49,9 @@ def fallback_create(messages: list[dict], system: str = "", max_tokens: int = 40
     Converts Anthropic-format messages to OpenAI-format (strips images and
     tool blocks, keeps text). Returns the completion text or raises RuntimeError.
     """
+    from agent import apocalypse
+    if apocalypse.enabled():
+        raise apocalypse.OfflineUnavailable('Cloud fallback is paused in Apocalypse mode.')
     key = getattr(config, "OPENROUTER_API_KEY", "") or ""
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY not configured.")
