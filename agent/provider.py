@@ -460,6 +460,9 @@ class _Messages:
         self._strip = strip_prefix
 
     def _prep(self, kwargs: dict) -> dict:
+        from agent import apocalypse
+        if apocalypse.enabled():
+            apocalypse.verify_model(kwargs.get('model', ''), str(self._oai.base_url))
         kw = _translate_kwargs(kwargs)
         if self._strip and kw.get("model", "").startswith(self._strip):
             kw["model"] = kw["model"][len(self._strip):]
@@ -505,6 +508,9 @@ class MissingProviderKey(RuntimeError):
 def get_client(model: str):
     """Return a provider client (Anthropic SDK or OpenAIAdapter) for a model."""
     import config
+    from agent import apocalypse
+    if apocalypse.enabled():
+        apocalypse.verify_model(model, config.OLLAMA_BASE_URL)
     p = provider_for(model)
 
     # Check the key BEFORE constructing anything. The OpenAI SDK raises
@@ -555,6 +561,10 @@ def discover(provider_name: str, force: bool = False) -> set[str]:
     import time
 
     import config
+
+    from agent import apocalypse
+    if apocalypse.enabled() and provider_name != 'ollama':
+        return set()
 
     now = time.time()
     if (not force and provider_name in _DISCOVERED
