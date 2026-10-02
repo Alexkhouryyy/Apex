@@ -880,8 +880,12 @@
   <section id="tab-approvals" class="tab">
     <header class="page-head">
       <h1>Approvals</h1>
-      <div class="page-sub">Autonomous actions the cortex staged, and tools Apex forged for itself, waiting for your sign-off. <strong>Nothing here runs until you approve it.</strong></div>
+      <div class="page-sub">Autonomous actions the cortex staged, tools Apex forged for itself, and things waiting to be saved, all waiting for your sign-off. <strong>Nothing here runs or is saved until you approve it.</strong></div>
     </header>
+    <div class="apv-group">
+      <h2 class="apv-title">Waiting to be saved <span id="apv-writes-count" class="apv-count">0</span></h2>
+      <div id="apv-writes" class="apv-list"></div>
+    </div>
     <div class="apv-group">
       <h2 class="apv-title">Pending actions <span id="apv-actions-count" class="apv-count">0</span></h2>
       <div id="apv-actions" class="apv-list"></div>
@@ -901,6 +905,7 @@
     <details id="team-workspace" open>
       <summary>Task workspace · Research, coding and review</summary>
       <p>Give Apex a concrete task and project path. Specialists work in order and leave inspectable results. Coding can change files on the Apex host under its existing permissions.</p>
+      <p><a href="/missions">Missions →</a> keep going round after round until checks you choose pass, instead of stopping after one try.</p>
       <form id="team-form" class="add-form vertical">
         <label>Task<textarea id="team-task" required maxlength="12000" rows="3" placeholder="Inspect my project, implement a specific fix, and review the changes."></textarea></label>
         <label>Project context<textarea id="team-context" maxlength="12000" rows="2" placeholder="Project folder, current goal, constraints and acceptance checks"></textarea></label>
