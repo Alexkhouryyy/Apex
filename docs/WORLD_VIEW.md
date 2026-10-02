@@ -47,6 +47,45 @@ requested until it is enabled. It uses the official USGS summary feed:
 
 No flight, satellite, weather, vessel or camera feeds are enabled yet.
 
+## Milestone 2b: regional aircraft
+
+Enable **Aircraft · regional** in **Live layers**. It starts off and remembers its
+switch and area in this browser. The initial area is Byblos. Select another place,
+or clear the selection and navigate the globe, then choose **Load this area**.
+Navigation alone leaves the loaded region fixed. The provider receives only the
+rounded area center; Apex does not forward dashboard credentials.
+
+- ADSB.lol supplies reported positions within 250 nautical miles (463 km).
+  Coverage depends on receiver reception and can be incomplete. Zero reported
+  aircraft means an empty feed, not proof of an empty sky.
+- Arrows follow ground track; a round symbol means track is unknown. Symbols use
+  reported geometric altitude when present, otherwise barometric altitude. Both
+  are estimates; rendering uses a minimum 100 m height for legibility.
+- Choose one of the eight latest aircraft to fly to it, or click a marker to
+  inspect it without moving the camera. Details include ICAO, callsign in the
+  heading, registration, type, altitude in feet with its basis, speed in knots,
+  ground track and the UTC time of the last position report. Unknown fields stay
+  unknown. No origins/destinations or historical flight routes are inferred.
+- Refreshes run every 30 seconds while visible. Individual positions older than
+  30 seconds turn amber and dim; whole snapshots older than 90 seconds or with a
+  failed refresh are stale. A failure retains original positions and timestamps.
+  Movement is not predicted or animated between samples.
+- Source, fetch and individual position times remain distinct. Turning off
+  aircraft removes their markers while preserving earthquake markers. Switching
+  the loaded area clears its old aircraft before requesting the new area.
+- ADSB.lol attribution and its ODbL data-license link are visible in the controls.
+  See <https://www.adsb.lol/docs/open-data/api/> and the provider's route/schema
+  source at <https://github.com/adsblol/api>. Field units follow the provider's
+  readsb format: <https://github.com/wiedehopf/readsb/blob/dev/README-json.md>.
+
+The authenticated `/api/world/layers/flights?lat=…&lng=…` endpoint calls only the
+fixed ADSB.lol radius route. It validates finite coordinates, timestamps, IDs,
+regional distance and fields, streams at most 2 MiB, processes up to 3,000 records
+and returns up to 500 aircraft. A shared lock, 30-second region cache, 16-region
+limit and five-second spacing for uncached areas bound requests. Provider 429
+responses apply a shared cooldown, respecting numeric Retry-After up to 24 hours.
+There is no persistent aircraft database or history export.
+
 ## Dependencies and integration
 
 CesiumJS **1.124.0** and its assets are loaded from jsDelivr only when World View
@@ -95,9 +134,10 @@ USGS generated times are preserved even when the service returns older data.
 
 ```sh
 python -m pytest tests/test_world_view.py -q
-python -m pytest tests/test_world_layers.py -q
+python -m pytest tests/test_world_layers.py tests/test_world_flights.py -q
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_view_ui.cjs
 NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_earthquakes_ui.cjs
+NODE_PATH=/path/to/jsdom/node_modules node scripts/check_world_flights_ui.cjs
 ```
 
 Backend checks cover auth, input validation, malformed provider records,
@@ -124,7 +164,10 @@ API responses stubbed; it does not call the assistant or use a real account.
 The earthquake response is deterministic by default. Set
 `APEX_TEST_LIVE_QUAKES=1` to exercise the real USGS route and live provider. It
 then injects a refresh failure to verify that event markers and original
-timestamps remain available with a stale label. Real Cesium entity picking is
+timestamps remain available with a stale label. Aircraft use deterministic data
+by default; `APEX_TEST_LIVE_FLIGHTS=1` exercises the live ADSB.lol backend. The
+regression checks aircraft picking, unit labels, retained stale snapshots,
+coexisting layers and mobile detail access. Real Cesium entity picking is
 checked independently of the location-selection marker.
 
 Before calling this Lenovo-verified, open it there and check wheel/pinch/tilt,
@@ -134,7 +177,7 @@ activity drops when World View is closed.
 
 ## Next milestones
 
-1. Source-aware live flights and propagated satellites, each with
+1. Propagated satellites with
    explicit timestamps, unavailable/stale states and independent layer switches.
 2. Structured scene context and confirmed commands for Apex's assistant.
 3. Comfortable opt-in hand navigation using Apex's existing tracking pipeline.

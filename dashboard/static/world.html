@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Apex · World View</title>
   <link rel="icon" type="image/svg+xml" href="/static/icons/apex-refined.svg">
-  <link rel="stylesheet" href="/static/world-view.css?v=world2">
+  <link rel="stylesheet" href="/static/world-view.css?v=world3">
   <script src="/static/world/imagery.js?v=world1" defer></script>
-  <script src="/static/world-earthquakes.js?v=world2" defer></script>
-  <script src="/static/world-view.js?v=world2" defer></script>
+  <script src="/static/world-layer-status.js?v=world3" defer></script>
+  <script src="/static/world-flights.js?v=world3" defer></script>
+  <script src="/static/world-earthquakes.js?v=world3" defer></script>
+  <script src="/static/world-view.js?v=world3" defer></script>
 </head>
 <body>
   <header class="world-header">
@@ -30,6 +32,13 @@
       <p class="world-help">Map imagery is a reference map, not live satellite video.</p>
       <details class="world-layers">
         <summary id="world-layer-summary">Live layers</summary>
+        <label class="layer-toggle"><input id="flight-toggle" type="checkbox" disabled> Aircraft · regional</label>
+        <p id="flight-status" class="layer-status" role="status" aria-live="polite">Off · enable to load regional aircraft.</p>
+        <p id="flight-region" class="layer-note"></p><p id="flight-times" class="layer-times"></p>
+        <div class="flight-actions"><button id="flight-area" type="button" disabled>Load this area</button><button id="flight-refresh" type="button" disabled>Refresh aircraft</button></div>
+        <p class="layer-note">Uses your selected place, or the globe center. Refreshes every 30 seconds while visible. Reception is incomplete; an empty feed does not mean an empty sky.</p>
+        <p class="layer-note">Aircraft data: <a href="https://www.adsb.lol/" target="_blank" rel="noopener noreferrer">ADSB.lol</a> · <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener noreferrer">ODbL</a>. Enabling sends the loaded area to the provider.</p>
+        <div id="flight-events" aria-label="Aircraft in the loaded area"></div>
         <label class="layer-toggle"><input id="quake-toggle" type="checkbox" disabled> Earthquakes · M2.5+ · past day</label>
         <p id="quake-status" class="layer-status" role="status" aria-live="polite">Off · enable to load the USGS feed.</p>
         <p id="quake-times" class="layer-times"></p>
@@ -40,6 +49,11 @@
     </section>
     <section class="world-readout" aria-label="Selected location" hidden>
       <h2 id="world-selected-name">Selected location</h2><p id="world-selected-coords"></p><button id="world-clear">Clear selection</button>
+      <div id="flight-details" hidden>
+        <dl><dt id="flight-address-label">ICAO</dt><dd id="flight-icao"></dd><dt>Registration</dt><dd id="flight-registration"></dd><dt>Type</dt><dd id="flight-type"></dd><dt>Altitude</dt><dd id="flight-altitude"></dd><dt>Speed</dt><dd id="flight-speed"></dd><dt>Track</dt><dd id="flight-track"></dd><dt>Position</dt><dd><time id="flight-position-time"></time></dd><dt>Reception</dt><dd id="flight-position-source"></dd></dl>
+        <p id="flight-detail-status" class="layer-note"></p>
+        <a href="https://www.adsb.lol/" target="_blank" rel="noopener noreferrer">Aircraft data: ADSB.lol ↗</a>
+      </div>
       <div id="quake-details" hidden>
         <dl><dt>Magnitude</dt><dd id="quake-magnitude"></dd><dt>Depth</dt><dd id="quake-depth"></dd><dt>Occurred</dt><dd><time id="quake-occurred"></time></dd><dt>Revised</dt><dd><time id="quake-updated"></time></dd><dt>Review</dt><dd id="quake-review"></dd></dl>
         <p id="quake-detail-status" class="layer-note"></p>

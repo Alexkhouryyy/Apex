@@ -13,9 +13,11 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from dashboard.world_layers import router as layers_router
+from dashboard.world_flights import router as flights_router
 
 router = APIRouter()
 router.include_router(layers_router)
+router.include_router(flights_router)
 _cache = OrderedDict()
 _search_lock = asyncio.Lock()
 _last_search = 0.0
