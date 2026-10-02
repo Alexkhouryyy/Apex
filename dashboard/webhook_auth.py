@@ -97,7 +97,10 @@ def public_url(request) -> str:
     against the wrong one rejects every legitimate request, so PUBLIC_BASE_URL
     wins when set, and X-Forwarded-Proto is honoured otherwise.
     """
-    base = (getattr(config, "PUBLIC_BASE_URL", "") or "").strip().rstrip("/")
+    # Call Apex reaches this PC through the cloud relay, which forwards Twilio's
+    # request unchanged: Twilio signed the RELAY's address (docs/CALL_APEX.md).
+    base = (getattr(config, "TWILIO_PUBLIC_BASE_URL", "") or getattr(config, "PUBLIC_BASE_URL", "")
+            or "").strip().rstrip("/")
     url = str(request.url)
     if base:
         parsed = urlparse(url)

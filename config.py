@@ -206,6 +206,11 @@ TWILIO_SID = os.getenv("TWILIO_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
 PHONE_ALLOWED_NUMBERS = [n.strip() for n in os.getenv("PHONE_ALLOWED_NUMBERS", "").split(",") if n.strip()]
+# The voice Call Apex speaks with (a Twilio <Say> voice). docs/CALL_APEX.md
+TWILIO_VOICE = os.getenv("TWILIO_VOICE", "Polly.Joanna-Neural")
+# When calls come through the cloud relay: the relay's public https address,
+# which is what Twilio signs (docs/CALL_APEX.md). Falls back to PUBLIC_BASE_URL.
+TWILIO_PUBLIC_BASE_URL = os.getenv("TWILIO_PUBLIC_BASE_URL", "")
 
 # Telegram bot
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
