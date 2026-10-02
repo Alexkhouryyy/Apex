@@ -12,7 +12,7 @@ async function drive() {
   w.localStorage.setItem('apex_token', 'test-token');
   w.TextDecoder = TextDecoder;
   w.setInterval = () => 0;
-  w.setTimeout = fn => setTimeout(fn, 10);
+  w.setTimeout = (fn, ms) => ms >= 5000 ? 0 : setTimeout(fn, 10);   // the 15 s link re-check is not under test here
   w.fetch = async (url, opts = {}) => {
     assert.equal(opts.headers.Authorization, 'Bearer test-token');
     if (url === '/api/status') return Response.json({agent_ready:true});
@@ -30,16 +30,20 @@ async function drive() {
     throw Error(url);
   };
   try {
-    w.eval(read('companion.js')); await tick();
+    w.eval(read('car_link.js')); w.eval(read('companion.js')); await tick();
     assert.equal($('remote-panel').hidden, false);
     assert.match($('capabilities').textContent, /unavailable/);
+    assert.ok($('car-talk'), 'one big button into talk-only voice mode');
+    assert.equal($('car-link').dataset.state, 'online');
+    assert.match($('car-link').textContent, /Connected to your Apex/);
     $('spoken').checked = false;
-    $('message').value = 'Run my checks'; $('mode').value = 'work'; $('send').click(); await tick();
-    assert.equal(posts.length, 1); assert.equal($('recover').hidden, false);
-    assert.equal($('send').disabled, true);
-    assert.ok(w.localStorage.getItem('apex_remote_pending'));
-    $('recover').click(); await tick(); await tick();
+    $('message').value = 'Run my checks'; $('mode').value = 'work'; $('send').click();
+    for (let i = 0; i < 8; i++) await tick();
+    // The connection dropped right after the PC accepted the task. The car
+    // retried by itself with the SAME turn id, so the PC ran it once.
     assert.equal(executions, 1); assert.equal(posts.length, 2);
+    assert.equal(posts[1].turn_id, posts[0].turn_id);
+    assert.equal(posts[0].voice, $('voice').value, 'the chosen voice rides along, so Celine answers as Celine');
     assert.equal(w.localStorage.getItem('apex_companion_thread'), '81');
     assert.equal(w.localStorage.getItem('apex_remote_pending'), null);
     assert.equal($('send').disabled, false);

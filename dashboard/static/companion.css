@@ -23,3 +23,19 @@
 /* Live screen: she is seeing your screen on every turn. */
 #companion[data-live] .orb{box-shadow:0 0 0 3px #ff5a5a99,0 0 34px #ff5a5a44}
 #companion[data-live] #voice-exit{border-color:#ff7a7a;color:#ffd0d0}
+
+/* Car (/drive): one big way in, and the link to the PC always visible. */
+.drive .car-talk{display:block;width:100%;min-height:64px;font-size:20px;font-weight:600;border-radius:14px;margin:0 0 12px;background:#a1e3d7;color:#102221;border:0}
+.drive .car-talk:hover{background:#bcf7e8}
+.car-link{font-size:14px;margin:0 0 10px;padding-left:18px;position:relative;color:#a5bdb9}
+.car-link::before{content:"";position:absolute;left:2px;top:50%;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;background:#7d8f8c}
+.car-link[data-state=online]::before{background:#6be3a0;box-shadow:0 0 8px #6be3a0}
+.car-link[data-state=reconnecting]{color:#f3c969}.car-link[data-state=reconnecting]::before{background:#f3c969;animation:carblink 1s infinite}
+.car-link[data-state=offline],.car-link[data-state=trouble],.car-link[data-state=auth]{color:#ff9a8a}
+.car-link[data-state=offline]::before,.car-link[data-state=trouble]::before,.car-link[data-state=auth]::before{background:#ff6b5e}
+@keyframes carblink{50%{opacity:.25}}
+.drive header nav{display:none}
+.drive .car-settings{border:1px solid #30484a;border-radius:12px;padding:10px 14px;margin:0 0 14px}
+.drive .car-settings summary{cursor:pointer;font-size:15px;color:#a5bdb9;min-height:32px;display:flex;align-items:center}
+.drive .car-settings[open] summary{margin-bottom:10px}
+.drive .context #screen-status{display:none}

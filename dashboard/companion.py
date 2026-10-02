@@ -100,8 +100,19 @@ async def cancel_turn(turn_id: str, request: Request):
 def _check_origin(request: Request):
     # Also protect tokenless localhost from cross-site simple POSTs.
     origin = request.headers.get("origin")
-    if origin is not None and origin != str(request.base_url).rstrip("/"):
-        raise HTTPException(403, "Open the companion on the same origin as your Apex dashboard.")
+    if origin is None or origin == str(request.base_url).rstrip("/"):
+        return
+    # Behind a local HTTPS proxy (`tailscale serve`, for the car): the page is
+    # https://your-pc.ts.net, but the request reaches Apex as plain http from
+    # loopback. Same host, https only, loopback only: another site's origin
+    # still never matches, so the forgery protection is unchanged.
+    from urllib.parse import urlsplit
+    client = request.client.host if request.client else ""
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    o = urlsplit(origin)
+    if client in ("127.0.0.1", "::1") and o.scheme == "https" and o.netloc and o.netloc.lower() == host.lower():
+        return
+    raise HTTPException(403, "Open the companion on the same origin as your Apex dashboard.")
 
 
 @router.post("/api/board/select")

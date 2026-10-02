@@ -11,6 +11,44 @@ memory and permissions:
 
 ## Car setup
 
+**The quick way (Windows):**
+
+1. Install **Tailscale** on the PC and on the phone or car screen, and sign in
+   to both with the same account.
+2. Double-click **`Setup-Apex-Car.cmd`**.
+   - It checks Tailscale and makes sure Apex has a dashboard token (offering
+     to create one).
+   - It turns on a private HTTPS address that only your own devices can open,
+     and prints it, for example `https://alex-pc.tail1234.ts.net/drive`.
+   - HTTPS matters: a phone browser won't allow the microphone without it.
+3. Open that address on the phone or car screen and enter the token once.
+4. Press **🎙 Talk with Celine**.
+
+`Setup-Apex-Car.cmd --off` turns the address off. Apex itself keeps listening
+only on the PC. Tailscale forwards the car's requests to it, and Apex accepts
+that HTTPS origin only when it arrives through that local proxy.
+
+**What the car page does now:**
+
+- **Voice first.** **🎙 Talk with Celine** opens talk-only voice mode:
+  hands-free listening, Celine's voice, and talking over her to interrupt.
+- **She speaks as she writes.** The car polls the reply every 0.4 s and feeds
+  each new sentence to the voice. It doesn't wait for the whole reply, and it
+  uses the fast streamed voice when it's running.
+- **Celine is Celine in the car too.** The chosen voice goes with each
+  message, so her personality comes with it.
+- **Connection drops are ridden out.** Tunnels and dead zones happen. The car
+  keeps retrying for up to 90 seconds with growing pauses. The task keeps
+  running on the PC either way, and a retried message is never run twice.
+  After 90 seconds it says so, and **Reconnect to task** picks it up later.
+- **A link light** shows whether the PC can be reached and how fast:
+  - green: connected, with the time in ms;
+  - amber: reconnecting;
+  - red: can't reach Apex, or the token is missing. It says which.
+
+**By hand / other setups** (the original notes):
+
+
 Start Apex normally on the laptop, then open `/drive` on its dashboard URL.
 Use the existing dashboard token. The car must be able to reach that URL over
 HTTPS; opening localhost in the car points at the car, not the laptop. A private
@@ -31,8 +69,8 @@ source for the car screen.
 Discuss uses the companion's enforced read-tool boundary. Switch to Work to ask
 for laptop work, for example: “Run the project's checks and tell me what failed,
 with the test output.” Actual execution still depends on the host's tools,
-credentials and existing safety gates. Voice uses tap-to-record transcription
-and speaks completed replies; it is not full-duplex streaming audio. The existing
+credentials and existing safety gates. Voice mode listens hands-free and speaks
+replies as they are written (see above). The existing
 API/provider requirements and costs in [SCREEN_COMPANION.md](SCREEN_COMPANION.md)
 also apply here.
 
