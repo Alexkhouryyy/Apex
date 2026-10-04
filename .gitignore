@@ -47,3 +47,7 @@ integrations/gods-eye-view/APEX_TEST_RESULTS.log
 
 # Browser speech model, fetched by scripts/fetch_speech_model.py (pinned + hash-checked).
 dashboard/static/vendor/speech/
+
+# Your own character model for the companion (docs/AVATAR.md). Not committed.
+dashboard/static/avatars/*.glb
+dashboard/static/avatars/*.gltf

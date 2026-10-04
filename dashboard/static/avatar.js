@@ -1,17 +1,22 @@
-/* The Apex character: a full-body android drawn with three.js, made for Apex
-   (no outside model, so no licence or likeness questions). Its chest core is
-   the orb; its visor face blinks, follows the pointer and moves its mouth
-   with the voice that is actually playing (window.ApexVoice.level).
-   Body language comes from avatar-pose.js.
+/* Apex's character: the Mk I suit (avatar-suit.js), rendered with reflections
+   (a studio environment for the metal), filmic tone mapping and bloom on its
+   energy lines. When it appears, the plates fly in and lock from the feet
+   up, then the eyes and reactor power on. Body language comes from
+   avatar-pose.js; the vocal grille follows window.ApexVoice.level, the audio
+   actually playing.
 
-   window.ApexAvatarCharacter.create(host, {level, state}) -> {dispose} or
-   null when the device has no WebGL (the page keeps the orb). */
-import * as THREE from './vendor/three/build/three.module.min.js';
+   window.ApexAvatarCharacter.create(host, {level, state}) -> {dispose, debug}
+   or null when the device has no WebGL (the page keeps the orb). If the
+   device can't hold the frame rate, bloom turns off by itself. */
+import * as THREE from 'three';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+import {buildSuit, ENERGY} from './avatar-suit.js?v=mk1';
 
-const COLORS = {
-  body: 0x13252c, trim: 0x7aebc7, glow: 0x7ff5d2, visor: 0x050b10,
-  idle: 0x67e9bb, listen: 0x6fc8ff, think: 0xb7a6ff, speak: 0x8dffe0,
-};
+const ASSEMBLE_SECONDS = 2.2, SLOW_FRAME_MS = 28;
 
 function webgl() {
   try {
@@ -20,160 +25,153 @@ function webgl() {
   } catch (_) { return false; }
 }
 
-function part(geometry, material) {
-  return new THREE.Mesh(geometry, material);
-}
+const easeOutBack = x => { const c = 1.6; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
 
-// Dark armour with a glowing edge: light added where the surface turns away
-// from the camera (a Fresnel rim), so the silhouette reads on a dark screen.
-function rimMaterial(options, rimColor, strength) {
-  const material = new THREE.MeshStandardMaterial(options);
-  material.onBeforeCompile = shader => {
-    shader.uniforms.rimColor = {value: new THREE.Color(rimColor)};
-    shader.uniforms.rimStrength = {value: strength};
-    shader.fragmentShader = 'uniform vec3 rimColor;\nuniform float rimStrength;\n' + shader.fragmentShader.replace(
-      '#include <opaque_fragment>',
-      'float apexRim = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 2.4);\n' +
-      'outgoingLight += rimColor * apexRim * rimStrength;\n#include <opaque_fragment>');
-  };
-  return material;
-}
-
-function limb(length, radius, material) {
-  // A joint group whose child hangs down -Y, so rotating the group swings the limb.
-  const joint = new THREE.Group();
-  const mesh = part(new THREE.CapsuleGeometry(radius, length - radius * 2, 6, 14), material);
-  mesh.position.y = -length / 2;
-  joint.add(mesh);
-  const end = new THREE.Group();
-  end.position.y = -length;
-  joint.add(end);
-  return {joint, end};
-}
-
-function at(object, x, y, z) { object.position.set(x, y, z); return object; }
-
-function ring(radius, material) {
-  const mesh = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.006, 8, 48), material);
-  mesh.rotation.x = Math.PI / 2;
-  return mesh;
-}
-
-function build() {
-  const body = rimMaterial({color: COLORS.body, metalness: 0.5, roughness: 0.35}, COLORS.glow, 0.9);
-  const trim = new THREE.MeshBasicMaterial({color: COLORS.trim});
-  const j = {};
-
-  j.root = new THREE.Group();
-  j.hips = new THREE.Group(); j.hips.position.y = 0.98; j.root.add(j.hips);
-  const pelvis = part(new THREE.CylinderGeometry(0.15, 0.12, 0.14, 24), body);
-  pelvis.scale.set(1, 1, 0.7); j.hips.add(pelvis);
-  j.hips.add(at(ring(0.17, trim), 0, 0.07, 0));
-
-  j.spine = new THREE.Group(); j.spine.position.y = 0.08; j.hips.add(j.spine);
-  const torso = part(new THREE.CylinderGeometry(0.2, 0.13, 0.5, 28), body);   // broad chest, narrow waist
-  torso.scale.set(1.15, 1, 0.68); torso.position.y = 0.25; j.spine.add(torso);
-  const chest = part(new THREE.SphereGeometry(0.2, 28, 16, 0, Math.PI * 2, 0, Math.PI / 2), body);
-  chest.scale.set(1.15, 0.35, 0.68); chest.position.y = 0.5; j.spine.add(chest);
-  // The core: the orb, now a heart.
-  j.core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.055, 2),
-    new THREE.MeshStandardMaterial({color: COLORS.idle, emissive: COLORS.idle, emissiveIntensity: 1.2, roughness: 0.2}));
-  j.core.position.set(0, 0.36, 0.13); j.spine.add(j.core);
-  j.coreHalo = new THREE.Mesh(new THREE.RingGeometry(0.07, 0.085, 40),
-    new THREE.MeshBasicMaterial({color: COLORS.idle, transparent: true, opacity: 0.7, side: THREE.DoubleSide}));
-  j.coreHalo.position.set(0, 0.36, 0.14); j.spine.add(j.coreHalo);
-
-  j.neck = new THREE.Group(); j.neck.position.y = 0.6; j.spine.add(j.neck);
-  j.neck.add(part(new THREE.CylinderGeometry(0.045, 0.055, 0.08, 16), body));
-  j.neck.add(at(ring(0.058, trim), 0, -0.03, 0));
-  j.head = new THREE.Group(); j.head.position.y = 0.06; j.neck.add(j.head);
-  const skull = part(new THREE.SphereGeometry(0.13, 32, 24), body);
-  skull.scale.set(0.88, 1.05, 0.95); skull.position.y = 0.12; j.head.add(skull);
-  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.118, 32, 16, -0.95, 1.9, 1.05, 0.95),
-    new THREE.MeshStandardMaterial({color: COLORS.visor, metalness: 0.9, roughness: 0.15}));
-  visor.position.set(0, 0.12, 0.012); visor.scale.set(0.9, 1.04, 0.98); j.head.add(visor);
-  const face = new THREE.MeshBasicMaterial({color: COLORS.glow});
-  j.eyes = [-1, 1].map(side => {
-    const eye = new THREE.Mesh(new THREE.CapsuleGeometry(0.011, 0.02, 4, 10), face);
-    eye.rotation.z = Math.PI / 2; eye.position.set(side * 0.042, 0.145, 0.115);
-    j.head.add(eye); return eye;
-  });
-  j.mouth = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.01, 0.01), face);
-  j.mouth.position.set(0, 0.075, 0.113); j.head.add(j.mouth);
-
-  const arm = side => {
-    const shoulder = new THREE.Group(); shoulder.position.set(side * 0.26, 0.5, 0); j.spine.add(shoulder);
-    shoulder.add(part(new THREE.SphereGeometry(0.06, 16, 12), body));
-    const upper = limb(0.28, 0.045, body); shoulder.add(upper.joint);
-    const fore = limb(0.26, 0.038, body); upper.end.add(fore.joint);
-    fore.end.add(at(ring(0.04, trim), 0, 0.02, 0));
-    const hand = part(new THREE.SphereGeometry(0.045, 16, 12), body);
-    hand.scale.set(0.8, 1.2, 0.6); hand.position.y = -0.04; fore.end.add(hand);
-    return {shoulder: upper.joint, elbow: fore.joint};
-  };
-  j.l = arm(1); j.r = arm(-1);
-  for (const side of [1, -1]) {
-    const hip = new THREE.Group(); hip.position.set(side * 0.1, -0.03, 0); j.hips.add(hip);
-    const thigh = limb(0.44, 0.065, body); hip.add(thigh.joint);
-    const shin = limb(0.44, 0.052, body); thigh.end.add(shin.joint);
-    shin.end.add(at(ring(0.055, trim), 0, 0.05, 0));
-    const foot = part(new THREE.BoxGeometry(0.09, 0.05, 0.2), body);
-    foot.position.set(0, -0.02, 0.04); shin.end.add(foot);
-  }
-  // A faint floor disc so it stands somewhere rather than floats.
-  const floor = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.42, 48),
-    new THREE.MeshBasicMaterial({color: COLORS.trim, transparent: true, opacity: 0.12, side: THREE.DoubleSide}));
-  floor.rotation.x = -Math.PI / 2; floor.position.y = 0.001; j.root.add(floor);
-  return j;
-}
-
-function create(host, {level = () => 0, state = () => '', reduced} = {}) {
+function create(host, {level = () => 0, state = () => '', reduced, quality, model} = {}) {
   if (!host || !webgl() || !window.ApexAvatarPose) return null;
   const Pose = window.ApexAvatarPose;
   const calm = reduced ?? window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+
+  const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, powerPreference: 'high-performance'});
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
+  renderer.setClearColor(0x000000, 0);
+  Object.assign(renderer.domElement.style, {position: 'absolute', inset: '0'});
+  if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
   host.appendChild(renderer.domElement);
-  const scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight(0xcffff3, 0x0a1418, 1.4));
-  const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(1.5, 3, 2.5); scene.add(key);
-  const rim = new THREE.DirectionalLight(0x67e9bb, 2.2); rim.position.set(-2, 2, -2.5); scene.add(rim);
-  const j = build(); scene.add(j.root);
-  const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 20);
 
-  let width = 0, height = 0;
+  const scene = new THREE.Scene();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+  pmrem.dispose();
+  const key = new THREE.DirectionalLight(0xfff1e0, 2.2); key.position.set(1.6, 3.2, 2.4); scene.add(key);
+  const rimL = new THREE.DirectionalLight(0x54ffd8, 3.2); rimL.position.set(-2.2, 2.2, -2); scene.add(rimL);
+  const rimR = new THREE.DirectionalLight(0x5aa8ff, 2.4); rimR.position.set(2.4, 1.6, -2.2); scene.add(rimR);
+  scene.add(new THREE.HemisphereLight(0x9fd8ff, 0x050809, 0.35));
+  const j = buildSuit(); scene.add(j.root);
+  const camera = new THREE.PerspectiveCamera(28, 1, 0.05, 30);
+
+  // Glow only where there is energy: a second canvas renders just the lit
+  // parts (everything else black), blurs them, and is screen-blended on top.
+  // Black adds nothing, so the page shows through and the armour stays crisp.
+  const glowRenderer = new THREE.WebGLRenderer({antialias: false, alpha: false, powerPreference: 'high-performance'});
+  glowRenderer.setPixelRatio(1);
+  glowRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  glowRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  glowRenderer.setClearColor(0x000000, 1);
+  Object.assign(glowRenderer.domElement.style, {position: 'absolute', inset: '0', mixBlendMode: 'screen', pointerEvents: 'none'});
+  // Fade the glow out toward the edges so its faint haze never shows the canvas's rectangle.
+  glowRenderer.domElement.style.maskImage = glowRenderer.domElement.style.webkitMaskImage =
+    'radial-gradient(ellipse 50% 50% at 50% 50%, #000 62%, transparent 100%)';
+  host.appendChild(glowRenderer.domElement);
+  const composer = new EffectComposer(glowRenderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.18, 0.12);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+  const black = new THREE.MeshBasicMaterial({color: 0x000000});
+  const glowing = new Set([j.energy.seam, j.energy.eye, j.energy.core, j.energy.grille]);
+  const darkMeshes = [];
+  scene.traverse(o => { if (o.isMesh && !glowing.has(o.material) && o !== j.beam && !j.hud.includes(o)) darkMeshes.push(o); });
+  const saved = new Map();
+  function renderGlow() {
+    for (const o of darkMeshes) { saved.set(o, o.material); o.material = black; }
+    const beam = j.beam.visible; j.beam.visible = false;
+    const env = scene.environment; scene.environment = null;
+    composer.render();
+    scene.environment = env; j.beam.visible = beam;
+    for (const o of darkMeshes) o.material = saved.get(o);
+  }
+  let useBloom = quality !== 'low';
+
+  // Your own model (avatar-model.js), if there is one: it replaces the suit
+  // once it has loaded; until then, or if it can't be used, the suit stays.
+  let custom = null, modelStatus = model ? 'loading' : 'none', disposed = false;
+  if (model) {
+    import('./avatar-model.js?v=mk1').then(m => m.loadModel(model)).then(loaded => {
+      if (disposed) return;
+      custom = loaded; j.hips.visible = false; j.root.add(loaded.object);
+      loaded.object.traverse(o => { if (o.isMesh && ![].concat(o.material).some(mat => loaded.glowing.has(mat))) darkMeshes.push(o); });
+      modelStatus = 'loaded';
+    }).catch(err => { modelStatus = 'failed: ' + (err?.message || err); });
+  }
+
+  let width = 0, height = 0, full = false;
   function frame() {
     const w = host.clientWidth || 1, h = host.clientHeight || 1;
     if (w === width && h === height) return;
     width = w; height = h;
-    renderer.setSize(w, h, false);
+    renderer.setSize(w, h, false); glowRenderer.setSize(w, h, false); composer.setSize(w, h);
+    glowRenderer.domElement.style.width = renderer.domElement.style.width = '100%';
+    glowRenderer.domElement.style.height = renderer.domElement.style.height = '100%';
     camera.aspect = w / h;
-    // Tall spaces show the whole body; small or wide ones, head and shoulders.
-    // Heights: feet 0, shoulders about 1.55, top of the head about 1.98.
-    const full = h / w >= 1.15 && h >= 160;
-    const [y, tall, wide] = full ? [0.97, 2.25, 1.0] : [1.68, 0.72, 0.72];
+    full = h / w >= 1.15 && h >= 160;               // tall spaces: the whole suit; small ones: head and shoulders
+    const [y, tall, wide] = full ? [1.0, 2.2, 1.05] : [1.66, 0.62, 0.66];
     const half = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
     const fit = Math.max(tall / 2 / half, wide / 2 / (camera.aspect * half));
-    camera.position.set(0, y + 0.03, fit);
+    camera.position.set(full ? 0.35 : 0.08, y + (full ? 0.12 : 0.02), fit);
     camera.lookAt(0, y, 0);
     camera.updateProjectionMatrix();
+    j.base.visible = full;
   }
   const resize = new ResizeObserver(frame); resize.observe(host);
 
   let gazeX = 0, gazeY = 0;
-  const onPointer = e => {
-    gazeX = (e.clientX / window.innerWidth) * 2 - 1;
-    gazeY = (e.clientY / window.innerHeight) * 2 - 1;
-  };
+  const onPointer = e => { gazeX = (e.clientX / window.innerWidth) * 2 - 1; gazeY = (e.clientY / window.innerHeight) * 2 - 1; };
   window.addEventListener('pointermove', onPointer, {passive: true});
 
-  let visible = true, lv = 0, raf = 0, last = performance.now();
-  const seen = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }); seen.observe(host);
-  const tint = new THREE.Color();
+  // Suit-up: every plate starts away from its place, then flies home in order, feet first.
+  const homeWorld = new THREE.Vector3();
+  j.root.updateMatrixWorld(true);
+  for (const plate of j.plates) {
+    // Resting place and size, read now that the suit is fully built (parts
+    // are often scaled or moved after being added).
+    plate.home = plate.mesh.position.clone(); plate.scale = plate.mesh.scale.clone();
+    plate.mesh.getWorldPosition(homeWorld);
+    plate.delay = (homeWorld.y / 2) * (ASSEMBLE_SECONDS - 0.7);
+    const dir = new THREE.Vector3(Math.sin(homeWorld.y * 7.3) * 0.5, 0.25, 0.6 + Math.cos(homeWorld.y * 5.1) * 0.3).normalize();
+    plate.from = plate.home.clone().addScaledVector(dir, 0.35);
+  }
+  // The clock starts once a frame has actually been drawn: the first frame
+  // compiles the shaders and can take seconds, and the suit-up must not
+  // finish before anyone sees it.
+  let born = null, drawn = 0;
+  const assemble = t => {
+    if (born === null && drawn >= 2) born = t;
+    const elapsed = calm ? 99 : born === null ? 0 : t - born;
+    for (const plate of j.plates) {
+      const k = Math.min(1, Math.max(0, (elapsed - plate.delay) / 0.55));
+      plate.mesh.position.lerpVectors(plate.from, plate.home, easeOutBack(k));
+      plate.mesh.scale.copy(plate.scale).multiplyScalar(Math.max(0.001, Math.min(1, k * 1.4)));
+    }
+    return Math.min(1, Math.max(0, (elapsed - ASSEMBLE_SECONDS + 0.4) / 0.6));   // power-on, after the last plate
+  };
 
-  function apply(p, dt) {
-    const ease = Math.min(1, dt * 8);
+  let visible = true, lv = 0, raf = 0, last = performance.now(), slow = 0, frames = 0;
+  const seen = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }); seen.observe(host);
+  const tint = new THREE.Color(), want = new THREE.Color();
+
+  function energize(mood, power, p, bars, t) {
+    want.setRGB(...ENERGY[mood]);
+    tint.lerp(want, 0.08);
+    const set = (material, k) => material.color.copy(tint).multiplyScalar(k);
+    set(j.energy.seam, 0.9 * power);
+    set(j.energy.eye, p.eyeGlow * power * Math.max(0.15, p.eyeOpen));
+    set(j.energy.core, (0.6 + p.coreGlow * 1.1) * power);
+    set(j.energy.grille, power * 0.35);
+    j.grille.forEach((bar, i) => { bar.scale.y = 0.25 + bars[i] * 1.9; });
+    j.coreRings.forEach((ring, i) => { ring.rotation.z += (i % 2 ? -1 : 1) * p.coreSpin * (0.6 + i * 0.35) * 0.016; });
+    j.hud.forEach((ring, i) => { ring.rotation.z += (i % 2 ? -1 : 1) * p.hudSpeed * (0.4 + i * 0.2) * 0.016; ring.material.color.copy(tint).multiplyScalar(0.55 * power); });
+    j.beam.material.uniforms.color.value.copy(tint).multiplyScalar(power);
+    j.beam.material.uniforms.time.value = t * 0.6;
+    j.scanBar.visible = p.scan > 0 && power > 0.5;
+    if (j.scanBar.visible) j.scanBar.position.x = -0.07 + 0.14 * p.scan;
+  }
+
+  function pose(p, dt) {
+    const ease = Math.min(1, dt * 7);
     const to = (obj, key, v) => { obj[key] += (v - obj[key]) * ease; };
     j.root.position.x = p.shift;
     to(j.spine.rotation, 'x', p.spineX); to(j.spine.rotation, 'z', p.spineZ);
@@ -181,14 +179,6 @@ function create(host, {level = () => 0, state = () => '', reduced} = {}) {
     to(j.head.rotation, 'x', p.headX); to(j.head.rotation, 'y', p.headY); to(j.head.rotation, 'z', p.headZ);
     to(j.l.shoulder.rotation, 'x', p.lShoulderX); to(j.l.shoulder.rotation, 'z', p.lShoulderZ); to(j.l.elbow.rotation, 'x', p.lElbowX);
     to(j.r.shoulder.rotation, 'x', p.rShoulderX); to(j.r.shoulder.rotation, 'z', p.rShoulderZ); to(j.r.elbow.rotation, 'x', p.rElbowX);
-    j.mouth.scale.set(p.mouthWide, 1 + p.mouthOpen * 3.2, 1);      // the voice, not the frame rate
-    for (const eye of j.eyes) eye.scale.y = Math.max(0.12, p.eyeOpen);
-    tint.set(COLORS[p.mood]);
-    j.core.material.color.lerp(tint, ease); j.core.material.emissive.lerp(tint, ease);
-    j.core.material.emissiveIntensity = 0.6 + p.coreGlow * 1.4;
-    j.coreHalo.material.color.lerp(tint, ease);
-    j.coreHalo.scale.setScalar(1 + p.coreGlow * 0.25);
-    j.core.rotation.y += p.coreSpin * dt;
   }
 
   function loop(now) {
@@ -196,21 +186,32 @@ function create(host, {level = () => 0, state = () => '', reduced} = {}) {
     if (!visible || document.hidden) { last = now; return; }
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
     frame();
+    const t = now / 1000;
     lv = Pose.smooth(lv, Math.max(0, Math.min(1, Number(level()) || 0)));
-    apply(Pose.pose(state(), now / 1000, lv, {gazeX, gazeY, reduced: calm}), dt);
-    renderer.render(scene, camera);
+    const p = Pose.pose(state(), t, lv, {gazeX, gazeY, reduced: calm});
+    const power = custom ? 1 : assemble(t);
+    if (custom) custom.apply(p, lv); else pose(p, dt);
+    energize(p.mood, power, p, Pose.voiceBars(t, p.mouthOpen > 0 ? lv : 0), t);
+    const started = performance.now();
+    renderer.render(scene, camera); drawn++;
+    glowRenderer.domElement.style.display = useBloom ? '' : 'none';
+    if (useBloom) renderGlow();
+    // Too slow for this device: drop bloom rather than stutter.
+    if (useBloom && ++frames > 30) { slow = slow * 0.9 + (performance.now() - started + dt * 1000) * 0.1; if (frames > 90 && slow > SLOW_FRAME_MS) useBloom = false; }
   }
   raf = requestAnimationFrame(loop);
 
   return {
     dispose() {
+      disposed = true;
       cancelAnimationFrame(raf); resize.disconnect(); seen.disconnect();
       window.removeEventListener('pointermove', onPointer);
-      scene.traverse(o => { o.geometry?.dispose(); o.material?.dispose?.(); });
-      renderer.dispose(); renderer.domElement.remove();
+      scene.traverse(o => { o.geometry?.dispose(); if (o.material) [].concat(o.material).forEach(m => { m.map?.dispose(); m.bumpMap?.dispose(); m.dispose(); }); });
+      scene.environment?.dispose(); composer.dispose?.(); black.dispose();
+      glowRenderer.dispose(); glowRenderer.domElement.remove(); renderer.dispose(); renderer.domElement.remove();
     },
-    // For checks: the current mouth opening and core colour.
-    debug: () => ({mouth: j.mouth.scale.y, core: '#' + j.core.material.color.getHexString(), level: lv}),
+    debug: () => ({model: modelStatus, bones: custom?.bones, mouth: custom?.mouth,grille: j.grille.map(b => +b.scale.y.toFixed(2)), core: '#' + j.energy.core.color.getHexString(),
+      level: lv, bloom: useBloom, assembled: j.plates.every(pl => pl.mesh.position.distanceTo(pl.home) < 1e-3), plates: j.plates.length}),
   };
 }
 

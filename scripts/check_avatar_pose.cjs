@@ -43,4 +43,22 @@ assert.ok(shut * 0.005 / 60 < 0.05, 'eyes mostly open');
 // Smoothing: opens fast on a syllable, closes slower.
 assert.ok(P.smooth(0, 1) > 1 - P.smooth(1, 0), 'rises faster than it falls');
 
-console.log(`PASS: mouth follows the voice only while speaking, states read differently, gestures scale with loudness, reduced motion keeps only mouth and blinks, gaze is bounded, ${blinks} blinks a minute, smoothing rises fast and falls slow.`);
+// The suit's lights: eyes brighten when listening, a scan sweeps while thinking.
+assert.ok(P.pose('listening', 3, 0).eyeGlow > P.pose('', 3, 0).eyeGlow);
+assert.ok(P.pose('thinking', 3.2, 0).scan > 0 && P.pose('thinking', 3.2, 0, {reduced: true}).scan === 0);
+// The vocal grille: silent is flat; speech raises the middle bars most.
+assert.deepEqual(P.voiceBars(2, 0), [0, 0, 0, 0, 0]);
+const bars = P.voiceBars(2, 0.8);
+assert.ok(bars.every(b => b > 0 && b <= 1) && bars[2] > bars[0] && bars[2] > bars[4], `bars ${bars}`);
+
+// Your own model: bones found by name across rig conventions.
+const roles = {
+  'mixamorig:LeftArm': 'lUpper', 'mixamorig:LeftForeArm': 'lFore', 'mixamorig:RightArm': 'rUpper', 'mixamorigRightForeArm': 'rFore',
+  'mixamorig:Spine2': 'chest', 'mixamorig:Spine': 'spine', 'mixamorig:Head': 'head', 'mixamorig:HeadTop_End': null,
+  'mixamorig:LeftHand': null, 'mixamorig:LeftShoulder': null, 'mixamorig:LeftHandIndex1': null,
+  'J_Bip_L_UpperArm': 'lUpper', 'J_Bip_R_LowerArm': 'rFore', 'J_Bip_C_Chest': 'chest', 'J_Bip_C_Hips': 'hips',
+  'UpperArm.L': 'lUpper', 'forearm.R': 'rFore', 'LowerArmL': 'lFore', 'Torso': 'chest', 'Jaw': 'jaw', 'DEF-upper_arm.L': 'lUpper',
+};
+for (const [name, want] of Object.entries(roles)) assert.equal(P.boneRole(name), want, name);
+
+console.log(`PASS: mouth follows the voice only while speaking, states read differently, gestures scale with loudness, reduced motion keeps only mouth and blinks, gaze is bounded, ${blinks} blinks a minute, smoothing rises fast and falls slow, the suit's lights and grille follow state and voice, and bones are recognised across Mixamo, VRoid and Blender names.`);

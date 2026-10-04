@@ -369,14 +369,25 @@
   };
   window.ApexVoice = {level: () => voiceMeter.level()};
   // --- How Apex appears: the orb, or its character (avatar.js) --------------
-  let avatar = null;
-  function applyLook() {
+  // A model of your own at /static/avatars/apex.glb replaces the built-in suit.
+  const CUSTOM_MODEL = '/static/avatars/apex.glb';
+  let customModel = null;
+  function findCustomModel() {
+    customModel = customModel || fetch(CUSTOM_MODEL, {method: 'HEAD'}).then(r => r.ok ? CUSTOM_MODEL : null).catch(() => null);
+    return customModel;
+  }
+  let avatar = null, lookPending = false;
+  async function applyLook() {
     if ($('presence-look').value !== 'character') {
       avatar?.dispose(); avatar = null; delete root.dataset.look; return;
     }
-    if (avatar) return;
+    if (avatar || lookPending) return;
     if (!window.ApexAvatarCharacter) { window.addEventListener('apex-avatar-ready', applyLook, {once: true}); return; }
-    avatar = window.ApexAvatarCharacter.create($('avatar'), {level: () => voiceMeter.level(),
+    lookPending = true;
+    const model = await findCustomModel();
+    lookPending = false;
+    if ($('presence-look').value !== 'character' || avatar) return;
+    avatar = window.ApexAvatarCharacter.create($('avatar'), {level: () => voiceMeter.level(), model,
       state: () => ['speaking', 'thinking', 'listening'].find(name => root.classList.contains(name)) || ''});
     if (avatar) { root.dataset.look = 'character'; return; }
     // Said on the setting itself: a banner would be cleared by the next status update.

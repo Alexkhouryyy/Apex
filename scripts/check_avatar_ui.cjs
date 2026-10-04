@@ -4,7 +4,7 @@ const {JSDOM}=require('jsdom'),fs=require('fs'),path=require('path'),assert=requ
 const base=path.join(__dirname,'..','dashboard','static');
 const store={};
 
-async function page({webgl=true, preload=false}={}){
+async function page({webgl=true, preload=false, custom=false}={}){
   const dom=new JSDOM(fs.readFileSync(path.join(base,'companion.html'),'utf8'),{url:'http://localhost:7860/companion',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window,d=w.document,$=id=>d.getElementById(id);
   for(const [k,v] of Object.entries(store))w.localStorage.setItem(k,v);
@@ -13,6 +13,7 @@ async function page({webgl=true, preload=false}={}){
   w.speechSynthesis={speaking:false,cancel(){},speak(u){s.utterance=u;}};w.SpeechSynthesisUtterance=class{constructor(t){this.text=t;}};
   w.fetch=async(url)=>{
     if(url==='/api/status')return Response.json({agent_ready:true});
+    if(url==='/static/avatars/apex.glb')return new Response(null,{status:custom?200:404});
     if(url==='/api/companion/chat')return new Response([{type:'start',thread_id:2},{type:'token',text:'Hi'},{type:'done',text:'Hi'}].map(v=>JSON.stringify(v)+'\n').join(''));
     throw Error(url);               // like the other checks: no instant answers that let polling loops spin
   };
@@ -21,7 +22,7 @@ async function page({webgl=true, preload=false}={}){
   for(const f of ['speech_queue.js','handsfree.js','companion.js'])w.eval(fs.readFileSync(path.join(base,f),'utf8'));
   const tick=()=>new Promise(r=>setTimeout(r,25));await tick();
   return Object.assign(s,{w,d,$,tick,stub,root:$('companion'),
-    choose(v){$('presence-look').value=v;$('presence-look').dispatchEvent(new w.Event('change'));},
+    async choose(v){$('presence-look').value=v;$('presence-look').dispatchEvent(new w.Event('change'));await tick();},
     save(){for(let i=0;i<w.localStorage.length;i++){const k=w.localStorage.key(i);if(k!=='apex_companion_thread')store[k]=w.localStorage.getItem(k);}},
     close(){dom.window.close();}});
 }
@@ -32,10 +33,11 @@ async function page({webgl=true, preload=false}={}){
   assert.equal(p.$('presence-look').value,'orb');assert.equal(p.root.dataset.look,undefined);assert.equal(p.created.length,0);
 
   // 2. Chosen before the 3D code has loaded: the orb stays until it is ready.
-  p.choose('character');
+  await p.choose('character');
   assert.equal(p.root.dataset.look,undefined,'no blank space while the character loads');
-  p.w.ApexAvatarCharacter=p.stub;p.w.dispatchEvent(new p.w.Event('apex-avatar-ready'));
+  p.w.ApexAvatarCharacter=p.stub;p.w.dispatchEvent(new p.w.Event('apex-avatar-ready'));await p.tick();
   assert.equal(p.created.length,1);assert.equal(p.created[0].host,p.$('avatar'));
+  assert.equal(p.created[0].opts.model,null,'no model of your own: the built-in suit');
   assert.equal(p.root.dataset.look,'character');
   assert.equal(p.w.localStorage.getItem('apex.presence.look'),'character','the choice is remembered');
 
@@ -54,18 +56,22 @@ async function page({webgl=true, preload=false}={}){
   p.w.speechSynthesis.speaking=false;p.root.className='';assert.equal(level(),0,'quiet when not speaking');
 
   // 5. Back to the orb: the character is released.
-  p.choose('orb');assert.equal(p.disposed,1);assert.equal(p.root.dataset.look,undefined);
-  p.choose('character');assert.equal(p.created.length,2,'drawn again when chosen again');
+  await p.choose('orb');assert.equal(p.disposed,1);assert.equal(p.root.dataset.look,undefined);
+  await p.choose('character');assert.equal(p.created.length,2,'drawn again when chosen again');
   p.save();p.close();
 
   // 6. Next visit: the remembered character, drawn at once when the code is ready.
   p=await page({preload:true});
   assert.equal(p.$('presence-look').value,'character');assert.equal(p.created.length,1);assert.equal(p.root.dataset.look,'character');p.close();
 
-  // 7. No WebGL: the orb stays and the page says why.
+  // 7. A model of your own in /static/avatars/apex.glb is used instead of the suit.
+  p=await page({preload:true,custom:true});
+  assert.equal(p.created[0].opts.model,'/static/avatars/apex.glb');p.close();
+
+  // 8. No WebGL: the orb stays and the page says why.
   p=await page({preload:true,webgl:false});
   assert.equal(p.root.dataset.look,undefined);assert.equal(p.$('presence-look').value,'orb');
   const option=p.$('presence-look').querySelector('option[value=character]');
   assert.ok(option.disabled&&/needs WebGL/.test(option.textContent));assert.match(p.$('presence-look').title,/no WebGL/);p.close();
-  console.log('PASS: the orb by default; the character is remembered, waits for its code, follows the companion state, moves its mouth on the device voice, is released on Orb, and without WebGL the orb stays with a reason.');
+  console.log('PASS: the orb by default; the character is remembered, waits for its code, follows the companion state, moves its mouth on the device voice, is released on Orb, uses your own model when there is one, and without WebGL the orb stays with a reason.');
 })().then(()=>process.exit(0),e=>{console.error(e);process.exit(1);});
