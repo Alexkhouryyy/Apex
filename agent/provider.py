@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any
+from agent.apocalypse import OfflineUnavailable
 
 
 # Google's OpenAI-compatible endpoint — lets the OpenAI SDK talk to Gemini.
@@ -298,7 +299,9 @@ def _translate_messages(messages: list) -> list:
 
             out_msg: dict[str, Any] = {
                 "role": "assistant",
-                "content": " ".join(texts).strip() or None,
+                # Ollama rejects null content without tool calls. Older empty
+                # replies can remain in memory after an interrupted generation.
+                "content": " ".join(texts).strip() or (None if tool_uses else ""),
             }
             if tool_uses:
                 out_msg["tool_calls"] = [
@@ -346,14 +349,30 @@ def _translate_kwargs(kwargs: dict) -> dict:
     return out
 
 
-def _wrap_response(resp) -> _FakeMessage:
+class LocalResponseIncomplete(OfflineUnavailable):
+    """No final local answer; never save a reasoning-only response as a reply."""
+
+
+def _require_local_answer(content: list, limited: bool) -> None:
+    if content:
+        return
+    if limited:
+        raise LocalResponseIncomplete(
+            "The local model reached its reply limit before producing an answer. "
+            "Ask it to handle one part of the question at a time.")
+    raise LocalResponseIncomplete(
+        "The local model returned no final answer. Try asking for one part of the question at a time.")
+
+
+def _wrap_response(resp, *, local: bool = False) -> _FakeMessage:
     choice = resp.choices[0] if resp.choices else None
     content: list = []
-    stop_reason = "end_turn"
+    limited = bool(choice and getattr(choice, "finish_reason", None) == "length")
+    stop_reason = "max_tokens" if limited else "end_turn"
 
     if choice:
         m = choice.message
-        if m.content:
+        if m.content and m.content.strip():
             content.append(_TextBlock(m.content.strip()))
         if getattr(m, "tool_calls", None):
             for tc in m.tool_calls:
@@ -363,6 +382,9 @@ def _wrap_response(resp) -> _FakeMessage:
                     inp = {}
                 content.append(_ToolUseBlock(tc.id, tc.function.name, inp))
             stop_reason = "tool_use"
+
+    if local:
+        _require_local_answer(content, limited)
 
     usage_obj = getattr(resp, "usage", None)
     return _FakeMessage(
@@ -380,9 +402,10 @@ def _wrap_response(resp) -> _FakeMessage:
 class _OpenAIStream:
     """Context manager yielding Anthropic-compatible events from an OpenAI stream."""
 
-    def __init__(self, oai_client, kwargs: dict):
+    def __init__(self, oai_client, kwargs: dict, *, local: bool = False):
         self._oai = oai_client
         self._kwargs = kwargs
+        self._local = local
         self._final: _FakeMessage | None = None
 
     def __enter__(self):
@@ -395,6 +418,7 @@ class _OpenAIStream:
         acc_text = ""
         tool_acc: dict[int, dict] = {}
         usage = _Usage(0, 0)
+        limited = False
 
         stream_kwargs = {**self._kwargs, "stream": True, "stream_options": {"include_usage": True}}
         resp = self._oai.chat.completions.create(**stream_kwargs)
@@ -412,6 +436,7 @@ class _OpenAIStream:
             if not chunk.choices:
                 continue
 
+            limited = limited or getattr(chunk.choices[0], "finish_reason", None) == "length"
             delta = chunk.choices[0].delta
 
             if delta.content:
@@ -443,7 +468,10 @@ class _OpenAIStream:
                 inp = {}
             blocks.append(_ToolUseBlock(tc["id"], tc["name"], inp))
 
-        self._final = _FakeMessage(blocks, "tool_use" if tool_acc else "end_turn", usage)
+        if self._local:
+            _require_local_answer(blocks, limited)
+        reason = "tool_use" if tool_acc else ("max_tokens" if limited else "end_turn")
+        self._final = _FakeMessage(blocks, reason, usage)
 
     def get_final_message(self) -> _FakeMessage:
         if self._final is None:
@@ -469,10 +497,11 @@ class _Messages:
         return kw
 
     def create(self, **kwargs) -> _FakeMessage:
-        return _wrap_response(self._oai.chat.completions.create(**self._prep(kwargs)))
+        return _wrap_response(self._oai.chat.completions.create(**self._prep(kwargs)),
+                              local=self._strip == "ollama/")
 
     def stream(self, **kwargs) -> _OpenAIStream:
-        return _OpenAIStream(self._oai, self._prep(kwargs))
+        return _OpenAIStream(self._oai, self._prep(kwargs), local=self._strip == "ollama/")
 
 
 class OpenAIAdapter:

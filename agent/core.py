@@ -3427,9 +3427,10 @@ class AgentCore:
     def _all_tools(self) -> list[dict]:
         from agent import apocalypse
         if apocalypse.enabled():
+            from agent.continuity import DEFINITION
             # A small local model should not receive a cloud/network toolbox it
             # cannot use, or hundreds of schemas that crowd out the user's text.
-            tools = [t for t in TOOLS if t.get('name') in apocalypse.LOCAL_TOOLS]
+            tools = [t for t in TOOLS if t.get('name') in apocalypse.LOCAL_TOOLS] + [DEFINITION]
             return [dict(t, description='Read up to 4,000 characters of local text or one PDF page. Use offset/page to continue.',
                          input_schema={'type': 'object', 'properties': {
                              'path': {'type': 'string'}, 'offset': {'type': 'integer', 'minimum': 0},
@@ -3485,6 +3486,8 @@ class AgentCore:
                 "Use remember/recall for durable memory and skill_manage to view local skills.\n"
             )
             text += "\nSaved memory:\n" + self._memory_files.get('memory', '')[:2200]
+            from agent import continuity
+            text += '\n' + continuity.prompt(max_field_chars=600)
             text += "\nUser profile:\n" + self._memory_files.get('user', '')[:1375]
             text += "\n" + goals.active_goals_for_prompt()[:1000] + "\n" + time_block()
             return [{'type': 'text', 'text': text}]
@@ -3569,7 +3572,7 @@ class AgentCore:
         if channel_id is None:
             return self.memory, self._run_lock
         prefix, _, suffix = channel_id.partition(':')
-        if prefix in ('dashboard', 'companion') and suffix.isdigit():
+        if prefix in ('dashboard', 'companion', 'apocalypse') and suffix.isdigit():
             channel_id = 'conversation:' + suffix
         with self._channels_mutex:
             if channel_id not in self._channel_memories:
@@ -3805,7 +3808,9 @@ class AgentCore:
                 _routed_model, _complexity = _router.route_model(user_text, self._model, use_thinking)
                 kwargs = dict(
                     model=_routed_model,
-                    max_tokens=400 if companion_mode == "observe" else (2048 if apocalypse.enabled() else 16000),
+                    # Qwen's reasoning and final text share this allowance.
+                    # This raises output capacity, not the daemon's RAM context.
+                    max_tokens=400 if companion_mode == "observe" else (8192 if apocalypse.enabled() else 16000),
                     system=turn_system(),
                     tools=[t for t in self._all_tools()
                            if companion_mode != "observe" and (companion_mode != "discuss" or t["name"] in companion.DISCUSS_TOOLS)],
@@ -3868,6 +3873,13 @@ class AgentCore:
                         kwargs, response_content, this_text
                     )
 
+                if apocalypse.enabled() and stop_reason != 'tool_use':
+                    checked = continuity.checked_reply(this_text)
+                    if checked != this_text:
+                        if streamer is not None and hasattr(streamer, 'feed'):
+                            streamer.feed(checked[len(this_text):])
+                        this_text = checked
+                        response_content = [{'type': 'text', 'text': checked}]
                 memory.add_assistant(response_content)
                 final_text = this_text
                 if this_text and stop_reason == "end_turn":
@@ -3919,6 +3931,8 @@ class AgentCore:
 
             if cancel_event is not None and cancel_event.is_set():
                 return final_text or "[turn interrupted]"
+            if apocalypse.enabled() and stop_reason == "max_tokens":
+                return final_text + "\n\n[This local reply reached its length limit. Ask for the next part to continue.]"
             if stop_reason == "end_turn":
                 return final_text
             return final_text or "I hit my iteration limit. Something may have gone wrong — let me know how to proceed."

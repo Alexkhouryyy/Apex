@@ -1,6 +1,7 @@
 """Start local Qwen and Apex together without editing the user's .env."""
 import json
 import os
+import signal
 from pathlib import Path
 import socket
 import subprocess
@@ -108,6 +109,10 @@ def stop(process):
 
 
 def main(argv=None):
+    if WINDOWS:
+        def interrupted(*_):
+            raise KeyboardInterrupt()
+        signal.signal(signal.SIGBREAK, interrupted)
     # --fast: the streaming engine (scripts/qwen_fast_server.py) in the
     # environment Test-Apex-Fast-Voice.cmd installs. First audio in about a
     # second instead of the whole section first; measured on the laptop.

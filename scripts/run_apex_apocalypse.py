@@ -6,6 +6,7 @@ The existing main/resident launcher can also use the same child environment.
 from pathlib import Path
 import argparse
 import os
+import signal
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,10 @@ sys.path.insert(0, str(ROOT))
 
 
 def main():
+    if sys.platform == 'win32':
+        def interrupted(*_):
+            raise KeyboardInterrupt()
+        signal.signal(signal.SIGBREAK, interrupted)
     parser = argparse.ArgumentParser()
     parser.add_argument('--resident', action='store_true', help='Use full resident mode instead of the quiet offline dashboard')
     args = parser.parse_args()

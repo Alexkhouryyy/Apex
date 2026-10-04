@@ -19,6 +19,7 @@ LOCAL_TOOLS = frozenset({
     'current_time', 'remember', 'recall', 'kb_search', 'apex_note',
     'list_skills', 'document_read', 'document_list', 'document_write',
     'list_goals', 'set_goal', 'update_goal', 'skill_manage',
+    'project_checkpoint',
 })
 
 
