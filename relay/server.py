@@ -47,8 +47,19 @@ unconfigured relay refuses everything and says why.
     RELAY_SERVER_TOKEN     required; the shared secret the laptop presents
     RELAY_SERVER_DB        default ./relay.db
     RELAY_SERVER_HOST      default 127.0.0.1
-    RELAY_SERVER_PORT      default 8799
+    RELAY_SERVER_PORT      default 8799 (or PORT, which Railway and similar hosts set)
     RELAY_SERVER_MAX_BYTES default 67108864 (64 MiB)
+
+  Call Apex while the laptop is off (docs/CALL_APEX.md). All three, or calls
+  are refused:
+    RELAY_TWILIO_AUTH_TOKEN  checks every call request really came from Twilio
+    RELAY_CALLERS            the phone numbers allowed to call, comma-separated
+    RELAY_PUBLIC_URL         the https address Twilio calls (what it signs)
+    RELAY_TWILIO_VOICE       optional; default Polly.Joanna-Neural
+    RELAY_PC_URL             optional; the laptop's private Tailscale address. Calls go
+                             there while it answers, and are answered here when it does not
+    RELAY_PC_PROXY           optional; an HTTP proxy that reaches the laptop (relay/start.sh
+                             sets one up when TS_AUTHKEY is given)
 
 Note what is absent: there is no key here, and there is nowhere to put one.
 """
@@ -63,11 +74,21 @@ import os
 import sqlite3
 import sys
 import time
+import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DB_PATH = os.getenv("RELAY_SERVER_DB", "relay.db")
 TOKEN = os.getenv("RELAY_SERVER_TOKEN", "")
 MAX_BYTES = int(os.getenv("RELAY_SERVER_MAX_BYTES", str(64 * 1024 * 1024)))
+TWILIO_TOKEN = os.getenv("RELAY_TWILIO_AUTH_TOKEN", "")
+CALLERS = os.getenv("RELAY_CALLERS", "")
+PUBLIC_URL = os.getenv("RELAY_PUBLIC_URL", "").rstrip("/")
+VOICE = os.getenv("RELAY_TWILIO_VOICE", "") or "Polly.Joanna-Neural"
+PC_URL = os.getenv("RELAY_PC_URL", "").rstrip("/")
+# On a host that is not itself on your Tailscale network (Railway), tailscaled
+# runs inside the container and offers an HTTP proxy into it (relay/start.sh).
+PC_PROXY = os.getenv("RELAY_PC_PROXY", "")
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
@@ -202,6 +223,61 @@ def authorised(header: str | None) -> tuple[bool, str]:
     return True, ""
 
 
+# --- Call Apex while the laptop is off ----------------------------------------
+#
+# The same phone number as the laptop: Twilio calls the laptop first and, when
+# it does not answer, this (Twilio's "fallback URL"). A spoken question becomes
+# an ordinary question in `questions`, marked as a call so the answerer keeps it
+# short; the call checks back every two seconds until the answer is there.
+# Twilio cannot send the bearer token, so these routes check Twilio's own
+# signature instead, and are closed unless all three settings are present.
+
+CALL_PREFIX = "[call] "
+CALL_WAIT_STEPS = 20                  # about 40 s
+ANSWERER_ALIVE_SECONDS = 30
+
+
+def twilio_signature(token: str, url: str, params: dict) -> str:
+    """Twilio's published algorithm: HMAC-SHA1 over the URL plus sorted params."""
+    payload = url + "".join(k + str(params[k]) for k in sorted(params))
+    return base64.b64encode(hmac.new(token.encode(), payload.encode(), hashlib.sha1).digest()).decode()
+
+
+def _digits(number: str) -> str:
+    return re.sub(r"\D", "", number or "")
+
+
+def _xml(text: str) -> str:
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;").replace("'", "&apos;"))
+
+
+def spoken(text: str, limit: int = 1000) -> str:
+    """Answer text made fit to read aloud: no markdown, links or code."""
+    t = re.sub(r"```.*?```", " ", text or "", flags=re.S)
+    t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", t)
+    t = re.sub(r"https?://\S+", "a link", t)
+    t = re.sub(r"[*_#`>|]+", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    if len(t) > limit:
+        cut = t[:limit]
+        t = cut[:cut.rfind(". ") + 1] or cut
+    return t
+
+
+GOODBYE = re.compile(r"^\s*(bye|goodbye|good bye|that'?s all|that is all|nothing|no thanks?|"
+                     r"no that'?s it|hang up|end (the )?call|stop)\W*$", re.I)
+
+
+def _say(text: str) -> str:
+    return f'<Say voice="{_xml(VOICE)}">{_xml(text)}</Say>'
+
+
+def _listen(prompt: str) -> str:
+    return (f'<Gather input="speech" action="/twilio/voice" method="POST" speechTimeout="auto" '
+            f'language="en-US">{_say(prompt)}</Gather>{_say("Goodbye.")}')
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ApexRelay/1"
     db_path: str | None = None          # overridden per-server in tests
@@ -252,6 +328,90 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
+
+    def _twiml(self, inner: str):
+        self._send(200, f"<Response>{inner}</Response>".encode(), "application/xml")
+
+    def _forward(self, raw: str):
+        """The laptop's TwiML for this request, or None when it does not answer in time."""
+        request = urllib.request.Request(
+            PC_URL + self.path, data=raw.encode(), method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded",
+                     "X-Twilio-Signature": self.headers.get("X-Twilio-Signature", "")})
+        proxies = {"http": PC_PROXY, "https": PC_PROXY} if PC_PROXY else {}
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies))
+        try:
+            with opener.open(request, timeout=8) as response:
+                body = response.read(65536)
+            return body if response.status == 200 and body.lstrip().startswith(b"<Response") else None
+        except Exception:
+            return None
+
+    def _call(self):
+        if not (TWILIO_TOKEN and PUBLIC_URL and _digits(CALLERS)):
+            return self._send(403, b"Calls are not configured on this relay.", "text/plain")
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 20000:
+            return self._send(413, b"", "text/plain")
+        raw = self.rfile.read(n).decode("utf-8", "replace") if n else ""
+        params = dict(urllib.parse.parse_qsl(raw, keep_blank_values=True))
+        signature = self.headers.get("X-Twilio-Signature", "")
+        if not signature or not hmac.compare_digest(
+                signature, twilio_signature(TWILIO_TOKEN, PUBLIC_URL + self.path, params)):
+            return self._send(403, b"", "text/plain")
+        allowed = {_digits(x) for x in CALLERS.split(",") if _digits(x)}
+        if _digits(params.get("From", "")) not in allowed:
+            return self._twiml(_say("This number is not authorized. Goodbye.") + "<Hangup/>")
+        path, _, query = self.path.partition("?")
+        args = dict(urllib.parse.parse_qsl(query))
+        # The laptop answers while it can: same request, same Twilio signature,
+        # over the private network. Only this relay is public; the laptop never is.
+        if PC_URL and "q" not in args:
+            answered = self._forward(raw)
+            if answered is not None:
+                return self._send(200, answered, "application/xml")
+            if path == "/twilio/voice/wait":
+                return self._twiml(_listen("Your computer stopped answering, so I'm answering from the "
+                                           "cloud now. What do you need?"))
+        if path == "/twilio/voice":
+            speech = (params.get("SpeechResult") or "").strip()[:MAX_QUESTION_CHARS - len(CALL_PREFIX)]
+            if not speech:
+                return self._twiml(_listen("Apex here. Your computer is off, so I'm answering from "
+                                           "what it last told me. What do you need?"))
+            if GOODBYE.match(speech):
+                return self._twiml(_say("Okay. Drive safe.") + "<Hangup/>")
+            with self._conn() as c:
+                pending = c.execute("SELECT COUNT(*) FROM questions WHERE status IN"
+                                    " ('queued', 'answering')").fetchone()[0]
+                if pending >= MAX_PENDING_QUESTIONS:
+                    return self._twiml(_say("Too many questions are waiting. Try again later.") + "<Hangup/>")
+                cur = c.execute("INSERT INTO questions (created_at, text) VALUES (?, ?)",
+                                (time.time(), CALL_PREFIX + speech))
+                c.commit()
+            return self._twiml(_say("One moment.") +
+                               f'<Redirect method="POST">/twilio/voice/wait?q={cur.lastrowid}&amp;n=0</Redirect>')
+        try:
+            qid, step = int(args.get("q", "")), max(0, min(100, int(args.get("n", "0"))))
+        except ValueError:
+            return self._twiml(_listen("Sorry, I lost that one. What do you need?"))
+        with self._conn() as c:
+            row = c.execute(_QUESTION_SELECT + " WHERE q.id = ?", (qid,)).fetchone()
+            beat = c.execute("SELECT seen_at FROM heartbeat WHERE id = 1").fetchone()
+        q = _question_row(row) if row else None
+        if q is None or not q["text"].startswith(CALL_PREFIX):
+            return self._twiml(_listen("Sorry, I lost that one. What do you need?"))
+        if q["status"] == "answered" and q["answer"]:
+            queued = " I've queued that for your computer." if q["requests"] else ""
+            return self._twiml(_say(spoken(q["answer"]) + queued) + _listen("Anything else?"))
+        if q["status"] == "failed":
+            return self._twiml(_listen("Sorry, I couldn't answer that just now. Anything else?"))
+        if not beat or time.time() - beat[0] > ANSWERER_ALIVE_SECONDS:
+            return self._twiml(_say("The cloud answerer isn't running, so I can't answer right now. "
+                                    "Your question is saved for later.") + "<Hangup/>")
+        if step >= CALL_WAIT_STEPS:
+            return self._twiml(_say("This is taking too long. Your question is saved; ask again later.")
+                               + _listen("Anything else?"))
+        return self._twiml(f'<Pause length="2"/><Redirect method="POST">/twilio/voice/wait?q={qid}&amp;n={step + 1}</Redirect>')
 
     # -- routes -----------------------------------------------------------
     def do_GET(self):
@@ -372,6 +532,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "byte_len": len(body)})
 
     def do_POST(self):
+        if self.path.split("?")[0] in ("/twilio/voice", "/twilio/voice/wait"):
+            return self._call()
         if not self._gate():
             return
         if self.path == "/questions":
@@ -674,7 +836,7 @@ PHONE_CSP = ("default-src 'none'; connect-src 'self'; "
 def serve(host: str | None = None, port: int | None = None,
           db_path: str | None = None) -> ThreadingHTTPServer:
     host = host or os.getenv("RELAY_SERVER_HOST", "127.0.0.1")
-    port = int(port if port is not None else os.getenv("RELAY_SERVER_PORT", "8799"))
+    port = int(port if port is not None else os.getenv("RELAY_SERVER_PORT") or os.getenv("PORT") or "8799")
     init_db(db_path)
     handler = type("BoundHandler", (Handler,), {"db_path": db_path or DB_PATH})
     return ThreadingHTTPServer((host, port), handler)

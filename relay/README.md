@@ -160,6 +160,7 @@ which is the schema making the promise rather than this file doing it.
 |---|---|---|
 | `GET` | `/health` | No auth. Returns `{"ok":true}` and nothing else — anything more is a fact about you served to strangers |
 | `GET` | `/phone`, `/` | No auth. The phone page — static, no data in it |
+| `POST` | `/twilio/voice`, `/twilio/voice/wait` | No bearer token: Twilio's signature and an allowed caller instead, and closed unless `RELAY_TWILIO_AUTH_TOKEN`, `RELAY_CALLERS` and `RELAY_PUBLIC_URL` are set. Call Apex — see `docs/CALL_APEX.md` |
 | `GET` | `/status` | How old the context and snapshot are, and when the answerer last asked for work |
 | `POST` | `/questions` | Ask: `{"text": "..."}`, up to 2000 characters, at most 50 waiting |
 | `GET` | `/questions` | The 20 most recent, with answers |

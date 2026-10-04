@@ -1,5 +1,7 @@
 # Deploying the relay to a cloud server — from zero
 
+**Using Railway?** Follow [RELAY_RAILWAY.md](RELAY_RAILWAY.md) instead.
+
 This is the G2 gate in `docs/APEX_V2_PLAN.md`: **the laptop lid is shut, and
 your phone still answers from Apex's memory.** About 30 minutes, once.
 
@@ -59,7 +61,7 @@ Description=Apex Relay
 After=network.target
 [Service]
 User=$USER
-WorkingDirectory=/home/$USER/apex-relay
+WorkingDirectory=$HOME/apex-relay
 EnvironmentFile=/etc/apex-relay.env
 ExecStart=/usr/bin/python3 server.py
 Restart=always
@@ -112,7 +114,7 @@ Description=Apex Relay answerer
 After=apex-relay.service
 [Service]
 User=$USER
-WorkingDirectory=/home/$USER/apex-relay
+WorkingDirectory=$HOME/apex-relay
 EnvironmentFile=/etc/apex-relay.env
 ExecStart=/usr/bin/python3 answer.py --watch
 Restart=always

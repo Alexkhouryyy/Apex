@@ -136,6 +136,8 @@
   // captions, hands-free listening and Celine's voice. Nothing about the turn
   // itself changes, so it has Celine's persona, memory and look-now as-is.
   let voiceMode = null;          // the settings to put back on the way out
+  let voiceFallback = '';        // said once when Celine's own voice is not available
+  let serverStatus = null;
   async function enterVoiceMode() {
     if (voiceMode) return;
     error();
@@ -148,16 +150,26 @@
     const celine = [...$('voicebox-profile').options].find(o => [o.value, o.text].some(v => v.trim().toLowerCase() === 'celine'));
     if (celine) $('voicebox-profile').value = celine.value;
     if (!voiceMode) return;                        // left while the profiles loaded
-    if (!$('voice-note').hidden) { const why = $('voice-note').textContent; leaveVoiceMode(); error(why); return; }
+    if (!$('voice-note').hidden) {
+      // No Celine server here (a cloud Apex has no GPU voice): talk in the cloud
+      // voice, or the device's own, rather than not at all.
+      const fallback = serverStatus?.voices?.openai ? 'openai' : window.speechSynthesis ? 'browser' : null;
+      if (!fallback) { const why = $('voice-note').textContent; leaveVoiceMode(); error(why); return; }
+      $('voice').value = fallback; $('voice-note').hidden = true;
+      voiceFallback = fallback === 'openai' ? "Celine's voice isn't on this Apex, so I'm using the cloud voice."
+                                            : "Celine's voice isn't on this Apex, so I'm using this device's voice.";
+    } else voiceFallback = '';
     $('spoken').checked = true;
     $('hands-free').checked = true;
     await $('hands-free').onchange();
     // Refused (a turn still running) or no microphone: the reason is already
     // on screen, and a talk-only view that cannot hear must not stay open.
     if (!$('hands-free').checked) leaveVoiceMode();
+    else if (voiceFallback) $('status').textContent = voiceFallback + ' Go ahead.';
   }
   function leaveVoiceMode() {
     if (!voiceMode) return;
+    document.getElementById('orb-start')?.removeAttribute('hidden');   // the car's orb screen: tap to start again
     const was = voiceMode; voiceMode = null;
     endLive();
     delete root.dataset.view; $('voice-mode').setAttribute('aria-pressed', 'false'); $('voice-exit').hidden = true;
@@ -954,6 +966,7 @@
   }
   async function boot() {
     const status = await (await request('/api/status')).json();
+    serverStatus = status;
     if ($('login').open) $('login').close();
     // A successful boot clears whatever the last failure was. Without this the
     // 401 raised before the token was entered leaves its red banner on screen
@@ -1018,6 +1031,27 @@
     $('check-frequency').parentElement.hidden = true;     // no screen sharing in the car
     addEventListener('online', checkLink); addEventListener('offline', checkLink);
     checkLink();
+    // /drive#orb: the orb screen for a dash display or a mounted tablet. Just
+    // the orb, its state and the last exchange; one tap starts it (a browser
+    // needs one before it may use the microphone), and the screen stays awake.
+    if (location.hash === '#orb') {
+      document.body.classList.add('orb-screen');
+      root.querySelector('.presence').append(link);
+      const start = document.createElement('button');
+      start.id = 'orb-start'; start.className = 'orb-start'; start.type = 'button';
+      start.innerHTML = '<span class="orb" aria-hidden="true"><span></span></span><span>Tap to start Apex</span>';
+      start.onclick = async () => {
+        start.hidden = true;
+        await enterVoiceMode().catch(exc => { leaveVoiceMode(); error(exc.message); });
+        if (voiceMode) keepAwake(); else start.hidden = false;
+      };
+      document.body.append(start);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && voiceMode) keepAwake(); });
+    }
+  }
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if (!wakeLock || wakeLock.released) wakeLock = await navigator.wakeLock?.request('screen'); } catch (_) {}
   }
   if (workspace) {
     root.dataset.workspace = workspace;

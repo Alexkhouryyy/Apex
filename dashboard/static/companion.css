@@ -39,3 +39,22 @@
 .drive .car-settings summary{cursor:pointer;font-size:15px;color:#a5bdb9;min-height:32px;display:flex;align-items:center}
 .drive .car-settings[open] summary{margin-bottom:10px}
 .drive .context #screen-status{display:none}
+
+/* /drive#orb: the orb screen for the car. One big orb, its state, the last exchange. */
+.orb-screen #companion[data-view=voice]{max-width:none;height:100dvh;justify-content:center}
+.orb-screen #companion[data-view=voice] .presence{padding:3dvh 0 1dvh;gap:3dvh}
+.orb-screen #companion[data-view=voice] .orb{width:min(52dvh,60vw,440px);height:min(52dvh,60vw,440px)}
+.orb-screen #companion[data-view=voice] #status{font-size:clamp(18px,3.4dvh,28px)}
+.orb-screen #companion[data-view=voice] .message .text{font-size:clamp(17px,3dvh,24px);line-height:1.4}
+.orb-screen #companion[data-view=voice] .message.user .text{font-size:clamp(14px,2.2dvh,18px)}
+.orb-screen #companion[data-view=voice] #voice-exit{min-height:48px;font-size:16px;padding:10px 22px}
+.orb-screen .car-link{margin:0;justify-content:center}
+.orb-start{position:fixed;inset:0;z-index:30;display:grid;place-content:center;justify-items:center;gap:4dvh;border:0;border-radius:0;
+  background:radial-gradient(70% 70% at 50% 45%,#12313a 0%,#071116 70%);color:#e4eff0;font:600 clamp(22px,4.5dvh,34px)/1.2 inherit;cursor:pointer}
+.orb-start .orb{width:min(42dvh,52vw,360px);height:min(42dvh,52vw,360px)}
+.orb-start .orb span{display:block;width:65%;height:65%;border:1px solid #98fadd55;border-radius:47% 53% 62% 38%;transform:rotate(-28deg)}
+@media (orientation:landscape) and (max-height:700px){
+  .orb-screen #companion[data-view=voice] .presence{flex-direction:row;text-align:left;gap:4vw;padding:2dvh 0}
+  .orb-screen #companion[data-view=voice] .orb{width:min(62dvh,40vw,420px);height:min(62dvh,40vw,420px)}
+}
+.orb-screen .apex-look-toggle{display:none}

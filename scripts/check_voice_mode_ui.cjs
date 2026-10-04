@@ -19,7 +19,7 @@ w.SpeechSynthesisUtterance = class {};
 w.Audio = class { play() { setTimeout(() => { this.onplaying?.(); this.onended?.(); }, 1); return Promise.resolve(); } pause() {} };
 w.URL.createObjectURL = () => 'blob:x'; w.URL.revokeObjectURL = () => {};
 
-let starts = 0, stops = 0, micFails = false, profilesDown = false;
+let starts = 0, stops = 0, micFails = false, profilesDown = false, cloudVoice = false;
 w.ApexHandsFree = class {
   constructor(opts) { this.opts = opts; this.enabled = false; this.epoch = 0; }
   async start() { starts++; if (micFails) { this.opts.onError(new Error('Microphone permission was denied.')); return; } this.enabled = true; }
@@ -30,7 +30,7 @@ w.ApexHandsFree = class {
 };
 const chats = [];
 w.fetch = async (path, opts = {}) => {
-  if (path === '/api/status') return Response.json({agent_ready: true});
+  if (path === '/api/status') return Response.json({agent_ready: true, voices: {openai: cloudVoice}});
   if (path === '/api/voicebox/profiles') {
     if (profilesDown) return new Response('{}', {status: 503});
     return Response.json({profiles: [{id: 'other', name: 'Other'}, {id: 'celine', name: 'CELINE'}]});
@@ -112,13 +112,27 @@ const esc = () => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: 
   micFails = false;
 
   // 6. No voice server: say so, and do not open.
+  // No Celine server (a cloud Apex): Voice mode speaks with the device's voice
+  // and says so, rather than refusing to talk at all.
   profilesDown = true; $('voice').value = 'voicebox';
+  $('voice-mode').click();
+  await sleep(100);
+  assert.equal(root.dataset.view, 'voice', 'no local voice server is not a reason to stay silent');
+  assert.equal($('voice').value, 'browser');
+  assert.match($('status').textContent, /this device's voice/);
+  esc(); await sleep(20);
+  assert.equal($('voice').value, 'voicebox', 'leaving puts the chosen voice back');
+
+  // (With an OpenAI key the cloud voice is used instead: check_orb_screen_ui.cjs.)
+  // Neither a cloud voice nor device speech: refused, with the reason.
+  const synth = w.speechSynthesis; w.speechSynthesis = undefined;
   const before = starts;
   $('voice-mode').click();
   await sleep(100);
   assert.equal(root.dataset.view, undefined);
   assert.equal(starts, before, 'no listening without a voice to answer');
   assert.match($('error').textContent, /Voice server not reachable/);
+  w.speechSynthesis = synth;
 
   console.log('PASS: voice mode switches to Celine (her profile), spoken replies and hands-free, labels replies as hers, '
     + 'and Esc, Stop, a missing microphone or a missing voice server all leave it with the settings restored.');
