@@ -1,0 +1,260 @@
+{
+ "title": "Apex open-source candidate register",
+ "observed": "2026-10-04",
+ "owner": "Alex (decisions); Apex maintainers (reviews)",
+ "next_review": "2027-01-04",
+ "method": "Repositories with at least 1,000 stars and not archived, found by capability searches and the reviewer's knowledge, for three gaps named in docs/CAPABILITY_MATRIX.md. Revisions come from git ls-remote HEAD. Licenses come from the license file at that revision. Activity comes from PyPI or npm. Stars are as shown on the repository page on the observation date, rounded to the nearest 100. This is not an exhaustive search: the GitHub search API was not available to the reviewer, so the listed queries are the intended queries, not a paginated result set.",
+ "dispositions": {
+  "integrate": "a version-pinned adapter, acceptance evidence and a rollback path",
+  "adapt": "a bounded port with provenance, notices kept and an update owner",
+  "learn_only": "a documented lesson; no production dependency",
+  "avoid": "a recorded reason and the condition for a later review"
+ },
+ "gaps": [
+  {
+   "id": "voice-turn-taking",
+   "gap": "Hands-free voice decides you stopped talking by loudness, then waits a fixed 1.2 s of silence. That wait is most of Pillar 1's 1.5 s budget. Background noise also triggers barge-in, and the threshold is a manual slider.",
+   "apex_today": "dashboard/static/companion.js + ApexHandsFree: an RMS threshold, a 1.2 s silence timer, and barge-in at 3x the threshold for 0.2 s. On the PC side, faster-whisper vad_filter is used only inside transcription.",
+   "success": "Measured by agent.voice_timing over 20 turns: end-of-speech-to-transcript drops by at least 0.5 s at the median, with no more cut-off sentences than today (counted the same way).",
+   "queries": [
+    "topic:voice-activity-detection stars:>=1000 archived:false",
+    "topic:voice-agents stars:>=1000 archived:false",
+    "turn detection voice agent stars:>=1000"
+   ],
+   "candidates": [
+    {
+     "repository": "ricky0123/vad",
+     "revision": "2e5aca93e3902f04ff5b7eb4a9633926cdca9cf6",
+     "stars": 2100,
+     "stars_observed": "2026-10-04",
+     "license": "ISC",
+     "license_evidence": "https://github.com/ricky0123/vad/blob/2e5aca93e3902f04ff5b7eb4a9633926cdca9cf6/LICENSE",
+     "activity": "npm @ricky0123/vad-web 0.0.31, published 2026-09-12. The only dependency is onnxruntime-web (MIT). Unpacked 6.8 MB.",
+     "capability": "Silero VAD in the browser: speech probability per frame, plus speech start and end callbacks.",
+     "findings": "Runs where Apex's microphone already is (the companion page). It replaces loudness with a speech model, so fans and road noise stop counting as speech. It must be vendored locally (pinned files under dashboard/static/vendor), not loaded from a CDN, because the companion has to work offline and on the car page. It does not solve echo: Celine's own voice is still speech.",
+     "effort": "S (1–2 days)",
+     "disposition": "integrate",
+     "reason": "Small, permissive, and fits the existing hands-free interface. Pilot it behind the existing hands-free switch, with the RMS path kept as fallback and rollback.",
+     "next_step": "Vendor the pinned build, add a \"Speech detector: model / loudness\" setting, and measure with voice_timing."
+    },
+    {
+     "repository": "pipecat-ai/smart-turn",
+     "revision": "4786657e242dfe77dd138699ac564ee074a2a543",
+     "stars": 1600,
+     "stars_observed": "2026-10-04",
+     "license": "BSD-2-Clause (code)",
+     "license_evidence": "https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/LICENSE",
+     "activity": "v3.2. The 8 MB int8 CPU model runs in about 10–100 ms. 23 languages, including Arabic.",
+     "capability": "An audio model that decides whether you have finished your turn, not just whether you stopped making sound.",
+     "findings": "This is the piece that lets the 1.2 s timer shrink: the turn ends early when the model is confident, with the timer as backstop. It runs on the PC with onnxruntime. Not verified: the license of the model weights, because Hugging Face is blocked from the review machine. That blocks adoption until checked.",
+     "effort": "M (3–5 days)",
+     "disposition": "adapt",
+     "reason": "Valuable, but only after the VAD pilot gives a measured baseline. The weights license must be confirmed first.",
+     "next_step": "Read the weights license on the model card. Then port inference only (a single ONNX call) with provenance notes."
+    },
+    {
+     "repository": "snakers4/silero-vad",
+     "revision": "1e261b036686cd0017d500ee96acd1c4ba572a9d",
+     "stars": 10300,
+     "stars_observed": "2026-10-04",
+     "license": "MIT",
+     "license_evidence": "https://github.com/snakers4/silero-vad/blob/1e261b036686cd0017d500ee96acd1c4ba572a9d/LICENSE",
+     "activity": "PyPI silero-vad 6.2.3, published 2026-09-23. 5 releases in the last 12 months.",
+     "capability": "The VAD model itself (PyTorch or ONNX).",
+     "findings": "Already reaches Apex in two ways: through faster-whisper's vad_filter and inside vad-web. A direct Python dependency adds nothing the browser pilot doesn't cover.",
+     "effort": "—",
+     "disposition": "learn_only",
+     "reason": "The model is used via vad-web. No separate dependency needed."
+    },
+    {
+     "repository": "pipecat-ai/pipecat",
+     "revision": "c027943125c0ef7ea1b946b6c438032eb8ff0483",
+     "stars": 16200,
+     "stars_observed": "2026-10-04",
+     "license": "BSD-2-Clause",
+     "license_evidence": "https://github.com/pipecat-ai/pipecat/blob/c027943125c0ef7ea1b946b6c438032eb8ff0483/LICENSE",
+     "activity": "PyPI pipecat-ai 1.12.0, published 2026-09-26. 36 releases in 12 months; 111 declared dependencies.",
+     "capability": "A full real-time voice agent framework: transports, STT, LLM and TTS pipelines.",
+     "findings": "It overlaps Apex's own voice pipeline almost completely. Its interruption and turn-handling design is worth reading for the companion.",
+     "effort": "—",
+     "disposition": "learn_only",
+     "reason": "Adopting the framework would replace working code and add heavy churn. Take the design lessons only."
+    },
+    {
+     "repository": "KoljaB/RealtimeSTT",
+     "revision": "777727553eedfa19aead15337ce66bab549add3f",
+     "stars": 10200,
+     "stars_observed": "2026-10-04",
+     "license": "MIT",
+     "license_evidence": "https://github.com/KoljaB/RealtimeSTT/blob/777727553eedfa19aead15337ce66bab549add3f/LICENSE",
+     "activity": "PyPI RealtimeSTT 1.1.2, published 2026-08-30. 8 releases in 12 months; 86 declared dependencies.",
+     "capability": "A Python microphone, VAD and Whisper loop.",
+     "findings": "Apex captures audio in the browser, not in Python, so its microphone loop doesn't fit. The two-stage VAD idea (WebRTC VAD, then Silero) is useful.",
+     "effort": "—",
+     "disposition": "learn_only",
+     "reason": "Wrong side of the microphone for the companion."
+    },
+    {
+     "repository": "livekit/agents",
+     "revision": "530ec952c030a68fcb4ac94c0a22c8b58806a256",
+     "stars": 14500,
+     "stars_observed": "2026-10-04",
+     "license": "Apache-2.0 (framework); turn-detector weights under the LiveKit Model License",
+     "license_evidence": "https://github.com/livekit/agents/blob/530ec952c030a68fcb4ac94c0a22c8b58806a256/LICENSE",
+     "activity": "PyPI livekit-agents 1.8.4, published 2026-10-01. 70 releases in 12 months; 107 declared dependencies.",
+     "capability": "A voice agent framework with a semantic turn-detector model.",
+     "findings": "It needs a LiveKit server (cloud or self-hosted). The turn model is under a separate, non-OSI license.",
+     "effort": "—",
+     "disposition": "avoid",
+     "reason": "A server dependency and a separate model license, while smart-turn covers the same need under BSD-2.",
+     "next_step": "Review again only if smart-turn's weights turn out to be restricted."
+    }
+   ]
+  },
+  {
+   "id": "source-documents",
+   "gap": "Projects can only take plain text and text-layer PDFs as source material. Word, PowerPoint, Excel and scanned PDFs come in empty or not at all, so the roadmap's workflow (\"start from a brief and supporting documents\") fails on common files.",
+   "apex_today": "agent/knowledge.py and agent/apocalypse.py use pypdf for PDFs, and plain reads for text. The knowledge base also needs the embedding model. scripts/apex_demo.py uses a markdown source.",
+   "success": "A fixed set of 10 real files (docx, pptx, xlsx, 2 PDFs with tables, 1 scanned PDF) converts to text that contains each file's checked key facts, on the Windows laptop, offline, in under 5 s per file for non-scanned files.",
+   "queries": [
+    "topic:document-processing stars:>=1000 archived:false",
+    "topic:pdf-to-markdown stars:>=1000 archived:false",
+    "docx pptx to markdown stars:>=1000"
+   ],
+   "candidates": [
+    {
+     "repository": "microsoft/markitdown",
+     "revision": "4cc9fa17653d695d64fb9eee5b33d4de55ff84e8",
+     "stars": 188300,
+     "stars_observed": "2026-10-04",
+     "license": "MIT",
+     "license_evidence": "https://github.com/microsoft/markitdown/blob/4cc9fa17653d695d64fb9eee5b33d4de55ff84e8/LICENSE",
+     "activity": "PyPI markitdown 0.1.8, published 2026-09-21. 8 releases in 12 months. Core dependencies: beautifulsoup4, charset-normalizer, defusedxml, magika, markdownify, requests.",
+     "capability": "Converts PDF, Word, PowerPoint, Excel, HTML, CSV, JSON, EPUB, ZIP and more to markdown.",
+     "findings": "Small and offline for office formats. Risks: it reads with the process's full privileges and can fetch URLs (including YouTube), and it has optional Azure and LLM paths. Apex must call it only with local file paths from allowed folders, never URLs, and with the cloud and LLM features off. No OCR, so scanned PDFs stay empty.",
+     "effort": "S (1–2 days)",
+     "disposition": "integrate",
+     "reason": "The smallest change that closes most of the gap. Pin the version, wrap it in one function, and keep pypdf as fallback and rollback.",
+     "next_step": "Add as an optional extra; build the 10-file acceptance set; wire it into the knowledge base and project sources."
+    },
+    {
+     "repository": "docling-project/docling",
+     "revision": "58f1f8d907fdc4610cd8dca20da6ef53a4550ee8",
+     "stars": 68400,
+     "stars_observed": "2026-10-04",
+     "license": "MIT",
+     "license_evidence": "https://github.com/docling-project/docling/blob/58f1f8d907fdc4610cd8dca20da6ef53a4550ee8/LICENSE",
+     "activity": "PyPI docling 2.133.0, published 2026-10-03. 92 releases in 12 months (very fast churn).",
+     "capability": "Layout-aware conversion with table structure and OCR, for PDF, office files, images, audio and email.",
+     "findings": "The best fit for scanned PDFs and complex tables, and it runs locally. It downloads models on first use (size not stated on the page) and pulls in PyTorch. Too heavy to be the default.",
+     "effort": "M (3–5 days)",
+     "disposition": "adapt",
+     "reason": "Offer it only as an optional \"deep conversion\" for scans and tables, after markitdown covers the common case.",
+     "next_step": "Measure install size and first-run download on the laptop before deciding."
+    },
+    {
+     "repository": "Unstructured-IO/unstructured",
+     "revision": "2c0c7a6ca71334bdfbbcb083311c4c859c0b59c7",
+     "stars": 15500,
+     "stars_observed": "2026-10-04",
+     "license": "Apache-2.0",
+     "license_evidence": "https://github.com/Unstructured-IO/unstructured/blob/2c0c7a6ca71334bdfbbcb083311c4c859c0b59c7/LICENSE.md",
+     "activity": "PyPI unstructured 0.27.10, published 2026-09-27. 43 releases in 12 months; 116 declared dependencies.",
+     "capability": "Document ETL into structured elements.",
+     "findings": "Needs system packages (libmagic, poppler, tesseract, libreoffice) that are painful on Windows. Heavy for what Apex needs.",
+     "effort": "—",
+     "disposition": "avoid",
+     "reason": "Install burden on Windows, and overlap with markitdown and docling.",
+     "next_step": "Review again if Apex moves document processing to the cloud relay (Linux)."
+    },
+    {
+     "repository": "datalab-to/marker",
+     "revision": "e7c67f1d239ea6a805cbf4ed6c6b2056d435e22d",
+     "stars": 40200,
+     "stars_observed": "2026-10-04",
+     "license": "Apache-2.0 (code); modified OpenRAIL-M (model weights)",
+     "license_evidence": "https://github.com/datalab-to/marker/blob/e7c67f1d239ea6a805cbf4ed6c6b2056d435e22d/LICENSE",
+     "activity": "PyPI marker-pdf 2.0.0, published 2026-07-20. 2 releases in 12 months.",
+     "capability": "High-quality PDF and office conversion to markdown, with equations and tables.",
+     "findings": "The weights license is free only for research, personal use and organisations under $5M in funding or revenue, and is paid beyond that. It also requires PyTorch.",
+     "effort": "—",
+     "disposition": "avoid",
+     "reason": "Usage-conditional weights license; docling covers the same ground under MIT.",
+     "next_step": "None while docling meets the acceptance set."
+    }
+   ]
+  },
+  {
+   "id": "task-evaluation",
+   "gap": "Phase 2's exit evidence is \"two representative tasks complete end to end with inspectable evidence and recorded cost\". Phase 5 needs a predefined task benchmark. Apex has a structural replay harness (agent/eval.py), cost telemetry (usage_log), goal verification contracts and the demonstration script, but no repeatable task benchmark that reports success and cost together.",
+   "apex_today": "agent/eval.py replays logged turns and scores them structurally; agent/telemetry.py records tokens and cost per call; agent/verification.py checks completion contracts; scripts/apex_demo.py runs the acceptance test.",
+   "success": "One command runs 2+ representative tasks against the configured model, and reports per task: pass/fail from checks (not model self-report), the tools used, and the dollar cost from usage_log. The results are comparable between two models.",
+   "queries": [
+    "topic:llm-evaluation stars:>=1000 archived:false",
+    "topic:evals stars:>=1000 archived:false",
+    "topic:llm-observability stars:>=1000 archived:false"
+   ],
+   "candidates": [
+    {
+     "repository": "UKGovernmentBEIS/inspect_ai",
+     "revision": "9f6accda8dce5ccd754e6be1a22fbcee96042e82",
+     "stars": 2900,
+     "stars_observed": "2026-10-04",
+     "license": "MIT",
+     "license_evidence": "https://github.com/UKGovernmentBEIS/inspect_ai/blob/9f6accda8dce5ccd754e6be1a22fbcee96042e82/LICENSE",
+     "activity": "PyPI inspect-ai 0.3.276, published 2026-10-02. 117 releases in 12 months; 112 declared dependencies.",
+     "capability": "An evaluation framework for agent tasks with tools, multi-turn dialogue, scorers and a log viewer.",
+     "findings": "Its task/solver/scorer split and its log format are the clearest model for what Apex needs. Adopting it means running Apex's agent loop inside Inspect's, plus a heavy and fast-moving dependency.",
+     "effort": "—",
+     "disposition": "learn_only",
+     "reason": "Copy the structure (task, checks, cost per sample, viewable log) into an extension of apex_demo, not the dependency.",
+     "next_step": "Build apex_demo --suite with two real tasks, reporting the cost from usage_log."
+    },
+    {
+     "repository": "promptfoo/promptfoo",
+     "revision": "5fde786d0c296339be3fd189d1542157e1d4217a",
+     "stars": 25700,
+     "stars_observed": "2026-10-04",
+     "license": "MIT",
+     "license_evidence": "https://github.com/promptfoo/promptfoo/blob/5fde786d0c296339be3fd189d1542157e1d4217a/LICENSE",
+     "activity": "npm promptfoo 0.123.1, published 2026-09-18. The project page states it is now part of OpenAI.",
+     "capability": "Prompt and model comparison, and red-teaming, from YAML configs (Node).",
+     "findings": "Built for prompt-level tests, not Apex's tool-using agent loop. It also adds a Node toolchain. Its red-team test ideas (prompt injection through tool results) are directly relevant to the MCP server and the apps.",
+     "effort": "—",
+     "disposition": "learn_only",
+     "reason": "Wrong layer for task evaluation. Borrow the injection test cases."
+    },
+    {
+     "repository": "confident-ai/deepeval",
+     "revision": "a200ecede6456f92d7cbbb350b7b3fb4d78d36b3",
+     "stars": 18600,
+     "stars_observed": "2026-10-04",
+     "license": "Apache-2.0",
+     "license_evidence": "https://github.com/confident-ai/deepeval/blob/a200ecede6456f92d7cbbb350b7b3fb4d78d36b3/LICENSE.md",
+     "activity": "PyPI deepeval 4.2.8, published 2026-10-02. 67 releases in 12 months.",
+     "capability": "Pytest-style LLM metrics: relevancy, hallucination, task completion.",
+     "findings": "Mostly model-as-judge metrics, which add cost and grade with a model, against Apex's rule that checks beat self-report. It steers users to its hosted platform.",
+     "effort": "—",
+     "disposition": "avoid",
+     "reason": "Model-graded by default and pulls toward a hosted service; Apex's contracts already do deterministic checks.",
+     "next_step": "Review again if a judged metric is ever needed for open-ended answers."
+    },
+    {
+     "repository": "langfuse/langfuse",
+     "revision": "f75c661dbe8c6b85523c81486b39e8403ac2c141",
+     "stars": 35400,
+     "stars_observed": "2026-10-04",
+     "license": "MIT, except ee/ folders (commercial)",
+     "license_evidence": "https://github.com/langfuse/langfuse/blob/f75c661dbe8c6b85523c81486b39e8403ac2c141/LICENSE",
+     "activity": "PyPI SDK langfuse 4.16.0, published 2026-09-30. 79 SDK releases in 12 months.",
+     "capability": "LLM tracing, cost, prompt management and evaluations platform.",
+     "findings": "Self-hosting needs Postgres, ClickHouse, Redis and S3-compatible storage: too much infrastructure for one laptop. Apex already records traces and cost locally in SQLite.",
+     "effort": "—",
+     "disposition": "avoid",
+     "reason": "Infrastructure burden out of proportion to a single-user environment.",
+     "next_step": "Review again if Apex becomes multi-user or cloud-hosted."
+    }
+   ]
+  }
+ ]
+}

@@ -35,13 +35,15 @@ so. Test counts are per file, as collected on 2026-10-04.
 | PARTIAL | 4 |
 | TESTED | 31 |
 | NEEDS YOU | 7 |
-| PLANNED | 4 |
+| PLANNED | 3 |
 | UNAVAILABLE | 3 |
 
 **The honest reading:** breadth is not the gap. Most of Apex is TESTED, and
 only a handful of things have been seen working where they matter. The
 fastest way to raise the LIVE count is not new code. It is the
 **NEEDS YOU** column and the measurements listed at the end.
+
+Related: the acceptance test is in [`DEMO.md`](DEMO.md), and outside projects reviewed for three of these gaps are in [`OPEN_SOURCE_REGISTER.md`](OPEN_SOURCE_REGISTER.md).
 
 ---
 
@@ -132,7 +134,6 @@ fastest way to raise the LIVE count is not new code. It is the
 | Pillar 2: a full session with no keyboard on the board | **PLANNED** | `docs/APEX_V2_PLAN.md` |
 | Documents per project | **PLANNED** | Found by the demo: documents are one shared list, linked to a project only by its handoff | — |
 | Pillar 3: "receipts" for every claim Apex makes | **PLANNED** | `docs/APEX_V2_PLAN.md` |
-| A register of outside projects (≥ 1000 stars) for the open gaps | **PLANNED** | Roadmap, Phase 0 |
 | CarPlay or Android Auto app | **UNAVAILABLE** | A 2011 Uconnect has neither. Apple and Google gate both. Call Apex and the car page cover the car |
 | Celine's own voice on a phone call | **UNAVAILABLE** | She runs on your PC's GPU, which a call can't reach. Calls use Twilio's voice |
 | ChatGPT as an Apex MCP client | **UNAVAILABLE** | It needs a public OAuth server, and Apex's server is local on purpose |
