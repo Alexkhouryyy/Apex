@@ -561,6 +561,7 @@
       endPlayback = () => videoAvatar?.stop();
       audio = {pause: () => videoAvatar?.stop()};
       state('speaking', 'Speaking · Stop ends playback'); controls();
+      if (timing && clip.renderMs != null && !('avatar_server' in timing.stages)) timing.stages.avatar_server = clip.renderMs;
       try { await videoAvatar.play(clip, () => mark('first_sound')); }
       catch (_) { if (epoch === speechEpoch) return playAudio(blob); }
       finally { if (endPlayback && audio && !audio.src) { audio = null; endPlayback = null; } }

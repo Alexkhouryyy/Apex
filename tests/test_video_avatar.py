@@ -44,7 +44,7 @@ def streams(data):
 
 @pytest.mark.parametrize('fmt,video,audio', [('mp4', 'h264', 'aac'), ('webm', 'vp8', 'opus')])
 def test_clips_play_in_browsers_and_last_as_long_as_the_voice(idle, fmt, video, audio):
-    clip = av_server.StillEngine(idle).render(wav(1.5), fmt)
+    clip, _ = av_server.StillEngine(idle).render(wav(1.5), fmt)
     kinds, seconds = streams(clip)
     assert kinds == {'video': video, 'audio': audio}
     assert abs(seconds - 1.5) < 0.15
@@ -110,7 +110,7 @@ def test_apex_says_when_the_avatar_is_off(apex, monkeypatch):
 def test_apex_passes_requests_through(apex, running, monkeypatch):
     client, config = apex
     monkeypatch.setattr(config, 'AVATAR_URL', running)
-    assert client.get('/api/avatar/status').json() == {'available': True, 'engine': 'still', 'fps': 25.0}
+    assert client.get('/api/avatar/status').json() == {'available': True, 'engine': 'still', 'fps': 25.0, 'frames': 48}
     idle = client.get('/api/avatar/idle?format=webm')
     assert idle.headers['content-type'] == 'video/webm'
     clip = client.post('/api/avatar/lipsync?format=webm', content=wav(1.0))
@@ -154,3 +154,23 @@ def test_setup_tracks_each_step_and_never_uses_a_mirror(tmp_path):
     source = (setup.Path(setup.__file__)).read_text()
     assert 'HF_ENDPOINT", None' in source and 'hf-mirror.com' not in source.split('"""', 2)[2]
     assert len(setup.COMMIT) == 40
+
+
+def test_clips_start_on_the_frame_shown_and_say_where_they_end(idle):
+    engine = av_server.StillEngine(idle)
+    assert len(engine.idle_frames) == 2 * 25 - 2                      # forward then back: no jump at the loop's end
+    clip, end = engine.render(wav(1.0), 'webm', start=40)
+    assert end == (40 + 25) % len(engine.idle_frames)
+    first = av_server.read_frames(io.BytesIO(clip))[0][0]
+    assert abs(int(first.mean()) - int(engine.idle_frames[40].mean())) <= 3   # the clip opens on frame 40
+
+
+def test_server_and_apex_pass_frame_numbers_and_timing(client, apex, running, monkeypatch):
+    r = client.post('/lipsync?start=10', content=wav(1.0))
+    assert r.headers['x-end-frame'] == '35' and r.headers['server-timing'].startswith('avatar;dur=')
+    assert client.post('/lipsync?start=ten', content=wav()).status_code == 400
+    apex_client, config = apex
+    monkeypatch.setattr(config, 'AVATAR_URL', running)
+    assert apex_client.get('/api/avatar/status').json()['frames'] == 48
+    clip = apex_client.post('/api/avatar/lipsync?format=webm&start=47', content=wav(1.0))
+    assert clip.headers['x-end-frame'] == str((47 + 25) % 48) and 'avatar;dur=' in clip.headers['server-timing']

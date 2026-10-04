@@ -609,7 +609,8 @@ async def avatar_status():
             response = await client.get('/health')
         response.raise_for_status()
         health = response.json()
-        return {'available': bool(health.get('ready')), 'engine': health.get('engine'), 'fps': health.get('fps')}
+        return {'available': bool(health.get('ready')), 'engine': health.get('engine'), 'fps': health.get('fps'),
+                'frames': health.get('frames')}
     except (httpx.HTTPError, ValueError):
         return {'available': False, 'reason': 'The video avatar is not running. Start it with Start-Apex-Video-Avatar.cmd.'}
 
@@ -635,7 +636,7 @@ async def avatar_idle(format: str = 'mp4'):
 
 
 @router.post('/api/avatar/lipsync')
-async def avatar_lipsync(request: Request, format: str = 'mp4'):
+async def avatar_lipsync(request: Request, format: str = 'mp4', start: int = 0):
     import httpx
     _check_origin(request)
     fmt = _avatar_format(format)
@@ -648,14 +649,16 @@ async def avatar_lipsync(request: Request, format: str = 'mp4'):
         raise HTTPException(400, 'Send the section as audio.')
     try:
         async with _avatar_client(180) as client:
-            response = await client.post('/lipsync', params={'format': fmt}, content=bytes(raw), headers={'Content-Type': 'audio/wav'})
+            response = await client.post('/lipsync', params={'format': fmt, 'start': max(0, start)}, content=bytes(raw), headers={'Content-Type': 'audio/wav'})
     except httpx.HTTPError as exc:
         raise HTTPException(503, 'The video avatar is not running.') from exc
     if response.status_code != 200:
         raise HTTPException(502, 'The video avatar could not render that section.')
     from fastapi.responses import Response
     return Response(response.content, media_type='video/' + fmt,
-                    headers={'Cache-Control': 'no-store', 'X-Render-Ms': response.headers.get('x-render-ms', '')})
+                    headers={'Cache-Control': 'no-store', 'X-Render-Ms': response.headers.get('x-render-ms', ''),
+                             'X-End-Frame': response.headers.get('x-end-frame', ''),
+                             'Server-Timing': response.headers.get('server-timing', '')})
 
 
 @router.get('/api/companion/timing')

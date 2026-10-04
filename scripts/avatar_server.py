@@ -10,7 +10,10 @@ companion never talks to it directly.
     GET  /health    {"ready": true, "engine": "musetalk", "fps": 25, "frames": N}
     GET  /idle      the character's idle loop (no sound)
     POST /lipsync   body: one spoken section as WAV  ->  a clip of the face saying it,
-                    with that audio; X-Render-Ms says how long it took
+                    with that audio. ?start=N begins on frame N of the idle loop
+                    (the one on screen), and X-End-Frame says where it ended, so
+                    talking starts and stops without a jump. X-Render-Ms (and
+                    Server-Timing) say how long it took
     Both take ?format=mp4 (default; Chrome, Edge, Safari) or ?format=webm.
 
 The face is a video of the character (`apex-idle.mp4`): looking at the camera,
@@ -41,7 +44,7 @@ FPS = 25                                    # what MuseTalk was trained on
 def read_frames(path, limit=750):
     """BGR frames of a video (up to `limit`), and its frame rate."""
     import av
-    with av.open(str(path)) as box:
+    with av.open(path if hasattr(path, 'read') else str(path)) as box:
         stream = box.streams.video[0]
         rate = float(stream.average_rate or FPS)
         frames = []
@@ -150,13 +153,16 @@ class StillEngine:
     name = 'still'
 
     def __init__(self, video):
-        self.frames, self.fps = read_frames(video)
+        frames, self.fps = read_frames(video)
+        # Forward then backward, like MuseTalk's prepared cycle: the loop never jumps.
+        self.frames = frames + frames[-2:0:-1] if len(frames) > 2 else frames
+        self.idle_frames = self.frames
 
-    def render(self, wav_bytes, fmt='mp4'):
+    def render(self, wav_bytes, fmt='mp4', start=0):
         samples, rate = decode_audio(wav_bytes)
         count = max(1, int(round(len(samples) / rate * self.fps)))
-        frames = [self.frames[i % len(self.frames)] for i in range(count)]
-        return encode_video(frames, self.fps, (samples, rate), fmt)
+        frames = [self.frames[(start + i) % len(self.frames)] for i in range(count)]
+        return encode_video(frames, self.fps, (samples, rate), fmt), (start + count) % len(self.frames)
 
 
 class MuseTalkEngine:
@@ -245,7 +251,7 @@ class MuseTalkEngine:
             data['frames'], data['coords'], data['masks'], data['boxes'], latents)
         self.idle_frames = data['frames']
 
-    def render(self, wav_bytes, fmt='mp4'):
+    def render(self, wav_bytes, fmt='mp4', start=0):
         torch, np, cv2 = self.torch, self.np, self.cv2
         samples, rate = decode_audio(wav_bytes)
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
@@ -256,19 +262,19 @@ class MuseTalkEngine:
                 chunks = self.audio.get_whisper_chunk(features, self.device, self.dtype, self.whisper, length,
                                                       fps=self.fps, audio_padding_length_left=2, audio_padding_length_right=2)
                 out, idx = [], 0
-                for whisper_batch, latent_batch in self.datagen(chunks, self.latents, self.batch_size):
+                for whisper_batch, latent_batch in self.datagen(chunks, self.latents, self.batch_size, delay_frame=start, device=self.device):
                     audio_batch = self.pe(whisper_batch.to(self.device))
                     latent_batch = latent_batch.to(device=self.device, dtype=self.unet.model.dtype)
                     pred = self.unet.model(latent_batch, self.timesteps, encoder_hidden_states=audio_batch).sample
                     for face in self.vae.decode_latents(pred.to(device=self.device, dtype=self.vae.vae.dtype)):
-                        n = idx % len(self.frames)
+                        n = (start + idx) % len(self.frames)
                         x1, y1, x2, y2 = self.coords[n]
                         face = cv2.resize(face.astype(np.uint8), (x2 - x1, y2 - y1))
                         out.append(self.blend(self.frames[n].copy(), face, [x1, y1, x2, y2], self.masks[n], self.boxes[n]))
                         idx += 1
         finally:
             os.unlink(tmp.name)
-        return encode_video(out, self.fps, (samples, rate), fmt)
+        return encode_video(out, self.fps, (samples, rate), fmt), (start + len(out)) % len(self.frames)
 
 
 # ---------------------------------------------------------------- the server
@@ -290,7 +296,7 @@ def create_app(engine):
     @app.get('/health')
     def health():
         return {'ready': True, 'service': 'apex-avatar', 'engine': engine.name, 'fps': engine.fps,
-                'frames': len(getattr(engine, 'idle_frames', None) or engine.frames)}
+                'frames': len(engine.idle_frames)}
 
     def kind(request):
         fmt = request.query_params.get('format', 'mp4')
@@ -302,7 +308,7 @@ def create_app(engine):
     def idle_loop(request: Request):
         fmt = kind(request)
         if fmt not in idle:
-            frames = getattr(engine, 'idle_frames', None) or engine.frames
+            frames = engine.idle_frames
             idle[fmt] = encode_video(frames, engine.fps, fmt=fmt)
         return Response(idle[fmt], media_type=FORMATS[fmt], headers={'Cache-Control': 'no-store'})
 
@@ -316,14 +322,20 @@ def create_app(engine):
                 raise HTTPException(413, 'Audio too long for one section.')
         if not raw:
             raise HTTPException(400, 'Send the section as WAV audio.')
+        try:
+            start = int(request.query_params.get('start', 0))
+        except ValueError:
+            raise HTTPException(400, 'start must be a frame number.')
         started = time.perf_counter()
         try:
             with gate:
-                video = engine.render(bytes(raw), fmt)
+                video, end = engine.render(bytes(raw), fmt, start % len(engine.idle_frames))
         except ValueError as exc:
             raise HTTPException(400, f'Could not read that audio: {exc}') from exc
         took = int((time.perf_counter() - started) * 1000)
-        return Response(video, media_type=FORMATS[fmt], headers={'X-Render-Ms': str(took), 'Cache-Control': 'no-store'})
+        # X-End-Frame: where the clip stopped in the loop, so the idle loop picks up from there.
+        return Response(video, media_type=FORMATS[fmt], headers={'X-Render-Ms': str(took), 'X-End-Frame': str(end),
+                        'Server-Timing': f'avatar;dur={took}', 'Cache-Control': 'no-store'})
 
     return app
 

@@ -23,6 +23,16 @@ Apex writes a sentence → your voice server speaks it (WAV)
 ```
 
 - **While one sentence plays, the next is being rendered.**
+- **No jumps:** a clip normally starts on the first frame of the face video,
+  while the idle loop could be anywhere, so the head would jump. Here, the
+  first clip of a reply starts on the frame the loop will be showing when the
+  clip is ready, predicted from how long recent clips took. Each later clip
+  starts where the one before ended. When talking stops, the loop carries on
+  from the last spoken frame. The loop itself plays forwards then backwards,
+  so it never snaps back to the start either.
+- **Measured:** each reply's render time is recorded with Apex's voice timing.
+  `.venv\Scripts\python -m agent.voice_timing` shows it as *(server: first
+  video clip)*, beside the voice's own time.
 - **Plain audio as the fallback:** if a clip can't be made or played, the
   sentence plays as audio. Apex is never silent because of the video.
 - **No streaming in video mode:** Celine's streamed voice (sound starting
@@ -123,6 +133,12 @@ everything else works.
     from a web page; sizes and formats;
   - Apex's routes against a real avatar server on a real port;
   - the installer's step tracking, and that it never uses a mirror.
+- `scripts/check_video_avatar_sync.cjs`: the frame choices.
+  - The look-ahead.
+  - Chaining sentence to sentence.
+  - The loop resuming at the last spoken frame.
+  - A new reply, or a Stop, going back to the loop.
+  - Every rule broken once on purpose and caught.
 - `scripts/check_video_avatar_ui.cjs`:
   - each sentence becomes a clip;
   - streaming is off in video mode;

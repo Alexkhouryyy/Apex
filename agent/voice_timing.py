@@ -35,7 +35,7 @@ STAGES = (
     "first_sound",     # first audio actually playing
 )
 # Server-side durations the browser read from Server-Timing headers.
-SERVER = ("stt_server", "tts_server")
+SERVER = ("stt_server", "tts_server", "avatar_server")
 MODES = ("tap", "hands_free")
 # How a hands-free turn decided you had stopped talking (dashboard/static/handsfree.js).
 DETECTORS = ("loudness", "model")
@@ -170,6 +170,7 @@ LABELS = {
         "reply_done": "whole reply written", "tts_start": "voice requested",
         "tts_ready": "first audio received", "first_sound": "FIRST SOUND",
         "stt_server": "  (server: speech-to-text)", "tts_server": "  (server: first voice section)",
+        "avatar_server": "  (server: first video clip)",
 }
 
 
