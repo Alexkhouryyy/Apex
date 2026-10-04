@@ -24,6 +24,7 @@ with the date. Send the line each item asks for, never a key or a token.
 | 11 | Car orb from the cloud | 10 min | — | does the orb talk in the car? | Car page → LIVE |
 | 12 | Call Apex | 20 min | Twilio number + per-minute | did the call answer? | Call Apex → LIVE |
 | 13 | Connect one app | 10 min | Composio plan | demo app steps' rows | Apps, demo step 4 → LIVE |
+| 14 | Photoreal video avatar | 1 h, once | free | render time per sentence, and how it looks | Video avatar → LIVE |
 
 ---
 
@@ -157,3 +158,15 @@ and say "Call Apex". Did it answer, with the PC on and with it off?
 Dashboard → **Apps**: add your Composio key and sign in to one app, for
 example Notion. Then run the demonstration with that app's tools
 ([DEMO.md](DEMO.md), "Adding the app steps"). Send the app rows of the report.
+
+## 14. Photoreal video avatar
+
+Follow [VIDEO_AVATAR.md](VIDEO_AVATAR.md):
+1. Install with `Setup-Apex-Video-Avatar.cmd`.
+2. Make the idle video.
+3. Start it with `Start-Apex-Video-Avatar.cmd`.
+4. Choose **Video (photoreal)** and talk.
+
+Send:
+- the avatar server's console output, which includes the render times;
+- one sentence on how real it looks.

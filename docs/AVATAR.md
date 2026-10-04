@@ -1,5 +1,7 @@
 # Apex's character
 
+> **For photorealism, see [VIDEO_AVATAR.md](VIDEO_AVATAR.md):** real footage of the character, lip-synced to Apex's voice on your GPU. This page is the 3D character, which tops out at game quality.
+
 Apex can appear as a full-body character instead of the orb. There are two
 ways to get one:
 

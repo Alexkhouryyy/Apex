@@ -664,6 +664,9 @@ FORGE_BUILD_Z_MM = float(os.getenv("FORGE_BUILD_Z_MM", "256"))
 # machine eats it, not because it is good.
 FORGE_DEFAULT_FORMAT = os.getenv("FORGE_DEFAULT_FORMAT", "3mf").strip().lower()
 
+# The photoreal video avatar (scripts/avatar_server.py, docs/VIDEO_AVATAR.md), on this PC.
+AVATAR_URL = os.getenv("AVATAR_URL", "http://127.0.0.1:17495")
+
 # Local Qwen speech via the Voicebox desktop application.
 VOICEBOX_URL = os.getenv("VOICEBOX_URL", "http://127.0.0.1:17493")
 VOICEBOX_PROFILE = os.getenv("VOICEBOX_PROFILE", "")  # exact profile ID or unique name

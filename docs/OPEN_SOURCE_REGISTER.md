@@ -63,6 +63,20 @@ This is Phase 4's candidate register from the environment roadmap, started small
 | [confident-ai/deepeval](https://github.com/confident-ai/deepeval/tree/a200ecede6456f92d7cbbb350b7b3fb4d78d36b3) | 18.6k | Apache-2.0 | Avoid | Model-graded by default and pulls toward a hosted service; Apex's contracts already do deterministic checks. |
 | [langfuse/langfuse](https://github.com/langfuse/langfuse/tree/f75c661dbe8c6b85523c81486b39e8403ac2c141) | 35.4k | MIT, except ee/ folders (commercial) | Avoid | Infrastructure burden out of proportion to a single-user environment. |
 
+## 4. A photoreal Apex
+
+**The gap:** the owner wants Apex to look photoreal. A character built from shapes in code tops out at game quality, so photorealism has to come from real footage or a generative model, driven by Apex's voice.
+
+**Success means:** on the RTX 4070, each spoken section becomes a lip-synced clip faster than it plays, and the mouth reads as matching the words.
+
+| Project | Stars | Licence | Verdict | Why |
+| --- | --- | --- | --- | --- |
+| [TMElyralab/MuseTalk](https://github.com/TMElyralab/MuseTalk/tree/0a89dec45a0192b824e3cf4daf96c239440c5ed8) | 6.7k | MIT (code); weights free for any use | **Integrate** | Real-time, audio-driven, works on Windows, permissive code and weights. **Piloted 2026-10-04** ([VIDEO_AVATAR.md](VIDEO_AVATAR.md)). Its own Windows script uses an unofficial download mirror; Apex's setup doesn't |
+| [KwaiVGI/LivePortrait](https://github.com/KwaiVGI/LivePortrait/tree/9b294b3d0536135442ea73cb01e6cb3ca7029dd3) | 19.2k | MIT (code); bundled InsightFace models non-commercial | Learn only | Driven by video, not audio. At most a way to make the idle loop from a still portrait |
+| [fudan-generative-vision/hallo2](https://github.com/fudan-generative-vision/hallo2/tree/58a9aa6c9f66817a6e084f3874cfc01ac24fed3e) | 3.7k | MIT | Avoid | Not real-time; review again for pre-recorded clips |
+
+Also looked at: antgroup/ditto-talkinghead (Apache-2.0, real-time from one image) is below the register's 1,000-star bar (899 on the day).
+
 ## What to do first
 
 Pilots follow the roadmap's rule: one module at a time, behind a switch, with the old path kept as the rollback.

@@ -589,6 +589,75 @@ async def speech_model_status():
     return await asyncio.get_running_loop().run_in_executor(None, check)
 
 
+# --- The photoreal video avatar (scripts/avatar_server.py) -------------------
+# The avatar server listens on loopback only; these pass the companion's
+# requests through, behind Apex's own sign-in, so a phone or the car can use it.
+AVATAR_MAX_AUDIO = 8_000_000
+
+
+def _avatar_client(timeout):
+    import httpx
+    import config
+    return httpx.AsyncClient(base_url=config.AVATAR_URL, trust_env=False, timeout=httpx.Timeout(timeout, connect=3))
+
+
+@router.get('/api/avatar/status')
+async def avatar_status():
+    import httpx
+    try:
+        async with _avatar_client(4) as client:
+            response = await client.get('/health')
+        response.raise_for_status()
+        health = response.json()
+        return {'available': bool(health.get('ready')), 'engine': health.get('engine'), 'fps': health.get('fps')}
+    except (httpx.HTTPError, ValueError):
+        return {'available': False, 'reason': 'The video avatar is not running. Start it with Start-Apex-Video-Avatar.cmd.'}
+
+
+def _avatar_format(value):
+    if value not in ('mp4', 'webm'):
+        raise HTTPException(400, 'format must be mp4 or webm.')
+    return value
+
+
+@router.get('/api/avatar/idle')
+async def avatar_idle(format: str = 'mp4'):
+    import httpx
+    fmt = _avatar_format(format)
+    try:
+        async with _avatar_client(60) as client:
+            response = await client.get('/idle', params={'format': fmt})
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, 'The video avatar is not running.') from exc
+    from fastapi.responses import Response
+    return Response(response.content, media_type='video/' + fmt, headers={'Cache-Control': 'no-store'})
+
+
+@router.post('/api/avatar/lipsync')
+async def avatar_lipsync(request: Request, format: str = 'mp4'):
+    import httpx
+    _check_origin(request)
+    fmt = _avatar_format(format)
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > AVATAR_MAX_AUDIO:
+            raise HTTPException(413, 'Audio too long for one section.')
+    if not raw:
+        raise HTTPException(400, 'Send the section as audio.')
+    try:
+        async with _avatar_client(180) as client:
+            response = await client.post('/lipsync', params={'format': fmt}, content=bytes(raw), headers={'Content-Type': 'audio/wav'})
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, 'The video avatar is not running.') from exc
+    if response.status_code != 200:
+        raise HTTPException(502, 'The video avatar could not render that section.')
+    from fastapi.responses import Response
+    return Response(response.content, media_type='video/' + fmt,
+                    headers={'Cache-Control': 'no-store', 'X-Render-Ms': response.headers.get('x-render-ms', '')})
+
+
 @router.get('/api/companion/timing')
 async def voice_timing_summary(limit: int = 20):
     from agent import voice_timing

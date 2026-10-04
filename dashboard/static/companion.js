@@ -376,11 +376,32 @@
     customModel = customModel || fetch(CUSTOM_MODEL, {method: 'HEAD'}).then(r => r.ok ? CUSTOM_MODEL : null).catch(() => null);
     return customModel;
   }
-  let avatar = null, lookPending = false;
+  let avatar = null, lookPending = false, videoAvatar = null, videoPending = false;
+  // The photoreal video avatar (video-avatar.js, scripts/avatar_server.py).
+  async function startVideoAvatar() {
+    if (videoAvatar || videoPending || !window.ApexVideoAvatar) return;
+    videoPending = true;
+    const candidate = new window.ApexVideoAvatar($('avatar'), request);
+    try {
+      await candidate.start();
+      if ($('presence-look').value !== 'video') { candidate.dispose(); return; }
+      videoAvatar = candidate; root.dataset.look = 'video';
+      $('presence-look').title = '';
+    } catch (exc) {
+      candidate.dispose();
+      // Said on the setting itself (a banner would be cleared by the next status update).
+      $('presence-look').value = 'orb'; delete root.dataset.look;
+      $('presence-look').title = exc.message;
+      const option = $('presence-look').querySelector('option[value=video]');
+      option.textContent = 'Video (avatar server off)';
+    } finally { videoPending = false; }
+  }
   async function applyLook() {
-    if ($('presence-look').value !== 'character') {
-      avatar?.dispose(); avatar = null; delete root.dataset.look; return;
-    }
+    const look = $('presence-look').value;
+    if (look !== 'video' && videoAvatar) { videoAvatar.dispose(); videoAvatar = null; }
+    if (look !== 'character' && avatar) { avatar.dispose(); avatar = null; }
+    if (look === 'orb') { delete root.dataset.look; return; }
+    if (look === 'video') { startVideoAvatar(); return; }
     if (avatar || lookPending) return;
     if (!window.ApexAvatarCharacter) { window.addEventListener('apex-avatar-ready', applyLook, {once: true}); return; }
     lookPending = true;
@@ -396,7 +417,7 @@
     option.disabled = true; option.textContent = 'Character (needs WebGL)';
     $('presence-look').title = 'This device cannot draw Apex\'s character (no WebGL), so the orb stays.';
   }
-  $('presence-look').value = localStorage.getItem('apex.presence.look') === 'character' ? 'character' : 'orb';
+  $('presence-look').value = ['character', 'video'].includes(localStorage.getItem('apex.presence.look')) ? localStorage.getItem('apex.presence.look') : 'orb';
   $('presence-look').addEventListener('change', () => { localStorage.setItem('apex.presence.look', $('presence-look').value); applyLook(); });
   applyLook();
   async function openStream(section, engine, profile) {
@@ -511,8 +532,9 @@
   }
   function voiceFns(epoch) {
     const engine = $('voice').value, profile = $('voicebox-profile').value;
+    const lipsync = Boolean(videoAvatar?.ready);       // the face needs each section whole, so no PCM streaming
     const generate = async section => {
-      if (engine === 'voicebox' && streamOk !== false) {
+      if (engine === 'voicebox' && streamOk !== false && !lipsync) {
         const previous = gpuFree;
         await previous;
         mark('tts_start');
@@ -524,9 +546,26 @@
         headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: section, engine, profile})});
       const blob = await response.blob();
       mark('tts_ready'); serverTiming(response, 'tts', 'tts_server');
+      // Render the face now: this section's clip is made while the one before it plays.
+      if (lipsync) { blob.clip = videoAvatar.render(blob); blob.clip.catch(() => {}); }
       return blob;
     };
-    const play = blob => blob && blob.kind === 'pcm' ? playPcm(blob, epoch) : new Promise((resolve, reject) => {
+    const play = blob => blob && blob.kind === 'pcm' ? playPcm(blob, epoch) : blob && blob.clip ? playClip(blob) : playAudio(blob);
+    // The video avatar: the face saying the section, with its sound. If the
+    // clip can't be made or played, the same section plays as plain audio.
+    const playClip = async blob => {
+      if (epoch !== speechEpoch) return;
+      let clip;
+      try { clip = await blob.clip; } catch (_) { return playAudio(blob); }
+      if (epoch !== speechEpoch || !videoAvatar?.ready) return;
+      endPlayback = () => videoAvatar?.stop();
+      audio = {pause: () => videoAvatar?.stop()};
+      state('speaking', 'Speaking · Stop ends playback'); controls();
+      try { await videoAvatar.play(clip, () => mark('first_sound')); }
+      catch (_) { if (epoch === speechEpoch) return playAudio(blob); }
+      finally { if (endPlayback && audio && !audio.src) { audio = null; endPlayback = null; } }
+    };
+    const playAudio = blob => new Promise((resolve, reject) => {
       if (epoch !== speechEpoch) { resolve(); return; }
       audioUrl = URL.createObjectURL(blob); audio = new Audio(audioUrl);
       voiceMeter.track(audio, blob);
@@ -570,7 +609,7 @@
     // length, and every section boundary costs a pause (one generation at a
     // time, a second to start each). So when streaming: no comma split, and
     // after the first sentence, everything written so far as one section.
-    const streaming = streamOk === true && $('voice').value === 'voicebox';
+    const streaming = streamOk === true && $('voice').value === 'voicebox' && !videoAvatar?.ready;
     live = {epoch, q: window.ApexSpeechQueue.live(generate, play,
       {firstPhrase: $('first-phrase').checked && !streaming, coalesce: streaming ? STREAM_SECTION_CHARS : 0,
        // Merge what has been written by the time the GPU is free, not by the
@@ -596,7 +635,7 @@
         const {generate, play} = voiceFns(epoch);
         try {
           let sections = window.ApexSpeechQueue.chunks(text);
-          if (streamOk === true && $('voice').value === 'voicebox') sections = merge(sections, STREAM_SECTION_CHARS);
+          if (streamOk === true && $('voice').value === 'voicebox' && !videoAvatar?.ready) sections = merge(sections, STREAM_SECTION_CHARS);
           await window.ApexSpeechQueue.run(sections, generate, play,
             () => epoch !== speechEpoch);
         } catch (exc) {

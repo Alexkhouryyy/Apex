@@ -86,6 +86,8 @@ jobs:
           node scripts/check_speech_detector_ui.cjs
           node scripts/check_avatar_pose.cjs
           node scripts/check_avatar_ui.cjs
+          node scripts/check_video_avatar_ui.cjs
+          node --check dashboard/static/video-avatar.js
           node --check dashboard/static/avatar-pose.js
           node --check dashboard/static/speech-model.js
           node scripts/check_team_ui.cjs

@@ -255,6 +255,63 @@
      "next_step": "Review again if Apex becomes multi-user or cloud-hosted."
     }
    ]
+  },
+  {
+   "id": "photoreal-avatar",
+   "gap": "The owner wants Apex to look photoreal. A character built from shapes in code tops out at game quality, so photorealism has to come from real footage or a generative model, driven by Apex's voice.",
+   "apex_today": "The companion shows the orb, or the Mk I character (three.js, dashboard/static/avatar*.js) with a slot for a rigged model of your own.",
+   "success": "On the RTX 4070, a spoken section becomes a lip-synced clip of a photoreal face in less time than the section lasts (render faster than real time), and a viewer reads the mouth as matching the words.",
+   "queries": [
+    "topic:talking-head stars:>=1000 archived:false",
+    "topic:lip-sync stars:>=1000 archived:false",
+    "audio driven portrait animation stars:>=1000"
+   ],
+   "candidates": [
+    {
+     "repository": "TMElyralab/MuseTalk",
+     "revision": "0a89dec45a0192b824e3cf4daf96c239440c5ed8",
+     "stars": 6700,
+     "stars_observed": "2026-10-04",
+     "license": "MIT (code); model weights \"available for any purpose, even commercially\" (README)",
+     "license_evidence": "https://github.com/TMElyralab/MuseTalk/blob/0a89dec45a0192b824e3cf4daf96c239440c5ed8/LICENSE",
+     "activity": "Windows instructions included; MuseTalk 1.5 is the current model.",
+     "capability": "Real-time audio-driven lip-sync over a source video or image; redraws only the mouth area.",
+     "findings": "Claims 30+ fps on a V100, which puts an RTX 4070 in range. The face is prepared once per video and cached. Pins PyTorch 2.0.1 and OpenMMLab, so it needs its own Python. Its own Windows weight script downloads through an unofficial mirror (hf-mirror.com); Apex's setup uses Hugging Face directly. Third-party weights (sd-vae, whisper, dwpose, face-parsing) keep their own licences.",
+     "effort": "M (3-5 days)",
+     "disposition": "integrate",
+     "reason": "The only candidate that is real-time, audio-driven, Windows-ready and permissively licensed, code and weights alike.",
+     "next_step": "Piloted 2026-10-04: scripts/avatar_server.py (MuseTalk engine plus a no-GPU still engine), Setup-Apex-Video-Avatar.cmd, and the companion's \"Video (photoreal)\" look. Next: install it on the laptop and measure render time per section."
+    },
+    {
+     "repository": "KwaiVGI/LivePortrait",
+     "revision": "9b294b3d0536135442ea73cb01e6cb3ca7029dd3",
+     "stars": 19200,
+     "stars_observed": "2026-10-04",
+     "license": "MIT (code); bundles InsightFace detection models, whose licence is non-commercial",
+     "license_evidence": "https://github.com/KwaiVGI/LivePortrait/blob/9b294b3d0536135442ea73cb01e6cb3ca7029dd3/LICENSE",
+     "activity": "Windows one-click installer.",
+     "capability": "Animates a portrait from a driving video (expressions, head pose).",
+     "findings": "Very good motion, but it is driven by another video, not by audio, so it can't speak Apex's replies by itself. It could make the idle loop (a still image animated by a short driving clip).",
+     "effort": "-",
+     "disposition": "learn_only",
+     "reason": "Not audio-driven. Useful at most for making the idle video from a still portrait."
+    },
+    {
+     "repository": "fudan-generative-vision/hallo2",
+     "revision": "58a9aa6c9f66817a6e084f3874cfc01ac24fed3e",
+     "stars": 3700,
+     "stars_observed": "2026-10-04",
+     "license": "MIT",
+     "license_evidence": "https://github.com/fudan-generative-vision/hallo2/blob/58a9aa6c9f66817a6e084f3874cfc01ac24fed3e/LICENSE",
+     "activity": "Tested on A100; speed-up listed as TBD.",
+     "capability": "Audio-driven animation of a single portrait, up to long and high-resolution clips.",
+     "findings": "High quality from one image, but far from real time; a reply would wait minutes.",
+     "effort": "-",
+     "disposition": "avoid",
+     "reason": "Not real-time on a laptop GPU.",
+     "next_step": "Review again for pre-recorded clips (greetings, intros), where waiting is fine."
+    }
+   ]
   }
  ]
 }
