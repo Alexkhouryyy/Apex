@@ -20,9 +20,9 @@ SCRIPT = ROOT / 'scripts' / 'apex_demo.py'
 def run(tmp_path, *extra, real_db=None):
     out = tmp_path / 'demo'
     env = dict(os.environ, ANTHROPIC_API_KEY='sk-ant-placeholder-for-ci-tests-only',
-               DB_PATH=str(real_db or tmp_path / 'real.db'))
+               DB_PATH=str(real_db or tmp_path / 'real.db'), PYTHONIOENCODING='utf-8')
     proc = subprocess.run([sys.executable, str(SCRIPT), '--out', str(out), *extra], env=env,
-                          capture_output=True, text=True, timeout=300, cwd=str(ROOT))
+                          capture_output=True, text=True, encoding='utf-8', timeout=300, cwd=str(ROOT))
     path = out / 'report.json'
     report = json.loads(path.read_text()) if path.exists() else None
     return proc, report, {s['step']: s for s in (report or {}).get('steps', [])}
