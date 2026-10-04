@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from zipfile import ZipFile
@@ -146,12 +147,110 @@ def test_pinned_nomad_source_and_generated_compose(tmp_path):
     assert data['services']['admin']['ports']==['127.0.0.1:8080:8080']
     assert 'updater' not in data['services'] and 'dozzle' not in data['services']
     assert data['services']['admin']['build']['args']['VCS_REF']==manifest['revision']
+    assert data['networks']['default']['name']=='project-nomad_default'
+    assert data['services']['admin']['environment']['NOMAD_STORAGE_PATH']=='/opt/project-nomad/storage'
     original=(folder/'.env').read_bytes()
     setup.nomad_files(tmp_path)
     assert (folder/'.env').read_bytes()==original
     source=folder/('source-'+manifest['revision'][:12])
+    dockerfile=Path(data['services']['admin']['build']['dockerfile'])
+    assert dockerfile==folder/'Dockerfile.apex'
+    assert dockerfile.read_bytes()==setup.nomad_build_dockerfile((source/'Dockerfile').read_bytes())
+    with ZipFile(archive) as z:
+        assert (source/'Dockerfile').read_bytes()==z.read('Dockerfile')
     (source/'Dockerfile').write_text('FROM malicious-local-change')
     with pytest.raises(RuntimeError,match='source changed'):setup.nomad_files(tmp_path)
+
+
+def test_nomad_transfer_adapter_only_changes_the_map_download():
+    with ZipFile(ROOT/'integrations/project-nomad-source.zip') as z:
+        original=z.read('Dockerfile')
+    adapted=setup.nomad_build_dockerfile(original)
+    start=original.index(b'curl -fsSL -o "$TARBALL"')
+    end=original.index(b';',start)+1
+    prefix,suffix=original[:start],original[end:]
+    prefix=prefix.replace(b'RUN set -eux;', b'RUN --mount=type=cache,id=apex-nomad-pmtiles,'
+                          b'target=/var/cache/apex-pmtiles,sharing=locked set -eux;')
+    assert adapted.startswith(prefix) and adapted.endswith(suffix)
+    replacement=adapted[len(prefix):len(adapted)-len(suffix)]
+    assert b'--http1.1' in replacement and b'--continue-at -' in replacement
+    assert b'--connect-timeout 30' in replacement and b'--max-time 1800' in replacement
+    assert b'--speed-time 120' in replacement and b'--speed-limit 1024' in replacement
+    # TLS and the pinned SHA-256 check must never be bypassed for retries.
+    assert b'--insecure' not in replacement and b' -k' not in replacement
+    assert b'sha256sum -c -' in suffix
+
+
+@pytest.mark.parametrize('scenario', ['interrupted', 'failed-build', 'corrupt'])
+def test_nomad_transfer_resumes_and_checks_integrity_in_real_shell(tmp_path, scenario):
+    # Run the generated download/verification shell, without Docker or internet.
+    # A simulated curl appends data at the saved offset and can fail mid-transfer.
+    shell=shutil.which('bash') if sys.platform!='win32' else None
+    if not shell and sys.platform=='win32':
+        candidate=Path('C:/Program Files/Git/bin/bash.exe')
+        if candidate.is_file():shell=str(candidate)
+    if not shell:
+        pytest.skip('Bash is required to exercise the generated Linux build step')
+    with ZipFile(ROOT/'integrations/project-nomad-source.zip') as z:
+        adapted=setup.nomad_build_dockerfile(z.read('Dockerfile')).decode()
+    body=adapted.split('sharing=locked ',1)[1].split('    tar -xzf',1)[0]
+    body=body.replace('/var/cache/apex-pmtiles', 'cache').replace('cd /tmp;', 'cd .;')
+    body=body.replace('sleep 2;', ':;')
+    # Docker removes backslash-newline escapes before passing RUN to /bin/sh.
+    body=body.replace('\\\r\n','').replace('\\\n','')
+    (tmp_path/'run.sh').write_text(body,encoding='utf-8',newline='\n')
+    digest=hashlib.sha256(b'abcdef').hexdigest()
+    (tmp_path/'curl').write_text('''#!/usr/bin/env bash
+set -eu
+[[ "$*" == *"--continue-at -"* ]] || exit 99
+while [ "$1" != "-o" ]; do shift; done
+part="$2"
+printf 'call\\n' >> calls
+if [ "${SCENARIO}" = corrupt ]; then printf 'bad' > "$part"; exit 0; fi
+if [ "${SCENARIO}" = failed-build ] && [ ! -f allow-success ]; then
+  if [ ! -s "$part" ]; then printf abc > "$part"; fi
+  exit 28
+fi
+if [ ! -s "$part" ]; then printf abc > "$part"; exit 28; fi
+if [ "$(cat "$part")" != abc ]; then exit 98; fi
+printf def >> "$part"
+''',encoding='utf-8',newline='\n')
+    env={**os.environ,'PMTILES_VERSION':'1.30.2','PMTILES_SHA256_AMD64':digest,
+         'TARGETARCH':'amd64','SCENARIO':scenario}
+    # Git Bash handles PATH conversion itself; prepend the test directory in bash.
+    command=[shell,'--noprofile','--norc','-c','export PATH="$PWD:$PATH"; bash run.sh']
+    (tmp_path/'curl').chmod(0o755)
+    result=subprocess.run(command,cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)
+    cached=tmp_path/'cache'/digest/'go-pmtiles_1.30.2_Linux_x86_64.tar.gz'
+    partial=cached.with_suffix('.gz.part')
+    if scenario=='corrupt':
+        assert result.returncode!=0
+        assert partial.read_bytes()==b'bad' and not cached.exists()
+        assert not (tmp_path/cached.name).exists()
+        return
+    if scenario=='failed-build':
+        assert result.returncode==28,result.stderr
+        assert partial.read_bytes()==b'abc' and not cached.exists()
+        assert len((tmp_path/'calls').read_text().splitlines())==6
+        # Resume a new invocation using exactly the preserved partial file.
+        (tmp_path/'allow-success').touch()
+        result=subprocess.run(command,cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)
+    assert result.returncode==0,result.stderr
+    assert cached.read_bytes()==b'abcdef'
+    assert (tmp_path/cached.name).read_bytes()==b'abcdef'
+    assert not partial.exists()
+    calls=(tmp_path/'calls').read_bytes()
+    result=subprocess.run(command,cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)
+    assert result.returncode==0,result.stderr
+    assert (tmp_path/'calls').read_bytes()==calls  # verified cache avoids another request
+
+
+@pytest.mark.parametrize('original', [b'FROM node:22-slim',
+    b'curl -fsSL -o "$TARBALL" curl -fsSL -o "$TARBALL"',
+    b'curl -fsSL -o "$TARBALL" https://unrelated.example/'])
+def test_nomad_transfer_adapter_refuses_unexpected_upstream(original):
+    with pytest.raises(RuntimeError,match='map download changed'):
+        setup.nomad_build_dockerfile(original)
 
 
 def test_cached_nomad_start_never_downloads(monkeypatch,tmp_path):
