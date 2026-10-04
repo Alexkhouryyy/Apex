@@ -44,3 +44,6 @@ integrations/gods-eye-view/node_modules/
 integrations/gods-eye-view/dist/
 integrations/gods-eye-view/APEX_BUILD.json
 integrations/gods-eye-view/APEX_TEST_RESULTS.log
+
+# Browser speech model, fetched by scripts/fetch_speech_model.py (pinned + hash-checked).
+dashboard/static/vendor/speech/

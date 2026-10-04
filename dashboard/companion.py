@@ -569,10 +569,31 @@ async def record_voice_timing(request: Request):
     return {'stored': stored}
 
 
+_speech_model_seen: dict = {}
+
+
+@router.get('/api/companion/speech-model')
+async def speech_model_status():
+    """Whether the browser speech detector (scripts/fetch_speech_model.py) is
+    installed and every file matches its manifest. Hashing 14 MB on every
+    hands-free start is wasteful, so a result is reused until a file changes."""
+    from scripts import fetch_speech_model as fsm
+
+    def check():
+        target = fsm.TARGET
+        key = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size)
+                    for p in sorted(target.glob('*')) if p.is_file()) if target.exists() else ()
+        if _speech_model_seen.get('key') != key:
+            _speech_model_seen.update(key=key, status=fsm.status(target))
+        return _speech_model_seen['status']
+    return await asyncio.get_running_loop().run_in_executor(None, check)
+
+
 @router.get('/api/companion/timing')
 async def voice_timing_summary(limit: int = 20):
     from agent import voice_timing
     limit = max(1, min(200, int(limit)))
     return {'summary': voice_timing.summary(limit), 'turns': voice_timing.recent(limit),
             'before': voice_timing.summary(limit, streamed=False),
-            'after': voice_timing.summary(limit, streamed=True)}
+            'after': voice_timing.summary(limit, streamed=True),
+            'detectors': {d: voice_timing.summary(limit, detector=d) for d in voice_timing.DETECTORS}}

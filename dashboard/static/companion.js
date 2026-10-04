@@ -32,7 +32,8 @@
     $('voice-timing').textContent = timingLine(t.stages); $('voice-timing').hidden = false;
     try {
       await request('/api/companion/timing', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mode: t.mode, voice: $('voice').value, streamed: Boolean(t.streamed), stages: t.stages})});
+        body: JSON.stringify({mode: t.mode, voice: $('voice').value, streamed: Boolean(t.streamed), stages: t.stages,
+          ...(t.detector ? {detector: t.detector} : {})})});
     } catch (_) { /* Measurement must never break a turn. */ }
   }
   const drive = location.pathname === '/drive';
@@ -271,6 +272,8 @@
     }
   }
   $('voicebox-profile').addEventListener('change', () => localStorage.setItem('apex.voicebox.profile', $('voicebox-profile').value));
+  $('speech-detector').value = localStorage.getItem('apex.speech.detector') === 'loudness' ? 'loudness' : 'model';
+  $('speech-detector').addEventListener('change', () => localStorage.setItem('apex.speech.detector', $('speech-detector').value));
   $('stream-speech').checked = localStorage.getItem('apex.speech.stream') !== '0';
   $('stream-speech').addEventListener('change', () => localStorage.setItem('apex.speech.stream', $('stream-speech').checked ? '1' : '0'));
   $('first-phrase').checked = localStorage.getItem('apex.speech.firstPhrase') !== '0';
@@ -825,6 +828,13 @@
     if (!window.ApexHandsFree) { $('hands-free').checked=false; error('Reload the companion to load hands-free controls.'); return; }
     hands = new window.ApexHandsFree({
       threshold: () => Number($('mic-threshold').value),
+      // The speech model, when chosen and installed intact; otherwise loudness.
+      loadModel: async (context, stream) => {
+        if ($('speech-detector').value !== 'model' || !window.ApexSpeechModel) return null;
+        const model = await (await request('/api/companion/speech-model')).json();
+        if (!model.installed) throw Error(model.problem);
+        return window.ApexSpeechModel.attach({context, stream, version: model.version});
+      },
       // Talking over a reply — while it is written or spoken — stops it.
       bargeWatch: () => $('barge-in').checked && Boolean(active || speechBusy || speechDraining),
       onBarge: interrupt,
@@ -839,6 +849,7 @@
         // Hands-free: your speech ended at the last voiced frame, not when the
         // 1.2 s silence timer fired — that wait is part of what you feel.
         timingStart('hands_free', hands.lastVoice || performance.now());
+        timing.detector = hands.detector;
         handsRequest=new AbortController();
         const text=await transcribeBlob(blob,handsRequest.signal);
         if (!hands.enabled || hands.epoch!==epoch) return;
@@ -860,6 +871,7 @@
       }
     });
     await hands.start(); controls();
+    $('mic-note').title = hands.modelProblem || '';   // why the model is off, on hover
   };
   $('check-in').onchange = () => {
     lastCheck=Date.now();

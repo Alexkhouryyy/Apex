@@ -35,7 +35,7 @@
      "effort": "S (1–2 days)",
      "disposition": "integrate",
      "reason": "Small, permissive, and fits the existing hands-free interface. Pilot it behind the existing hands-free switch, with the RMS path kept as fallback and rollback.",
-     "next_step": "Vendor the pinned build, add a \"Speech detector: model / loudness\" setting, and measure with voice_timing."
+     "next_step": "Piloted 2026-10-04: Setup-Apex-Speech-Model.cmd installs vad-web 0.0.31 + onnxruntime-web 1.22.0 (npm sha512-checked) into dashboard/static/vendor/speech/; hands-free uses it with loudness as fallback. Loads and runs in real Chromium. Next: 10+ hands-free turns each way on the laptop, compared by agent.voice_timing."
     },
     {
      "repository": "pipecat-ai/smart-turn",

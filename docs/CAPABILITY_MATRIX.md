@@ -34,7 +34,7 @@ so. Test counts are per file, as collected on 2026-10-04.
 | LIVE | 3 |
 | PARTIAL | 4 |
 | TESTED | 31 |
-| NEEDS YOU | 7 |
+| NEEDS YOU | 8 |
 | PLANNED | 3 |
 | UNAVAILABLE | 3 |
 
@@ -71,6 +71,7 @@ Related: the acceptance test is in [`DEMO.md`](DEMO.md), and outside projects re
 | Celine's voice (local Qwen, streamed) | **PARTIAL** | LIVE: you run `Start-Apex-Celine-Fast.cmd` and hear her. Not measured: Pillar 1 latency (median ≤ 1.5 s, p90 ≤ 2.5 s over 20 turns). Tests: `test_qwen_fast_server` 8, `test_speak_stream` 9, `test_voice_timing` 25, `test_celine` 16 | 20 spoken turns, then `python -m agent.voice_timing`, and send the output (`docs/PROVE_IT.md` §1) |
 | Companion (`/companion`): chat, Voice mode, Look now | **PARTIAL** | LIVE: you use it. Not measured: barge-in stop time on the laptop (simulated 0.25 s), and wake-word accuracy. Tests: `test_companion` 23, `test_look_now` 35, `test_wake` 25 | PROVE_IT §1b |
 | Several voices, including an Alex voice | **NEEDS YOU** | `test_voices` 18. The library, both voice servers and the Voices tab are built | Record about 15 s of your voice in **Voices**, then pick it (`docs/VOICES.md`) |
+| Speech model for hands-free (tells voice from noise; sends 0.7 s after you stop instead of 1.2 s) | **NEEDS YOU** | `test_speech_model` 8, `check_speech_detector_ui.cjs` (every guard broken once on purpose and caught). The real model loads and runs in Chromium: speech scored 0.6–0.98; steady noise and hum about 0.01, with one 0.2 s spike to 0.72 at a sound change | Run `Setup-Apex-Speech-Model.cmd`, do about 10 hands-free turns each way, then send `agent.voice_timing` |
 | Voicebox desktop voice | **TESTED** | `test_voicebox` 14, `test_voicebox_live` 23 (live against a stub) | Only if you use Voicebox |
 | Speech-to-text (faster-whisper; browser speech as fallback) | **TESTED** | `test_browser_stt` 4, plus the companion tests | — |
 

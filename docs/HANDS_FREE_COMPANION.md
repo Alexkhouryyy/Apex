@@ -15,6 +15,46 @@ memory, not saved by this endpoint. Transcribed messages join the companion thre
 OpenAI transcription and OpenAI output remain explicit alternatives requiring its key.
 This does not integrate Voicebox yet.
 
+## Speech model (recommended)
+
+By default, hands-free decides you are talking by **loudness**. A fan, traffic
+or typing can count as speech, and it waits 1.2 s of quiet before sending.
+
+The **speech model** fixes both. It's the Silero voice-activity model running
+in the browser, on the same microphone stream; nothing extra is sent anywhere.
+- It tells a voice from noise, so a loud fan or a door doesn't count as speech.
+- It sends **0.7 s** after your last word instead of 1.2 s.
+- Soft word endings stay inside your turn.
+
+Install it once (about 14 MB). The versions are pinned, and every file is
+checked against npm's published hash before it's kept:
+
+```cmd
+Setup-Apex-Speech-Model.cmd
+```
+
+Then reload the companion. In settings, **Hands-free detects** should say
+**Speech (model)**, and while listening the note says *Listening · speak
+naturally · speech model*.
+
+**When the model isn't used:** if it isn't installed, a file has changed, or
+it fails to start or stops reporting, hands-free uses loudness. The note says
+*loudness (speech model off)*; hover over it for the reason. Choose
+**Loudness** in settings to turn the model off.
+
+**Talking over Celine** still needs loud speech: her own voice through the
+speakers is speech too, so the model alone can't tell you apart.
+
+**Whether it's actually faster** is measured, not assumed. Each hands-free
+turn records which detector heard it. After about 10 turns with each:
+
+```cmd
+.venv\Scripts\python -m agent.voice_timing
+```
+
+The report shows *transcript back* for loudness and for the speech model side
+by side. The 0.5 s saving should show up there; if it doesn't, it isn't real.
+
 ## Proactive comments
 
 1. Share the actual window or screen you want Apex to see.
@@ -42,13 +82,14 @@ you use your chosen Discuss/Work mode and the existing tool permissions.
 - Turning hands-free off releases microphone tracks. Both automatic modes start
   off on every page load. Browser microphone and screen permission prompts still
   require your initial interaction.
-- Listening pauses while Apex thinks and speaks, then resumes. Speaking over Apex
-  to interrupt is not implemented in this version; use Stop for interruption.
-- Detection is browser-local audio energy detection, followed by Whisper's speech
-  filter. It is not speaker identification: game audio, other people or background
-  speech can trigger it. Use headphones and tune Microphone sensitivity if needed.
-- Speech is sent after roughly 1.2 seconds of silence; each recording segment is
-  capped at 30 seconds. Silence-only recordings are discarded locally. Network,
+- Listening pauses while Apex thinks and speaks, then resumes. With
+  **Interrupt by talking** on, talking over a reply stops it.
+- Detection is browser-local: the speech model, or audio energy without it,
+  followed by Whisper's speech filter. It is not speaker identification: other
+  people, game audio or video with speech can trigger it. Use headphones, and
+  tune Microphone sensitivity if needed.
+- Speech is sent after 0.7 s of silence with the speech model, or about 1.2 s
+  with loudness. Each recording segment is capped at 30 seconds. Silence-only recordings are discarded locally. Network,
   CPU inference, model latency and voice playback determine actual response time.
 - Keep the page open; Float can keep the companion visible. A suspended browser,
   sleeping laptop or lost microphone stops the experience. Background browser
@@ -57,6 +98,16 @@ you use your chosen Discuss/Work mode and the existing tool permissions.
   telemetry. Apex cannot reliably call out split-second events from these snapshots.
 
 ## Verification
+
+`scripts/check_speech_detector_ui.cjs` covers the speech model's decisions:
+- loud non-speech is ignored, and the turn ends 0.7 s after speech;
+- soft endings keep the turn open;
+- loudness takes over when the model is missing, failing or stalled;
+- barge-in needs loud speech;
+- timing records the detector.
+
+It scripts the model's output; the model's real accuracy on your microphone
+is what the timing report measures.
 
 Deterministic media/DOM tests cover silence discard, automatic speech submission,
 microphone reuse, playback isolation, re-listening, stop during transcription,

@@ -179,6 +179,10 @@ def _pin_script_mime_types() -> None:
     mimetypes.add_type("text/javascript", ".js")
     mimetypes.add_type("text/javascript", ".mjs")
     mimetypes.add_type("text/css", ".css")
+    # The browser speech model (scripts/fetch_speech_model.py): WebAssembly
+    # only compiles in streaming mode when served as application/wasm.
+    mimetypes.add_type("application/wasm", ".wasm")
+    mimetypes.add_type("application/octet-stream", ".onnx")
 
 
 _pin_script_mime_types()

@@ -83,6 +83,8 @@ jobs:
           node scripts/check_speech_queue.cjs
           node scripts/check_car_link.cjs
           node scripts/check_handsfree_ui.cjs
+          node scripts/check_speech_detector_ui.cjs
+          node --check dashboard/static/speech-model.js
           node scripts/check_team_ui.cjs
           node --check dashboard/static/world-view.js
           node scripts/check_world_view_ui.cjs
