@@ -26,6 +26,8 @@ Word, PowerPoint, Excel and PDF files as sources, and how to check them on your 
 **[docs/DOCUMENTS.md](docs/DOCUMENTS.md)**.
 Two real tasks, checked by rules, with what they cost, so you can compare models:
 **[docs/TASKS.md](docs/TASKS.md)**.
+Apex as a full-body character whose mouth follows its voice, instead of the orb:
+**[docs/AVATAR.md](docs/AVATAR.md)**.
 Designing physical objects and checking they can actually be made:
 **[docs/FORGE.md](docs/FORGE.md)**.
 Generating hypotheses that could be wrong, and recording what happened:

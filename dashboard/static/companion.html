@@ -7,9 +7,11 @@
   <link rel="stylesheet" href="/static/companion.css">
   <script src="/static/handsfree.js?v=speech-model-1" defer></script>
   <script src="/static/speech-model.js?v=speech-model-1" defer></script>
+  <script src="/static/avatar-pose.js?v=avatar-1" defer></script>
+  <script type="module" src="/static/avatar.js?v=avatar-1"></script>
   <script src="/static/speech_queue.js?v=live-screen-1" defer></script>
   <script src="/static/car_link.js?v=car-1" defer></script>
-  <script src="/static/companion.js?v=speech-model-1" defer></script>
+  <script src="/static/companion.js?v=avatar-1" defer></script>
 <link rel="stylesheet" href="/static/brand.css?v=brand40"><link rel="stylesheet" href="/static/theme.css">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png?v=chevron38">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -19,6 +21,7 @@
   <header class="pywebview-drag-region"><a href="/" aria-label="Open Apex dashboard" class="brand apex-brand"><span class="apex-logo" aria-hidden="true"></span><span class="apex-wordmark">APEX</span><small>COMPANION</small></a><nav><button id="voice-mode" aria-pressed="false" title="Talk only, with Celine. Stop or Esc to leave.">Voice mode</button> · <a href="/board">Workspace</a> · <a href="/drive">Car</a> · <button id="float" title="Keep the companion above your other windows">Float ↗</button></nav></header>
   <section class="presence" aria-label="Companion status">
     <div class="orb" aria-hidden="true"><div></div></div>
+    <div id="avatar" class="avatar" aria-hidden="true"></div>
     <div><p class="eyebrow">LET’S THINK IT THROUGH</p><h1>Right here with you.</h1><p id="status" role="status">Connecting to Apex…</p><button id="voice-exit" type="button" hidden>Stop · Esc</button></div>
   </section>
   <div class="toolbar">
@@ -41,6 +44,7 @@
     <label>Check screen <select id="check-frequency"><option value="30">Every 30 seconds</option><option value="60" selected>Every minute</option><option value="120">Every 2 minutes</option></select></label>
     <label>Transcription <select id="stt-engine"><option value="local">Local Whisper</option><option value="openai">OpenAI</option></select></label>
     <label>Microphone sensitivity <select id="mic-threshold"><option value="0.009">High · quiet voice</option><option value="0.018" selected>Normal</option><option value="0.04">Low · noisy room</option></select></label>
+    <label title="The orb, or Apex's character: a full-body android whose mouth follows the voice. The character needs WebGL; without it the orb stays.">Apex appears as <select id="presence-look"><option value="orb" selected>Orb</option><option value="character">Character</option></select></label>
     <label title="Speech model tells your voice from noise, so a turn can end 0.5 s sooner. Needs Setup-Apex-Speech-Model.cmd once; without it, loudness is used.">Hands-free detects <select id="speech-detector"><option value="model" selected>Speech (model)</option><option value="loudness">Loudness</option></select></label>
   </div>
   <p class="hint" id="hands-note">Hands-free sends your speech after a pause, then listens again after Apex replies. Local Whisper runs on the Apex host and may download its model on first use. Use headphones to reduce game audio pickup. Stop turns hands-free and proactive comments off.</p>

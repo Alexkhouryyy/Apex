@@ -319,6 +319,75 @@
     }
     return audioCtx;
   }
+  // --- Voice level, for the character's mouth (avatar.js) -------------------
+  // Read from the audio actually playing. Celine's streamed PCM passes
+  // through an analyser on its own audio context. A recorded clip plays
+  // untouched; its loudness comes from a copy decoded beside it. The device
+  // voice exposes no audio, so its word boundaries pulse the mouth instead.
+  const voiceMeter = {
+    clip: null, envelope: null, pulse: 0, samples: null,
+    output(ctx) {
+      if (typeof ctx.createAnalyser !== 'function') return ctx.destination;
+      if (!ctx.apexMeter) {
+        const meter = ctx.createAnalyser(); meter.fftSize = 1024;
+        meter.connect(ctx.destination); ctx.apexMeter = meter;
+      }
+      return ctx.apexMeter;
+    },
+    async track(clip, blob) {
+      this.clip = clip; this.envelope = null;
+      try {
+        const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        if (!Offline || !blob?.arrayBuffer) return;
+        const decoded = await new Offline(1, 1, 22050).decodeAudioData(await blob.arrayBuffer());
+        const data = decoded.getChannelData(0), step = Math.max(1, Math.round(decoded.sampleRate * 0.02)), env = [];
+        for (let i = 0; i < data.length; i += step) {
+          let sum = 0; const end = Math.min(data.length, i + step);
+          for (let k = i; k < end; k++) sum += data[k] * data[k];
+          env.push(Math.sqrt(sum / (end - i)));
+        }
+        if (this.clip === clip) this.envelope = env;
+      } catch (_) { /* the mouth falls back to a plain flap */ }
+    },
+    level() {
+      if (!root.classList.contains('speaking')) return 0;
+      const meter = audioCtx && audioCtx.apexMeter;
+      if (meter && typeof meter.getFloatTimeDomainData === 'function') {
+        if (!this.samples || this.samples.length !== meter.fftSize) this.samples = new Float32Array(meter.fftSize);
+        meter.getFloatTimeDomainData(this.samples);
+        let sum = 0; for (const v of this.samples) sum += v * v;
+        const rms = Math.sqrt(sum / this.samples.length);
+        if (rms > 0.002) return Math.min(1, rms * 5);
+      }
+      if (this.clip && !this.clip.paused) {
+        if (this.envelope) return Math.min(1, (this.envelope[Math.floor(this.clip.currentTime / 0.02)] || 0) * 5);
+        return 0.3 + 0.25 * Math.sin(performance.now() / 70);
+      }
+      if (window.speechSynthesis?.speaking) return 0.15 + 0.65 * Math.exp(-(performance.now() - this.pulse) / 140);
+      return 0;
+    },
+  };
+  window.ApexVoice = {level: () => voiceMeter.level()};
+  // --- How Apex appears: the orb, or its character (avatar.js) --------------
+  let avatar = null;
+  function applyLook() {
+    if ($('presence-look').value !== 'character') {
+      avatar?.dispose(); avatar = null; delete root.dataset.look; return;
+    }
+    if (avatar) return;
+    if (!window.ApexAvatarCharacter) { window.addEventListener('apex-avatar-ready', applyLook, {once: true}); return; }
+    avatar = window.ApexAvatarCharacter.create($('avatar'), {level: () => voiceMeter.level(),
+      state: () => ['speaking', 'thinking', 'listening'].find(name => root.classList.contains(name)) || ''});
+    if (avatar) { root.dataset.look = 'character'; return; }
+    // Said on the setting itself: a banner would be cleared by the next status update.
+    $('presence-look').value = 'orb';
+    const option = $('presence-look').querySelector('option[value=character]');
+    option.disabled = true; option.textContent = 'Character (needs WebGL)';
+    $('presence-look').title = 'This device cannot draw Apex\'s character (no WebGL), so the orb stays.';
+  }
+  $('presence-look').value = localStorage.getItem('apex.presence.look') === 'character' ? 'character' : 'orb';
+  $('presence-look').addEventListener('change', () => { localStorage.setItem('apex.presence.look', $('presence-look').value); applyLook(); });
+  applyLook();
   async function openStream(section, engine, profile) {
     let response;
     // 409: the GPU is still finishing a section that was stopped — stopping
@@ -380,7 +449,7 @@
         let o = 0;
         for (const pcm of pending) { for (let i = 0; i < pcm.length; i++) channel[o++] = pcm[i] / 32768; }
         pending = []; pendingLen = 0;
-        const src = ctx.createBufferSource(); src.buffer = buffer; src.connect(ctx.destination);
+        const src = ctx.createBufferSource(); src.buffer = buffer; src.connect(voiceMeter.output(ctx));
         const rate = exact ? handle.rate : ctx.sampleRate;
         const earliest = Math.ceil((ctx.currentTime + (first ? LEAD : 0.01)) * rate);
         // Late (the voice fell behind): start now rather than in the past.
@@ -449,10 +518,12 @@
     const play = blob => blob && blob.kind === 'pcm' ? playPcm(blob, epoch) : new Promise((resolve, reject) => {
       if (epoch !== speechEpoch) { resolve(); return; }
       audioUrl = URL.createObjectURL(blob); audio = new Audio(audioUrl);
+      voiceMeter.track(audio, blob);
       const current = audio, url = audioUrl;
       const done = exc => {
         current.onended = current.onerror = null;
         if (audio === current) { audio = null; audioUrl = null; endPlayback = null; }
+        if (voiceMeter.clip === current) { voiceMeter.clip = null; voiceMeter.envelope = null; }
         URL.revokeObjectURL(url);
         if (exc) reject(exc); else resolve();
       };
@@ -526,7 +597,8 @@
         if (!window.speechSynthesis) throw new Error('Device speech is unavailable. Choose OpenAI voice or read the reply.');
         const utterance = new SpeechSynthesisUtterance(text); utterance.rate = 1.02;
         utterance.onend = finish;
-        utterance.onstart = () => mark('first_sound');
+        utterance.onstart = () => { voiceMeter.pulse = performance.now(); mark('first_sound'); };
+        utterance.onboundary = () => { voiceMeter.pulse = performance.now(); };
         utterance.onerror = event => { if (!['interrupted', 'canceled'].includes(event.error)) error('Device voice could not play.'); finish(); };
         state('speaking', 'Speaking · tap Stop or Talk to interrupt'); controls();
         window.speechSynthesis.speak(utterance);

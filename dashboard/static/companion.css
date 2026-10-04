@@ -58,3 +58,12 @@
   .orb-screen #companion[data-view=voice] .orb{width:min(62dvh,40vw,420px);height:min(62dvh,40vw,420px)}
 }
 .orb-screen .apex-look-toggle{display:none}
+
+/* Apex's character (avatar.js) in place of the orb. */
+.avatar{display:none;flex:0 0 82px;height:104px;position:relative}
+.avatar canvas{display:block;width:100%!important;height:100%!important}
+#companion[data-look=character] .presence>.orb{display:none}
+#companion[data-look=character] .avatar{display:block}
+#companion[data-look=character][data-view=voice] .avatar{flex:0 0 auto;width:min(52vw,280px);height:min(52dvh,470px)}
+.orb-screen #companion[data-look=character][data-view=voice] .avatar{width:min(40dvh,60vw,380px);height:min(64dvh,620px)}
+@media(max-width:480px){#companion[data-look=character] .avatar{flex-basis:66px;height:84px}}
