@@ -24,6 +24,8 @@ Outside projects (1,000+ stars) reviewed for three named gaps, each with a verdi
 **[docs/OPEN_SOURCE_REGISTER.md](docs/OPEN_SOURCE_REGISTER.md)**.
 Word, PowerPoint, Excel and PDF files as sources, and how to check them on your own files:
 **[docs/DOCUMENTS.md](docs/DOCUMENTS.md)**.
+Two real tasks, checked by rules, with what they cost, so you can compare models:
+**[docs/TASKS.md](docs/TASKS.md)**.
 Designing physical objects and checking they can actually be made:
 **[docs/FORGE.md](docs/FORGE.md)**.
 Generating hypotheses that could be wrong, and recording what happened:

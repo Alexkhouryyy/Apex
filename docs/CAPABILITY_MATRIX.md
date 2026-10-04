@@ -33,7 +33,7 @@ so. Test counts are per file, as collected on 2026-10-04.
 | --- | --- |
 | LIVE | 3 |
 | PARTIAL | 4 |
-| TESTED | 32 |
+| TESTED | 33 |
 | NEEDS YOU | 8 |
 | PLANNED | 3 |
 | UNAVAILABLE | 3 |
@@ -64,6 +64,7 @@ Related: the acceptance test is in [`DEMO.md`](DEMO.md), and outside projects re
 | Self-modification with rollback | **TESTED** | `test_self_mod` 28, `test_rollback` 14, `test_recovery` 12 | — |
 | World state: what's true right now, fresh for 30 min | **TESTED** | `test_world_state_fresh` 3 | — |
 | Minimum complete demonstration (projects, restart, isolation, app write with receipt, recovery) | **TESTED** | `scripts/apex_demo.py`: 15 pass and 1 unknown in fixture mode; `test_apex_demo` 5, including two injected faults that each fail their check | Run `scripts\apex_demo.py --live` and send the summary (`docs/DEMO.md`) |
+| Task suite: two representative tasks through the task runner, judged by rules, cost from Apex's ledger | **TESTED** | `scripts/apex_tasks.py`: 2/2 pass in fixture mode; `test_apex_tasks` 7, including two injected faults that each fail only their own check | Run `apex_tasks.py --live` (and once per model you want to compare), then send `--history` (`docs/TASKS.md`) |
 
 ## 2. Voice and companion
 

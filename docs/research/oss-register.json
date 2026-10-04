@@ -208,7 +208,7 @@
      "effort": "—",
      "disposition": "learn_only",
      "reason": "Copy the structure (task, checks, cost per sample, viewable log) into an extension of apex_demo, not the dependency.",
-     "next_step": "Build apex_demo --suite with two real tasks, reporting the cost from usage_log."
+     "next_step": "Done 2026-10-04 without the dependency: scripts/apex_tasks.py runs two tasks through Apex's task runner, judged by rules, with cost from usage_log checked against the runner. Next: --live runs per model on the laptop."
     },
     {
      "repository": "promptfoo/promptfoo",
