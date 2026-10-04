@@ -143,6 +143,8 @@ Related: the acceptance test is in [`DEMO.md`](DEMO.md), and outside projects re
 
 ## What would raise the LIVE count fastest
 
+The full ordered list, with commands, is [CHECKLIST.md](CHECKLIST.md).
+
 Every item is on your side. None needs new code.
 
 1. **Voice timing:** 20 turns, then `agent.voice_timing`. This makes Pillar 1

@@ -36,6 +36,8 @@ Celine — Voice mode, her memory, and "Hey Celly" / Ctrl+Alt+C to look at your 
 **[docs/CELINE.md](docs/CELINE.md)**.
 The checks only you can run — voice timing, the relay, the pinch — and what to send back:
 **[docs/PROVE_IT.md](docs/PROVE_IT.md)**.
+Everything only you can run, in one ordered list with time, cost and what to send back:
+**[docs/CHECKLIST.md](docs/CHECKLIST.md)**.
 Your phone asks Apex while the laptop is shut — deploying the relay, from zero:
 **[docs/RELAY_DEPLOY.md](docs/RELAY_DEPLOY.md)**.
 Where Apex goes next — the v2 mission (ownership, invention, trust) and its proofs:
