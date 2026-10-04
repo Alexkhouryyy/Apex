@@ -33,7 +33,7 @@ so. Test counts are per file, as collected on 2026-10-04.
 | --- | --- |
 | LIVE | 3 |
 | PARTIAL | 4 |
-| TESTED | 30 |
+| TESTED | 31 |
 | NEEDS YOU | 7 |
 | PLANNED | 4 |
 | UNAVAILABLE | 3 |
@@ -60,6 +60,7 @@ fastest way to raise the LIVE count is not new code. It is the
 | Approvals (nothing outward-facing without your yes) | **TESTED** | `test_cortex_approval` 3, `test_safety` 25, `test_restraint` 26, `test_autonomy` 8 | — |
 | Self-modification with rollback | **TESTED** | `test_self_mod` 28, `test_rollback` 14, `test_recovery` 12 | — |
 | World state: what's true right now, fresh for 30 min | **TESTED** | `test_world_state_fresh` 3 | — |
+| Minimum complete demonstration (projects, restart, isolation, app write with receipt, recovery) | **TESTED** | `scripts/apex_demo.py`: 15 pass and 1 unknown in fixture mode; `test_apex_demo` 5, including two injected faults that each fail their check | Run `scripts\apex_demo.py --live` and send the summary (`docs/DEMO.md`) |
 
 ## 2. Voice and companion
 
@@ -129,8 +130,8 @@ fastest way to raise the LIVE count is not new code. It is the
 | Capability | Status | Where |
 | --- | --- | --- |
 | Pillar 2: a full session with no keyboard on the board | **PLANNED** | `docs/APEX_V2_PLAN.md` |
+| Documents per project | **PLANNED** | Found by the demo: documents are one shared list, linked to a project only by its handoff | — |
 | Pillar 3: "receipts" for every claim Apex makes | **PLANNED** | `docs/APEX_V2_PLAN.md` |
-| An automated minimum-complete-demonstration script | **PLANNED** | Roadmap, Phase 0 |
 | A register of outside projects (≥ 1000 stars) for the open gaps | **PLANNED** | Roadmap, Phase 0 |
 | CarPlay or Android Auto app | **UNAVAILABLE** | A 2011 Uconnect has neither. Apple and Google gate both. Call Apex and the car page cover the car |
 | Celine's own voice on a phone call | **UNAVAILABLE** | She runs on your PC's GPU, which a call can't reach. Calls use Twilio's voice |
