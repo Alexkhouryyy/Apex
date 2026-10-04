@@ -68,7 +68,7 @@ This is Phase 4's candidate register from the environment roadmap, started small
 Pilots follow the roadmap's rule: one module at a time, behind a switch, with the old path kept as the rollback.
 
 1. **Speech detection in the browser (`ricky0123/vad`).** Small and permissive, and it attacks the biggest piece of voice delay, the fixed 1.2 s wait. **Piloted 2026-10-04:** `Setup-Apex-Speech-Model.cmd` installs it, and hands-free uses it with loudness as the fallback ([HANDS_FREE_COMPANION.md](HANDS_FREE_COMPANION.md)). It still needs measuring on the laptop: about 10 hands-free turns each way, compared by `agent.voice_timing`.
-2. **Office files as sources (`markitdown`).** One function with local paths only and no URLs, with `pypdf` kept as the fallback. Acceptance: the 10-file set.
+2. **Office files as sources (`markitdown`).** One function with local paths only and no URLs, with `pypdf` kept as the fallback. **Piloted 2026-10-04** ([DOCUMENTS.md](DOCUMENTS.md)): the sample set passes here. It still needs the 10-file acceptance set from your own files on the laptop.
 3. **Task suite in the demo.** Take the structure from `inspect_ai` without the dependency: two real tasks, checks instead of model self-grading, and cost read from Apex's own `usage_log`. This is Phase 2's exit evidence.
 
 Later, and only with evidence:

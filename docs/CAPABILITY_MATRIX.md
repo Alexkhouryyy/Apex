@@ -33,7 +33,7 @@ so. Test counts are per file, as collected on 2026-10-04.
 | --- | --- |
 | LIVE | 3 |
 | PARTIAL | 4 |
-| TESTED | 31 |
+| TESTED | 32 |
 | NEEDS YOU | 8 |
 | PLANNED | 3 |
 | UNAVAILABLE | 3 |
@@ -55,6 +55,7 @@ Related: the acceptance test is in [`DEMO.md`](DEMO.md), and outside projects re
 | Long-term memory that survives restarts (SQLite) | **LIVE** | Restart-verified (Blueprint Phase 1). Tests: `test_memory` 22, `test_memory_lazy_runtime` 3 | — |
 | Semantic recall and reranking | **TESTED** | `test_reranker` 12, `test_rerank_wiring` 11, `test_reranker_integrity` 6. The sandbox has no `sentence-transformers`, so only the keyword fallback runs here | Confirm `matched: semantic` appears on your PC |
 | Obsidian vault and vault search | **TESTED** | `test_vault_index` 28 | — |
+| Word, PowerPoint, Excel and PDF as text (read_file, knowledge base, demo); scans reported as needing OCR | **TESTED** | `test_doc_convert` 15 (every guard broken once on purpose and caught); `scripts/doc_acceptance.py` sample set: 5/5 pass, each file under 0.1 s after a one-time 0.8 s load | Run `doc_acceptance.py` on about 10 of your own files (`docs/DOCUMENTS.md`) |
 | Lessons from measured tool failures | **TESTED** | `test_lessons` 26, `test_observed` 44, `test_outcomes` 14, `test_outcome_measurement` 16 | — |
 | Reflection, feedback and trajectory | **TESTED** | `test_reflection` 26, `test_reflection_heartbeat` 14, `test_feedback` 28, `test_trajectory` 8 | — |
 | Skills: procedural, SKILL.md imports and the skill forge | **TESTED** | `test_skills` 13, `test_skill_md_usage` 8, `test_skill_forge` 28, `test_skill_autonomy` 8 | — |

@@ -13,7 +13,7 @@ from typing import Optional
 
 import numpy as np
 
-from agent import longterm
+from agent import doc_convert, longterm
 
 CHUNK_SIZE = 800        # characters
 CHUNK_OVERLAP = 120
@@ -21,7 +21,7 @@ ALLOWED_EXTS = {
     ".md", ".txt", ".rst",
     ".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".c", ".cpp", ".h",
     ".html", ".css", ".sh", ".yaml", ".yml", ".json", ".toml",
-    ".pdf",
+    ".pdf", ".docx", ".pptx", ".xlsx",   # through agent/doc_convert.py
 }
 MAX_FILE_BYTES = 2_000_000  # skip huge files
 
@@ -44,12 +44,17 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_kb_path ON kb_chunks(path)")
 
 
+def _size_ok(path: Path) -> bool:
+    """Documents are mostly zip and images, so they get doc_convert's limit."""
+    limit = doc_convert.MAX_BYTES if path.suffix.lower() in doc_convert.CONVERTIBLE else MAX_FILE_BYTES
+    return path.stat().st_size <= limit
+
+
 def _read_file(path: Path) -> Optional[str]:
     try:
-        if path.suffix.lower() == ".pdf":
-            from pypdf import PdfReader
-            reader = PdfReader(str(path))
-            return "\n".join(p.extract_text() or "" for p in reader.pages)
+        if path.suffix.lower() in doc_convert.CONVERTIBLE:
+            result = doc_convert.convert(path)
+            return result["text"] if result["status"] != "needs_ocr" else None
         return path.read_text(encoding="utf-8", errors="replace")
     except Exception:
         return None
@@ -96,7 +101,7 @@ def reindex(paths: list[str], force: bool = False) -> str:
             files = []
             for sub in root.rglob("*"):
                 if sub.is_file() and sub.suffix.lower() in ALLOWED_EXTS:
-                    if sub.stat().st_size <= MAX_FILE_BYTES:
+                    if _size_ok(sub):
                         files.append(sub)
 
         for f in files:

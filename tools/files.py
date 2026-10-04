@@ -5,6 +5,9 @@ import glob
 
 def read(path: str) -> str:
     path = os.path.expanduser(path)
+    from agent import doc_convert
+    if os.path.splitext(path)[1].lower() in doc_convert.CONVERTIBLE:
+        return doc_convert.read_text(path)     # Word, PowerPoint, Excel, PDF as text, not bytes
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             return f.read()

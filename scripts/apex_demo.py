@@ -156,8 +156,10 @@ def phase_build(d, args):
     from agent import continuity, documents
     out = []
     source = Path(args['source'])
-    text = source.read_text(encoding='utf-8')
-    digest = hashlib.sha256(text.encode()).hexdigest()[:16]
+    from agent import doc_convert
+    text = (doc_convert.convert(source)['text'] if source.suffix.lower() in doc_convert.CONVERTIBLE
+            else source.read_text(encoding='utf-8'))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
     a = _new_project('Demo A · workshop')
     out.append(step('Create project A', PASS, f'Workspace {a[:8]} created and made active.'))
     out.append(step('Reference source material', PASS, f'{source.name} (sha256 {digest}), {len(text)} characters.'))

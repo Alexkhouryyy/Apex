@@ -135,7 +135,7 @@
      "effort": "S (1–2 days)",
      "disposition": "integrate",
      "reason": "The smallest change that closes most of the gap. Pin the version, wrap it in one function, and keep pypdf as fallback and rollback.",
-     "next_step": "Add as an optional extra; build the 10-file acceptance set; wire it into the knowledge base and project sources."
+     "next_step": "Piloted 2026-10-04: agent/doc_convert.py (local paths only, plugins off, 25 MB / 2M-character limits, pypdf fallback, scans reported as needs_ocr) feeds read_file, the knowledge base and the demo. The sample acceptance set passes in the sandbox; next: scripts/doc_acceptance.py on 10 real files on the laptop."
     },
     {
      "repository": "docling-project/docling",

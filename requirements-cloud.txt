@@ -8,6 +8,7 @@ jupyter_client
 ipykernel
 watchdog
 pypdf
+markitdown[docx,pptx,xlsx,pdf]==0.1.8   # Word, PowerPoint, Excel, PDF as text (agent/doc_convert.py)
 fastapi
 uvicorn[standard]
 websockets
