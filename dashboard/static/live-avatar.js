@@ -6,7 +6,9 @@
 
    new ApexLiveAvatar(host, request) -> await start() (throws the reason if
    Simli isn't set up or can't connect) -> say(int16, rate) for each piece of
-   speech -> await finished() -> interrupt() -> dispose(). The page's caller
+   speech -> await finished() -> interrupt() -> dispose(). park() hangs up
+   (Simli bills while a session is open) and keeps the last frame on screen;
+   ensure() reconnects, and is called as soon as you start typing or talking. The page's caller
    falls back to plain audio whenever any of this fails.
 
    The Simli key never reaches this page: Apex's server exchanges it for a
@@ -46,27 +48,63 @@
 
   class LiveAvatar {
     constructor(host, request) {
-      this.host = host; this.request = request; this.ready = false;
+      this.host = host; this.request = request; this.ready = false; this.connecting = null;
       this.resamplers = new Map(); this.speechEnds = 0; this.heard = false; this.quietSince = 0;
     }
-    async start() {
+    // The first connection: throws the reason if the live face can't be used at all.
+    async start() { await this.ensure(); }
+    // Connected now, or as soon as possible (one attempt at a time). Simli bills
+    // while a session is open, so the page hangs up when the face isn't needed
+    // (park) and calls this again the moment you start typing or talking.
+    ensure() {
+      if (this.ready) return Promise.resolve();
+      this.connecting = this.connecting || this.connect().finally(() => { this.connecting = null; });
+      return this.connecting;
+    }
+    async connect() {
       const session = await (await this.request('/api/avatar/live/session', {method: 'POST'})).json();
       if (!session.available) throw Error(session.reason || 'The live face is not set up.');
       await loadBundle();
-      this.video = document.createElement('video');
-      this.video.className = 'avatar-live'; this.video.autoplay = true; this.video.playsInline = true;
-      this.video.setAttribute('playsinline', ''); this.video.muted = true;    // the voice comes on the audio element
-      this.audio = document.createElement('audio'); this.audio.autoplay = true;
-      this.host.append(this.video, this.audio);
+      if (!this.video) {
+        this.video = document.createElement('video');
+        this.video.className = 'avatar-live'; this.video.autoplay = true; this.video.playsInline = true;
+        this.video.setAttribute('playsinline', ''); this.video.muted = true;    // the voice comes on the audio element
+        this.audio = document.createElement('audio'); this.audio.autoplay = true;
+        this.host.append(this.video, this.audio);
+      }
       const {SimliClient, LogLevel} = window.ApexSimli;
-      this.client = new SimliClient(session.session_token, this.video, this.audio, session.ice_servers, LogLevel.ERROR, 'livekit');
-      this.client.on?.('disconnected', () => this.lost('The live face disconnected.'));
-      this.client.on?.('failed', reason => this.lost(`The live face failed: ${reason || 'unknown'}`));
+      const client = new SimliClient(session.session_token, this.video, this.audio, session.ice_servers, LogLevel.ERROR, 'livekit');
+      // Simli ending the session (its idle limit, a network blip) is a hang-up, not a failure:
+      // the face waits, parked, and reconnects when needed.
+      client.on?.('disconnected', () => { if (this.client === client) this.park(); });
+      client.on?.('failed', reason => { if (this.client === client) this.lost(`The live face failed: ${reason || 'unknown'}`); });
+      this.client = client;
       let timer;
-      await Promise.race([this.client.start(),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(Error('The live face did not connect within 20 s.')), 20000); })])
-        .finally(() => clearTimeout(timer));
-      this.ready = true;
+      try {
+        await Promise.race([client.start(),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(Error('The live face did not connect within 20 s.')), 20000); })]);
+      } catch (exc) {
+        this.client = null; try { client.stop?.(); } catch (_) {}
+        throw exc;
+      } finally { clearTimeout(timer); }
+      this.ready = true; this.parked = false;
+      this.host.classList.remove('avatar-parked');
+    }
+    // Hang up and keep the last frame on screen, so the face doesn't vanish.
+    park() {
+      if (!this.client) return;
+      const client = this.client; this.client = null; this.ready = false; this.parked = true;
+      try {
+        if (this.video?.videoWidth) {
+          this.poster = this.poster || Object.assign(document.createElement('canvas'), {className: 'avatar-poster'});
+          this.poster.width = this.video.videoWidth; this.poster.height = this.video.videoHeight;
+          this.poster.getContext('2d').drawImage(this.video, 0, 0);
+          if (!this.poster.isConnected) this.host.append(this.poster);
+        }
+      } catch (_) { /* no frame to keep: the background shows */ }
+      this.host.classList.add('avatar-parked');
+      this.resamplers.clear(); this.speechEnds = 0; this.heard = false;
+      try { client.stop?.(); } catch (_) {}
     }
     lost(why) { if (!this.ready) return; this.ready = false; this.onLost?.(why); }
     // Loudness of the face's own voice, so the page knows when it starts and stops talking.
@@ -125,8 +163,9 @@
     dispose() {
       this.ready = false; clearTimeout(this.timer);
       try { this.client?.stop?.(); } catch (_) {}
+      this.client = null;
       this.ctx?.close?.().catch?.(() => {});
-      this.video?.remove(); this.audio?.remove();
+      this.video?.remove(); this.audio?.remove(); this.poster?.remove();
     }
   }
   window.ApexLiveAvatar = LiveAvatar;

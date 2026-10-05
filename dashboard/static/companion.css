@@ -72,3 +72,6 @@
 .avatar video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 28%}
 .avatar .avatar-speaking{opacity:0;transition:opacity .12s}
 .avatar.avatar-talking .avatar-speaking{opacity:1}
+.avatar .avatar-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 28%;display:none}
+.avatar.avatar-parked .avatar-poster{display:block}
+.avatar.avatar-parked .avatar-live{visibility:hidden}

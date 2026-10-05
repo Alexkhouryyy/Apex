@@ -37,15 +37,25 @@ async function unit(){
   assert.ok(heard===1&&!done,'a 0.9 s pause with 2 s still queued is not the end');
   level=0;await step(2500);assert.ok(done);
   a.say(Int16Array.from({length:16000}),16000);a.interrupt();assert.equal(cleared,1);assert.equal(a.speechEnds,0);
+  // ensure(): one session at a time however many callers; park() hangs up and keeps the face's last frame;
+  // Simli ending the session is a hang-up (parked), not a failure.
+  let sessions=0;const handlers={};
+  w.ApexSimli={LogLevel:{ERROR:0},SimliClient:class{constructor(){this.stopped=0;}on(e,f){handlers[e]=f;}start(){return new Promise(r=>setTimeout(r,30));}stop(){this.stopped++;}sendAudioData(){}ClearBuffer(){}}};
+  const b=new w.ApexLiveAvatar(w.document.getElementById('host'),async url=>{sessions++;return {json:async()=>({available:true,session_token:'t',ice_servers:[]})};});
+  await Promise.all([b.ensure(),b.ensure(),b.ensure()]);
+  assert.equal(sessions,1,'three callers, one paid session');assert.ok(b.ready);
+  const c1=b.client;b.park();assert.ok(!b.ready&&b.parked&&c1.stopped===1);assert.ok(b.host.classList.contains('avatar-parked'));
+  await b.ensure();assert.equal(sessions,2);assert.ok(b.ready&&!b.host.classList.contains('avatar-parked'));
+  let lost=null;b.onLost=r=>lost=r;handlers.disconnected();assert.ok(!b.ready&&b.parked&&lost===null,'a Simli hang-up parks the face');
   dom.window.close();
 }
 
 // --- 2. companion.js routing speech to the live face ------------------------
-async function page({fails=false, streamOk=false, voice='openai', talkMs=20}={}){
+async function page({fails=false, streamOk=false, voice='openai', talkMs=20, ensureFails=false, parkMs=0, connectMs=0}={}){
   const dom=new JSDOM(fs.readFileSync(path.join(base,'companion.html'),'utf8'),{url:'http://localhost:7860/companion',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window,d=w.document,$=id=>d.getElementById(id);
-  w.localStorage.setItem('apex.presence.look','live');
-  const s={said:[],interrupts:0,audios:0,finishes:0,disposed:0,instances:[]};
+  w.localStorage.setItem('apex.presence.look','live');if(parkMs)w.ApexLiveParkMs=parkMs;
+  const s={said:[],interrupts:0,audios:0,finishes:0,disposed:0,instances:[],ensures:0,parks:0};
   w.Audio=class{constructor(){s.audios++;}play(){queueMicrotask(()=>this.onended?.());return Promise.resolve();}pause(){}};
   w.URL.createObjectURL=()=> 'blob:x';w.URL.revokeObjectURL=()=>{};
   w.speechSynthesis={cancel(){},speak(){}};w.SpeechSynthesisUtterance=class{};
@@ -67,6 +77,9 @@ async function page({fails=false, streamOk=false, voice='openai', talkMs=20}={})
   w.ApexLiveAvatar=class{
     constructor(host){this.host=host;s.instances.push(this);}
     async start(){if(fails)throw Error('Add SIMLI_API_KEY and SIMLI_FACE_ID to Apex settings.');this.ready=true;}
+    ensure(){s.ensures++;if(ensureFails)return Promise.reject(Error('Simli could not be reached.'));
+      if(this.ready)return Promise.resolve();this.pending=this.pending||new Promise(r=>setTimeout(()=>{this.ready=true;this.pending=null;r();},connectMs));return this.pending;}
+    park(){s.parks++;this.ready=false;}
     say(pcm,rate){s.said.push({n:pcm.length,rate});}
     endStream(){} interrupt(){s.interrupts++;}
     finished(onSound){s.finishes++;onSound?.();return new Promise(r=>setTimeout(r,talkMs));}
@@ -107,6 +120,26 @@ async function page({fails=false, streamOk=false, voice='openai', talkMs=20}={})
   p=await page();p.instances[0].onLost('The live face disconnected.');
   assert.equal(p.root.dataset.look,undefined);assert.equal(p.disposed,1);
   await p.ask();assert.equal(p.said.length,0);assert.ok(p.audios>=1);p.close();
-  console.log('PASS: 16 kHz resampling is exact across chunk boundaries and keeps pitch, the face is done only when its queued speech has played and gone quiet, clip voices and streamed voices reach the face with no sample lost, Stop clears it, and when Simli is not set up or drops, the orb returns and speech plays as audio.');
+  // Quiet for a while: the face hangs up. The next reply reconnects it first, then speaks.
+  p=await page({parkMs:150});await p.ask();await p.tick(300);
+  assert.ok(p.parks>=1,'parked after the quiet spell');assert.equal(p.instances[0].ready,false);
+  const before=p.ensures;p.said.length=0;p.finishes=0;await p.ask();
+  assert.ok(p.ensures>before,'reconnected');assert.equal(p.said.length,1,'and spoke through the face');p.close();
+  // The reply is ready before the reconnect finishes: it waits for the face rather than skipping it.
+  p=await page({connectMs:300});p.instances[0].park();p.said.length=0;
+  p.$('message').value='Hi';p.$('send').click();for(let i=0;i<60&&!p.finishes&&!p.audios;i++)await p.tick();await p.tick(100);
+  assert.equal(p.said.length,1,'spoke through the face once it connected');assert.equal(p.audios,0);p.close();
+  // Typing warms it up before the reply exists.
+  p=await page();p.instances[0].park();const e0=p.ensures;
+  p.$('message').value='h';p.$('message').dispatchEvent(new p.w.Event('input'));await p.tick();
+  assert.ok(p.ensures>e0&&p.instances[0].ready,'typing reconnects the face');p.close();
+  // Can't reconnect: this reply is plain audio, and the live look stays for next time.
+  p=await page({ensureFails:true});p.instances[0].park();
+  await p.ask();assert.equal(p.said.length,0);assert.ok(p.audios>=1);assert.equal(p.$('presence-look').value,'live');
+  assert.match(p.$('presence-look').title,/could not be reached/);p.close();
+  // Page hidden while quiet: hang up at once.
+  p=await page();Object.defineProperty(p.w.document,'hidden',{value:true,configurable:true});
+  p.w.document.dispatchEvent(new p.w.Event('visibilitychange'));assert.equal(p.parks,1);p.close();
+  console.log('PASS: 16 kHz resampling is exact across chunk boundaries and keeps pitch, the face is done only when its queued speech has played and gone quiet, clip voices and streamed voices reach the face with no sample lost, Stop clears it, and when Simli is not set up or drops, the orb returns and speech plays as audio; it hangs up when quiet or hidden, keeps one session however many callers, reconnects on typing or before a reply, and speaks as plain audio when it cannot reconnect.');
   process.exit(0);
 })().catch(e=>{console.error(e);process.exit(1);});

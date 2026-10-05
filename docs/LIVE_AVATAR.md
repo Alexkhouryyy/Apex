@@ -77,6 +77,17 @@ Apex writes a sentence → your voice server speaks it
 - **The key never reaches a browser.** The companion asks Apex for a session.
   Apex sends the key to Simli and gives the page only a short-lived session
   token. Other websites can't ask Apex for a session.
+- **You only pay while it's being used.** Simli bills while a session is open:
+  - After 90 seconds of quiet, or as soon as you switch away from the page,
+    Apex hangs up and keeps the face's last frame on screen.
+  - The moment you type, press the mic, start talking hands-free or send a
+    message, it reconnects in the background, usually before the reply is
+    ready.
+  - If a reply is ready first, it waits for the face. If the face can't
+    reconnect, that reply plays as plain audio and the live face is tried
+    again next time.
+  - A hang-up on Simli's side (its idle limit, a network blip) is handled
+    the same way.
 - **Stop or talking over Apex** clears whatever the face still has to say.
 - **If anything fails, Apex still speaks,** as plain audio, and the orb comes
   back with the reason on the setting. That covers no key, no credit, no
@@ -103,6 +114,10 @@ Apex writes a sentence → your voice server speaks it
   - Clip voices and Celine's streamed voice both reach the face, with no
     sample lost.
   - Stop clears it.
+  - It hangs up when quiet or hidden, and opens one paid session however many
+    things ask at once.
+  - It reconnects on typing, waits for a reconnect that's still in progress,
+    and speaks as plain audio when it can't reconnect.
   - When Simli isn't set up, or drops, the orb returns and speech plays as
     audio.
   - Every rule was broken once on purpose and caught.

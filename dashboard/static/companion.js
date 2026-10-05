@@ -377,7 +377,20 @@
     return customModel;
   }
   let avatar = null, lookPending = false, videoAvatar = null, videoPending = false, liveAvatar = null, livePending = false;
-  // The live photoreal face (live-avatar.js, Simli).
+  // The live photoreal face (live-avatar.js, Simli). Simli bills while a
+  // session is open, so the face hangs up after a quiet spell or when the page
+  // is hidden, keeps its last frame, and reconnects as soon as you start typing
+  // or talking: usually connected again before the reply is ready.
+  let parkTimer = null;
+  const parkAfter = () => Number(window.ApexLiveParkMs) || 90000;
+  function liveBusy() { clearTimeout(parkTimer); }
+  function liveIdle() { clearTimeout(parkTimer); parkTimer = setTimeout(() => liveAvatar?.park(), parkAfter()); }
+  function liveWarm() { if (!liveAvatar) return; clearTimeout(parkTimer); if (!liveAvatar.ready) liveAvatar.ensure().catch(exc => liveNote(exc.message)); }
+  function liveNote(reason) { $('presence-look').title = reason; }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && liveAvatar && !root.classList.contains('speaking')) { clearTimeout(parkTimer); liveAvatar.park(); }
+  });
+  $('message').addEventListener('input', liveWarm);
   function liveOff(reason) {
     $('presence-look').value = 'orb'; delete root.dataset.look;
     $('presence-look').title = reason;
@@ -391,9 +404,10 @@
       await candidate.start();
       if ($('presence-look').value !== 'live') { candidate.dispose(); return; }
       liveAvatar = candidate; root.dataset.look = 'live'; $('presence-look').title = '';
+      liveIdle();
       candidate.onLost = reason => {
         if (liveAvatar !== candidate) return;
-        candidate.dispose(); liveAvatar = null; liveOff(reason);    // speech goes back to plain audio
+        clearTimeout(parkTimer); candidate.dispose(); liveAvatar = null; liveOff(reason);    // speech goes back to plain audio
       };
     } catch (exc) { candidate.dispose(); liveOff(exc.message); }
     finally { livePending = false; }
@@ -573,7 +587,7 @@
       if (lipsync) { blob.clip = videoAvatar.render(blob); blob.clip.catch(() => {}); }
       return blob;
     };
-    const live = () => Boolean(liveAvatar?.ready);
+    const live = () => Boolean(liveAvatar);           // connected, or parked and able to reconnect
     const play = blob => blob && blob.kind === 'pcm' ? (live() ? playLivePcm(blob) : playPcm(blob, epoch))
       : live() && blob ? playLive(blob) : blob && blob.clip ? playClip(blob) : playAudio(blob);
     // The live face (Simli): Apex's voice goes to the face instead of the
@@ -590,13 +604,24 @@
         for (let i = 0; i < f.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, Math.round(f[i] * 32767)));
       } catch (_) { return playAudio(blob); }
       if (epoch !== speechEpoch || !live()) return playAudio(blob);
+      liveBusy();
+      if (!liveAvatar.ready) {                        // parked: reconnect, or speak as plain audio this once
+        try { await liveAvatar.ensure(); } catch (exc) { liveNote(exc.message); return playAudio(blob); }
+        if (epoch !== speechEpoch || !liveAvatar?.ready) return playAudio(blob);
+      }
       liveAvatar.say(pcm, 16000);
       endPlayback = () => liveAvatar?.interrupt(); audio = {pause: () => liveAvatar?.interrupt()};
       state('speaking', 'Speaking · Stop ends playback'); controls();
       await liveAvatar.finished(() => mark('first_sound'));
+      liveIdle();
       if (audio && !audio.src) { audio = null; endPlayback = null; }
     };
     const playLivePcm = async handle => {
+      liveBusy();
+      if (!liveAvatar.ready) {
+        try { await liveAvatar.ensure(); } catch (exc) { liveNote(exc.message); }
+        if (!liveAvatar?.ready) return playPcm(handle, epoch);         // the voice still plays
+      }
       const id = {}; let carry = null, first = true, stopped = false;
       const stop = () => { stopped = true; handle.reader.cancel().catch(() => {}); handle.received(); liveAvatar?.interrupt(); };
       endPlayback = stop; audio = {pause: stop};
@@ -617,6 +642,7 @@
       if (stopped) return;
       if (first) throw new Error('The voice server sent no audio.');
       await liveAvatar.finished(() => mark('first_sound'));
+      liveIdle();
       if (audio && !audio.src) { audio = null; endPlayback = null; }
     };
     // The video avatar: the face saying the section, with its sound. If the
@@ -821,6 +847,7 @@
   // `look`: a hotkey / "Hey Celly" request (agent/look_now.py) — the server
   // attaches the screen it captured; no browser share is sent with it.
   async function send(text, automatic = false, recovery = null, fromHands = false, look = null) {
+    if (!automatic) liveWarm();          // the live face reconnects while the reply is being written
     if (speechBusy || speechDraining || active || recorder || (hands?.busy && !fromHands) || (pendingRemote && !recovery) || !text.trim()) { timing = null; return; }
     // Only the send that a transcript triggered is a voice turn; a typed
     // message or a proactive check-in must not inherit a stale clock.
@@ -982,6 +1009,7 @@
     ? 'Work: Apex can use action tools on the computer running Apex, with its existing safety gates. Describe the task you want it to perform.'
     : 'Discuss: look, research, and reason together. Action tools are disabled.'; };
   $('mic').onclick = async () => {
+    liveWarm();
     if (recorder) { if (recorder.state === 'recording') recorder.stop(); return; }
     if (speechBusy || speechDraining || active || pendingRemote) return;
     stopSpeech(); error();
@@ -1032,7 +1060,7 @@
       onState: text => {
         if (text === 'ready') { resumeHands(); return; }
         if (!active && !speechBusy) state(text.startsWith('Listening') ? 'listening' : 'thinking', text);
-        if (text.startsWith('Listening · pause')) lastInteraction=Date.now();
+        if (text.startsWith('Listening · pause')) { lastInteraction=Date.now(); liveWarm(); }
         $('mic-note').textContent=text; controls();
       },
       onError: exc => { disableHands(); error(exc.message); state('', 'Hands-free stopped.'); },
