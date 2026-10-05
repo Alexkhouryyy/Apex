@@ -25,6 +25,7 @@ with the date. Send the line each item asks for, never a key or a token.
 | 12 | Call Apex | 20 min | Twilio number + per-minute | did the call answer? | Call Apex → LIVE |
 | 13 | Connect one app | 10 min | Composio plan | demo app steps' rows | Apps, demo step 4 → LIVE |
 | 14 | Photoreal video avatar | 1 h, once | free | render time per sentence, and how it looks | Video avatar → LIVE |
+| 15 | Live photoreal face (Simli) | 15 min | Simli per-minute | does it look real, and how long before it speaks? | Live face → LIVE |
 
 ---
 
@@ -170,3 +171,15 @@ Follow [VIDEO_AVATAR.md](VIDEO_AVATAR.md):
 Send:
 - the avatar server's console output, which includes the render times;
 - one sentence on how real it looks.
+
+## 15. Live photoreal face (Simli)
+
+Follow [LIVE_AVATAR.md](LIVE_AVATAR.md):
+1. Create a Simli account and a face.
+2. Put the key and face ID in `.env` with `set_env_key.py`.
+3. Choose **Live face (Simli)**, and talk with Local Qwen.
+
+Send back:
+- how real it looks;
+- roughly how long before it starts talking;
+- the setting's message, if it falls back to the orb.

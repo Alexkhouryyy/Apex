@@ -34,7 +34,7 @@ so. Test counts are per file, as collected on 2026-10-04.
 | LIVE | 3 |
 | PARTIAL | 4 |
 | TESTED | 34 |
-| NEEDS YOU | 9 |
+| NEEDS YOU | 10 |
 | PLANNED | 3 |
 | UNAVAILABLE | 3 |
 
@@ -74,6 +74,7 @@ Related: the acceptance test is in [`DEMO.md`](DEMO.md), and outside projects re
 | Companion (`/companion`): chat, Voice mode, Look now | **PARTIAL** | LIVE: you use it. Not measured: barge-in stop time on the laptop (simulated 0.25 s), and wake-word accuracy. Tests: `test_companion` 23, `test_look_now` 35, `test_wake` 25 | PROVE_IT §1b |
 | Apex's character: the Mk I armoured suit (reflective metal, selective glow, suit-up sequence), or your own rigged model, in place of the orb; voice drives the grille or mouth | **TESTED** | `check_avatar_pose.cjs` (incl. bone names across Mixamo/VRoid/Blender), `check_avatar_ui.cjs`, `check_voice_stream_ui.cjs`; `check_avatar_browser.cjs` in real Chromium; every state, the suit-up, car and phone layouts, and a Mixamo model through the model slot checked by eye | Turn on **Apex appears as: Character** and judge it on the laptop and in the car; for a film-quality look, add your own model (`docs/AVATAR.md`) |
 | Photoreal video avatar: real footage of the character, mouth redrawn per sentence by MuseTalk on your GPU | **NEEDS YOU** | `test_video_avatar` 8 (encoding, server rules, Apex routes against a real server, installer), `check_video_avatar_ui.cjs` (every guard broken once and caught), `check_video_avatar_browser.cjs` (real clips in Chromium). The MuseTalk engine itself has not run: it needs your GPU | `Setup-Apex-Video-Avatar.cmd`, make the idle video, `Start-Apex-Video-Avatar.cmd`, then choose **Video (photoreal)** and send the render times (`docs/VIDEO_AVATAR.md`) |
+| Live photoreal face (Simli): Apex's own voice in, a photoreal face streamed back, starts within about a second | **NEEDS YOU** | `test_live_avatar` 7 (key only to Simli, token only to the page, capped sessions, every failure a reason), `check_live_avatar_ui.cjs` (16 kHz conversion, streaming, Stop, fallbacks; every guard broken once and caught), `check_live_avatar_browser.cjs` (real bundle in Chromium). No real Simli session yet: no key here | Simli account, face ID and API key into `.env`, then choose **Live face (Simli)** (`docs/LIVE_AVATAR.md`) |
 | Several voices, including an Alex voice | **NEEDS YOU** | `test_voices` 18. The library, both voice servers and the Voices tab are built | Record about 15 s of your voice in **Voices**, then pick it (`docs/VOICES.md`) |
 | Speech model for hands-free (tells voice from noise; sends 0.7 s after you stop instead of 1.2 s) | **NEEDS YOU** | `test_speech_model` 8, `check_speech_detector_ui.cjs` (every guard broken once on purpose and caught). The real model loads and runs in Chromium: speech scored 0.6–0.98; steady noise and hum about 0.01, with one 0.2 s spike to 0.72 at a sound change | Run `Setup-Apex-Speech-Model.cmd`, do about 10 hands-free turns each way, then send `agent.voice_timing` |
 | Voicebox desktop voice | **TESTED** | `test_voicebox` 14, `test_voicebox_live` 23 (live against a stub) | Only if you use Voicebox |

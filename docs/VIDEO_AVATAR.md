@@ -1,5 +1,7 @@
 # Apex as a photoreal face
 
+> **The top tier is [LIVE_AVATAR.md](LIVE_AVATAR.md)** (Simli): the whole face moves and it starts talking within about a second, but it's paid and uses the cloud. This page is the free, private option that runs on your own GPU.
+
 Apex can appear as a real-looking person or character on video, whose
 mouth moves with what Apex says. It isn't 3D drawn in the browser. It's real
 footage of the character, with the mouth area redrawn for every sentence by

@@ -88,6 +88,8 @@ jobs:
           node scripts/check_avatar_ui.cjs
           node scripts/check_video_avatar_ui.cjs
           node scripts/check_video_avatar_sync.cjs
+          node scripts/check_live_avatar_ui.cjs
+          node --check dashboard/static/live-avatar.js
           node --check dashboard/static/video-avatar.js
           node --check dashboard/static/avatar-pose.js
           node --check dashboard/static/speech-model.js

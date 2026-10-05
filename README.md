@@ -29,6 +29,8 @@ Two real tasks, checked by rules, with what they cost, so you can compare models
 Apex as a full-body character whose mouth follows its voice, instead of the orb:
 **[docs/AVATAR.md](docs/AVATAR.md)**.
 Apex as a photoreal face that lip-syncs its voice, on your GPU:
+Apex as a live photoreal face (Simli), in its own voice, streamed:
+**[docs/LIVE_AVATAR.md](docs/LIVE_AVATAR.md)**.
 **[docs/VIDEO_AVATAR.md](docs/VIDEO_AVATAR.md)**.
 Designing physical objects and checking they can actually be made:
 **[docs/FORGE.md](docs/FORGE.md)**.

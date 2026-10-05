@@ -376,7 +376,28 @@
     customModel = customModel || fetch(CUSTOM_MODEL, {method: 'HEAD'}).then(r => r.ok ? CUSTOM_MODEL : null).catch(() => null);
     return customModel;
   }
-  let avatar = null, lookPending = false, videoAvatar = null, videoPending = false;
+  let avatar = null, lookPending = false, videoAvatar = null, videoPending = false, liveAvatar = null, livePending = false;
+  // The live photoreal face (live-avatar.js, Simli).
+  function liveOff(reason) {
+    $('presence-look').value = 'orb'; delete root.dataset.look;
+    $('presence-look').title = reason;
+    $('presence-look').querySelector('option[value=live]').textContent = 'Live face (not available)';
+  }
+  async function startLiveAvatar() {
+    if (liveAvatar || livePending || !window.ApexLiveAvatar) return;
+    livePending = true;
+    const candidate = new window.ApexLiveAvatar($('avatar'), request);
+    try {
+      await candidate.start();
+      if ($('presence-look').value !== 'live') { candidate.dispose(); return; }
+      liveAvatar = candidate; root.dataset.look = 'live'; $('presence-look').title = '';
+      candidate.onLost = reason => {
+        if (liveAvatar !== candidate) return;
+        candidate.dispose(); liveAvatar = null; liveOff(reason);    // speech goes back to plain audio
+      };
+    } catch (exc) { candidate.dispose(); liveOff(exc.message); }
+    finally { livePending = false; }
+  }
   // The photoreal video avatar (video-avatar.js, scripts/avatar_server.py).
   async function startVideoAvatar() {
     if (videoAvatar || videoPending || !window.ApexVideoAvatar) return;
@@ -399,9 +420,11 @@
   async function applyLook() {
     const look = $('presence-look').value;
     if (look !== 'video' && videoAvatar) { videoAvatar.dispose(); videoAvatar = null; }
+    if (look !== 'live' && liveAvatar) { liveAvatar.dispose(); liveAvatar = null; }
     if (look !== 'character' && avatar) { avatar.dispose(); avatar = null; }
     if (look === 'orb') { delete root.dataset.look; return; }
     if (look === 'video') { startVideoAvatar(); return; }
+    if (look === 'live') { startLiveAvatar(); return; }
     if (avatar || lookPending) return;
     if (!window.ApexAvatarCharacter) { window.addEventListener('apex-avatar-ready', applyLook, {once: true}); return; }
     lookPending = true;
@@ -417,7 +440,7 @@
     option.disabled = true; option.textContent = 'Character (needs WebGL)';
     $('presence-look').title = 'This device cannot draw Apex\'s character (no WebGL), so the orb stays.';
   }
-  $('presence-look').value = ['character', 'video'].includes(localStorage.getItem('apex.presence.look')) ? localStorage.getItem('apex.presence.look') : 'orb';
+  $('presence-look').value = ['character', 'video', 'live'].includes(localStorage.getItem('apex.presence.look')) ? localStorage.getItem('apex.presence.look') : 'orb';
   $('presence-look').addEventListener('change', () => { localStorage.setItem('apex.presence.look', $('presence-look').value); applyLook(); });
   applyLook();
   async function openStream(section, engine, profile) {
@@ -550,7 +573,52 @@
       if (lipsync) { blob.clip = videoAvatar.render(blob); blob.clip.catch(() => {}); }
       return blob;
     };
-    const play = blob => blob && blob.kind === 'pcm' ? playPcm(blob, epoch) : blob && blob.clip ? playClip(blob) : playAudio(blob);
+    const live = () => Boolean(liveAvatar?.ready);
+    const play = blob => blob && blob.kind === 'pcm' ? (live() ? playLivePcm(blob) : playPcm(blob, epoch))
+      : live() && blob ? playLive(blob) : blob && blob.clip ? playClip(blob) : playAudio(blob);
+    // The live face (Simli): Apex's voice goes to the face instead of the
+    // speakers, and comes back from it, in sync. Streamed voice goes in as it
+    // arrives. If anything fails, the speech plays as plain audio instead.
+    const playLive = async blob => {
+      if (epoch !== speechEpoch) return;
+      let pcm;
+      try {
+        const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const decoded = await new Offline(1, 1, 16000).decodeAudioData(await blob.arrayBuffer());
+        const f = decoded.getChannelData(0);
+        pcm = new Int16Array(f.length);
+        for (let i = 0; i < f.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, Math.round(f[i] * 32767)));
+      } catch (_) { return playAudio(blob); }
+      if (epoch !== speechEpoch || !live()) return playAudio(blob);
+      liveAvatar.say(pcm, 16000);
+      endPlayback = () => liveAvatar?.interrupt(); audio = {pause: () => liveAvatar?.interrupt()};
+      state('speaking', 'Speaking · Stop ends playback'); controls();
+      await liveAvatar.finished(() => mark('first_sound'));
+      if (audio && !audio.src) { audio = null; endPlayback = null; }
+    };
+    const playLivePcm = async handle => {
+      const id = {}; let carry = null, first = true, stopped = false;
+      const stop = () => { stopped = true; handle.reader.cancel().catch(() => {}); handle.received(); liveAvatar?.interrupt(); };
+      endPlayback = stop; audio = {pause: stop};
+      try {
+        while (!stopped) {
+          const {value, done} = await handle.reader.read();
+          if (done) break;
+          if (epoch !== speechEpoch) { stop(); return; }
+          if (!value || !value.length) continue;
+          let bytes = value;
+          if (carry) { const joined = new Uint8Array(carry.length + bytes.length); joined.set(carry); joined.set(bytes, carry.length); bytes = joined; carry = null; }
+          if (bytes.length % 2) { carry = bytes.slice(-1); bytes = bytes.slice(0, -1); }
+          if (!bytes.length) continue;
+          if (first) { first = false; mark('tts_ready'); state('speaking', 'Speaking · Stop ends playback'); controls(); }
+          liveAvatar?.say(new Int16Array(bytes.slice().buffer), handle.rate, id);
+        }
+      } finally { handle.received(); liveAvatar?.endStream(id); }
+      if (stopped) return;
+      if (first) throw new Error('The voice server sent no audio.');
+      await liveAvatar.finished(() => mark('first_sound'));
+      if (audio && !audio.src) { audio = null; endPlayback = null; }
+    };
     // The video avatar: the face saying the section, with its sound. If the
     // clip can't be made or played, the same section plays as plain audio.
     const playClip = async blob => {

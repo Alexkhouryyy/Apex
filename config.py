@@ -667,6 +667,16 @@ FORGE_DEFAULT_FORMAT = os.getenv("FORGE_DEFAULT_FORMAT", "3mf").strip().lower()
 # The photoreal video avatar (scripts/avatar_server.py, docs/VIDEO_AVATAR.md), on this PC.
 AVATAR_URL = os.getenv("AVATAR_URL", "http://127.0.0.1:17495")
 
+# The live photoreal face (Simli, docs/LIVE_AVATAR.md): Apex's own voice in,
+# a lip-synced face streamed back over WebRTC. The key stays on this machine;
+# the browser only ever gets a short-lived session token.
+SIMLI_API_KEY = os.getenv("SIMLI_API_KEY", "").strip()
+SIMLI_FACE_ID = os.getenv("SIMLI_FACE_ID", "").strip()
+SIMLI_MODEL = os.getenv("SIMLI_MODEL", "").strip()            # blank: Simli's default
+SIMLI_URL = os.getenv("SIMLI_URL", "https://api.simli.ai").rstrip("/")
+SIMLI_MAX_SESSION = int(os.getenv("SIMLI_MAX_SESSION", "1800"))   # seconds; a session is billed while open
+SIMLI_MAX_IDLE = int(os.getenv("SIMLI_MAX_IDLE", "180"))          # seconds of silence before Simli closes it
+
 # Local Qwen speech via the Voicebox desktop application.
 VOICEBOX_URL = os.getenv("VOICEBOX_URL", "http://127.0.0.1:17493")
 VOICEBOX_PROFILE = os.getenv("VOICEBOX_PROFILE", "")  # exact profile ID or unique name

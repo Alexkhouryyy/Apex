@@ -661,6 +661,44 @@ async def avatar_lipsync(request: Request, format: str = 'mp4', start: int = 0):
                              'Server-Timing': response.headers.get('server-timing', '')})
 
 
+# --- The live photoreal face (Simli) -----------------------------------------
+# Apex asks Simli for a session with the key from .env and gives the page only
+# the session token and the network (ICE) servers. The key never reaches a
+# browser. Each session is billed while open, so its length and idle time are
+# capped (SIMLI_MAX_SESSION, SIMLI_MAX_IDLE).
+@router.post('/api/avatar/live/session')
+async def live_avatar_session(request: Request):
+    import httpx
+    import config
+    _check_origin(request)
+    if not config.SIMLI_API_KEY or not config.SIMLI_FACE_ID:
+        return {'available': False, 'reason': 'Add SIMLI_API_KEY and SIMLI_FACE_ID to Apex settings (docs/LIVE_AVATAR.md).'}
+    body = {'faceId': config.SIMLI_FACE_ID, 'handleSilence': True,
+            'maxSessionLength': config.SIMLI_MAX_SESSION, 'maxIdleTime': config.SIMLI_MAX_IDLE}
+    if config.SIMLI_MODEL:
+        body['model'] = config.SIMLI_MODEL
+    headers = {'x-simli-api-key': config.SIMLI_API_KEY, 'Content-Type': 'application/json'}
+    try:
+        async with httpx.AsyncClient(base_url=config.SIMLI_URL, timeout=httpx.Timeout(20, connect=8)) as client:
+            token = await client.post('/compose/token', json=body, headers=headers)
+            if token.status_code in (401, 403):
+                return {'available': False, 'reason': 'Simli refused the API key. Check SIMLI_API_KEY.'}
+            if token.status_code != 200:
+                return {'available': False, 'reason': f'Simli could not start a session ({token.status_code}). Check SIMLI_FACE_ID and your Simli balance.'}
+            session = token.json().get('session_token')
+            if not session:
+                return {'available': False, 'reason': 'Simli answered without a session token.'}
+            try:
+                ice = (await client.get('/compose/ice', headers=headers)).json()
+            except (httpx.HTTPError, ValueError):
+                ice = None
+    except httpx.HTTPError:
+        return {'available': False, 'reason': 'Simli could not be reached. Check this computer is online.'}
+    if not isinstance(ice, list) or not ice:
+        ice = [{'urls': ['stun:stun.l.google.com:19302']}]            # what Simli's own client falls back to
+    return {'available': True, 'session_token': session, 'ice_servers': ice}
+
+
 @router.get('/api/companion/timing')
 async def voice_timing_summary(limit: int = 20):
     from agent import voice_timing
