@@ -1,0 +1,679 @@
+// Apex Code (dashboard/code.py, agent/code_studio.py): coding sessions on your
+// Claude and ChatGPT plans. Home: greeting, your plans, the brief, recent work.
+// Session: what you asked and what Apex did, live, step by step; the change,
+// a second opinion out of 10, checks, and Keep / Undo / Catch up / Throw away.
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = (tag, attrs = {}) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
+  const store = {
+    get(k, d = '') { try { return localStorage.getItem(k) ?? d; } catch (_) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} },
+  };
+  const auth = () => { const t = store.get('apex_token'); return t ? {Authorization: 'Bearer ' + t} : {}; };
+  async function api(path, options = {}, as = 'json') {
+    const r = await fetch(path, {...options, headers: {'Content-Type': 'application/json', ...auth(), ...(options.headers || {})}});
+    if (r.status === 401) { $('login').showModal(); throw new Error('Enter your Apex token.'); }
+    if (as === 'text' && r.ok) return r.text();
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || `Request failed (${r.status})`);
+    return body;
+  }
+  const post = (path, body = {}) => api(path, {method: 'POST', body: JSON.stringify(body)});
+  let toastTimer;
+  function say(text, kind = '', link) {
+    const t = $('toast'); t.replaceChildren(text); t.className = 'toast ' + kind; t.hidden = false;
+    if (link) { t.append(' '); const a = el('a', '', link.text); a.href = link.href; t.append(a); }
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, kind === 'error' ? 7000 : 4000);
+  }
+
+  const NAME = {claude: 'Claude plan', chatgpt: 'ChatGPT plan'};
+  const OTHER = {claude: 'chatgpt', chatgpt: 'claude'};
+  let ov = null, current = null, detail = null, lastId = 0, feed = null, pollTimer = null, lastOverview = 0, quiet = 0;
+  let project = Number(store.get('apex.code.project')) || null;
+  let engine = store.get('apex.code.engine'), mode = store.get('apex.code.mode', 'safe');
+  const busy = () => !!(detail && (detail.working || detail.side));
+
+  // ---------------------------------------------------------------- small pieces
+  function ago(ts) {
+    const s = Date.now() / 1000 - ts;
+    if (s < 60) return 'just now'; if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ago`; if (s < 172800) return 'yesterday';
+    return new Date(ts * 1000).toLocaleDateString(undefined, {day: 'numeric', month: 'short'});
+  }
+  const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  function reactor() {
+    const s = svg('svg', {viewBox: '0 0 24 24', class: 'reactor', 'aria-hidden': 'true'});
+    s.append(svg('circle', {class: 'ring', cx: 12, cy: 12, r: 10}), svg('circle', {class: 'core', cx: 12, cy: 12, r: 4}));
+    return s;
+  }
+  function ring10(rating, size = 44) {
+    const r = 18, c = 2 * Math.PI * r;
+    const s = svg('svg', {viewBox: '0 0 44 44', width: size, height: size, class: 'ring10 ' + (rating >= 8 ? 'hi' : rating >= 6 ? 'mid' : 'lo'), role: 'img', 'aria-label': `${rating} out of 10`});
+    s.append(svg('circle', {class: 'bg', cx: 22, cy: 22, r}),
+      svg('circle', {class: 'fg', cx: 22, cy: 22, r, 'stroke-dasharray': `${(rating / 10) * c} ${c}`, transform: 'rotate(-90 22 22)'}));
+    const t = svg('text', {x: 22, y: 22}); t.textContent = rating; s.append(t);
+    return s;
+  }
+  // A safe little Markdown: paragraphs, lists, **bold**, `code` and ``` blocks. Built
+  // as DOM nodes, never innerHTML, so nothing an agent writes can run in the page.
+  function md(text) {
+    const frag = document.createDocumentFragment();
+    const parts = String(text || '').split(/```[\w+-]*\n?([\s\S]*?)```/g);
+    parts.forEach((part, i) => {
+      if (i % 2) { const pre = el('pre'); pre.append(el('code', '', part.replace(/\n$/, ''))); frag.append(pre); return; }
+      let list = null, para = [];
+      const flush = () => { if (para.length) { const p = el('p'); inline(p, para.join('\n')); frag.append(p); para = []; } };
+      for (const raw of part.split('\n')) {
+        const line = raw.trimEnd();
+        const item = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)/);
+        if (item) { flush(); if (!list) { list = el('ul'); frag.append(list); } const li = el('li'); inline(li, item[1]); list.append(li); continue; }
+        list = null;
+        const head = line.match(/^#{1,4}\s+(.*)/);
+        if (head) { flush(); const p = el('p', 'h'); inline(p, head[1]); frag.append(p); continue; }
+        if (!line.trim()) { flush(); continue; }
+        para.push(line.trim());
+      }
+      flush();
+    });
+    return frag;
+  }
+  function inline(node, text) {
+    const re = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g; let last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) node.append(text.slice(last, m.index));
+      node.append(m[0][0] === '`' ? el('code', '', m[0].slice(1, -1)) : el('strong', '', m[0].slice(2, -2)));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) node.append(text.slice(last));
+  }
+  const plain = t => String(t || '').replace(/```[\s\S]*?```/g, '').replace(/[`*#>]/g, '').replace(/\n{2,}/g, '\n').trim();
+
+  // ---------------------------------------------------------------- overview: plans, home, rail
+  async function loadOverview() {
+    ov = await api('/api/code');
+    lastOverview = Date.now();
+    if (!ov.projects.some(p => p.id === project)) project = ov.projects[0] && ov.projects[0].id;
+    if (!engine || !NAME[engine]) engine = ov.default_engine;
+    renderPlans(); renderHome(); renderRail(); renderEngine();
+  }
+  function planState(p) { return p.ready ? 'ready' : /signed in|not signed|installed|bills|credits/.test(p.why) ? 'out' : 'resting'; }
+  function renderPlans() {
+    const root = $('plans'); root.replaceChildren();
+    for (const p of ov.plans) {
+      const working = ov.sessions.some(s => s.working && s.engine === p.id);
+      const chip = el('div', `plan ${p.id} ${planState(p)}${working ? ' busy' : ''}`);
+      chip.title = p.ready ? `${p.name}: signed in and ready` : `${p.name} ${p.why}. ${p.how || ''}`;
+      chip.append(reactor(), el('b', '', p.name.replace(/ plan$/, '')), el('span', '', working ? 'working' : p.ready ? 'ready' : planState(p) === 'out' ? 'not ready' : 'resting'));
+      root.append(chip);
+    }
+  }
+  function greeting() {
+    const h = new Date().getHours();
+    return h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  }
+  const STARTS = [
+    ['⚑', 'Fix a bug', 'Fix this bug in Apex: '],
+    ['✦', 'Add a feature', 'Add this to Apex: '],
+    ['◎', 'Explain', 'Explain how this part of Apex works. Change nothing, just explain: '],
+    ['✓', 'Write tests', 'Write tests for '],
+    ['◈', 'Make it look better', 'Make this page cleaner and more futuristic, without breaking anything: '],
+    ['⚖', 'Brutal review', 'Review the last commit honestly. Rate it out of 10, list what is wrong with file:line, and change nothing.'],
+  ];
+  function renderHome() {
+    const name = ov.owner;
+    $('today').textContent = new Date().toLocaleDateString(undefined, {weekday: 'long', day: 'numeric', month: 'long'}).toUpperCase() + ' · APEX CODE';
+    const g = $('greeting'); g.replaceChildren(greeting() + (name ? ', ' : '.'));
+    if (name) { g.append(el('span', 'name', name), '.'); }
+    const ready = ov.plans.filter(p => p.ready), down = ov.plans.filter(p => !p.ready);
+    $('greet-sub').textContent = !down.length ? 'Both plans are ready. Zero API credits. What are we building?'
+      : ready.length ? `Your ${down[0].name} ${down[0].why}. Your ${ready[0].name} has you covered. What are we building?`
+      : `Neither plan is ready: ${down[0].how || 'run Setup-Apex-Work-Plans.cmd'}`;
+    const w = ov.week, week = $('week'); week.replaceChildren();
+    for (const [v, label, cls] of [[w.sessions, 'sessions this week', ''], [w.kept, 'kept', ''],
+      [w.rating == null ? '–' : `${w.rating}/10`, 'average rating', ''], [`${w.minutes}m`, 'of AI work', ''], ['$0', 'API credits', 'good']]) {
+      const s = el('div', 'stat ' + cls); s.append(el('b', '', String(v)), el('span', '', label)); week.append(s);
+    }
+    const starts = $('starts'); starts.replaceChildren();
+    for (const [icon, label, text] of STARTS) {
+      const b = el('button', 'chip'); b.type = 'button'; b.append(el('i', '', icon), label);
+      b.onclick = () => { const p = $('prompt'); p.value = text; p.focus(); p.setSelectionRange(text.length, text.length); autosize(); };
+      starts.append(b);
+    }
+    const cards = $('cards'); cards.replaceChildren();
+    const list = ov.sessions.filter(s => !project || s.project_id === project).slice(0, 9);
+    if (!list.length) cards.append(el('p', 'empty', 'No sessions yet. Tell Apex what to build above: it works on its own branch, so nothing you have is at risk.'));
+    for (const s of list) cards.append(sessionCard(s));
+  }
+  function sessionState(s) {
+    return s.working ? 'working' : s.status === 'kept' ? 'kept' : s.status === 'discarded' ? 'discarded'
+      : ['failed', 'limited', 'signed_out', 'missing', 'interrupted', 'stopped'].includes(s.last_status) ? 'failed' : 'review';
+  }
+  const STATE_TEXT = {working: 'Apex is working', kept: 'kept', discarded: 'thrown away', failed: 'stopped', review: 'ready for you'};
+  const STOP_TEXT = {limited: 'hit the plan limit', signed_out: 'plan not signed in', missing: 'plan not set up', interrupted: 'interrupted', stopped: 'you stopped it'};
+  const stateText = s => sessionState(s) === 'failed' ? (STOP_TEXT[s.last_status] || 'stopped') : STATE_TEXT[sessionState(s)];
+  function sessionCard(s) {
+    const c = el('button', 'card'); c.type = 'button';
+    const body = el('div', 'grow');
+    body.append(el('div', 't', s.title), el('div', 'm', `${stateText(s)} · ${NAME[s.engine] || s.engine} · ${s.files_changed} file${s.files_changed === 1 ? '' : 's'} · ${ago(s.updated)}`));
+    c.append(el('i', 'state ' + sessionState(s)), body);
+    if (s.review_rating != null) c.append(ring10(s.review_rating, 38));
+    c.onclick = () => open(s.id);
+    return c;
+  }
+  function renderRail() {
+    const sel = $('project'); sel.replaceChildren();
+    for (const p of ov.projects) { const o = el('option', '', p.name + (p.branch ? ` · ${p.branch}` : '')); o.value = p.id; sel.append(o); }
+    sel.value = String(project || '');
+    const list = $('session-list'); list.replaceChildren();
+    const mine = ov.sessions.filter(s => !project || s.project_id === project);
+    if (!mine.length) list.append(el('p', 'fine', 'Your sessions show up here.'));
+    for (const s of mine) {
+      const row = el('div', `srow ${s.status}`); row.setAttribute('role', 'button'); row.tabIndex = 0;
+      row.setAttribute('aria-current', String(s.id === current));
+      const body = el('div', 'grow');
+      body.append(el('span', 't', s.title), el('span', 'm', `${NAME[s.engine] || s.engine} · ${ago(s.updated)}${s.review_rating != null ? ` · ${s.review_rating}/10` : ''}`));
+      row.append(el('i', 'state ' + sessionState(s)), body);
+      row.onclick = () => { open(s.id); closeDrawers(); };
+      row.onkeydown = e => { if (e.key === 'Enter') row.click(); };
+      list.append(row);
+    }
+  }
+  $('project').onchange = e => { project = Number(e.target.value); store.set('apex.code.project', project); renderHome(); renderRail(); };
+
+  // ---------------------------------------------------------------- the brief: plan, mode, voice
+  function renderEngine() {
+    for (const b of document.querySelectorAll('[data-engine]')) {
+      const p = ov && ov.plans.find(x => x.id === b.dataset.engine);
+      b.setAttribute('aria-checked', String(b.dataset.engine === engine));
+      b.classList.toggle('resting', !!p && !p.ready);
+      b.title = p ? (p.ready ? `${p.name}: ready` : `${p.name} ${p.why}`) : '';
+    }
+    for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
+    const hint = $('hint'), p = ov && ov.plans.find(x => x.id === engine);
+    let text = 'Every session works on its own branch. Nothing touches your project until you press Keep.', warn = false;
+    if (p && !p.ready) { text = `Your ${p.name} ${p.why}. ${p.how || 'Pick the other plan.'}`; warn = true; }
+    else if (detail && detail.status === 'ready' && detail.engine !== engine) { text = `Next message goes to your ${NAME[engine]}, with a recap of this session.`; warn = true; }
+    else if (mode === 'full') { text = 'Full: Apex may run any command, inside this session\'s own copy of the project.'; warn = true; }
+    hint.textContent = text; hint.className = 'hint' + (warn ? ' warn' : '');
+    const send = $('send'); send.classList.toggle('stop', busy());
+    send.replaceChildren(busy() ? '■ Stop' : current ? 'Send' : 'Build it', ...(busy() ? [] : [el('kbd', '', 'Ctrl ⏎')]));
+    send.classList.toggle('primary', !busy());
+    const finished = detail && detail.status !== 'ready';
+    $('prompt').disabled = !!finished; send.disabled = !!finished;
+    $('prompt').placeholder = finished ? `This session is ${detail.status === 'kept' ? 'kept' : 'thrown away'}. Start a new one.`
+      : current ? 'Ask for a change, a fix, or "explain…"' : 'Tell Apex what to build, fix or explain…';
+  }
+  for (const b of document.querySelectorAll('[data-engine]')) b.onclick = () => { engine = b.dataset.engine; store.set('apex.code.engine', engine); renderEngine(); };
+  for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => { mode = b.dataset.mode; store.set('apex.code.mode', mode); renderEngine(); };
+  function autosize() { const p = $('prompt'); p.style.height = 'auto'; p.style.height = Math.min(p.scrollHeight + 2, innerHeight * 0.4) + 'px'; }
+  $('prompt').addEventListener('input', autosize);
+  $('prompt').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); $('brief-form').requestSubmit(); } });
+
+  $('brief-form').onsubmit = async e => {
+    e.preventDefault();
+    if (busy()) return stop();
+    const text = $('prompt').value.trim();
+    if (!text) { $('prompt').focus(); return; }
+    $('send').disabled = true;
+    try {
+      if (!current) {
+        if (!project) throw new Error('Add a project first.');
+        const s = await post('/api/code/sessions', {project_id: project, prompt: text, engine, mode});
+        $('prompt').value = ''; autosize();
+        await open(s.id);
+      } else {
+        detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, engine, mode});
+        $('prompt').value = ''; autosize(); renderEngine(); schedule(300);
+      }
+    } catch (err) { say(err.message, 'error'); }
+    $('send').disabled = false; renderEngine();
+  };
+  async function stop() {
+    if (!current) return;
+    try { await post(`/api/code/sessions/${current}/stop`); say('Stopping…'); schedule(300); } catch (err) { say(err.message, 'error'); }
+  }
+
+  // Talk instead of typing: recorded here, transcribed by Apex on this PC (no API credits).
+  let rec = null;
+  $('mic').onclick = async () => {
+    if (rec) { rec.stop(); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { say('This browser can\'t record here. Type instead.', 'error'); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); } catch (_) { say('The microphone is blocked for this page. Allow it, then try again.', 'error'); return; }
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+    const chunks = [];
+    rec = new MediaRecorder(stream, type ? {mimeType: type} : undefined);
+    rec.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
+    rec.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop()); $('mic').classList.remove('rec');
+      const blob = new Blob(chunks, {type: rec.mimeType || type || 'audio/webm'}); rec = null;
+      if (blob.size < 1500) return;
+      say('Listening back…');
+      try {
+        const r = await fetch('/api/companion/transcribe?engine=local', {method: 'POST', body: blob, headers: {'Content-Type': blob.type, ...auth()}});
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.detail || `failed (${r.status})`);
+        const p = $('prompt'), text = (body.text || '').trim();
+        if (!text) { say('I didn\'t catch that. Try again, a little closer.'); return; }
+        p.value = (p.value.trim() ? p.value.trimEnd() + ' ' : '') + text; autosize(); p.focus();
+        say('Got it. Check it, then send.', 'good');
+      } catch (err) { say('Could not transcribe: ' + err.message, 'error'); }
+    };
+    rec.start(); $('mic').classList.add('rec'); say('Listening… tap the mic again when you\'re done.');
+    setTimeout(() => { if (rec && rec.state === 'recording') rec.stop(); }, 90000);
+  };
+
+  // ---------------------------------------------------------------- views
+  function show(view) {
+    document.body.className = 'view-' + view;
+    $('home').hidden = view !== 'home'; $('session').hidden = view !== 'session';
+    (view === 'home' ? $('home-slot') : $('session-slot')).append($('brief-form'));
+  }
+  async function open(id) {
+    current = id; detail = null; lastId = 0; feed = {turn: null, root: $('feed')};
+    $('feed').replaceChildren(); show('session');
+    if (location.hash !== `#s=${id}`) history.replaceState(null, '', `#s=${id}`);
+    try {
+      await Promise.all([refreshDetail(), loadOverview()]);  // fresh plan status: one may have hit its limit since
+      engine = detail.engine; mode = detail.mode;
+      const mine = ov && ov.plans.find(p => p.id === engine), other = ov && ov.plans.find(p => p.id === OTHER[engine]);
+      if (mine && !mine.ready && other && other.ready) engine = other.id;      // its plan is resting: offer the ready one
+      renderEngine(); await pull();
+    }
+    catch (err) { say(err.message, 'error'); home(); return; }
+    if (ov) renderRail();
+    $('feed').scrollTop = $('feed').scrollHeight;
+    schedule(400);
+  }
+  function home() {
+    current = null; detail = null; show('home');
+    history.replaceState(null, '', location.pathname);
+    engine = store.get('apex.code.engine') || (ov && ov.default_engine) || 'claude'; mode = store.get('apex.code.mode', 'safe');
+    if (ov) { renderHome(); renderRail(); } renderEngine();
+  }
+  $('back').onclick = home;
+  $('new-session').onclick = () => { home(); closeDrawers(); $('prompt').focus(); };
+
+  // ---------------------------------------------------------------- the feed
+  function newTurn(you) {
+    const root = el('div', 'turn');
+    if (you) {
+      const row = el('div', 'you'), bubble = el('div', 'bubble'), who = el('div', 'who');
+      row.append(el('div', 'avatar', ((ov && ov.owner) || 'You')[0].toUpperCase()), bubble);
+      who.append(((ov && ov.owner) || 'You').toUpperCase(), el('span', 'badge ' + you.engine, NAME[you.engine] || you.engine));
+      if (you.mode === 'full') who.append(el('span', 'badge full', 'FULL'));
+      who.append(el('span', '', ago(you.ts)));
+      bubble.append(who, el('div', 'text', you.text));
+      root.append(row);
+    }
+    const tl = el('div', 'timeline'); root.append(tl);
+    feed.root.append(root);
+    feed.turn = {root, tl, reads: null, todo: null, lastProse: null, lastText: '', tools: {}, review: null, checks: null};
+    return feed.turn;
+  }
+  const turn = () => feed.turn || newTurn(null);
+  function step(cls, ...kids) {
+    const s = el('div', 'step ' + cls); s.append(...kids);
+    s.dataset.label = kids.map(k => typeof k === 'string' ? k : k.textContent).join(' ').replace(/\s+/g, ' ').trim();
+    turn().tl.append(s); return s;
+  }
+  const ic = t => el('span', 'ic', t);
+
+  function render(e) {
+    const t = e.kind === 'you' ? null : turn();
+    if (t && !['result', 'tool'].includes(e.kind)) t.reads = null;
+    switch (e.kind) {
+      case 'you': newTurn(e); break;
+      case 'note': step('note', '· ' + e.text); break;
+      case 'thinking': { const d = el('details', 'more step thinking'); d.append(el('summary', '', 'Thinking'), el('p', '', e.text)); t.tl.append(d); break; }
+      case 'text': { const s = step('prose'); s.append(md(e.text)); t.lastProse = s; t.lastText = e.text; break; }
+      case 'tool':
+        if (e.tool === 'read' || e.tool === 'search') {
+          if (!t.reads) { t.reads = step('reads'); t.reads.items = []; t.reads.head = el('span'); t.reads.chips = el('div', 'chips'); t.reads.append(ic('◇'), t.reads.head, t.reads.chips); }
+          t.reads.items.push(e);
+          const n = t.reads.items.filter(x => x.tool === 'read').length, q = t.reads.items.length - n;
+          t.reads.head.textContent = [n && `Read ${n} file${n > 1 ? 's' : ''}`, q && `searched ${q} time${q > 1 ? 's' : ''}`].filter(Boolean).join(', ');
+          t.reads.dataset.label = `${t.reads.head.textContent}: ${e.path || e.title}`;
+          t.reads.chips.append(el('span', '', e.path || e.title.replace(/^Searched for /, '⌕ ')));
+        } else if (e.tool === 'command') {
+          t.reads = null;
+          const s = step('cmd'), line = el('div', 'line');
+          line.append(el('span', 'sym', '$'), el('span', 'c', e.title), el('span', 'st muted', '…'));
+          line.title = e.detail || e.title; s.dataset.label = `Running ${e.title}`;
+          s.append(line); if (e.ref) t.tools[e.ref] = s;
+        } else { t.reads = null; step('', ic(e.tool === 'web' ? '◌' : '·'), e.title); }
+        break;
+      case 'result': {
+        const s = t.tools[e.ref];
+        if (s) {
+          const st = s.querySelector('.st');
+          st.className = 'st ' + (e.ok ? 'ok' : 'bad');
+          st.textContent = e.ok ? '✓' : (e.exit_code != null ? `✗ exit ${e.exit_code}` : '✗');
+          if (e.output) { const d = el('details', 'more'); if (!e.ok) d.open = true; d.append(el('summary', '', 'Output'), el('pre', 'out', e.output)); s.append(d); }
+        } else if (!e.ok && e.output) step('error', ic('✗'), e.output.split('\n')[0].slice(0, 300));
+        break;
+      }
+      case 'file': {
+        const s = step('file');
+        const label = {add: '+', delete: '−', write: '✎', update: '✎'}[e.change] || '✎';
+        s.append(ic(label), el('span', 'p', e.path));
+        if (e.plus != null) s.append(el('span', 'plus', `+${e.plus}`), el('span', 'minus', `−${e.minus || 0}`));
+        if (e.change === 'add') s.append(el('span', 'muted', '  new file'));
+        if (e.change === 'delete') s.append(el('span', 'muted', '  deleted'));
+        s.onclick = () => openDiff(e.path);
+        break;
+      }
+      case 'todo': {
+        const box = el('div', 'todo');
+        for (const it of e.items) { const r = el('div', 'ti' + (it.done ? ' done' : it.active ? ' active' : '')); r.append(el('b', '', it.done ? '✓' : it.active ? '▸' : '○'), it.text); box.append(r); }
+        if (t.todo) t.todo.replaceWith(box); else t.tl.append(box);
+        t.todo = box; break;
+      }
+      case 'blocked': step('blocked', ic('⛔'), `Blocked in Safe mode: ${e.title}. Switch to Full if you trust it.`); break;
+      case 'error': step('error', ic('✗'), e.text); break;
+      case 'checkpoint': step('mark', e.catch_up ? 'Caught up with your latest work' : `Checkpoint · ${e.files} file${e.files === 1 ? '' : 's'} saved on the session's branch`); break;
+      case 'undo': step('mark', `↶ Undid a step (${e.files} file${e.files === 1 ? '' : 's'})`); break;
+      case 'conflict': {
+        const c = el('div', 'card2 warnish'), h = el('div', 'h');
+        h.append('⚠ Your latest work clashes with this session');
+        c.append(h, el('p', 'muted', `In: ${e.files.join(', ')}. Apex can sort it out: it keeps what both sides meant.`));
+        const acts = el('div', 'acts'), fix = el('button', 'primary', 'Ask Apex to fix them');
+        fix.onclick = () => sendText(`Resolve the merge conflicts in: ${e.files.join(', ')}. Keep what both sides intended, remove every conflict marker, make sure it still works, then summarise what you decided.`);
+        acts.append(fix); c.append(acts); t.tl.append(c); break;
+      }
+      case 'done': renderDone(e, t); feed.turn = null; break;
+      case 'review_started': {
+        const s = step('', ic('⚖'), `Second opinion from your ${NAME[e.engine]}…`);
+        t.review = s; break;
+      }
+      case 'review_step': if (t.review) { const d = el('div', 'muted', '  ' + e.title); d.style.fontSize = '12px'; t.review.append(d); } break;
+      case 'review': renderReview(e, t); feed.turn = null; break;
+      case 'checks_started': {
+        const line = el('div', 'line');
+        line.append(el('span', 'sym', '▶'), el('span', 'c', `Checks: ${e.command}`), el('span', 'st muted', '…'));
+        t.checks = step('cmd', line); break;
+      }
+      case 'checks': {
+        const s = t.checks || step('cmd');
+        if (!t.checks) { const line = el('div', 'line'); line.append(el('span', 'sym', '▶'), el('span', 'c', `Checks: ${e.command}`), el('span', 'st')); s.append(line); }
+        const st = s.querySelector('.st'); st.className = 'st ' + (e.passed ? 'ok' : 'bad'); st.textContent = `${e.passed ? '✓ passed' : '✗ failed'} · ${clock(e.seconds)}`;
+        if (e.output) { const d = el('details', 'more'); if (!e.passed) d.open = true; d.append(el('summary', '', 'Output'), el('pre', 'out', e.output)); s.append(d); }
+        t.checks = null; feed.turn = null; break;
+      }
+      case 'kept': {
+        const c = el('div', 'card2 kept'), h = el('div', 'h');
+        h.append(`✓ Kept: merged into ${e.into} (${e.files} file${e.files === 1 ? '' : 's'})`);
+        c.append(h, el('p', 'muted', e.restart ? 'Your Apex has it now. Restart Apex to run it.' : 'It\'s in your project now.'));
+        t.tl.append(c); break;
+      }
+      case 'discarded': step('mark', 'Thrown away: the session\'s branch and copy are gone. Your project never changed.'); break;
+      default: break;
+    }
+  }
+  const DONE = {done: ['✓ Done', 'done-ok'], stopped: ['■ Stopped', ''], limited: ['⚠ Plan limit reached', 'warnish'],
+    signed_out: ['⚠ Plan not signed in', 'warnish'], missing: ['⚠ Plan not set up', 'warnish'], failed: ['✗ Stopped with an error', 'done-bad'],
+    interrupted: ['⚠ Interrupted', 'warnish']};
+  function renderDone(e, t) {
+    const [label, cls] = DONE[e.status] || [e.status, ''];
+    if (e.status === 'done' && t.lastProse && plain(t.lastText) === plain(e.summary)) t.lastProse.classList.add('final');
+    const c = el('div', 'card2 ' + cls), h = el('div', 'h');
+    const bits = [clock(e.seconds || 0), e.files ? `${e.files} file${e.files === 1 ? '' : 's'} this step` : 'no file changes', e.total != null ? `${e.total} in total` : '', `on your ${NAME[e.engine] || 'plan'}`];
+    h.append(label, el('span', 'st', bits.filter(Boolean).join(' · ')));
+    c.append(h);
+    if (e.summary && !(e.status === 'done' && t.lastProse && t.lastProse.classList.contains('final'))) { const p = el('div', 'prose'); p.append(md(e.summary)); c.append(p); }
+    const acts = el('div', 'acts');
+    if (e.status === 'done') {
+      acts.append(button('⚖ Second opinion', () => review()), button('▶ Run checks', () => runChecks()), button('🔊 Read it to me', () => speak(e.summary || t.lastText)));
+    } else if (['limited', 'signed_out', 'missing'].includes(e.status) && e.engine) {
+      acts.append(button(`Continue on your ${NAME[OTHER[e.engine]]}`, () => { engine = OTHER[e.engine]; store.set('apex.code.engine', engine); sendText('Carry on with the request from where it stopped.'); }, 'primary'));
+    }
+    if (acts.childNodes.length) c.append(acts);
+    t.tl.append(c);
+  }
+  function renderReview(e, t) {
+    if (t.review) t.review.remove();
+    const c = el('div', 'card2'), h = el('div', 'h');
+    if (e.status !== 'done') {
+      h.append(`⚠ The second opinion didn't finish (${e.status})`); c.append(h, el('p', 'muted', e.text || '')); t.tl.append(c); return;
+    }
+    const score = el('div', 'score');
+    if (e.rating != null) score.append(ring10(e.rating, 52));
+    const words = el('div');
+    words.append(el('b', '', `Your ${NAME[e.engine]} says`), el('div', 'muted', 'Second opinion · brutally honest'));
+    score.append(words); c.append(score);
+    const p = el('div', 'prose'); p.style.marginTop = '8px'; p.append(md(e.text.replace(/^\**rating\**:?\**\s*\d+(\.\d+)?\s*\/\s*10\s*\n?/i, ''))); c.append(p);
+    const acts = el('div', 'acts');
+    acts.append(button('Fix what it found', () => sendText(`A second opinion on your change said:\n\n${e.text}\n\nFix the real problems it found (skip any you disagree with, and say why).`), 'primary'));
+    c.append(acts); t.tl.append(c);
+  }
+  function button(text, fn, cls = '') { const b = el('button', cls, text); b.type = 'button'; b.onclick = fn; return b; }
+
+  function working() {
+    let w = $('feed').querySelector('.working');
+    if (!busy()) { if (w) w.remove(); return; }
+    if (!w) { w = el('div', 'working'); w.append(reactor(), el('div', 'words')); }
+    $('feed').append(w);                                     // always last
+    const evs = [...$('feed').querySelectorAll('.step')];
+    const lastStep = evs.length ? (evs[evs.length - 1].dataset.label || '') : '';
+    const words = w.querySelector('.words'); words.replaceChildren();
+    const who = detail.side === 'review' ? 'The second opinion is reading' : detail.side === 'checks' ? 'Running the checks' : `Apex is working · ${NAME[detail.engine]}`;
+    words.append(el('b', '', who), el('span', 'clock'));
+    if (lastStep) words.append(el('div', 'last', lastStep));
+    tickClock();
+  }
+  // The clock ticks every second on its own, between updates from Apex.
+  function tickClock() {
+    const c = $('feed').querySelector('.working .clock');
+    if (c && detail && detail.since) c.textContent = ` · ${clock(Math.max(0, Date.now() / 1000 - detail.since))}`;
+  }
+  setInterval(tickClock, 1000);
+
+  // ---------------------------------------------------------------- polling
+  function schedule(ms) { clearTimeout(pollTimer); pollTimer = setTimeout(tick, ms); }
+  async function tick() {
+    try {
+      if (current) await pull();
+      if (Date.now() - lastOverview > (current ? 15000 : 6000)) await loadOverview();
+    } catch (err) { console.warn('[Code] update failed, retrying:', err); }   // offline for a moment, or a bug: never silent
+    schedule(document.hidden ? 10000 : busy() ? 1000 : 4000);
+  }
+  const REFRESH = new Set(['done', 'checkpoint', 'review', 'checks', 'kept', 'discarded', 'conflict', 'undo', 'file', 'review_started', 'checks_started', 'you']);
+  async function pull() {
+    const id = current;
+    const {events} = await api(`/api/code/sessions/${id}/events?after=${lastId}`);
+    if (id !== current) return;
+    const nearBottom = $('feed').scrollHeight - $('feed').scrollTop - $('feed').clientHeight < 160;
+    let refresh = false;
+    for (const e of events) {
+      lastId = Math.max(lastId, e.id);
+      render(e);
+      if (REFRESH.has(e.kind)) refresh = true;
+    }
+    // The change list costs Apex some git work: fetch it when something changed, and now and then.
+    if (refresh || (busy() && ++quiet % 5 === 0)) await refreshDetail();
+    working();
+    if (nearBottom && events.length) $('feed').scrollTop = $('feed').scrollHeight;
+  }
+  async function refreshDetail() {
+    detail = await api(`/api/code/sessions/${current}`);
+    renderDetail(); renderEngine();
+  }
+
+  // ---------------------------------------------------------------- the side panel
+  function renderDetail() {
+    const s = detail;
+    $('s-title').textContent = s.title;
+    const meta = $('s-meta'); meta.replaceChildren();
+    meta.append(el('span', '', s.project), el('code', '', s.branch || ''), el('span', 'badge ' + s.engine, NAME[s.engine]));
+    if (s.mode === 'full') meta.append(el('span', 'badge full', 'FULL'));
+    if (s.status !== 'ready') meta.append(el('span', 'badge ' + (s.status === 'kept' ? 'kept' : ''), s.status === 'kept' ? 'KEPT' : 'THROWN AWAY'));
+    const files = s.changes.files;
+    $('c-count').textContent = files.length ? `${files.length} · +${s.changes.plus} −${s.changes.minus}` : '';
+    $('side-count').textContent = files.length ? String(files.length) : '';
+    const list = $('c-files'); list.replaceChildren();
+    if (!files.length) list.append(el('p', 'fine', s.status === 'discarded' ? 'Thrown away.' : 'No changes yet.'));
+    for (const f of files) {
+      const b = el('button', 'frow ' + f.change); b.type = 'button'; b.title = f.path;
+      b.append(el('span', 'k', f.change === 'add' ? '+' : f.change === 'delete' ? '−' : '●'), el('span', 'p', f.path),
+        el('span', 'plus', f.plus == null ? 'bin' : `+${f.plus}`), el('span', 'minus', f.minus == null ? '' : `−${f.minus}`));
+      b.onclick = () => openDiff(f.path);
+      list.append(b);
+    }
+    // Second opinion
+    const r = $('r-body'); r.replaceChildren();
+    const other = OTHER[s.engine];
+    if (s.review_state === 'working') r.append(el('p', 'verdict', `Your ${NAME[s.review_engine]} is reading the change…`));
+    else if (s.review_state === 'done') {
+      const score = el('div', 'score');
+      if (s.review_rating != null) score.append(ring10(s.review_rating, 64));
+      const verdict = (s.review_text.match(/verdict:\s*(.+)/i) || [, s.review_text.split('\n').find(l => l.trim() && !/rating/i.test(l)) || ''])[1];
+      const w = el('div'); w.append(el('b', '', `${NAME[s.review_engine]} says`), el('p', 'verdict', verdict.replace(/\*\*/g, '')));
+      score.append(w); r.append(score);
+      const d = el('details', 'more full'); d.append(el('summary', '', 'Full review')); const p = el('div', 'prose'); p.append(md(s.review_text)); d.append(p); r.append(d);
+    } else if (s.review_state === 'failed') r.append(el('p', 'verdict', 'The last review did not finish. ' + (s.review_text || '').slice(0, 200)));
+    else r.append(el('p', 'verdict', `Your ${NAME[other]} reads the change, rates it out of 10, and tells you what's wrong.`));
+    $('r-go').textContent = s.review_state === 'done' ? `Ask again (${NAME[other]})` : `Get a second opinion (${NAME[other]})`;
+    // Checks
+    const proj = ov && ov.projects.find(p => p.id === s.project_id);
+    if (document.activeElement !== $('k-cmd')) $('k-cmd').value = proj ? proj.checks : '';
+    $('k-save').hidden = !proj || $('k-cmd').value === proj.checks;
+    const ks = $('k-state');
+    ks.className = 'k-state' + (s.check_state === 'passed' ? ' ok' : s.check_state === 'failed' ? ' bad' : '');
+    ks.textContent = {running: 'Running…', passed: '✓ Passed', failed: '✗ Failed'}[s.check_state] || 'Not run yet.';
+    $('k-out').hidden = !s.check_output; $('k-out').textContent = s.check_output || '';
+    // Actions
+    const ready = s.status === 'ready', idle = ready && !busy();
+    $('a-keep').disabled = !idle || !files.length || !!s.conflict;
+    $('a-keep').textContent = s.status === 'kept' ? '✓ Kept' : `✓ Keep it${proj && proj.branch ? ` → ${proj.branch}` : ''}`;
+    $('a-undo').disabled = !idle; $('a-catchup').disabled = !idle; $('a-discard').disabled = !ready;
+    $('r-go').disabled = !idle || !files.length; $('k-go').disabled = !idle || !ready;
+    $('a-folder').disabled = !ready;
+    $('a-where').textContent = ready ? `Working copy: ${s.worktree}` : s.status === 'kept' ? `Merged as ${s.kept_commit.slice(0, 10)}.` : '';
+  }
+  $('r-go').onclick = () => review();
+  $('k-go').onclick = () => runChecks();
+  $('k-cmd').oninput = () => { const proj = ov && detail && ov.projects.find(p => p.id === detail.project_id); $('k-save').hidden = !proj || $('k-cmd').value === proj.checks; };
+  $('k-save').onclick = async () => {
+    try { await api(`/api/code/projects/${detail.project_id}`, {method: 'PATCH', body: JSON.stringify({checks: $('k-cmd').value})}); await loadOverview(); renderDetail(); say('Checks command saved.', 'good'); }
+    catch (err) { say(err.message, 'error'); }
+  };
+  async function act(action, okText) {
+    try { const r = await post(`/api/code/sessions/${current}/${action}`); if (okText) say(typeof okText === 'function' ? okText(r) : okText, 'good'); schedule(200); return r; }
+    catch (err) { say(err.message, 'error'); }
+  }
+  async function review() { try { detail = await post(`/api/code/sessions/${current}/review`, {}); renderDetail(); renderEngine(); schedule(200); } catch (err) { say(err.message, 'error'); } }
+  const runChecks = () => act('checks');
+  async function sendText(text) {
+    try { detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, engine, mode}); renderEngine(); schedule(200); }
+    catch (err) { say(err.message, 'error'); }
+  }
+  $('a-keep').onclick = async () => {
+    const proj = ov.projects.find(p => p.id === detail.project_id), n = detail.changes.files.length;
+    const apex = proj && proj.name === 'Apex';
+    if (!await confirmBox('Keep it?', `This merges ${n} file${n === 1 ? '' : 's'} into ${proj && proj.branch ? proj.branch : 'your branch'} of ${detail.project}.${apex ? ' Restart Apex afterwards to run it.' : ''}`, 'Keep it')) return;
+    const r = await act('keep', apex ? 'Kept. Restart Apex to run it.' : 'Kept. It\'s in your project now.');
+    if (r) { await loadOverview(); await refreshDetail(); }
+  };
+  $('a-discard').onclick = async () => {
+    if (!await confirmBox('Throw it away?', 'The session\'s branch and its copy are deleted. Your project never changed, so nothing else is lost.', 'Throw away')) return;
+    if (await act('discard', 'Thrown away.')) { await loadOverview(); await refreshDetail(); }
+  };
+  $('a-undo').onclick = async () => {
+    if (!await confirmBox('Undo the last step?', 'The files go back to how they were before Apex\'s last step. Apex is told, so it won\'t assume its work is still there.', 'Undo it')) return;
+    await act('undo', 'Undone.'); await refreshDetail();
+  };
+  $('a-catchup').onclick = () => act('catch-up', r => r.caught_up === 'already' ? 'Already up to date with your latest work.'
+    : r.caught_up === 'conflict' ? `Caught up, with clashes in ${r.conflicts.length} file(s): ask Apex to fix them.` : 'Caught up with your latest work.');
+  $('a-folder').onclick = async () => {
+    const path = detail.worktree;
+    try { await navigator.clipboard.writeText(path); } catch (_) {}
+    say(`Path copied: ${path}`, 'good', {text: 'Open in VS Code', href: 'vscode://file/' + path.replace(/\\/g, '/')});
+  };
+
+  // ---------------------------------------------------------------- the diff viewer
+  let diffPath = null;
+  async function openDiff(path) {
+    if (!current) return;
+    diffPath = path;
+    const f = detail && detail.changes.files.find(x => x.path === path);
+    $('diff-path').textContent = path;
+    $('diff-stat').textContent = f ? (f.plus == null ? 'binary' : `+${f.plus} −${f.minus}`) : '';
+    $('diff-body').replaceChildren(el('p', 'fine', 'Loading…'));
+    if (!$('diff').open) $('diff').showModal();
+    try { $('diff-body').replaceChildren(renderDiff(await api(`/api/code/sessions/${current}/diff?path=${encodeURIComponent(path)}`, {}, 'text'))); }
+    catch (err) { $('diff-body').replaceChildren(el('p', 'fine', err.message)); }
+  }
+  function renderDiff(text) {
+    const box = el('div'); let a = 0, b = 0;
+    for (const line of text.split('\n')) {
+      let cls = 'ctx', l = '', r = '';
+      if (line.startsWith('@@')) { const m = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)/); if (m) { a = +m[1]; b = +m[2]; } cls = 'hunk'; }
+      else if (/^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode|similarity|rename |old mode|new mode)/.test(line)) continue;
+      else if (line.startsWith('+')) { cls = 'add'; r = b++; }
+      else if (line.startsWith('-')) { cls = 'del'; l = a++; }
+      else if (line.startsWith('\\')) cls = 'hunk';
+      else if (line.startsWith('new file ')) cls = 'hunk';
+      else { l = a++; r = b++; }
+      const row = el('div', 'dl ' + cls); row.append(el('span', 'ln', String(l)), el('span', 'ln', String(r)), el('span', 'tx', line || ' '));
+      box.append(row);
+    }
+    return box;
+  }
+  function stepDiff(dir) {
+    const files = detail ? detail.changes.files : []; const i = files.findIndex(f => f.path === diffPath);
+    if (files.length) openDiff(files[(i + dir + files.length) % files.length].path);
+  }
+  $('diff-prev').onclick = () => stepDiff(-1); $('diff-next').onclick = () => stepDiff(1);
+  $('diff-close').onclick = () => $('diff').close();
+  $('diff').addEventListener('keydown', e => { if (e.key === 'ArrowDown' || e.key === 'j') stepDiff(1); if (e.key === 'ArrowUp' || e.key === 'k') stepDiff(-1); });
+
+  // ---------------------------------------------------------------- dialogs, voice out, drawers, keys
+  function confirmBox(title, text, ok) {
+    $('confirm-title').textContent = title; $('confirm-text').textContent = text; $('confirm-ok').textContent = ok;
+    $('confirm').returnValue = '';                    // Esc must never count as the last "OK"
+    $('confirm').showModal();
+    return new Promise(res => $('confirm').addEventListener('close', () => res($('confirm').returnValue === 'ok'), {once: true}));
+  }
+  async function speak(text) {
+    const words = plain(text).slice(0, 3900);
+    if (!words) return;
+    try {
+      const r = await fetch('/api/speak', {method: 'POST', headers: {'Content-Type': 'application/json', ...auth()}, body: JSON.stringify({text: words})});
+      if (!r.ok || !(r.headers.get('content-type') || '').startsWith('audio')) throw new Error('voice is not available');
+      const audio = new Audio(URL.createObjectURL(await r.blob())); await audio.play();
+    } catch (err) { say('Could not read it out: ' + err.message, 'error'); }
+  }
+  $('add-project').onclick = () => { $('add-form').reset(); $('add-dialog').returnValue = ''; $('add-dialog').showModal(); };
+  $('add-dialog').addEventListener('close', async () => {
+    if ($('add-dialog').returnValue !== 'ok') return;
+    try {
+      const p = await post('/api/code/projects', {path: $('add-path').value, name: $('add-name').value});
+      project = p.id; store.set('apex.code.project', project); await loadOverview(); say(`Added ${p.name}.`, 'good');
+    } catch (err) { say(err.message, 'error'); }
+  });
+  $('token-save').onclick = () => { store.set('apex_token', $('token').value.trim()); boot(); };
+  function closeDrawers() { $('rail').classList.remove('open'); $('side').classList.remove('open'); $('scrim').hidden = true; }
+  $('open-rail').onclick = () => { $('rail').classList.add('open'); $('scrim').hidden = false; };
+  $('open-side').onclick = () => { $('side').classList.add('open'); $('scrim').hidden = false; };
+  $('close-side').onclick = closeDrawers; $('scrim').onclick = closeDrawers;
+  document.addEventListener('keydown', e => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    const dialog = [...document.querySelectorAll('dialog')].some(d => d.open);
+    if (e.key === 'Escape' && busy() && !dialog) { e.preventDefault(); stop(); }
+    else if (e.key === '/' && !typing && !dialog) { e.preventDefault(); $('prompt').focus(); }
+  });
+  addEventListener('hashchange', () => { const m = location.hash.match(/^#s=(\d+)/); if (m && Number(m[1]) !== current) open(Number(m[1])); else if (!m && current) home(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(100); });
+
+  async function boot() {
+    try { await loadOverview(); }
+    catch (err) { say(/owner only/i.test(err.message) ? 'Apex Code is for the owner: open Apex with your master token.' : err.message, 'error'); return; }
+    const m = location.hash.match(/^#s=(\d+)/);
+    if (m) await open(Number(m[1])); else home();
+    schedule(1000);
+  }
+  show('home'); boot();
+})();

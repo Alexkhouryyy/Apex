@@ -680,6 +680,8 @@ SIMLI_MAX_IDLE = int(os.getenv("SIMLI_MAX_IDLE", "180"))          # seconds of s
 # Codex's Windows sandbox for Work tasks on your ChatGPT plan: "" = Codex's own default,
 # "unelevated" (runs as you, restricted) or "elevated" (separate sandbox users). See docs/WORK.md.
 WORK_CODEX_WINDOWS_SANDBOX = os.getenv("WORK_CODEX_WINDOWS_SANDBOX", "").strip()
+# What Apex calls you on the Code page and in coding prompts.
+OWNER_NAME = os.getenv("OWNER_NAME", "Alex").strip()
 
 # Local Qwen speech via the Voicebox desktop application.
 VOICEBOX_URL = os.getenv("VOICEBOX_URL", "http://127.0.0.1:17493")

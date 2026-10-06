@@ -3,6 +3,7 @@
     python scripts/work_plans_check.py          # no usage: installed, signed in with the plan, flags
     python scripts/work_plans_check.py --live   # also one tiny real task per plan (a few seconds of usage)
     python scripts/work_plans_check.py --signed-in claude   # exit 0 if signed in with the plan
+    python scripts/work_plans_check.py --code   # also Apex Code's path: a live coding step and a follow-up
 
 For each plan:
   1. installed: where the tool is and its version;
@@ -32,6 +33,9 @@ FLAGS = {
     'chatgpt': (['exec', '--help'], ['--skip-git-repo-check', '--ephemeral', '--cd', '--sandbox', 'workspace-write',
                                      '--output-last-message', 'read from stdin']),
 }
+CODE_TASKS = ('Create a file named apex-code-check.md in this folder containing exactly the word ready. '
+              'Then reply with one short sentence.',
+              'Add a second line to apex-code-check.md containing exactly the word again. Then reply with one short sentence.')
 LIVE_TASK = ('Create a file named apex-check.md in the current folder containing exactly the word ready. '
              'Then reply with one short sentence saying you did it.')
 
@@ -131,10 +135,43 @@ def _live(engine: str, windows_sandbox):
     return ok
 
 
+def code_check(engine: str) -> bool:
+    """Apex Code's own path (agent/code_engines.py), as a session uses it: the live
+    stream in a git project, then a follow-up that resumes the same conversation."""
+    from agent import code_engines, work
+    print(f"\n{we.NAMES[engine]}: Apex Code")
+    folder = Path(work.WORK_DIR) / '_plan-check' / f"code-{engine}-{time.strftime('%Y%m%d-%H%M%S')}"
+    folder.mkdir(parents=True, exist_ok=True)
+    git = ['git', '-c', 'user.name=Apex check', '-c', 'user.email=apex-check@localhost']
+    try:
+        subprocess.run(git + ['init', '-q'], cwd=folder, check=True, capture_output=True)
+        (folder / 'README.md').write_text('Apex Code check\n', encoding='utf-8')
+        subprocess.run(git + ['add', '-A'], cwd=folder, check=True, capture_output=True)
+        subprocess.run(git + ['commit', '-q', '-m', 'start'], cwd=folder, check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return _say(False, f'git is needed for Apex Code and did not work here: {exc}')
+    made = folder / 'apex-code-check.md'
+    read = lambda: made.read_text(encoding='utf-8', errors='replace').lower() if made.exists() else ''
+    steps: list = []
+    first = code_engines.turn(engine, CODE_TASKS[0], folder, 'safe', None, steps.append, timeout=300)
+    ok = _say(first['status'] == 'done' and 'ready' in read(),
+              f"a live coding step finished as {first['status']}, with {len(steps) - 1} steps streamed")
+    if not first.get('session'):
+        return _say(False, 'it gave no conversation id, so follow-ups could not continue it')
+    steps.clear()
+    second = code_engines.turn(engine, CODE_TASKS[1], folder, 'safe', first['session'], steps.append, timeout=300)
+    ok &= _say(second['status'] == 'done' and 'again' in read(), f"a follow-up continued the same conversation ({second['status']})")
+    if not ok:
+        print('        it said: ' + ((second if first['status'] == 'done' else first).get('summary') or '').replace('\n', ' ')[:300])
+    print(f'        folder: {folder}')
+    return ok
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--live', action='store_true', help='also run one tiny real task per plan')
     ap.add_argument('--only', choices=['claude', 'chatgpt'], help='check one plan')
+    ap.add_argument('--code', action='store_true', help="also Apex Code's path: a live coding step and a follow-up per plan")
     ap.add_argument('--signed-in', choices=['claude', 'chatgpt'],
                     help='only say whether this plan is signed in with the plan (exit 0) or not (exit 1); no usage')
     args = ap.parse_args(argv)
@@ -144,6 +181,8 @@ def main(argv=None) -> int:
         return 0 if signed['ok'] else 1
     engines = [args.only] if args.only else ['claude', 'chatgpt']
     results = {e: check_plan(e, args.live) for e in engines}
+    if args.code:
+        results = {e: ok and code_check(e) for e, ok in results.items()}
     print()
     for e, ok in results.items():
         print(f"{we.NAMES[e]}: {'READY' if ok else 'NOT READY'}" + (' (real task passed)' if ok and args.live else ''))

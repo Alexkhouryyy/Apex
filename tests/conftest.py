@@ -1,5 +1,13 @@
 """Shared pytest fixtures."""
-import pytest
+import os
+
+# Tests never see a real key: the placeholder CI uses, set before Apex's config
+# loads .env (which never overrides what is already set). So a run on your PC,
+# or inside an Apex Code session where API keys are removed, behaves like CI.
+if not os.environ.get('ANTHROPIC_API_KEY'):
+    os.environ['ANTHROPIC_API_KEY'] = 'sk-ant-placeholder-for-ci-tests-only'
+
+import pytest  # noqa: E402
 from agent import safety, longterm
 
 
