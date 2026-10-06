@@ -26,6 +26,7 @@ with the date. Send the line each item asks for, never a key or a token.
 | 13 | Connect one app | 10 min | Composio plan | demo app steps' rows | Apps, demo step 4 → LIVE |
 | 14 | Photoreal video avatar | 1 h, once | free | render time per sentence, and how it looks | Video avatar → LIVE |
 | 15 | Live photoreal face (Simli) | 15 min | Simli per-minute | does it look real, and how long before it speaks? | Live face → LIVE |
+| 16 | Apex Code on your plans | 15 min | a little of each plan | the check's last lines, the rating, one sentence | Apex Code → LIVE |
 
 ---
 
@@ -183,3 +184,19 @@ Send back:
 - how real it looks;
 - roughly how long before it starts talking;
 - the setting's message, if it falls back to the orb.
+
+## 16. Apex Code on your plans
+
+Follow [CODE.md](CODE.md):
+1. Run `python scripts\work_plans_check.py --code`. Both plans should end
+   with READY.
+2. Open **Code**, and ask for something small in Apex (for example, "Add a
+   Focus button to the Work page").
+3. When it's done, press **Second opinion**, then **Keep it**, then restart
+   Apex.
+
+Send back:
+- the last lines of the check;
+- the rating the second opinion gave;
+- one sentence on whether you'd rather use this than the Claude or ChatGPT
+  app, and why.
