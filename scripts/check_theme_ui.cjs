@@ -69,7 +69,7 @@ assert.ok(scoped > 15);
 
 // 5. Every page loads it: the script right after <meta charset> (before paint),
 //    the stylesheet after the page's own.
-for (const name of ['index.html', 'companion.html', 'board.html', 'study.html']) {
+for (const name of ['index.html', 'companion.html', 'board.html', 'study.html', 'code.html']) {
   const html = fs.readFileSync(path.join(dir, name), 'utf8');
   assert.match(html, /<meta charset="[^"]+"><script src="\/static\/theme.js"><\/script>/i, `${name}: theme.js first`);
   const css = [...html.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map(m => m[1]);
@@ -77,5 +77,5 @@ for (const name of ['index.html', 'companion.html', 'board.html', 'study.html'])
 }
 
 console.log('PASS: futuristic by default, one switch to normal (remembered, followed across tabs, never duplicated in frames), '
-  + 'the study hears the change, every futuristic rule is scoped and geometry-free, and all four pages load it before paint.');
+  + 'the study hears the change, every futuristic rule is scoped and geometry-free, and every page checked here loads it before paint.');
 })().catch(e => { console.error(e); process.exit(1); });

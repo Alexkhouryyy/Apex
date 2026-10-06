@@ -360,11 +360,13 @@ def test_waiting_work_gets_a_nudge_every_few_days(fake):
     t = work.add_task(title='quote from supplier', status='waiting')
     work.update_task(t['id'], waiting_on='Ahmad')
     base = work.get_task(t['id'])['updated']
-    at = lambda days: datetime.fromtimestamp(base + days * 86400).replace(hour=12)
-    assert work_agent.tick(at(1)) == []
-    assert any('Still waiting on Ahmad' in x for x in work_agent.tick(at(3.2)))
-    assert work_agent.tick(at(4)) == []
-    assert any('Still waiting' in x for x in work_agent.tick(at(6.5)))
+    # Exact offsets from when it started waiting, whatever the time of day the test runs;
+    # only the follow-ups are counted (a 23:59 brief could otherwise land in the list).
+    nudges = lambda days: [x for x in work_agent.tick(datetime.fromtimestamp(base + days * 86400)) if 'Still waiting' in x]
+    assert nudges(1) == []
+    assert any('Still waiting on Ahmad' in x for x in nudges(3.2))
+    assert nudges(4) == []
+    assert nudges(6.5) and nudges(6.6) == []
 
 
 def test_works_on_its_own_on_your_plans_and_moves_on_at_a_limit(fake):

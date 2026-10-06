@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><script src="/static/theme.js"></script><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Apex · Code</title>
+  <link rel="icon" href="/static/icons/apex-refined.svg">
+  <link rel="stylesheet" href="/static/brand.css?v=brand40">
+  <link rel="stylesheet" href="/static/code.css?v=code-1">
+  <script src="/static/code.js?v=code-1" defer></script>
+  <link rel="stylesheet" href="/static/theme.css">
+</head>
+<body class="view-home">
+<div id="code-app">
+  <header class="top">
+    <button type="button" class="icon only-narrow" id="open-rail" aria-label="Sessions" aria-controls="rail">☰</button>
+    <a href="/" class="brand apex-brand" aria-label="Open Apex dashboard"><span class="apex-logo" aria-hidden="true"></span><span class="apex-wordmark">APEX</span><small>CODE</small></a>
+    <div class="plans" id="plans" aria-label="Your plans"></div>
+    <span class="credits" id="credits" title="Coding here only ever uses your Claude and ChatGPT plans">$0 API credits</span>
+    <nav class="links"><a href="/work">Work</a><a href="/">Dashboard</a></nav>
+    <button type="button" class="look small" data-look-toggle></button>
+  </header>
+
+  <div class="frame">
+    <aside class="rail" id="rail" aria-label="Sessions">
+      <button type="button" class="primary new" id="new-session">＋ New session</button>
+      <label class="field">Project
+        <select id="project" aria-label="Project"></select>
+      </label>
+      <div class="rail-list" id="session-list"></div>
+      <button type="button" class="ghost" id="add-project">＋ Add a project folder</button>
+    </aside>
+    <div class="scrim" id="scrim" hidden></div>
+
+    <main class="stage">
+      <section id="home" class="home" aria-labelledby="greeting">
+        <p class="eyebrow" id="today">APEX CODE</p>
+        <h1 id="greeting">Good evening.</h1>
+        <p class="sub" id="greet-sub">Two plans. Zero API credits. What are we building?</p>
+        <div class="week" id="week" aria-label="This week"></div>
+        <div id="home-slot"></div>
+        <div class="starts" id="starts" aria-label="Quick starts"></div>
+        <h2 class="section-title">Recent sessions</h2>
+        <div class="cards" id="cards"></div>
+      </section>
+
+      <section id="session" class="session" hidden aria-labelledby="s-title">
+        <div class="session-head">
+          <button type="button" class="icon" id="back" aria-label="Back to all sessions">←</button>
+          <div class="titles">
+            <h1 id="s-title"></h1>
+            <p class="meta" id="s-meta"></p>
+          </div>
+          <button type="button" class="only-narrow" id="open-side" aria-controls="side">Changes <em id="side-count"></em></button>
+        </div>
+        <div class="feed" id="feed" aria-live="polite"></div>
+        <div id="session-slot"></div>
+      </section>
+
+      <form id="brief-form" class="composer" autocomplete="off">
+        <div class="brief">
+          <textarea id="prompt" rows="3" maxlength="20000" aria-label="Tell Apex what to do"
+            placeholder="Tell Apex what to build, fix or explain…"></textarea>
+          <div class="brief-bar">
+            <div class="seg" id="engine-seg" role="radiogroup" aria-label="Which plan does the work">
+              <button type="button" role="radio" data-engine="claude"><i class="dot claude"></i>Claude plan</button>
+              <button type="button" role="radio" data-engine="chatgpt"><i class="dot chatgpt"></i>ChatGPT plan</button>
+            </div>
+            <div class="seg" id="mode-seg" role="radiogroup" aria-label="What Apex may run">
+              <button type="button" role="radio" data-mode="safe" title="Edit files, run tests and git status/diff/log. Nothing else.">Safe</button>
+              <button type="button" role="radio" data-mode="full" title="Any command, inside the session's own copy of the project.">Full</button>
+            </div>
+            <span class="grow"></span>
+            <button type="button" class="mic" id="mic" aria-label="Talk instead of typing" title="Talk instead of typing">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
+            </button>
+            <button type="submit" class="primary send" id="send">Build it <kbd>Ctrl ⏎</kbd></button>
+          </div>
+        </div>
+        <p class="hint" id="hint">Every session works on its own branch. Nothing touches your project until you press Keep.</p>
+      </form>
+    </main>
+
+    <aside class="side" id="side" aria-label="Changes, second opinion and checks">
+      <div class="side-head only-narrow"><b>This session</b><button type="button" class="icon" id="close-side" aria-label="Close">✕</button></div>
+      <section class="box">
+        <h3>Changes <em id="c-count"></em></h3>
+        <div id="c-files" class="files"></div>
+      </section>
+      <section class="box review" id="box-review">
+        <h3>Second opinion <small>brutally honest</small></h3>
+        <div id="r-body"></div>
+        <div class="row">
+          <button type="button" id="r-go">Get a second opinion</button>
+        </div>
+      </section>
+      <section class="box" id="box-checks">
+        <h3>Checks</h3>
+        <div class="check-cmd"><input id="k-cmd" aria-label="Checks command" spellcheck="false"><button type="button" id="k-save" class="small" hidden>Save</button></div>
+        <div id="k-state" class="k-state"></div>
+        <pre id="k-out" class="out" hidden></pre>
+        <div class="row"><button type="button" id="k-go">▶ Run checks</button></div>
+      </section>
+      <section class="box actions" id="box-actions">
+        <button type="button" class="primary keep" id="a-keep">✓ Keep it</button>
+        <div class="row">
+          <button type="button" id="a-undo" title="Put the files back to before the last step">↶ Undo last step</button>
+          <button type="button" id="a-catchup" title="Bring your latest commits into this session">⇣ Catch up</button>
+        </div>
+        <div class="row">
+          <button type="button" id="a-folder">Open folder</button>
+          <button type="button" class="danger" id="a-discard">Throw away</button>
+        </div>
+        <p class="fine" id="a-where"></p>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<dialog id="diff" aria-labelledby="diff-path">
+  <div class="dialog-head">
+    <div><b id="diff-path"></b> <span id="diff-stat" class="muted"></span></div>
+    <span class="grow"></span>
+    <button type="button" id="diff-prev" aria-label="Previous file">↑</button>
+    <button type="button" id="diff-next" aria-label="Next file">↓</button>
+    <button type="button" id="diff-close" aria-label="Close">✕</button>
+  </div>
+  <div id="diff-body" class="diff-body"></div>
+</dialog>
+
+<dialog id="confirm" aria-labelledby="confirm-title">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text"></p>
+    <div class="row end"><button value="cancel">Cancel</button><button value="ok" class="primary" id="confirm-ok">OK</button></div>
+  </form>
+</dialog>
+
+<dialog id="add-dialog" aria-labelledby="add-title">
+  <form method="dialog" id="add-form">
+    <h2 id="add-title">Add a project folder</h2>
+    <label class="field">Folder on this PC <input id="add-path" placeholder="C:\Users\you\projects\my-app" spellcheck="false" required></label>
+    <label class="field">Name (optional) <input id="add-name" maxlength="60"></label>
+    <p class="fine">It must be a git project with at least one commit. Sessions work on their own branch of it.</p>
+    <div class="row end"><button value="cancel">Cancel</button><button value="ok" class="primary">Add</button></div>
+  </form>
+</dialog>
+
+<dialog id="login">
+  <form method="dialog"><label class="field">Apex dashboard token (the master one) <input id="token" type="password" autocomplete="current-password"></label>
+  <div class="row end"><button class="primary" id="token-save">Continue</button></div></form>
+</dialog>
+
+<p id="toast" class="toast" role="status" hidden></p>
+</body>
+</html>

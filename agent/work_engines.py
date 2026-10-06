@@ -288,8 +288,7 @@ def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: 
     except OSError as exc:
         return {'status': 'failed', 'summary': f'{NAMES[engine]} could not start: {exc}', 'reset_at': None}
     if run_id:
-        with _lock:
-            _procs[run_id] = proc
+        track(run_id, proc)
     try:
         try:
             out, err = proc.communicate(prompt, timeout=timeout)
@@ -298,12 +297,8 @@ def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: 
             proc.communicate()
             return {'status': 'failed', 'summary': f'{NAMES[engine]} took longer than {timeout // 60} minutes and was stopped.', 'reset_at': None}
     finally:
-        if run_id:
-            with _lock:
-                _procs.pop(run_id, None)
-                was_stopped = run_id in _stopped
-                _stopped.discard(run_id)
-    if run_id and was_stopped:
+        was_stopped = untrack(run_id) if run_id else False
+    if was_stopped:
         return {'status': 'stopped', 'summary': 'You stopped it. Anything it wrote so far is in the folder.', 'reset_at': None}
     out, err = out or '', err or ''
     if engine == 'claude':
@@ -333,13 +328,37 @@ def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: 
             'reset_at': reset_time(detail) if status == 'limited' else None}
 
 
-def stop(run_id: str) -> bool:
-    """End a running plan task and everything it started."""
+def track(run_id: str, proc: subprocess.Popen) -> None:
+    """Remember a running tool so stop(run_id) can end it (Work tasks, Code turns).
+    If Stop came before the tool had even started, it ends now."""
+    with _lock:
+        _procs[run_id] = proc
+        stop_now = run_id in _stopped
+    if stop_now:
+        _kill_tree(proc)
+
+
+def untrack(run_id: str) -> bool:
+    """Forget a finished tool. True if it ended because stop() was called."""
+    with _lock:
+        _procs.pop(run_id, None)
+        was_stopped = run_id in _stopped
+        _stopped.discard(run_id)
+    return was_stopped
+
+
+def running(run_id: str) -> bool:
+    with _lock:
+        return run_id in _procs
+
+
+def stop(run_id: str, before_start: bool = False) -> bool:
+    """End a running plan task and everything it started. With before_start, a run
+    that hasn't started its tool yet is ended the moment it does (see track)."""
     with _lock:
         proc = _procs.get(run_id)
-        if proc:
+        if proc or before_start:
             _stopped.add(run_id)
-    if not proc:
-        return False
-    _kill_tree(proc)
-    return True
+    if proc:
+        _kill_tree(proc)
+    return bool(proc) or before_start

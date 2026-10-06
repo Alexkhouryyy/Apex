@@ -142,6 +142,11 @@ What the plans may do:
 - Not yet seen: a real usage-limit message from either plan, and a week of
   Always on.
 
+## Coding
+
+For coding, there's a page of its own on the same two plans: **Code**
+(`/code`, see `docs/CODE.md`).
+
 ## From chat and voice
 
 The `work` tool works anywhere you talk to Apex:
