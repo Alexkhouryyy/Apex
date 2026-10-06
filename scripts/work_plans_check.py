@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agent import work_engines as we  # noqa: E402
 
 FLAGS = {
-    'claude': (['--help'], ['-p', '--output-format', '--permission-mode', '--allowedTools']),
+    'claude': (['--help'], ['-p', '--output-format', '--permission-mode', '--allowedTools', '--tools', '--strict-mcp-config']),
     'chatgpt': (['exec', '--help'], ['--skip-git-repo-check', '--ephemeral', '--cd', '--sandbox', 'workspace-write',
                                      '--output-last-message', 'read from stdin']),
 }

@@ -27,12 +27,15 @@ if sys.argv[1:3] in (['auth', 'status'], ['login', 'status']):
         print(auth); sys.exit(0 if '"loggedIn": true' in auth else 1)
     print(auth, file=sys.stderr); sys.exit(0 if auth.startswith('Logged in') else 1)
 if '--help' in sys.argv or '--version' in sys.argv:   # what the real tools print, in short
-    print('{name} 9.9 -p --output-format --permission-mode --allowedTools --skip-git-repo-check --ephemeral '
-          '--cd --sandbox workspace-write --output-last-message instructions are read from stdin'); sys.exit(0)
+    extra = (here / '{name}.help').read_text() if (here / '{name}.help').exists() else ''
+    print('{name} 9.9 -p --output-format --permission-mode --allowedTools --tools --strict-mcp-config '
+          '--skip-git-repo-check --ephemeral --cd --sandbox workspace-write --output-last-message '
+          'instructions are read from stdin ' + extra); sys.exit(0)
 mode = (here / '{name}.mode').read_text().strip()
 (here / '{name}.args').write_text(json.dumps({{
     'argv': sys.argv[1:], 'cwd': os.getcwd(), 'stdin': sys.stdin.read(),
-    'keys': [k for k in ('ANTHROPIC_API_KEY', 'OPENAI_API_KEY') if k in os.environ]}}))
+    'keys': [k for k in ('ANTHROPIC_API_KEY', 'OPENAI_API_KEY') if k in os.environ],
+    'connectors': os.environ.get('ENABLE_CLAUDEAI_MCP_SERVERS')}}))
 if mode == 'slow':
     import time; time.sleep(5)
 if mode == 'check':                    # does what the live check asks, like a real plan would
@@ -78,7 +81,9 @@ def fake(tmp_path, monkeypatch, test_db):
         (bin_dir / f'{name}.mode').write_text('done')
     (bin_dir / 'claude.auth').write_text(PLAN_CLAUDE)
     (bin_dir / 'codex.auth').write_text('Logged in using ChatGPT')
+    (bin_dir / 'claude.help').write_text('--restricted')
     work_engines.forget_checks()
+    work_engines._supports.clear()
     monkeypatch.setenv('FAKE_DIR', str(bin_dir))
     monkeypatch.setenv('PATH', f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'sk-ant-should-not-reach-the-plan')
@@ -558,3 +563,16 @@ def test_files_you_cannot_open_are_called_out_in_the_summary(fake, tmp_path, mon
     monkeypatch.setattr(pathlib.Path, 'open', guarded)
     r = work_engines.run('chatgpt', 'x', tmp_path / 'f')
     assert r['status'] == 'done' and "Windows won't let you open what Codex wrote (result.md)" in r['summary']
+
+
+def test_claude_gets_only_file_and_web_tools_no_connectors_and_stays_in_the_folder(fake, tmp_path):
+    work_engines.run('claude', 'x', tmp_path / 'a')
+    seen = fake.args('claude'); argv = seen['argv']
+    assert argv[argv.index('--tools') + 1] == 'Read,Write,Edit,Glob,Grep,WebSearch,WebFetch'
+    assert '--strict-mcp-config' in argv and '--restricted' in argv          # no MCP; files stay in the folder
+    assert seen['connectors'] == 'false'                                    # no claude.ai connectors (Stripe...)
+    # An older Claude Code without --restricted still works, with the rest of the limits.
+    (fake.dir / 'claude.help').write_text(''); work_engines._supports.clear()
+    work_engines.run('claude', 'x', tmp_path / 'b')
+    argv = fake.args('claude')['argv']
+    assert '--restricted' not in argv and '--strict-mcp-config' in argv and '--tools' in argv

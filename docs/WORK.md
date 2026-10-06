@@ -83,7 +83,10 @@ don't look. It is off until you switch it on.
 
 What the plans may do:
 - Claude Code may read, write and edit files in the task's folder and search
-  the web. It has no shell.
+  the web. Only those tools exist in its run (`--tools`). It has no shell, no
+  MCP servers, and none of your claude.ai connectors (Drive, Stripe...). With
+  `--restricted` (Claude Code 2.1.29x and later), its file tools stay inside
+  the task folder and your personal Claude settings and hooks are ignored.
 - Codex runs in its workspace-write sandbox, in the task's folder.
 - Each run stops after 30 minutes. **Stop** in the task ends it sooner.
   Either way, the app and everything it started is ended, so nothing keeps
@@ -132,11 +135,12 @@ What the plans may do:
   configured model and API key.
 - These apps sometimes change their sign-in or output. If a plan says "not
   signed in", run `claude` or `codex` once in a terminal.
-- What has been checked against the real apps (Claude Code 2.1, Codex
-  0.160): every option Apex passes; how each app reports its sign-in; that a
-  Codex signed in with an API key is refused. What hasn't, because it needs
-  your accounts: a full task on your own plans, and the wording of a real
-  limit message. The `--live` check in the setup script covers the first.
+- **Seen working on your PC (6 Oct 2026):** the setup signed in Claude
+  (Claude Pro) and Codex (ChatGPT). Both passed the live check: a real task
+  on each plan wrote its file, and Apex could read it (Claude in 20 s, Codex
+  in 50 s).
+- Not yet seen: a real usage-limit message from either plan, and a week of
+  Always on.
 
 ## From chat and voice
 

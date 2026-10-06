@@ -91,7 +91,24 @@ def _env() -> dict:
     env = dict(os.environ)
     for key in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY'):
         env.pop(key, None)            # so the tools use your signed-in plan, never API credits
+    env['ENABLE_CLAUDEAI_MCP_SERVERS'] = 'false'   # no claude.ai connectors (Drive, Stripe...) in Work tasks
     return env
+
+
+_supports: dict[tuple[str, str], bool] = {}
+
+
+def supports(exe: str, flag: str) -> bool:
+    """Whether this install of a tool knows an option (asked once per install)."""
+    key = (exe, flag)
+    if key not in _supports:
+        try:
+            text = subprocess.run([exe, '--help'], capture_output=True, text=True, encoding='utf-8', errors='replace',
+                                  timeout=60, env=_env(), stdin=subprocess.DEVNULL, **_hidden()).stdout
+        except (OSError, subprocess.SubprocessError):
+            text = ''
+        _supports[key] = flag in text
+    return _supports[key]
 
 
 def _hidden() -> dict:
@@ -252,7 +269,13 @@ def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: 
     folder.mkdir(parents=True, exist_ok=True)
     last = folder / '.apex-last-message.txt'
     if engine == 'claude':
-        cmd = [exe, '-p', '--output-format', 'json', '--permission-mode', 'acceptEdits', '--allowedTools', *CLAUDE_TOOLS]
+        # Only file and web tools exist (--tools) and are pre-approved; no MCP servers or connectors;
+        # --restricted (Claude Code 2.1.29x+) also keeps file tools inside the task folder and
+        # ignores personal settings and hooks.
+        cmd = [exe, '-p', '--output-format', 'json', '--permission-mode', 'acceptEdits',
+               '--tools', ','.join(CLAUDE_TOOLS), '--allowedTools', *CLAUDE_TOOLS, '--strict-mcp-config']
+        if supports(exe, '--restricted'):
+            cmd.append('--restricted')
     else:
         cmd = [exe, 'exec', '--skip-git-repo-check', '--ephemeral', '-C', str(folder), '--sandbox', 'workspace-write']
         mode = codex_windows_sandbox() if windows_sandbox is None else windows_sandbox
