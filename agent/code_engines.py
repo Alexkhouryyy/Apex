@@ -304,6 +304,8 @@ def turn(engine: str, prompt: str, folder: Path, mode: str = 'safe', resume: str
         cmd = command(engine, exe, Path(folder), mode, resume)
     except ValueError as exc:
         return finish('failed', str(exc))
+    if engine == 'chatgpt' and mode != 'review':
+        prompt = we.codex_prompt(prompt)
     env = we._env()
     env.update(env_extra or {})
     try:
