@@ -160,10 +160,13 @@ def code_check(engine: str) -> bool:
     made = folder / 'apex-code-check.md'
     steps: list = []
     first = code_engines.turn(engine, CODE_TASKS[0], folder, 'safe', None, steps.append, timeout=300)
+    _how(steps)
     wrote = _readable(made)
     ok = _say(first['status'] == 'done' and wrote is True,
               f"a live coding step finished as {first['status']}, with {len(steps) - 1} steps streamed"
               + (', but Windows blocks reading the file it wrote' if wrote == 'unreadable' else ''))
+    if wrote is not True:
+        print('        it said: ' + (first.get('summary') or '').replace('\n', ' ')[:300])
     if wrote == 'unreadable':
         print(f'        folder: {folder}')
         return _unelevated_retry(engine) if engine == 'chatgpt' and os.name == 'nt' else False
@@ -171,6 +174,7 @@ def code_check(engine: str) -> bool:
         return _say(False, 'it gave no conversation id, so follow-ups could not continue it')
     steps.clear()
     second = code_engines.turn(engine, CODE_TASKS[1], folder, 'safe', first['session'], steps.append, timeout=300)
+    _how(steps)
     again = _readable(made, word='again')
     ok &= _say(second['status'] == 'done' and again is True, f"a follow-up continued the same conversation ({second['status']})"
                + (', but Windows blocks reading the file' if again == 'unreadable' else ''))
@@ -178,6 +182,15 @@ def code_check(engine: str) -> bool:
         print('        it said: ' + ((second if first['status'] == 'done' else first).get('summary') or '').replace('\n', ' ')[:300])
     print(f'        folder: {folder}')
     return ok
+
+
+def _how(steps: list) -> None:
+    """How the plan changed files: its edit tool, or commands (which matters on Windows)."""
+    for e in steps:
+        if e.get('kind') == 'file':
+            print(f"        wrote {e.get('path')} with its edit tool")
+        elif e.get('kind') == 'tool' and e.get('tool') == 'command':
+            print(f"        ran: {str(e.get('title'))[:160]}")
 
 
 def _unelevated_retry(engine: str) -> bool:

@@ -87,6 +87,20 @@ def codex_windows_sandbox() -> str:
     return mode if mode in WINDOWS_SANDBOXES else ''
 
 
+# Seen on the owner's PC: a file Codex writes with a shell command (Set-Content,
+# echo >) is created by its Windows sandbox account, and the owner can't open it,
+# not even its permissions. Files it writes with its own edit tool are the owner's.
+WINDOWS_CODEX_NOTE = ('Important on this Windows PC: create and change files only with your file-editing tool '
+                      '(apply_patch). Never write files with shell commands such as Set-Content, Out-File, '
+                      'New-Item, Add-Content or echo/redirection: files written that way are locked away from the owner.')
+
+
+def codex_prompt(prompt: str, windows: bool | None = None) -> str:
+    """The task as Codex gets it: on Windows, with the note on how to write files."""
+    windows = os.name == 'nt' if windows is None else windows
+    return f'{WINDOWS_CODEX_NOTE}\n\n{prompt}' if windows else prompt
+
+
 def _env() -> dict:
     env = dict(os.environ)
     for key in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY'):
@@ -291,7 +305,7 @@ def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: 
         track(run_id, proc)
     try:
         try:
-            out, err = proc.communicate(prompt, timeout=timeout)
+            out, err = proc.communicate(codex_prompt(prompt) if engine == 'chatgpt' else prompt, timeout=timeout)
         except subprocess.TimeoutExpired:
             _kill_tree(proc)
             proc.communicate()

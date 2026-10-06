@@ -620,3 +620,19 @@ def test_the_code_check_reports_a_locked_file_calmly(lab, monkeypatch, capsys):
     assert work_plans_check.code_check('chatgpt') is False                    # not a crash
     out = capsys.readouterr().out
     assert 'Windows blocks reading the file it wrote' in out and 'Windows would not let Apex read it' in out
+
+
+def test_on_windows_codex_is_told_to_write_files_with_its_edit_tool(lab):
+    assert work_engines.codex_prompt('Do it', windows=False) == 'Do it'
+    told = work_engines.codex_prompt('Do it', windows=True)
+    assert told.endswith('\n\nDo it') and 'apply_patch' in told and 'Set-Content' in told
+
+
+def test_codex_gets_the_windows_note_in_code_sessions_not_reviews(lab, monkeypatch):
+    real = work_engines.codex_prompt
+    monkeypatch.setattr(work_engines, 'codex_prompt', lambda p, windows=None: real(p, windows=True))   # as on Windows
+    s = wait(code_studio.start(lab.pid, 'Add a codex file', 'chatgpt')['id'])
+    assert lab.calls('codex')[-1]['stdin'].startswith(work_engines.WINDOWS_CODEX_NOTE)
+    lab.mode('codex', 'review')
+    code_studio.review(s['id'], engine='chatgpt'); wait(s['id'])
+    assert not lab.calls('codex')[-1]['stdin'].startswith(work_engines.WINDOWS_CODEX_NOTE)   # read-only: nothing to write
