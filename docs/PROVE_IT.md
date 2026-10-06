@@ -1,5 +1,7 @@
 # Prove it — the checks only you can run
 
+> **Newer, ordered list:** [CHECKLIST.md](CHECKLIST.md) (2026-10-04) covers these and the newer checks: the task suite, documents, the speech model, the Railway relay and Call Apex.
+
 Everything here needs your laptop, your voice, your phone or your cloud
 server, so it cannot be proven in a test. Each check says exactly what to
 send back; the result goes into `docs/APEX_V2_PLAN.md` as a measured number,

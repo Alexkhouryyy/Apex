@@ -569,10 +569,141 @@ async def record_voice_timing(request: Request):
     return {'stored': stored}
 
 
+_speech_model_seen: dict = {}
+
+
+@router.get('/api/companion/speech-model')
+async def speech_model_status():
+    """Whether the browser speech detector (scripts/fetch_speech_model.py) is
+    installed and every file matches its manifest. Hashing 14 MB on every
+    hands-free start is wasteful, so a result is reused until a file changes."""
+    from scripts import fetch_speech_model as fsm
+
+    def check():
+        target = fsm.TARGET
+        key = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size)
+                    for p in sorted(target.glob('*')) if p.is_file()) if target.exists() else ()
+        if _speech_model_seen.get('key') != key:
+            _speech_model_seen.update(key=key, status=fsm.status(target))
+        return _speech_model_seen['status']
+    return await asyncio.get_running_loop().run_in_executor(None, check)
+
+
+# --- The photoreal video avatar (scripts/avatar_server.py) -------------------
+# The avatar server listens on loopback only; these pass the companion's
+# requests through, behind Apex's own sign-in, so a phone or the car can use it.
+AVATAR_MAX_AUDIO = 8_000_000
+
+
+def _avatar_client(timeout):
+    import httpx
+    import config
+    return httpx.AsyncClient(base_url=config.AVATAR_URL, trust_env=False, timeout=httpx.Timeout(timeout, connect=3))
+
+
+@router.get('/api/avatar/status')
+async def avatar_status():
+    import httpx
+    try:
+        async with _avatar_client(4) as client:
+            response = await client.get('/health')
+        response.raise_for_status()
+        health = response.json()
+        return {'available': bool(health.get('ready')), 'engine': health.get('engine'), 'fps': health.get('fps'),
+                'frames': health.get('frames')}
+    except (httpx.HTTPError, ValueError):
+        return {'available': False, 'reason': 'The video avatar is not running. Start it with Start-Apex-Video-Avatar.cmd.'}
+
+
+def _avatar_format(value):
+    if value not in ('mp4', 'webm'):
+        raise HTTPException(400, 'format must be mp4 or webm.')
+    return value
+
+
+@router.get('/api/avatar/idle')
+async def avatar_idle(format: str = 'mp4'):
+    import httpx
+    fmt = _avatar_format(format)
+    try:
+        async with _avatar_client(60) as client:
+            response = await client.get('/idle', params={'format': fmt})
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, 'The video avatar is not running.') from exc
+    from fastapi.responses import Response
+    return Response(response.content, media_type='video/' + fmt, headers={'Cache-Control': 'no-store'})
+
+
+@router.post('/api/avatar/lipsync')
+async def avatar_lipsync(request: Request, format: str = 'mp4', start: int = 0):
+    import httpx
+    _check_origin(request)
+    fmt = _avatar_format(format)
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > AVATAR_MAX_AUDIO:
+            raise HTTPException(413, 'Audio too long for one section.')
+    if not raw:
+        raise HTTPException(400, 'Send the section as audio.')
+    try:
+        async with _avatar_client(180) as client:
+            response = await client.post('/lipsync', params={'format': fmt, 'start': max(0, start)}, content=bytes(raw), headers={'Content-Type': 'audio/wav'})
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, 'The video avatar is not running.') from exc
+    if response.status_code != 200:
+        raise HTTPException(502, 'The video avatar could not render that section.')
+    from fastapi.responses import Response
+    return Response(response.content, media_type='video/' + fmt,
+                    headers={'Cache-Control': 'no-store', 'X-Render-Ms': response.headers.get('x-render-ms', ''),
+                             'X-End-Frame': response.headers.get('x-end-frame', ''),
+                             'Server-Timing': response.headers.get('server-timing', '')})
+
+
+# --- The live photoreal face (Simli) -----------------------------------------
+# Apex asks Simli for a session with the key from .env and gives the page only
+# the session token and the network (ICE) servers. The key never reaches a
+# browser. Each session is billed while open, so its length and idle time are
+# capped (SIMLI_MAX_SESSION, SIMLI_MAX_IDLE).
+@router.post('/api/avatar/live/session')
+async def live_avatar_session(request: Request):
+    import httpx
+    import config
+    _check_origin(request)
+    if not config.SIMLI_API_KEY or not config.SIMLI_FACE_ID:
+        return {'available': False, 'reason': 'Add SIMLI_API_KEY and SIMLI_FACE_ID to Apex settings (docs/LIVE_AVATAR.md).'}
+    body = {'faceId': config.SIMLI_FACE_ID, 'handleSilence': True,
+            'maxSessionLength': config.SIMLI_MAX_SESSION, 'maxIdleTime': config.SIMLI_MAX_IDLE}
+    if config.SIMLI_MODEL:
+        body['model'] = config.SIMLI_MODEL
+    headers = {'x-simli-api-key': config.SIMLI_API_KEY, 'Content-Type': 'application/json'}
+    try:
+        async with httpx.AsyncClient(base_url=config.SIMLI_URL, timeout=httpx.Timeout(20, connect=8)) as client:
+            token = await client.post('/compose/token', json=body, headers=headers)
+            if token.status_code in (401, 403):
+                return {'available': False, 'reason': 'Simli refused the API key. Check SIMLI_API_KEY.'}
+            if token.status_code != 200:
+                return {'available': False, 'reason': f'Simli could not start a session ({token.status_code}). Check SIMLI_FACE_ID and your Simli balance.'}
+            session = token.json().get('session_token')
+            if not session:
+                return {'available': False, 'reason': 'Simli answered without a session token.'}
+            try:
+                ice = (await client.get('/compose/ice', headers=headers)).json()
+            except (httpx.HTTPError, ValueError):
+                ice = None
+    except httpx.HTTPError:
+        return {'available': False, 'reason': 'Simli could not be reached. Check this computer is online.'}
+    if not isinstance(ice, list) or not ice:
+        ice = [{'urls': ['stun:stun.l.google.com:19302']}]            # what Simli's own client falls back to
+    return {'available': True, 'session_token': session, 'ice_servers': ice}
+
+
 @router.get('/api/companion/timing')
 async def voice_timing_summary(limit: int = 20):
     from agent import voice_timing
     limit = max(1, min(200, int(limit)))
     return {'summary': voice_timing.summary(limit), 'turns': voice_timing.recent(limit),
             'before': voice_timing.summary(limit, streamed=False),
-            'after': voice_timing.summary(limit, streamed=True)}
+            'after': voice_timing.summary(limit, streamed=True),
+            'detectors': {d: voice_timing.summary(limit, detector=d) for d in voice_timing.DETECTORS}}

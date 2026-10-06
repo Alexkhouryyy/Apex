@@ -32,7 +32,8 @@
     $('voice-timing').textContent = timingLine(t.stages); $('voice-timing').hidden = false;
     try {
       await request('/api/companion/timing', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mode: t.mode, voice: $('voice').value, streamed: Boolean(t.streamed), stages: t.stages})});
+        body: JSON.stringify({mode: t.mode, voice: $('voice').value, streamed: Boolean(t.streamed), stages: t.stages,
+          ...(t.detector ? {detector: t.detector} : {})})});
     } catch (_) { /* Measurement must never break a turn. */ }
   }
   const drive = location.pathname === '/drive';
@@ -271,6 +272,8 @@
     }
   }
   $('voicebox-profile').addEventListener('change', () => localStorage.setItem('apex.voicebox.profile', $('voicebox-profile').value));
+  $('speech-detector').value = localStorage.getItem('apex.speech.detector') === 'loudness' ? 'loudness' : 'model';
+  $('speech-detector').addEventListener('change', () => localStorage.setItem('apex.speech.detector', $('speech-detector').value));
   $('stream-speech').checked = localStorage.getItem('apex.speech.stream') !== '0';
   $('stream-speech').addEventListener('change', () => localStorage.setItem('apex.speech.stream', $('stream-speech').checked ? '1' : '0'));
   $('first-phrase').checked = localStorage.getItem('apex.speech.firstPhrase') !== '0';
@@ -316,6 +319,144 @@
     }
     return audioCtx;
   }
+  // --- Voice level, for the character's mouth (avatar.js) -------------------
+  // Read from the audio actually playing. Celine's streamed PCM passes
+  // through an analyser on its own audio context. A recorded clip plays
+  // untouched; its loudness comes from a copy decoded beside it. The device
+  // voice exposes no audio, so its word boundaries pulse the mouth instead.
+  const voiceMeter = {
+    clip: null, envelope: null, pulse: 0, samples: null,
+    output(ctx) {
+      if (typeof ctx.createAnalyser !== 'function') return ctx.destination;
+      if (!ctx.apexMeter) {
+        const meter = ctx.createAnalyser(); meter.fftSize = 1024;
+        meter.connect(ctx.destination); ctx.apexMeter = meter;
+      }
+      return ctx.apexMeter;
+    },
+    async track(clip, blob) {
+      this.clip = clip; this.envelope = null;
+      try {
+        const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        if (!Offline || !blob?.arrayBuffer) return;
+        const decoded = await new Offline(1, 1, 22050).decodeAudioData(await blob.arrayBuffer());
+        const data = decoded.getChannelData(0), step = Math.max(1, Math.round(decoded.sampleRate * 0.02)), env = [];
+        for (let i = 0; i < data.length; i += step) {
+          let sum = 0; const end = Math.min(data.length, i + step);
+          for (let k = i; k < end; k++) sum += data[k] * data[k];
+          env.push(Math.sqrt(sum / (end - i)));
+        }
+        if (this.clip === clip) this.envelope = env;
+      } catch (_) { /* the mouth falls back to a plain flap */ }
+    },
+    level() {
+      if (!root.classList.contains('speaking')) return 0;
+      const meter = audioCtx && audioCtx.apexMeter;
+      if (meter && typeof meter.getFloatTimeDomainData === 'function') {
+        if (!this.samples || this.samples.length !== meter.fftSize) this.samples = new Float32Array(meter.fftSize);
+        meter.getFloatTimeDomainData(this.samples);
+        let sum = 0; for (const v of this.samples) sum += v * v;
+        const rms = Math.sqrt(sum / this.samples.length);
+        if (rms > 0.002) return Math.min(1, rms * 5);
+      }
+      if (this.clip && !this.clip.paused) {
+        if (this.envelope) return Math.min(1, (this.envelope[Math.floor(this.clip.currentTime / 0.02)] || 0) * 5);
+        return 0.3 + 0.25 * Math.sin(performance.now() / 70);
+      }
+      if (window.speechSynthesis?.speaking) return 0.15 + 0.65 * Math.exp(-(performance.now() - this.pulse) / 140);
+      return 0;
+    },
+  };
+  window.ApexVoice = {level: () => voiceMeter.level()};
+  // --- How Apex appears: the orb, or its character (avatar.js) --------------
+  // A model of your own at /static/avatars/apex.glb replaces the built-in suit.
+  const CUSTOM_MODEL = '/static/avatars/apex.glb';
+  let customModel = null;
+  function findCustomModel() {
+    customModel = customModel || fetch(CUSTOM_MODEL, {method: 'HEAD'}).then(r => r.ok ? CUSTOM_MODEL : null).catch(() => null);
+    return customModel;
+  }
+  let avatar = null, lookPending = false, videoAvatar = null, videoPending = false, liveAvatar = null, livePending = false;
+  // The live photoreal face (live-avatar.js, Simli). Simli bills while a
+  // session is open, so the face hangs up after a quiet spell or when the page
+  // is hidden, keeps its last frame, and reconnects as soon as you start typing
+  // or talking: usually connected again before the reply is ready.
+  let parkTimer = null;
+  const parkAfter = () => Number(window.ApexLiveParkMs) || 90000;
+  function liveBusy() { clearTimeout(parkTimer); }
+  function liveIdle() { clearTimeout(parkTimer); parkTimer = setTimeout(() => liveAvatar?.park(), parkAfter()); }
+  function liveWarm() { if (!liveAvatar) return; clearTimeout(parkTimer); if (!liveAvatar.ready) liveAvatar.ensure().catch(exc => liveNote(exc.message)); }
+  function liveNote(reason) { $('presence-look').title = reason; }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && liveAvatar && !root.classList.contains('speaking')) { clearTimeout(parkTimer); liveAvatar.park(); }
+  });
+  $('message').addEventListener('input', liveWarm);
+  function liveOff(reason) {
+    $('presence-look').value = 'orb'; delete root.dataset.look;
+    $('presence-look').title = reason;
+    $('presence-look').querySelector('option[value=live]').textContent = 'Live face (not available)';
+  }
+  async function startLiveAvatar() {
+    if (liveAvatar || livePending || !window.ApexLiveAvatar) return;
+    livePending = true;
+    const candidate = new window.ApexLiveAvatar($('avatar'), request);
+    try {
+      await candidate.start();
+      if ($('presence-look').value !== 'live') { candidate.dispose(); return; }
+      liveAvatar = candidate; root.dataset.look = 'live'; $('presence-look').title = '';
+      liveIdle();
+      candidate.onLost = reason => {
+        if (liveAvatar !== candidate) return;
+        clearTimeout(parkTimer); candidate.dispose(); liveAvatar = null; liveOff(reason);    // speech goes back to plain audio
+      };
+    } catch (exc) { candidate.dispose(); liveOff(exc.message); }
+    finally { livePending = false; }
+  }
+  // The photoreal video avatar (video-avatar.js, scripts/avatar_server.py).
+  async function startVideoAvatar() {
+    if (videoAvatar || videoPending || !window.ApexVideoAvatar) return;
+    videoPending = true;
+    const candidate = new window.ApexVideoAvatar($('avatar'), request);
+    try {
+      await candidate.start();
+      if ($('presence-look').value !== 'video') { candidate.dispose(); return; }
+      videoAvatar = candidate; root.dataset.look = 'video';
+      $('presence-look').title = '';
+    } catch (exc) {
+      candidate.dispose();
+      // Said on the setting itself (a banner would be cleared by the next status update).
+      $('presence-look').value = 'orb'; delete root.dataset.look;
+      $('presence-look').title = exc.message;
+      const option = $('presence-look').querySelector('option[value=video]');
+      option.textContent = 'Video (avatar server off)';
+    } finally { videoPending = false; }
+  }
+  async function applyLook() {
+    const look = $('presence-look').value;
+    if (look !== 'video' && videoAvatar) { videoAvatar.dispose(); videoAvatar = null; }
+    if (look !== 'live' && liveAvatar) { liveAvatar.dispose(); liveAvatar = null; }
+    if (look !== 'character' && avatar) { avatar.dispose(); avatar = null; }
+    if (look === 'orb') { delete root.dataset.look; return; }
+    if (look === 'video') { startVideoAvatar(); return; }
+    if (look === 'live') { startLiveAvatar(); return; }
+    if (avatar || lookPending) return;
+    if (!window.ApexAvatarCharacter) { window.addEventListener('apex-avatar-ready', applyLook, {once: true}); return; }
+    lookPending = true;
+    const model = await findCustomModel();
+    lookPending = false;
+    if ($('presence-look').value !== 'character' || avatar) return;
+    avatar = window.ApexAvatarCharacter.create($('avatar'), {level: () => voiceMeter.level(), model,
+      state: () => ['speaking', 'thinking', 'listening'].find(name => root.classList.contains(name)) || ''});
+    if (avatar) { root.dataset.look = 'character'; return; }
+    // Said on the setting itself: a banner would be cleared by the next status update.
+    $('presence-look').value = 'orb';
+    const option = $('presence-look').querySelector('option[value=character]');
+    option.disabled = true; option.textContent = 'Character (needs WebGL)';
+    $('presence-look').title = 'This device cannot draw Apex\'s character (no WebGL), so the orb stays.';
+  }
+  $('presence-look').value = ['character', 'video', 'live'].includes(localStorage.getItem('apex.presence.look')) ? localStorage.getItem('apex.presence.look') : 'orb';
+  $('presence-look').addEventListener('change', () => { localStorage.setItem('apex.presence.look', $('presence-look').value); applyLook(); });
+  applyLook();
   async function openStream(section, engine, profile) {
     let response;
     // 409: the GPU is still finishing a section that was stopped — stopping
@@ -377,7 +518,7 @@
         let o = 0;
         for (const pcm of pending) { for (let i = 0; i < pcm.length; i++) channel[o++] = pcm[i] / 32768; }
         pending = []; pendingLen = 0;
-        const src = ctx.createBufferSource(); src.buffer = buffer; src.connect(ctx.destination);
+        const src = ctx.createBufferSource(); src.buffer = buffer; src.connect(voiceMeter.output(ctx));
         const rate = exact ? handle.rate : ctx.sampleRate;
         const earliest = Math.ceil((ctx.currentTime + (first ? LEAD : 0.01)) * rate);
         // Late (the voice fell behind): start now rather than in the past.
@@ -428,8 +569,9 @@
   }
   function voiceFns(epoch) {
     const engine = $('voice').value, profile = $('voicebox-profile').value;
+    const lipsync = Boolean(videoAvatar?.ready);       // the face needs each section whole, so no PCM streaming
     const generate = async section => {
-      if (engine === 'voicebox' && streamOk !== false) {
+      if (engine === 'voicebox' && streamOk !== false && !lipsync) {
         const previous = gpuFree;
         await previous;
         mark('tts_start');
@@ -441,15 +583,92 @@
         headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: section, engine, profile})});
       const blob = await response.blob();
       mark('tts_ready'); serverTiming(response, 'tts', 'tts_server');
+      // Render the face now: this section's clip is made while the one before it plays.
+      if (lipsync) { blob.clip = videoAvatar.render(blob); blob.clip.catch(() => {}); }
       return blob;
     };
-    const play = blob => blob && blob.kind === 'pcm' ? playPcm(blob, epoch) : new Promise((resolve, reject) => {
+    const live = () => Boolean(liveAvatar);           // connected, or parked and able to reconnect
+    const play = blob => blob && blob.kind === 'pcm' ? (live() ? playLivePcm(blob) : playPcm(blob, epoch))
+      : live() && blob ? playLive(blob) : blob && blob.clip ? playClip(blob) : playAudio(blob);
+    // The live face (Simli): Apex's voice goes to the face instead of the
+    // speakers, and comes back from it, in sync. Streamed voice goes in as it
+    // arrives. If anything fails, the speech plays as plain audio instead.
+    const playLive = async blob => {
+      if (epoch !== speechEpoch) return;
+      let pcm;
+      try {
+        const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const decoded = await new Offline(1, 1, 16000).decodeAudioData(await blob.arrayBuffer());
+        const f = decoded.getChannelData(0);
+        pcm = new Int16Array(f.length);
+        for (let i = 0; i < f.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, Math.round(f[i] * 32767)));
+      } catch (_) { return playAudio(blob); }
+      if (epoch !== speechEpoch || !live()) return playAudio(blob);
+      liveBusy();
+      if (!liveAvatar.ready) {                        // parked: reconnect, or speak as plain audio this once
+        try { await liveAvatar.ensure(); } catch (exc) { liveNote(exc.message); return playAudio(blob); }
+        if (epoch !== speechEpoch || !liveAvatar?.ready) return playAudio(blob);
+      }
+      liveAvatar.say(pcm, 16000);
+      endPlayback = () => liveAvatar?.interrupt(); audio = {pause: () => liveAvatar?.interrupt()};
+      state('speaking', 'Speaking · Stop ends playback'); controls();
+      await liveAvatar.finished(() => mark('first_sound'));
+      liveIdle();
+      if (audio && !audio.src) { audio = null; endPlayback = null; }
+    };
+    const playLivePcm = async handle => {
+      liveBusy();
+      if (!liveAvatar.ready) {
+        try { await liveAvatar.ensure(); } catch (exc) { liveNote(exc.message); }
+        if (!liveAvatar?.ready) return playPcm(handle, epoch);         // the voice still plays
+      }
+      const id = {}; let carry = null, first = true, stopped = false;
+      const stop = () => { stopped = true; handle.reader.cancel().catch(() => {}); handle.received(); liveAvatar?.interrupt(); };
+      endPlayback = stop; audio = {pause: stop};
+      try {
+        while (!stopped) {
+          const {value, done} = await handle.reader.read();
+          if (done) break;
+          if (epoch !== speechEpoch) { stop(); return; }
+          if (!value || !value.length) continue;
+          let bytes = value;
+          if (carry) { const joined = new Uint8Array(carry.length + bytes.length); joined.set(carry); joined.set(bytes, carry.length); bytes = joined; carry = null; }
+          if (bytes.length % 2) { carry = bytes.slice(-1); bytes = bytes.slice(0, -1); }
+          if (!bytes.length) continue;
+          if (first) { first = false; mark('tts_ready'); state('speaking', 'Speaking · Stop ends playback'); controls(); }
+          liveAvatar?.say(new Int16Array(bytes.slice().buffer), handle.rate, id);
+        }
+      } finally { handle.received(); liveAvatar?.endStream(id); }
+      if (stopped) return;
+      if (first) throw new Error('The voice server sent no audio.');
+      await liveAvatar.finished(() => mark('first_sound'));
+      liveIdle();
+      if (audio && !audio.src) { audio = null; endPlayback = null; }
+    };
+    // The video avatar: the face saying the section, with its sound. If the
+    // clip can't be made or played, the same section plays as plain audio.
+    const playClip = async blob => {
+      if (epoch !== speechEpoch) return;
+      let clip;
+      try { clip = await blob.clip; } catch (_) { return playAudio(blob); }
+      if (epoch !== speechEpoch || !videoAvatar?.ready) return;
+      endPlayback = () => videoAvatar?.stop();
+      audio = {pause: () => videoAvatar?.stop()};
+      state('speaking', 'Speaking · Stop ends playback'); controls();
+      if (timing && clip.renderMs != null && !('avatar_server' in timing.stages)) timing.stages.avatar_server = clip.renderMs;
+      try { await videoAvatar.play(clip, () => mark('first_sound')); }
+      catch (_) { if (epoch === speechEpoch) return playAudio(blob); }
+      finally { if (endPlayback && audio && !audio.src) { audio = null; endPlayback = null; } }
+    };
+    const playAudio = blob => new Promise((resolve, reject) => {
       if (epoch !== speechEpoch) { resolve(); return; }
       audioUrl = URL.createObjectURL(blob); audio = new Audio(audioUrl);
+      voiceMeter.track(audio, blob);
       const current = audio, url = audioUrl;
       const done = exc => {
         current.onended = current.onerror = null;
         if (audio === current) { audio = null; audioUrl = null; endPlayback = null; }
+        if (voiceMeter.clip === current) { voiceMeter.clip = null; voiceMeter.envelope = null; }
         URL.revokeObjectURL(url);
         if (exc) reject(exc); else resolve();
       };
@@ -485,7 +704,7 @@
     // length, and every section boundary costs a pause (one generation at a
     // time, a second to start each). So when streaming: no comma split, and
     // after the first sentence, everything written so far as one section.
-    const streaming = streamOk === true && $('voice').value === 'voicebox';
+    const streaming = streamOk === true && $('voice').value === 'voicebox' && !videoAvatar?.ready;
     live = {epoch, q: window.ApexSpeechQueue.live(generate, play,
       {firstPhrase: $('first-phrase').checked && !streaming, coalesce: streaming ? STREAM_SECTION_CHARS : 0,
        // Merge what has been written by the time the GPU is free, not by the
@@ -511,7 +730,7 @@
         const {generate, play} = voiceFns(epoch);
         try {
           let sections = window.ApexSpeechQueue.chunks(text);
-          if (streamOk === true && $('voice').value === 'voicebox') sections = merge(sections, STREAM_SECTION_CHARS);
+          if (streamOk === true && $('voice').value === 'voicebox' && !videoAvatar?.ready) sections = merge(sections, STREAM_SECTION_CHARS);
           await window.ApexSpeechQueue.run(sections, generate, play,
             () => epoch !== speechEpoch);
         } catch (exc) {
@@ -523,7 +742,8 @@
         if (!window.speechSynthesis) throw new Error('Device speech is unavailable. Choose OpenAI voice or read the reply.');
         const utterance = new SpeechSynthesisUtterance(text); utterance.rate = 1.02;
         utterance.onend = finish;
-        utterance.onstart = () => mark('first_sound');
+        utterance.onstart = () => { voiceMeter.pulse = performance.now(); mark('first_sound'); };
+        utterance.onboundary = () => { voiceMeter.pulse = performance.now(); };
         utterance.onerror = event => { if (!['interrupted', 'canceled'].includes(event.error)) error('Device voice could not play.'); finish(); };
         state('speaking', 'Speaking · tap Stop or Talk to interrupt'); controls();
         window.speechSynthesis.speak(utterance);
@@ -627,6 +847,7 @@
   // `look`: a hotkey / "Hey Celly" request (agent/look_now.py) — the server
   // attaches the screen it captured; no browser share is sent with it.
   async function send(text, automatic = false, recovery = null, fromHands = false, look = null) {
+    if (!automatic) liveWarm();          // the live face reconnects while the reply is being written
     if (speechBusy || speechDraining || active || recorder || (hands?.busy && !fromHands) || (pendingRemote && !recovery) || !text.trim()) { timing = null; return; }
     // Only the send that a transcript triggered is a voice turn; a typed
     // message or a proactive check-in must not inherit a stale clock.
@@ -788,6 +1009,7 @@
     ? 'Work: Apex can use action tools on the computer running Apex, with its existing safety gates. Describe the task you want it to perform.'
     : 'Discuss: look, research, and reason together. Action tools are disabled.'; };
   $('mic').onclick = async () => {
+    liveWarm();
     if (recorder) { if (recorder.state === 'recording') recorder.stop(); return; }
     if (speechBusy || speechDraining || active || pendingRemote) return;
     stopSpeech(); error();
@@ -825,13 +1047,20 @@
     if (!window.ApexHandsFree) { $('hands-free').checked=false; error('Reload the companion to load hands-free controls.'); return; }
     hands = new window.ApexHandsFree({
       threshold: () => Number($('mic-threshold').value),
+      // The speech model, when chosen and installed intact; otherwise loudness.
+      loadModel: async (context, stream) => {
+        if ($('speech-detector').value !== 'model' || !window.ApexSpeechModel) return null;
+        const model = await (await request('/api/companion/speech-model')).json();
+        if (!model.installed) throw Error(model.problem);
+        return window.ApexSpeechModel.attach({context, stream, version: model.version});
+      },
       // Talking over a reply — while it is written or spoken — stops it.
       bargeWatch: () => $('barge-in').checked && Boolean(active || speechBusy || speechDraining),
       onBarge: interrupt,
       onState: text => {
         if (text === 'ready') { resumeHands(); return; }
         if (!active && !speechBusy) state(text.startsWith('Listening') ? 'listening' : 'thinking', text);
-        if (text.startsWith('Listening · pause')) lastInteraction=Date.now();
+        if (text.startsWith('Listening · pause')) { lastInteraction=Date.now(); liveWarm(); }
         $('mic-note').textContent=text; controls();
       },
       onError: exc => { disableHands(); error(exc.message); state('', 'Hands-free stopped.'); },
@@ -839,6 +1068,7 @@
         // Hands-free: your speech ended at the last voiced frame, not when the
         // 1.2 s silence timer fired — that wait is part of what you feel.
         timingStart('hands_free', hands.lastVoice || performance.now());
+        timing.detector = hands.detector;
         handsRequest=new AbortController();
         const text=await transcribeBlob(blob,handsRequest.signal);
         if (!hands.enabled || hands.epoch!==epoch) return;
@@ -860,6 +1090,7 @@
       }
     });
     await hands.start(); controls();
+    $('mic-note').title = hands.modelProblem || '';   // why the model is off, on hover
   };
   $('check-in').onchange = () => {
     lastCheck=Date.now();

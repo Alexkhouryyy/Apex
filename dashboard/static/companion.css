@@ -58,3 +58,20 @@
   .orb-screen #companion[data-view=voice] .orb{width:min(62dvh,40vw,420px);height:min(62dvh,40vw,420px)}
 }
 .orb-screen .apex-look-toggle{display:none}
+
+/* Apex's character (avatar.js) in place of the orb. */
+.avatar{display:none;flex:0 0 82px;height:104px;position:relative}
+.avatar canvas{display:block;width:100%!important;height:100%!important}
+#companion[data-look] .presence>.orb{display:none}
+#companion[data-look] .avatar{display:block}
+#companion[data-look][data-view=voice] .avatar{flex:0 0 auto;width:min(52vw,280px);height:min(52dvh,470px)}
+.orb-screen #companion[data-look][data-view=voice] .avatar{width:min(40dvh,60vw,380px);height:min(64dvh,620px)}
+@media(max-width:480px){#companion[data-look] .avatar{flex-basis:66px;height:84px}}
+/* The photoreal video avatar (video-avatar.js): the idle loop, and each spoken clip faded in over it. */
+#companion[data-look=video] .avatar,#companion[data-look=live] .avatar{border-radius:14px;overflow:hidden;background:#05090d}
+.avatar video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 28%}
+.avatar .avatar-speaking{opacity:0;transition:opacity .12s}
+.avatar.avatar-talking .avatar-speaking{opacity:1}
+.avatar .avatar-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 28%;display:none}
+.avatar.avatar-parked .avatar-poster{display:block}
+.avatar.avatar-parked .avatar-live{visibility:hidden}

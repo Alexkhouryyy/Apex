@@ -35,8 +35,10 @@ STAGES = (
     "first_sound",     # first audio actually playing
 )
 # Server-side durations the browser read from Server-Timing headers.
-SERVER = ("stt_server", "tts_server")
+SERVER = ("stt_server", "tts_server", "avatar_server")
 MODES = ("tap", "hands_free")
+# How a hands-free turn decided you had stopped talking (dashboard/static/handsfree.js).
+DETECTORS = ("loudness", "model")
 MAX_MS = 30 * 60 * 1000          # half an hour: anything longer is not a turn
 KEEP = 500
 
@@ -62,6 +64,8 @@ def init_db() -> None:
         cols = {r[1] for r in c.execute("PRAGMA table_info(voice_timing)")}
         if "streamed" not in cols:
             c.execute("ALTER TABLE voice_timing ADD COLUMN streamed INTEGER")
+        if "detector" not in cols:
+            c.execute("ALTER TABLE voice_timing ADD COLUMN detector TEXT")
 
 
 def _clean_ms(v) -> Optional[float]:
@@ -90,29 +94,36 @@ def record(turn: dict) -> dict:
         raise ValueError("No usable stage timings.")
     streamed = turn.get("streamed")
     streamed = None if streamed is None else (1 if streamed is True else 0 if streamed is False else None)
+    detector = turn.get("detector")
+    detector = detector if mode == "hands_free" and detector in DETECTORS else None
     init_db()
     from agent import longterm
     with longterm._conn() as c:
-        c.execute("INSERT INTO voice_timing (ts, mode, voice, stages, streamed)"
-                  " VALUES (?,?,?,?,?)",
-                  (time.time(), mode, voice, json.dumps(stages), streamed))
+        c.execute("INSERT INTO voice_timing (ts, mode, voice, stages, streamed, detector)"
+                  " VALUES (?,?,?,?,?,?)",
+                  (time.time(), mode, voice, json.dumps(stages), streamed, detector))
         c.execute("DELETE FROM voice_timing WHERE id NOT IN "
                   "(SELECT id FROM voice_timing ORDER BY id DESC LIMIT ?)", (KEEP,))
     return stages
 
 
-def recent(limit: int = 20, streamed: Optional[bool] = None) -> list[dict]:
-    """The last `limit` turns — of one mode only when `streamed` is given."""
+def recent(limit: int = 20, streamed: Optional[bool] = None,
+           detector: Optional[str] = None) -> list[dict]:
+    """The last `limit` turns — of one mode only when `streamed` is given, and
+    only hands-free turns heard by one detector when `detector` is given."""
     init_db()
     from agent import longterm
-    where, args = "", [int(limit)]
+    where, args = [], []
     if streamed is not None:
-        where, args = "WHERE streamed = ? ", [1 if streamed else 0, int(limit)]
+        where.append("streamed = ?"); args.append(1 if streamed else 0)
+    if detector is not None:
+        where.append("detector = ?"); args.append(detector)
+    clause = ("WHERE " + " AND ".join(where) + " ") if where else ""
     with longterm._conn() as c:
-        rows = c.execute("SELECT ts, mode, voice, stages, streamed FROM voice_timing "
-                         + where + "ORDER BY id DESC LIMIT ?", args).fetchall()
+        rows = c.execute("SELECT ts, mode, voice, stages, streamed, detector FROM voice_timing "
+                         + clause + "ORDER BY id DESC LIMIT ?", args + [int(limit)]).fetchall()
     return [{"ts": r[0], "mode": r[1], "voice": r[2], "stages": json.loads(r[3]),
-             "streamed": None if r[4] is None else bool(r[4])} for r in rows]
+             "streamed": None if r[4] is None else bool(r[4]), "detector": r[5]} for r in rows]
 
 
 def _pct(values: list, p: float) -> Optional[float]:
@@ -124,11 +135,12 @@ def _pct(values: list, p: float) -> Optional[float]:
     return s[k]
 
 
-def summary(limit: int = 20, streamed: Optional[bool] = None) -> dict:
+def summary(limit: int = 20, streamed: Optional[bool] = None,
+            detector: Optional[str] = None) -> dict:
     """Median and 90th percentile per stage over the last `limit` turns, and
     whether Pillar 1's check passes. `verdict` is three-state: too few turns
     to judge is `unknown`, never `pass`."""
-    turns = recent(limit, streamed)
+    turns = recent(limit, streamed, detector)
     out: dict = {"turns": len(turns), "stages": {}}
     for k in STAGES + SERVER:
         vals = [t["stages"][k] for t in turns if k in t["stages"]]
@@ -158,6 +170,7 @@ LABELS = {
         "reply_done": "whole reply written", "tts_start": "voice requested",
         "tts_ready": "first audio received", "first_sound": "FIRST SOUND",
         "stt_server": "  (server: speech-to-text)", "tts_server": "  (server: first voice section)",
+        "avatar_server": "  (server: first video clip)",
 }
 
 
@@ -183,6 +196,19 @@ def report(limit: int = 20) -> str:
         if b and a:
             lines.append(f"  First sound {'earlier' if a < b else 'LATER'} by "
                          f"{abs(b - a) / 1000:.2f}s with it on.")
+    loud, model = summary(limit, detector="loudness"), summary(limit, detector="model")
+    if loud["turns"] and model["turns"]:
+        # The silence wait sits inside "transcript back": that is where a
+        # quicker end-of-turn shows, if it is real.
+        lines += ["", "  Hands-free, loudness / speech model (median, turns counted):",
+                  f"  {'':<34}{'loudness':>12}{'model':>14}"]
+        for k in ("stt_done", "first_sound"):
+            lines.append(f"  {LABELS[k]:<34}{_fmt(loud['stages'][k]['median']):>12}{_fmt(model['stages'][k]['median']):>14}")
+        lines.append(f"  {'turns':<34}{loud['turns']:>12}{model['turns']:>14}")
+        b, a = loud["stages"]["stt_done"]["median"], model["stages"]["stt_done"]["median"]
+        if b and a:
+            lines.append(f"  Transcript back {'earlier' if a < b else 'LATER'} by "
+                         f"{abs(b - a) / 1000:.2f}s with the speech model.")
     return "\n".join(lines)
 
 

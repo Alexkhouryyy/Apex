@@ -60,6 +60,8 @@ menus or settings.
 2. The screen stays awake while the orb is open.
 3. **Stop** (or Esc) goes back to the tap-to-start screen.
 
+**A character instead of the orb:** in the companion's settings, **Apex appears as: Character** shows Apex's full-body android on the orb screen, with its mouth following the voice ([AVATAR.md](AVATAR.md)).
+
 **With no PC: the cloud Apex on Railway.** The orb screen works on any Apex,
 including the one on Railway. Open `https://<your Railway Apex domain>/drive#orb`;
 Railway already gives it HTTPS, which the microphone needs.

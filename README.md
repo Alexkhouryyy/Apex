@@ -20,6 +20,20 @@ Every feature, dated, as live, tested only, waiting on your setup, or planned:
 **[docs/CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md)**.
 The roadmap's acceptance test in one command (projects, restart, app write, recovery):
 **[docs/DEMO.md](docs/DEMO.md)**.
+Outside projects (1,000+ stars) reviewed for three named gaps, each with a verdict:
+**[docs/OPEN_SOURCE_REGISTER.md](docs/OPEN_SOURCE_REGISTER.md)**.
+Word, PowerPoint, Excel and PDF files as sources, and how to check them on your own files:
+**[docs/DOCUMENTS.md](docs/DOCUMENTS.md)**.
+Two real tasks, checked by rules, with what they cost, so you can compare models:
+**[docs/TASKS.md](docs/TASKS.md)**.
+Apex as a full-body character whose mouth follows its voice, instead of the orb:
+**[docs/AVATAR.md](docs/AVATAR.md)**.
+Apex as a photoreal face that lip-syncs its voice, on your GPU:
+Apex as a live photoreal face (Simli), in its own voice, streamed:
+**[docs/LIVE_AVATAR.md](docs/LIVE_AVATAR.md)**.
+Work: tasks and projects for your job, studies, business and software, with a Today view, and tasks you hand to Apex:
+**[docs/WORK.md](docs/WORK.md)**.
+**[docs/VIDEO_AVATAR.md](docs/VIDEO_AVATAR.md)**.
 Designing physical objects and checking they can actually be made:
 **[docs/FORGE.md](docs/FORGE.md)**.
 Generating hypotheses that could be wrong, and recording what happened:
@@ -30,6 +44,8 @@ Celine — Voice mode, her memory, and "Hey Celly" / Ctrl+Alt+C to look at your 
 **[docs/CELINE.md](docs/CELINE.md)**.
 The checks only you can run — voice timing, the relay, the pinch — and what to send back:
 **[docs/PROVE_IT.md](docs/PROVE_IT.md)**.
+Everything only you can run, in one ordered list with time, cost and what to send back:
+**[docs/CHECKLIST.md](docs/CHECKLIST.md)**.
 Your phone asks Apex while the laptop is shut — deploying the relay, from zero:
 **[docs/RELAY_DEPLOY.md](docs/RELAY_DEPLOY.md)**.
 Where Apex goes next — the v2 mission (ownership, invention, trust) and its proofs:

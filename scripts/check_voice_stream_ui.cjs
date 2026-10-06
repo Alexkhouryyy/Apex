@@ -26,13 +26,16 @@ w.Audio = class { play() { setTimeout(() => { this.onplaying?.(); setTimeout(() 
 const t0 = performance.now();
 const scheduled = [], stoppedSources = [];
 const contexts = [];
+const connections = []; let meterValue = 0;      // what the speech audio was routed to; what the meter reads
 w.AudioContext = class {
   constructor(opts = {}) { this.state = 'running'; this.destination = {}; this.sampleRate = opts.sampleRate || 48000; contexts.push(this); }
   get currentTime() { return (performance.now() - t0) / 1000; }
   resume() { return Promise.resolve(); }
   createBuffer(ch, length, rate) { const d = new Float32Array(length);
     return {duration: length / rate, length, getChannelData: () => d, data: d}; }
-  createBufferSource() { const src = {connect() {}, start(at) { scheduled.push({at, dur: src.buffer.duration, first: src.buffer.data[0], calledAt: performance.now() - t0}); },
+  createAnalyser() { const ctx = this; return {fftSize: 1024, connect(t) { this.target = t; },
+    getFloatTimeDomainData(a) { a.fill(meterValue); }, ctx}; }
+  createBufferSource() { const ctx = this; const src = {connect(t) { connections.push({ctx, t}); }, start(at) { scheduled.push({at, dur: src.buffer.duration, first: src.buffer.data[0], calledAt: performance.now() - t0}); },
     stop() { stoppedSources.push(src); }}; return src; }
 };
 
@@ -177,8 +180,26 @@ const TWO = [[0, {type: 'start', thread_id: 1}], [10, {type: 'token', text: 'Fir
   assert.equal(log.filter(l => l.kind === 'stream').length - streamBefore, 1, 'kept asking for a stream after a 404');
   assert.equal(log.filter(l => l.kind === 'wav').length - wavBefore, 2, 'both sections must fall back to /api/speak');
 
+  // 7. The character's mouth (avatar.js) hears the same audio: every streamed
+  //    piece goes through a meter that still ends at the speakers.
+  assert.ok(connections.length > 0);
+  for (const {ctx, t} of connections) {
+    assert.ok(ctx.apexMeter && t === ctx.apexMeter, 'speech bypassed the voice meter');
+    assert.equal(ctx.apexMeter.target, ctx.destination, 'the meter must still reach the speakers');
+  }
+  const companionRoot = w.document.getElementById('companion'), was = companionRoot.className;
+  companionRoot.className = 'speaking';
+  meterValue = 0.05; const soft = w.ApexVoice.level();
+  meterValue = 0.25; const strong = w.ApexVoice.level();
+  meterValue = 0; const silent = w.ApexVoice.level();
+  assert.ok(soft > 0.1 && strong > soft && strong <= 1, `level follows the audio (${soft}, ${strong})`);
+  assert.equal(silent, 0, 'a gap between words closes the mouth');
+  companionRoot.className = ''; meterValue = 0.25;
+  assert.equal(w.ApexVoice.level(), 0, 'not speaking: no mouth movement');
+  companionRoot.className = was;
+
   console.log('PASS: streamed voice plays before the stream ends, back to back with split samples intact, '
     + 'one synthesis at a time, Stop silences it without deadlocking the next turn, and a non-streaming '
-    + 'server falls back once and stays on /api/speak.');
+    + 'server falls back once and stays on /api/speak, and the character\'s mouth hears the same audio.');
   dom.window.close();
 })().catch(e => { console.error(e); dom.window.close(); process.exit(1); });

@@ -59,6 +59,12 @@ def set_agent(agent, awareness_log=None) -> None:
         _missions.start_supervisor(agent)
     except Exception as exc:
         print(f"[Missions] not resumed: {exc}")
+    # The always-on Work agent (agent/work_agent.py): idle until switched on in /work.
+    try:
+        from agent import work_agent as _work_agent
+        _work_agent.start(agent)
+    except Exception as exc:
+        print(f"[Work] always-on agent not started: {exc}")
 
 
 # === WebSocket connection manager ===
@@ -140,6 +146,8 @@ from dashboard.apps import router as apps_router
 app.include_router(apps_router)
 from dashboard.home import router as home_router
 app.include_router(home_router)
+from dashboard.work import router as work_router
+app.include_router(work_router)
 from dashboard.environment import router as environment_router
 app.include_router(environment_router)
 from dashboard.voices import router as voices_router
@@ -179,6 +187,10 @@ def _pin_script_mime_types() -> None:
     mimetypes.add_type("text/javascript", ".js")
     mimetypes.add_type("text/javascript", ".mjs")
     mimetypes.add_type("text/css", ".css")
+    # The browser speech model (scripts/fetch_speech_model.py): WebAssembly
+    # only compiles in streaming mode when served as application/wasm.
+    mimetypes.add_type("application/wasm", ".wasm")
+    mimetypes.add_type("application/octet-stream", ".onnx")
 
 
 _pin_script_mime_types()
@@ -230,7 +242,7 @@ async def _auth(request: Request, call_next):
     # NOT exempt, so this must stay an exact match: `path.startswith("/board")`
     # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
-            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home" or path == "/setup" or path == "/apocalypse" or path == "/world" or path == "/world/basic" or path == "/voices" or path == "/missions"
+            or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home" or path == "/setup" or path == "/apocalypse" or path == "/world" or path == "/world/basic" or path == "/voices" or path == "/missions" or path == "/work"
             or path == "/sw.js" or path == "/manifest.webmanifest"):
         return await call_next(request)
     # Inbound webhooks can't present a bearer token, so they authenticate

@@ -10,6 +10,9 @@ also loads, all copied unmodified from the same 0.160.0 package:
 `examples/jsm/postprocessing/{EffectComposer,RenderPass,ShaderPass,MaskPass,Pass,UnrealBloomPass,OutputPass}.js`
 and `examples/jsm/shaders/{CopyShader,LuminosityHighPassShader,OutputShader}.js`.
 They import only `three` and each other.
+Apex's character (`dashboard/static/avatar*.js`) also loads `examples/jsm/environments/RoomEnvironment.js`
+(reflections for its metal) and `examples/jsm/geometries/RoundedBoxGeometry.js` (bevelled plates), copied
+unmodified from the same 0.160.0 package (npm sha512 checked). Each imports only `three`.
 
 Why vendored: `/board` used to import these from cdn.jsdelivr.net. With no
 internet — or the CDN down, or a network that blocks it — the module failed to

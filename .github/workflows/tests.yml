@@ -83,6 +83,18 @@ jobs:
           node scripts/check_speech_queue.cjs
           node scripts/check_car_link.cjs
           node scripts/check_handsfree_ui.cjs
+          node scripts/check_speech_detector_ui.cjs
+          node scripts/check_avatar_pose.cjs
+          node scripts/check_avatar_ui.cjs
+          node scripts/check_video_avatar_ui.cjs
+          node scripts/check_video_avatar_sync.cjs
+          node scripts/check_live_avatar_ui.cjs
+          node scripts/check_work_ui.cjs
+          node --check dashboard/static/work.js
+          node --check dashboard/static/live-avatar.js
+          node --check dashboard/static/video-avatar.js
+          node --check dashboard/static/avatar-pose.js
+          node --check dashboard/static/speech-model.js
           node scripts/check_team_ui.cjs
           node --check dashboard/static/world-view.js
           node scripts/check_world_view_ui.cjs

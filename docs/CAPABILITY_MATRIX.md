@@ -33,15 +33,17 @@ so. Test counts are per file, as collected on 2026-10-04.
 | --- | --- |
 | LIVE | 3 |
 | PARTIAL | 4 |
-| TESTED | 31 |
-| NEEDS YOU | 7 |
-| PLANNED | 4 |
+| TESTED | 35 |
+| NEEDS YOU | 10 |
+| PLANNED | 3 |
 | UNAVAILABLE | 3 |
 
 **The honest reading:** breadth is not the gap. Most of Apex is TESTED, and
 only a handful of things have been seen working where they matter. The
 fastest way to raise the LIVE count is not new code. It is the
 **NEEDS YOU** column and the measurements listed at the end.
+
+Related: the acceptance test is in [`DEMO.md`](DEMO.md), and outside projects reviewed for three of these gaps are in [`OPEN_SOURCE_REGISTER.md`](OPEN_SOURCE_REGISTER.md).
 
 ---
 
@@ -53,14 +55,18 @@ fastest way to raise the LIVE count is not new code. It is the
 | Long-term memory that survives restarts (SQLite) | **LIVE** | Restart-verified (Blueprint Phase 1). Tests: `test_memory` 22, `test_memory_lazy_runtime` 3 | — |
 | Semantic recall and reranking | **TESTED** | `test_reranker` 12, `test_rerank_wiring` 11, `test_reranker_integrity` 6. The sandbox has no `sentence-transformers`, so only the keyword fallback runs here | Confirm `matched: semantic` appears on your PC |
 | Obsidian vault and vault search | **TESTED** | `test_vault_index` 28 | — |
+| Word, PowerPoint, Excel and PDF as text (read_file, knowledge base, demo); scans reported as needing OCR | **TESTED** | `test_doc_convert` 15 (every guard broken once on purpose and caught); `scripts/doc_acceptance.py` sample set: 5/5 pass, each file under 0.1 s after a one-time 0.8 s load | Run `doc_acceptance.py` on about 10 of your own files (`docs/DOCUMENTS.md`) |
 | Lessons from measured tool failures | **TESTED** | `test_lessons` 26, `test_observed` 44, `test_outcomes` 14, `test_outcome_measurement` 16 | — |
 | Reflection, feedback and trajectory | **TESTED** | `test_reflection` 26, `test_reflection_heartbeat` 14, `test_feedback` 28, `test_trajectory` 8 | — |
 | Skills: procedural, SKILL.md imports and the skill forge | **TESTED** | `test_skills` 13, `test_skill_md_usage` 8, `test_skill_forge` 28, `test_skill_autonomy` 8 | — |
 | Goals, initiative, scheduler and time awareness | **TESTED** | `test_goals` 32, `test_initiative` 22, `test_scheduler` 8, `test_time_awareness` 12 | — |
+| Work: tasks and projects across job, studies, business and software; Today view; quick add; hand a task to Apex for review | **TESTED** | `test_work` 19, `check_work_ui.cjs`; the page driven in real Chromium (Today, Board, Projects, detail, phone layout) | Use it for a week and say what's missing (`docs/WORK.md`) |
+| Work, always on: brief, evening check, follow-ups, and tasks done on your Claude / ChatGPT plans (only a plan sign-in is accepted; falls back between plans at a limit, resting until the reset time; Stop ends the whole process tree; API credits only if chosen) | **LIVE** (6 Oct 2026, plan check) | On your Windows PC, `Setup-Apex-Work-Plans.cmd` signed in Claude Pro and ChatGPT, and the live check passed a real task on each plan (Claude 20 s, Codex 50 s). Tests: `test_work_agent` (fake CLIs), `test_work_plans_real` (real Codex 0.160 / Claude Code 2.1), `check_work_ui.cjs` | Switch on Always on, add one `+apex` task, and report; a real usage-limit message is still unseen |
 | Approvals (nothing outward-facing without your yes) | **TESTED** | `test_cortex_approval` 3, `test_safety` 25, `test_restraint` 26, `test_autonomy` 8 | — |
 | Self-modification with rollback | **TESTED** | `test_self_mod` 28, `test_rollback` 14, `test_recovery` 12 | — |
 | World state: what's true right now, fresh for 30 min | **TESTED** | `test_world_state_fresh` 3 | — |
 | Minimum complete demonstration (projects, restart, isolation, app write with receipt, recovery) | **TESTED** | `scripts/apex_demo.py`: 15 pass and 1 unknown in fixture mode; `test_apex_demo` 5, including two injected faults that each fail their check | Run `scripts\apex_demo.py --live` and send the summary (`docs/DEMO.md`) |
+| Task suite: two representative tasks through the task runner, judged by rules, cost from Apex's ledger | **TESTED** | `scripts/apex_tasks.py`: 2/2 pass in fixture mode; `test_apex_tasks` 7, including two injected faults that each fail only their own check | Run `apex_tasks.py --live` (and once per model you want to compare), then send `--history` (`docs/TASKS.md`) |
 
 ## 2. Voice and companion
 
@@ -68,7 +74,11 @@ fastest way to raise the LIVE count is not new code. It is the
 | --- | --- | --- | --- |
 | Celine's voice (local Qwen, streamed) | **PARTIAL** | LIVE: you run `Start-Apex-Celine-Fast.cmd` and hear her. Not measured: Pillar 1 latency (median ≤ 1.5 s, p90 ≤ 2.5 s over 20 turns). Tests: `test_qwen_fast_server` 8, `test_speak_stream` 9, `test_voice_timing` 25, `test_celine` 16 | 20 spoken turns, then `python -m agent.voice_timing`, and send the output (`docs/PROVE_IT.md` §1) |
 | Companion (`/companion`): chat, Voice mode, Look now | **PARTIAL** | LIVE: you use it. Not measured: barge-in stop time on the laptop (simulated 0.25 s), and wake-word accuracy. Tests: `test_companion` 23, `test_look_now` 35, `test_wake` 25 | PROVE_IT §1b |
+| Apex's character: the Mk I armoured suit (reflective metal, selective glow, suit-up sequence), or your own rigged model, in place of the orb; voice drives the grille or mouth | **TESTED** | `check_avatar_pose.cjs` (incl. bone names across Mixamo/VRoid/Blender), `check_avatar_ui.cjs`, `check_voice_stream_ui.cjs`; `check_avatar_browser.cjs` in real Chromium; every state, the suit-up, car and phone layouts, and a Mixamo model through the model slot checked by eye | Turn on **Apex appears as: Character** and judge it on the laptop and in the car; for a film-quality look, add your own model (`docs/AVATAR.md`) |
+| Photoreal video avatar: real footage of the character, mouth redrawn per sentence by MuseTalk on your GPU | **NEEDS YOU** | `test_video_avatar` 8 (encoding, server rules, Apex routes against a real server, installer), `check_video_avatar_ui.cjs` (every guard broken once and caught), `check_video_avatar_browser.cjs` (real clips in Chromium). The MuseTalk engine itself has not run: it needs your GPU | `Setup-Apex-Video-Avatar.cmd`, make the idle video, `Start-Apex-Video-Avatar.cmd`, then choose **Video (photoreal)** and send the render times (`docs/VIDEO_AVATAR.md`) |
+| Live photoreal face (Simli): Apex's own voice in, a photoreal face streamed back, starts within about a second | **NEEDS YOU** | `test_live_avatar` 7 (key only to Simli, token only to the page, capped sessions, every failure a reason), `check_live_avatar_ui.cjs` (16 kHz conversion, streaming, Stop, fallbacks; every guard broken once and caught), `check_live_avatar_browser.cjs` (real bundle in Chromium). No real Simli session yet: no key here | Simli account, face ID and API key into `.env`, then choose **Live face (Simli)** (`docs/LIVE_AVATAR.md`) |
 | Several voices, including an Alex voice | **NEEDS YOU** | `test_voices` 18. The library, both voice servers and the Voices tab are built | Record about 15 s of your voice in **Voices**, then pick it (`docs/VOICES.md`) |
+| Speech model for hands-free (tells voice from noise; sends 0.7 s after you stop instead of 1.2 s) | **NEEDS YOU** | `test_speech_model` 8, `check_speech_detector_ui.cjs` (every guard broken once on purpose and caught). The real model loads and runs in Chromium: speech scored 0.6–0.98; steady noise and hum about 0.01, with one 0.2 s spike to 0.72 at a sound change | Run `Setup-Apex-Speech-Model.cmd`, do about 10 hands-free turns each way, then send `agent.voice_timing` |
 | Voicebox desktop voice | **TESTED** | `test_voicebox` 14, `test_voicebox_live` 23 (live against a stub) | Only if you use Voicebox |
 | Speech-to-text (faster-whisper; browser speech as fallback) | **TESTED** | `test_browser_stt` 4, plus the companion tests | — |
 
@@ -132,12 +142,13 @@ fastest way to raise the LIVE count is not new code. It is the
 | Pillar 2: a full session with no keyboard on the board | **PLANNED** | `docs/APEX_V2_PLAN.md` |
 | Documents per project | **PLANNED** | Found by the demo: documents are one shared list, linked to a project only by its handoff | — |
 | Pillar 3: "receipts" for every claim Apex makes | **PLANNED** | `docs/APEX_V2_PLAN.md` |
-| A register of outside projects (≥ 1000 stars) for the open gaps | **PLANNED** | Roadmap, Phase 0 |
 | CarPlay or Android Auto app | **UNAVAILABLE** | A 2011 Uconnect has neither. Apple and Google gate both. Call Apex and the car page cover the car |
 | Celine's own voice on a phone call | **UNAVAILABLE** | She runs on your PC's GPU, which a call can't reach. Calls use Twilio's voice |
 | ChatGPT as an Apex MCP client | **UNAVAILABLE** | It needs a public OAuth server, and Apex's server is local on purpose |
 
 ## What would raise the LIVE count fastest
+
+The full ordered list, with commands, is [CHECKLIST.md](CHECKLIST.md).
 
 Every item is on your side. None needs new code.
 
