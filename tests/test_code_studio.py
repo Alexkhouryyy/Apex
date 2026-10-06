@@ -569,6 +569,6 @@ def test_the_plan_checker_covers_apex_code(lab, capsys):
     assert out.count('PASS  a follow-up continued the same conversation (done)') == 2
     resumed = lab.calls('codex')[-1]['argv']
     assert resumed[:2] == ['exec', 'resume'] and 'thread-codex-1' in resumed
-    lab.mode('claude', 'edit')                                          # a plan that ignores the task fails the check
-    assert not work_plans_check.code_check('claude')
+    lab.mode('claude', 'edit')                                          # a plan that ignores the task fails the check,
+    assert not work_plans_check.code_check('claude')                    # even straight after a passing one
     assert 'FAIL  a live coding step' in capsys.readouterr().out

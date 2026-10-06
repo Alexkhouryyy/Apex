@@ -22,6 +22,7 @@ import argparse
 import subprocess
 import sys
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -89,6 +90,14 @@ def check_plan(engine: str, live: bool) -> bool:
     return ok
 
 
+def _fresh(work_dir, name: str) -> Path:
+    """A new, empty folder for one check: never one an earlier check left behind
+    (two checks in the same second would otherwise share it and see its files)."""
+    parent = Path(work_dir) / '_plan-check'
+    parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f"{name}-{time.strftime('%Y%m%d-%H%M%S')}-", dir=parent))
+
+
 def _readable(path: Path, tries: int = 10):
     """True if it says ready, False if missing or wrong, 'unreadable' if Windows refuses.
     Retries for a few seconds, so a file still held open for a moment isn't mistaken."""
@@ -114,9 +123,7 @@ def _readable(path: Path, tries: int = 10):
 def _live(engine: str, windows_sandbox):
     """One tiny real task in the same place real Work tasks go (ApexWork), left there to look at."""
     from agent import work
-    folder = Path(work.WORK_DIR) / '_plan-check' / f"{engine}-{time.strftime('%Y%m%d-%H%M%S')}"
-    if windows_sandbox:
-        folder = folder.with_name(folder.name + '-' + windows_sandbox)
+    folder = _fresh(work.WORK_DIR, engine + (f'-{windows_sandbox}' if windows_sandbox else ''))
     started = time.time()
     try:
         result = we.run(engine, LIVE_TASK, folder, timeout=300, windows_sandbox=windows_sandbox)
@@ -140,8 +147,7 @@ def code_check(engine: str) -> bool:
     stream in a git project, then a follow-up that resumes the same conversation."""
     from agent import code_engines, work
     print(f"\n{we.NAMES[engine]}: Apex Code")
-    folder = Path(work.WORK_DIR) / '_plan-check' / f"code-{engine}-{time.strftime('%Y%m%d-%H%M%S')}"
-    folder.mkdir(parents=True, exist_ok=True)
+    folder = _fresh(work.WORK_DIR, f'code-{engine}')
     git = ['git', '-c', 'user.name=Apex check', '-c', 'user.email=apex-check@localhost']
     try:
         subprocess.run(git + ['init', '-q'], cwd=folder, check=True, capture_output=True)
