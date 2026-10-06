@@ -437,7 +437,14 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt) -> None:
                                        env_extra=extra)
         if result.get('session'):
             _set(sid, engine_session=result['session'])
-        files = _checkpoint(sid, start_sha, f'turn on your {we.NAMES[engine]}')
+        locked = _wait_readable(folder)
+        if locked:
+            event(sid, 'error', text=f"Windows won't let Apex open what the plan wrote ({', '.join(locked[:5])}), so this "
+                  'step is not saved yet. Run `.venv\\Scripts\\python.exe scripts\\work_plans_check.py --code --only '
+                  f"{'chatgpt' if engine == 'chatgpt' else 'claude'}` for the fix, then send a message to carry on.")
+            files = 0
+        else:
+            files = _checkpoint(sid, start_sha, f'turn on your {we.NAMES[engine]}')
     except Exception as exc:                              # never leave a session marked working
         result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
     finally:
@@ -475,6 +482,34 @@ def _notify(title, status, files) -> None:
 
 def _merging(folder) -> bool:
     return _git(folder, 'rev-parse', '-q', '--verify', 'MERGE_HEAD', check=False).returncode == 0
+
+
+LOCK_WAIT = 8.0                       # seconds to wait for a file Windows holds after a step
+
+
+def _wait_readable(folder, seconds: float | None = None) -> list[str]:
+    """Files the step changed that this account can't open yet. On Windows, Codex's
+    sandbox (or a virus scan of a new file) can hold one for a moment: wait a few
+    seconds before calling it a problem. Only changed files are looked at."""
+    def locked():
+        out = []
+        for line in _git(folder, 'status', '--porcelain', '-uall', check=False).stdout.splitlines():
+            path = line[3:].split(' -> ')[-1].strip().strip('"')
+            f = Path(folder) / path
+            if not path or not f.is_file():
+                continue
+            try:
+                with f.open('rb') as fh:
+                    fh.read(1)
+            except PermissionError:
+                out.append(path)
+        return out
+    end = time.time() + (LOCK_WAIT if seconds is None else seconds)
+    still = locked()
+    while still and time.time() < end:
+        time.sleep(0.5)
+        still = locked()
+    return still
 
 
 def _checkpoint(sid: int, start_sha: str, why: str) -> int:

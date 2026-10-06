@@ -572,3 +572,51 @@ def test_the_plan_checker_covers_apex_code(lab, capsys):
     lab.mode('claude', 'edit')                                          # a plan that ignores the task fails the check,
     assert not work_plans_check.code_check('claude')                    # even straight after a passing one
     assert 'FAIL  a live coding step' in capsys.readouterr().out
+
+
+def _lock(monkeypatch, name, times):
+    """Windows holding a new file: opening it fails `times` times (forever if None)."""
+    import pathlib
+    real, seen = pathlib.Path.open, {'n': 0}
+    def guarded(self, *a, **k):
+        if self.name == name and (times is None or seen['n'] < times):
+            seen['n'] += 1
+            raise PermissionError(13, 'Permission denied')
+        return real(self, *a, **k)
+    monkeypatch.setattr(pathlib.Path, 'open', guarded)
+    return seen
+
+
+def test_a_file_held_for_a_moment_is_waited_for(lab, monkeypatch):
+    monkeypatch.setattr(code_studio, 'LOCK_WAIT', 5)
+    seen = _lock(monkeypatch, 'step1.py', 3)
+    s = wait(code_studio.start(lab.pid, 'Add a step', 'claude')['id'])
+    assert seen['n'] == 3 and s['files_changed'] == 1
+    assert any(e['kind'] == 'checkpoint' for e in code_studio.events(s['id']))
+
+
+def test_a_file_windows_keeps_locked_is_reported_not_a_crash(lab, monkeypatch):
+    monkeypatch.setattr(code_studio, 'LOCK_WAIT', 0.6)
+    _lock(monkeypatch, 'codex1.py', None)
+    s = wait(code_studio.start(lab.pid, 'Add a codex file', 'chatgpt')['id'])
+    feed = code_studio.events(s['id'])
+    err = next(e for e in feed if e['kind'] == 'error')
+    assert "Windows won't let Apex open what the plan wrote (codex1.py)" in err['text'] and '--only chatgpt' in err['text']
+    assert not any(e['kind'] == 'checkpoint' for e in feed) and feed[-1]['kind'] == 'done'
+    assert not s['working']
+
+
+def test_the_code_check_reports_a_locked_file_calmly(lab, monkeypatch, capsys):
+    from scripts import work_plans_check
+    import pathlib
+    lab.mode('codex', 'check')
+    real = pathlib.Path.read_text
+    def refuse(self, *a, **k):
+        if self.name == 'apex-code-check.md':
+            raise PermissionError(13, 'Permission denied')
+        return real(self, *a, **k)
+    monkeypatch.setattr(pathlib.Path, 'read_text', refuse)
+    monkeypatch.setattr(work_plans_check.time, 'sleep', lambda s: None)
+    assert work_plans_check.code_check('chatgpt') is False                    # not a crash
+    out = capsys.readouterr().out
+    assert 'Windows blocks reading the file it wrote' in out and 'Windows would not let Apex read it' in out
