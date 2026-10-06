@@ -2,6 +2,7 @@
 
     python scripts/work_plans_check.py          # no usage: installed, signed in with the plan, flags
     python scripts/work_plans_check.py --live   # also one tiny real task per plan (a few seconds of usage)
+    python scripts/work_plans_check.py --signed-in claude   # exit 0 if signed in with the plan
 
 For each plan:
   1. installed: where the tool is and its version;
@@ -85,7 +86,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--live', action='store_true', help='also run one tiny real task per plan')
     ap.add_argument('--only', choices=['claude', 'chatgpt'], help='check one plan')
+    ap.add_argument('--signed-in', choices=['claude', 'chatgpt'],
+                    help='only say whether this plan is signed in with the plan (exit 0) or not (exit 1); no usage')
     args = ap.parse_args(argv)
+    if args.signed_in:
+        signed = we.check(args.signed_in, fresh=True)
+        print(f"{we.NAMES[args.signed_in]}: " + (f"signed in ({signed.get('plan') or 'plan'})" if signed['ok'] else signed['why']))
+        return 0 if signed['ok'] else 1
     engines = [args.only] if args.only else ['claude', 'chatgpt']
     results = {e: check_plan(e, args.live) for e in engines}
     print()

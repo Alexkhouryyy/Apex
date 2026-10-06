@@ -501,3 +501,21 @@ def test_the_plan_checker_script(fake, capsys):
     assert work_plans_check.main(['--live']) == 0
     out = capsys.readouterr().out
     assert out.count('PASS  it wrote apex-check.md') == 2 and 'Claude plan: READY (real task passed)' in out
+
+
+def test_the_setup_asks_only_whether_a_plan_is_signed_in(fake, capsys):
+    from scripts import work_plans_check
+    assert work_plans_check.main(['--signed-in', 'claude']) == 0
+    assert 'Claude plan: signed in (Claude Max)' in capsys.readouterr().out
+    fake.auth('codex', 'Not logged in')
+    assert work_plans_check.main(['--signed-in', 'chatgpt']) == 1
+    assert 'ChatGPT plan: is not signed in' in capsys.readouterr().out
+    assert not (fake.dir / 'codex.args').exists()                     # nothing ran: no usage
+
+
+def test_the_setup_script_signs_in_with_the_plan_never_the_console():
+    from pathlib import Path
+    cmd = (Path(__file__).parents[1] / 'Setup-Apex-Work-Plans.cmd').read_text()
+    assert 'claude auth login --claudeai' in cmd and '--console' not in cmd
+    assert '--signed-in claude' in cmd and '--signed-in chatgpt' in cmd and '--live' in cmd
+    assert 'call claude\r\n' not in cmd                                # never drops you into the full app

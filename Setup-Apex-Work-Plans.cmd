@@ -1,10 +1,13 @@
 @echo off
 REM Let Apex's Work tasks run on your Claude and ChatGPT plans instead of API credits.
-REM Installs Claude Code and OpenAI Codex (the official apps), opens each so you can sign in
-REM with your own account in the browser (Apex never sees your password), then checks both
-REM with one tiny real task each. See docs\WORK.md, "Always on, on your plans".
+REM Installs Claude Code and OpenAI Codex (the official apps), signs each in with your own
+REM account in the browser (Apex never sees your password), then checks both with one tiny
+REM real task each. A plan that is already signed in correctly is skipped.
+REM See docs\WORK.md, "Always on, on your plans".
 cd /d "%~dp0"
 set "PATH=%USERPROFILE%\.local\bin;%APPDATA%\npm;%PATH%"
+set "APEX_PYTHON=%~dp0.venv\Scripts\python.exe"
+if not exist "%APEX_PYTHON%" set "APEX_PYTHON=python"
 
 echo.
 echo [1/3] Claude Code, for your Claude Pro or Max plan
@@ -19,11 +22,12 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-where git >nul 2>nul || echo Note: if Claude Code asks for Git for Windows, install it from https://git-scm.com and run this again.
-echo When Claude Code opens: choose your Claude account (Pro or Max), NOT an API key or Console account.
-echo Once you see its prompt, type /exit and press Enter.
-pause
-call claude
+"%APEX_PYTHON%" scripts\work_plans_check.py --signed-in claude
+if errorlevel 1 (
+  echo A browser page opens: sign in with your Claude account. This uses your subscription, never API billing.
+  call claude auth logout >nul 2>nul
+  call claude auth login --claudeai
+)
 
 echo.
 echo [2/3] Codex, for your ChatGPT plan
@@ -37,16 +41,17 @@ if errorlevel 1 (
   )
   call npm install -g @openai/codex
 )
-echo Codex will now open a browser page: choose "Sign in with ChatGPT".
-pause
-call codex login
+"%APEX_PYTHON%" scripts\work_plans_check.py --signed-in chatgpt
+if errorlevel 1 (
+  echo A browser page opens: choose "Sign in with ChatGPT".
+  call codex logout >nul 2>nul
+  call codex login
+)
 
 echo.
 echo [3/3] Checking both plans with one tiny real task each (a few seconds of your usage)
-set "APEX_PYTHON=%~dp0.venv\Scripts\python.exe"
-if not exist "%APEX_PYTHON%" set "APEX_PYTHON=python"
 "%APEX_PYTHON%" scripts\work_plans_check.py --live
 echo.
 echo If both say READY: restart Apex, open Work, then Always on, and switch it on.
-echo If one says NOT READY, the line above it says what to do. Send it to Apex's maintainer if unsure.
+echo If one says NOT READY, the line above it says what to do. Paste it to Claude if unsure.
 pause

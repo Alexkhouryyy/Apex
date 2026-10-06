@@ -97,9 +97,10 @@ What the plans may do:
 1. Install Node.js LTS from nodejs.org if you don't have it (Codex needs it).
 2. Double-click **`Setup-Apex-Work-Plans.cmd`** in your Apex folder. It:
    - installs Claude Code (Anthropic's installer) and Codex (npm);
-   - opens each so you can sign in. In Claude Code, choose your **Claude
-     account** (Pro or Max), not an API key. For Codex, choose **Sign in with
-     ChatGPT**;
+   - signs each in through your browser, skipping any that is already signed
+     in with the plan. Claude uses `claude auth login --claudeai`, which is
+     always your subscription and never Console/API billing. For Codex,
+     choose **Sign in with ChatGPT**;
    - runs `scripts\work_plans_check.py --live`. For each plan, this checks the
      install, that it's signed in with the plan, and that it accepts every
      option Apex uses. Then it runs one tiny real task that must write a file.
