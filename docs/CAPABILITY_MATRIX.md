@@ -33,7 +33,7 @@ so. Test counts are per file, as collected on 2026-10-04.
 | --- | --- |
 | LIVE | 3 |
 | PARTIAL | 4 |
-| TESTED | 34 |
+| TESTED | 35 |
 | NEEDS YOU | 10 |
 | PLANNED | 3 |
 | UNAVAILABLE | 3 |
@@ -60,6 +60,7 @@ Related: the acceptance test is in [`DEMO.md`](DEMO.md), and outside projects re
 | Reflection, feedback and trajectory | **TESTED** | `test_reflection` 26, `test_reflection_heartbeat` 14, `test_feedback` 28, `test_trajectory` 8 | — |
 | Skills: procedural, SKILL.md imports and the skill forge | **TESTED** | `test_skills` 13, `test_skill_md_usage` 8, `test_skill_forge` 28, `test_skill_autonomy` 8 | — |
 | Goals, initiative, scheduler and time awareness | **TESTED** | `test_goals` 32, `test_initiative` 22, `test_scheduler` 8, `test_time_awareness` 12 | — |
+| Work: tasks and projects across job, studies, business and software; Today view; quick add; hand a task to Apex for review | **TESTED** | `test_work` 19, `check_work_ui.cjs`; the page driven in real Chromium (Today, Board, Projects, detail, phone layout) | Use it for a week and say what's missing (`docs/WORK.md`) |
 | Approvals (nothing outward-facing without your yes) | **TESTED** | `test_cortex_approval` 3, `test_safety` 25, `test_restraint` 26, `test_autonomy` 8 | — |
 | Self-modification with rollback | **TESTED** | `test_self_mod` 28, `test_rollback` 14, `test_recovery` 12 | — |
 | World state: what's true right now, fresh for 30 min | **TESTED** | `test_world_state_fresh` 3 | — |

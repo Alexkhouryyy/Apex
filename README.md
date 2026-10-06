@@ -31,6 +31,8 @@ Apex as a full-body character whose mouth follows its voice, instead of the orb:
 Apex as a photoreal face that lip-syncs its voice, on your GPU:
 Apex as a live photoreal face (Simli), in its own voice, streamed:
 **[docs/LIVE_AVATAR.md](docs/LIVE_AVATAR.md)**.
+Work: tasks and projects for your job, studies, business and software, with a Today view, and tasks you hand to Apex:
+**[docs/WORK.md](docs/WORK.md)**.
 **[docs/VIDEO_AVATAR.md](docs/VIDEO_AVATAR.md)**.
 Designing physical objects and checking they can actually be made:
 **[docs/FORGE.md](docs/FORGE.md)**.

@@ -1509,6 +1509,27 @@ TOOLS = [
         },
     },
     {
+        "name": "work",
+        "description": ("The owner's work tracker (tasks and projects across job, studies, business, software). "
+                        "Use it when they mention something to do ('remind me to send the invoice Friday', 'add a task'), "
+                        "ask what's on their plate, or finish something. action=add takes `quick`: one line of shorthand "
+                        "('send invoice to Karim fri #job !high'); action=today summarises overdue, due, waiting and Apex-finished work; "
+                        "action=list lists open tasks (optionally for an area); action=done or action=update change task `id`."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["add", "today", "list", "update", "done"]},
+                "quick": {"type": "string", "description": "add: the task in one line, with optional #area @project !high/!low and a date word"},
+                "id": {"type": "integer", "description": "update/done: the task's id"},
+                "area": {"type": "string", "enum": ["job", "studies", "business", "software", "other"]},
+                "due": {"type": "string", "description": "update: YYYY-MM-DD, or empty to clear"},
+                "status": {"type": "string", "enum": ["todo", "doing", "waiting", "review", "done"]},
+                "notes": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "set_goal",
         "description": "Create a strategic goal. Use when the user expresses a longer-term aim ('I want to launch by end of June', 'my goal this week is X').",
         "input_schema": {
@@ -2907,6 +2928,9 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                 double=inputs.get("double", False),
             )
 
+        elif name == "work":
+            from agent import work as _work
+            return _work.tool(inputs)
         elif name == "set_goal":
             return goals.set_goal(
                 inputs["title"],

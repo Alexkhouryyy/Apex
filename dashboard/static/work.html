@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><script src="/static/theme.js"></script><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Apex · Work</title>
+  <link rel="icon" href="/static/icons/apex-refined.svg">
+  <link rel="stylesheet" href="/static/work.css?v=work-1">
+  <script src="/static/work.js?v=work-1" defer></script>
+  <link rel="stylesheet" href="/static/brand.css?v=brand40"><link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+<main id="work">
+  <header>
+    <a href="/" class="brand apex-brand" aria-label="Open Apex dashboard"><span class="apex-logo" aria-hidden="true"></span><span class="apex-wordmark">APEX</span><small>WORK</small></a>
+    <nav><a href="/companion">Companion</a> · <a href="/missions">Missions</a> · <a href="/">Dashboard</a></nav>
+  </header>
+
+  <section class="hero">
+    <div>
+      <p class="eyebrow" id="date-line">TODAY</p>
+      <h1 id="headline">Your work, in one place.</h1>
+      <p class="sub" id="subline">Add tasks in one line. Hand the ones Apex can do to Apex.</p>
+    </div>
+    <div class="stats" id="stats" aria-label="Summary"></div>
+  </section>
+
+  <form id="quick" class="quick" autocomplete="off">
+    <input id="quick-text" maxlength="300" aria-label="Add a task"
+      placeholder="Add a task… e.g. send invoice to Karim fri #job !high">
+    <button class="primary" id="quick-add">Add</button>
+  </form>
+  <p class="hint">Shorthand: <code>#job</code> <code>#studies</code> <code>#business</code> <code>#software</code> · <code>@project</code> · <code>!high</code> / <code>!low</code> · <code>today</code>, <code>tomorrow</code>, <code>fri</code>, <code>next week</code>, <code>12/10</code> · <code>waiting</code></p>
+  <p id="message" class="message" role="status"></p>
+
+  <div class="bar">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-view="today" aria-selected="true">Today</button>
+      <button role="tab" data-view="board" aria-selected="false">Board</button>
+      <button role="tab" data-view="projects" aria-selected="false">Projects</button>
+    </div>
+    <div class="areas" id="areas" aria-label="Filter by area"></div>
+  </div>
+
+  <section id="view-today" class="view"></section>
+  <section id="view-board" class="view board" hidden></section>
+  <section id="view-projects" class="view" hidden>
+    <form id="new-project" class="card inline-form" autocomplete="off">
+      <input id="project-name" maxlength="120" placeholder="New project, e.g. Website for Karim" required aria-label="Project name">
+      <select id="project-area" aria-label="Area"></select>
+      <input id="project-client" maxlength="120" placeholder="Client (optional)" aria-label="Client">
+      <button class="primary">Add project</button>
+    </form>
+    <div id="project-list"></div>
+  </section>
+</main>
+
+<dialog id="detail" aria-labelledby="d-title-label">
+  <form method="dialog" id="detail-form">
+    <label id="d-title-label">Task <input id="d-title" maxlength="200" required></label>
+    <div class="grid">
+      <label>Due <input id="d-due" type="date"></label>
+      <label>Priority <select id="d-priority"><option value="1">High</option><option value="2">Normal</option><option value="3">Low</option></select></label>
+      <label>Status <select id="d-status"><option value="todo">To do</option><option value="doing">Doing</option><option value="waiting">Waiting</option><option value="review">Review</option><option value="done">Done</option></select></label>
+      <label>Area <select id="d-area"></select></label>
+      <label>Project <select id="d-project"></select></label>
+      <label>Waiting on <input id="d-waiting" maxlength="200" placeholder="who or what"></label>
+    </div>
+    <label>Notes <textarea id="d-notes" rows="4" maxlength="8000" placeholder="Details, links, what done looks like"></textarea></label>
+    <section class="apex" id="d-apex">
+      <h3>Apex</h3>
+      <p id="d-apex-state" class="muted"></p>
+      <pre id="d-apex-summary" hidden></pre>
+      <ul id="d-apex-files"></ul>
+      <div class="apex-row">
+        <label>Spending cap ($) <input id="d-budget" type="number" min="0.05" max="5" step="0.05" value="0.5"></label>
+        <button type="button" id="d-give" class="primary">Give to Apex</button>
+      </div>
+      <p class="fine">Apex researches and writes the deliverable into its own folder, a reviewer pass checks it, and the task comes back to you for review. It never sends, pays or contacts anyone: it prepares drafts.</p>
+    </section>
+    <div class="d-actions">
+      <button type="button" id="d-delete" class="danger">Delete</button>
+      <span class="grow"></span>
+      <button value="cancel">Close</button>
+      <button type="button" id="d-save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="login">
+  <form method="dialog"><label>Apex dashboard token <input id="token" type="password" autocomplete="current-password"></label>
+  <button class="primary" id="token-save">Continue</button></form>
+</dialog>
+</body>
+</html>
