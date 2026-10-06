@@ -111,6 +111,19 @@ What the plans may do:
 5. Add a test task: `summarise the pros and cons of a standing desk +apex`.
    Within a minute it should show **Apex is working**.
 
+### On Windows: two things seen on a real PC
+
+- **Claude says "not signed in" although `claude` opens fine.** Your PC has
+  `ANTHROPIC_API_KEY` set, so plain `claude` was running on API credits. Apex
+  hides that key from Claude Code, so it needs your account:
+  `claude auth login --claudeai`. The setup script does this for you.
+- **Codex writes the file, but Windows blocks reading it.** This can happen
+  with Codex's Windows sandbox when it runs commands as separate sandbox
+  users. The live check retries, shows who owns the file (`icacls`), and tries
+  Codex's `unelevated` mode. If that works, it prints the one command that
+  sets `WORK_CODEX_WINDOWS_SANDBOX=unelevated`. A real task with this problem
+  says so in its summary.
+
 ### Honest limits
 
 - Your plans' own usage limits apply. Heavy days will hit them, and that's

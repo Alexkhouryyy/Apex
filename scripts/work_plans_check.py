@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-import tempfile
+import os
 import time
 from pathlib import Path
 
@@ -58,6 +58,10 @@ def check_plan(engine: str, live: bool) -> bool:
     print(f'        version: {version}')
     signed = we.check(engine, fresh=True)
     ok = _say(signed['ok'], f"signed in with your plan ({signed.get('plan') or 'plan'})" if signed['ok'] else f"{signed['why']}. {signed['how']}")
+    if engine == 'claude' and not signed['ok'] and os.environ.get('ANTHROPIC_API_KEY'):
+        print('        Note: this PC has ANTHROPIC_API_KEY set, so plain `claude` runs on API credits and looks')
+        print('        signed in. Apex hides that key from Claude Code, so it needs your Claude account:')
+        print('          claude auth login --claudeai')
     args, needed = FLAGS[engine]
     try:
         help_text = _run([exe, *args]).stdout
@@ -68,17 +72,62 @@ def check_plan(engine: str, live: bool) -> bool:
                f"this version doesn't know {', '.join(missing)}: update it, or tell Apex's maintainer")
     if not live or not ok:
         return ok
-    with tempfile.TemporaryDirectory(prefix='apex-plan-check-') as tmp:
-        started = time.time()
-        result = we.run(engine, LIVE_TASK, Path(tmp), timeout=300)
-        took = time.time() - started
-        made = Path(tmp, 'apex-check.md')
-        wrote = made.exists() and 'ready' in made.read_text(encoding='utf-8', errors='replace').lower()
-        ok &= _say(result['status'] == 'done', f"a real task finished as {result['status']} in {took:.0f} s")
-        ok &= _say(wrote, 'it wrote apex-check.md in the task folder' if wrote else 'it did not write apex-check.md')
-        print('        it said: ' + (result['summary'].replace('\n', ' ')[:200] or '(nothing)'))
-        if result['status'] == 'limited':
-            print('        (your plan is at its usage limit right now: that is the plan, not Apex. Try again after it resets.)')
+    result, wrote = _live(engine, None)
+    ok &= result['status'] == 'done' and wrote is True
+    if wrote == 'unreadable' and engine == 'chatgpt' and os.name == 'nt':
+        # Codex wrote it, but Windows won't let you read it: try Codex's other Windows sandbox mode.
+        current = we.codex_windows_sandbox() or "Codex's default"
+        print(f'        Trying again with Codex\'s "unelevated" Windows sandbox (now: {current})...')
+        result2, wrote2 = _live(engine, 'unelevated')
+        if result2['status'] == 'done' and wrote2 is True:
+            print('  FIX   That works. Run this once, then restart Apex:')
+            print('          .venv\\Scripts\\python.exe scripts\\set_env_key.py WORK_CODEX_WINDOWS_SANDBOX unelevated')
+    return ok
+
+
+def _readable(path: Path, tries: int = 10):
+    """True if it says ready, False if missing or wrong, 'unreadable' if Windows refuses.
+    Retries for a few seconds, so a file still held open for a moment isn't mistaken."""
+    for i in range(tries):
+        if not path.exists():
+            return False
+        try:
+            return 'ready' in path.read_text(encoding='utf-8', errors='replace').lower()
+        except PermissionError as exc:
+            error = exc
+            time.sleep(0.5)
+    print(f'        Windows would not let Apex read it: {error}')
+    if os.name == 'nt':
+        for cmd in (['icacls', str(path)], ['tasklist', '/fi', 'imagename eq codex*']):
+            try:
+                out = subprocess.run(cmd, capture_output=True, text=True, errors='replace', timeout=30).stdout.strip()
+            except (OSError, subprocess.SubprocessError) as exc2:
+                out = str(exc2)
+            print(f"        {' '.join(cmd[:2])}:\n          " + out.replace('\n', '\n          '))
+    return 'unreadable'
+
+
+def _live(engine: str, windows_sandbox):
+    """One tiny real task in the same place real Work tasks go (ApexWork), left there to look at."""
+    from agent import work
+    folder = Path(work.WORK_DIR) / '_plan-check' / f"{engine}-{time.strftime('%Y%m%d-%H%M%S')}"
+    if windows_sandbox:
+        folder = folder.with_name(folder.name + '-' + windows_sandbox)
+    started = time.time()
+    try:
+        result = we.run(engine, LIVE_TASK, folder, timeout=300, windows_sandbox=windows_sandbox)
+    except Exception as exc:                        # report it, never crash the check
+        result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
+    took = time.time() - started
+    _say(result['status'] == 'done', f"a real task finished as {result['status']} in {took:.0f} s")
+    print('        it said: ' + (result['summary'].replace('\n', ' ')[:300] or '(nothing)'))
+    if result['status'] == 'limited':
+        print('        (your plan is at its usage limit right now: that is the plan, not Apex. Try again after it resets.)')
+    wrote = _readable(folder / 'apex-check.md')
+    _say(wrote is True, {True: 'it wrote apex-check.md and Apex can read it', False: 'it did not write apex-check.md',
+                         'unreadable': 'it wrote apex-check.md, but Windows blocks reading it'}[wrote])
+    print(f'        folder: {folder}')
+    return result, wrote
     return ok
 
 

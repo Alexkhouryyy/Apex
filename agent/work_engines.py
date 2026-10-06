@@ -77,6 +77,16 @@ def installed() -> dict:
     return {e: (True if e == 'api' else bool(binary(e))) for e in ENGINES}
 
 
+WINDOWS_SANDBOXES = ('', 'unelevated', 'elevated')
+
+
+def codex_windows_sandbox() -> str:
+    """Codex's Windows sandbox mode for Work tasks ('' = Codex's own default)."""
+    import config
+    mode = getattr(config, 'WORK_CODEX_WINDOWS_SANDBOX', '') or ''
+    return mode if mode in WINDOWS_SANDBOXES else ''
+
+
 def _env() -> dict:
     env = dict(os.environ)
     for key in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY'):
@@ -214,9 +224,22 @@ def _tidy(text: str) -> str:
     return '\n'.join(lines[-6:])
 
 
+def unreadable(folder: Path, limit: int = 50) -> list[str]:
+    """Files a run wrote that you can't open (seen with Codex's Windows sandbox)."""
+    bad = []
+    for f in sorted(p for p in Path(folder).rglob('*') if p.is_file())[:limit]:
+        try:
+            with f.open('rb') as fh:
+                fh.read(1)
+        except PermissionError:
+            bad.append(str(f.relative_to(folder)))
+    return bad
+
+
 # ---------------------------------------------------------------- one run
 
-def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: str | None = None) -> dict:
+def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: str | None = None,
+        windows_sandbox: str | None = None) -> dict:
     """Run one task with a subscription tool. Never raises for a failed run:
     returns {status: done|failed|limited|signed_out|missing|stopped, summary, reset_at}."""
     exe = binary(engine)
@@ -231,8 +254,11 @@ def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: 
     if engine == 'claude':
         cmd = [exe, '-p', '--output-format', 'json', '--permission-mode', 'acceptEdits', '--allowedTools', *CLAUDE_TOOLS]
     else:
-        cmd = [exe, 'exec', '--skip-git-repo-check', '--ephemeral', '-C', str(folder), '--sandbox', 'workspace-write',
-               '-o', str(last), '-']                # '-': read the task from stdin
+        cmd = [exe, 'exec', '--skip-git-repo-check', '--ephemeral', '-C', str(folder), '--sandbox', 'workspace-write']
+        mode = codex_windows_sandbox() if windows_sandbox is None else windows_sandbox
+        if mode and os.name == 'nt':
+            cmd += ['-c', f'windows.sandbox={mode}']    # bare: no quotes to survive cmd.exe
+        cmd += ['-o', str(last), '-']               # '-': read the task from stdin
     try:
         proc = subprocess.Popen(cmd, cwd=str(folder), env=_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', **_hidden())
@@ -272,6 +298,10 @@ def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: 
             last.unlink()
         except OSError:
             pass
+        blocked = unreadable(folder)
+        if blocked:
+            summary += ('\n\nWindows won\'t let you open what Codex wrote (' + ', '.join(blocked[:5]) +
+                        '). Run `python scripts\\work_plans_check.py --live --only chatgpt` to find the fix.')
     detail = summary + '\n' + err[-3000:]
     status = _classify(detail, failed)
     if status == 'signed_out':

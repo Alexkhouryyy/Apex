@@ -519,3 +519,42 @@ def test_the_setup_script_signs_in_with_the_plan_never_the_console():
     assert 'claude auth login --claudeai' in cmd and '--console' not in cmd
     assert '--signed-in claude' in cmd and '--signed-in chatgpt' in cmd and '--live' in cmd
     assert 'call claude\r\n' not in cmd                                # never drops you into the full app
+
+
+def test_a_file_windows_will_not_let_apex_read_is_reported_not_a_crash(tmp_path, monkeypatch, capsys):
+    from scripts import work_plans_check
+    made = tmp_path / 'apex-check.md'; made.write_text('ready')
+    assert work_plans_check._readable(made) is True
+    assert work_plans_check._readable(tmp_path / 'missing.md') is False
+    def refuse(self, *a, **k): raise PermissionError(13, 'Permission denied')
+    monkeypatch.setattr(type(made), 'read_text', refuse)
+    monkeypatch.setattr(work_plans_check.time, 'sleep', lambda s: None)
+    assert work_plans_check._readable(made, tries=3) == 'unreadable'
+    assert 'Windows would not let Apex read it' in capsys.readouterr().out
+
+
+def test_the_claude_note_when_an_api_key_hides_a_missing_sign_in(fake, capsys):
+    from scripts import work_plans_check
+    fake.auth('claude', json.dumps({'loggedIn': False, 'authMethod': 'none'}))
+    assert work_plans_check.main(['--only', 'claude']) == 1
+    out = capsys.readouterr().out
+    assert 'this PC has ANTHROPIC_API_KEY set' in out and 'claude auth login --claudeai' in out
+    assert 'sk-ant' not in out                                         # the key itself is never shown
+
+
+def test_codex_windows_sandbox_setting(monkeypatch):
+    import config
+    for value, want in (('', ''), ('unelevated', 'unelevated'), ('elevated', 'elevated'), ('rm -rf', '')):
+        monkeypatch.setattr(config, 'WORK_CODEX_WINDOWS_SANDBOX', value, raising=False)
+        assert work_engines.codex_windows_sandbox() == want
+
+
+def test_files_you_cannot_open_are_called_out_in_the_summary(fake, tmp_path, monkeypatch):
+    import pathlib
+    real_open = pathlib.Path.open
+    def guarded(self, *a, **k):
+        if self.name == 'result.md': raise PermissionError(13, 'Permission denied')
+        return real_open(self, *a, **k)
+    monkeypatch.setattr(pathlib.Path, 'open', guarded)
+    r = work_engines.run('chatgpt', 'x', tmp_path / 'f')
+    assert r['status'] == 'done' and "Windows won't let you open what Codex wrote (result.md)" in r['summary']
