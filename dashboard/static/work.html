@@ -4,8 +4,8 @@
   <meta charset="utf-8"><script src="/static/theme.js"></script><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Apex · Work</title>
   <link rel="icon" href="/static/icons/apex-refined.svg">
-  <link rel="stylesheet" href="/static/work.css?v=work-1">
-  <script src="/static/work.js?v=work-1" defer></script>
+  <link rel="stylesheet" href="/static/work.css?v=work-2">
+  <script src="/static/work.js?v=work-2" defer></script>
   <link rel="stylesheet" href="/static/brand.css?v=brand40"><link rel="stylesheet" href="/static/theme.css">
 </head>
 <body>
@@ -29,7 +29,7 @@
       placeholder="Add a task… e.g. send invoice to Karim fri #job !high">
     <button class="primary" id="quick-add">Add</button>
   </form>
-  <p class="hint">Shorthand: <code>#job</code> <code>#studies</code> <code>#business</code> <code>#software</code> · <code>@project</code> · <code>!high</code> / <code>!low</code> · <code>today</code>, <code>tomorrow</code>, <code>fri</code>, <code>next week</code>, <code>12/10</code> · <code>waiting</code></p>
+  <p class="hint">Shorthand: <code>#job</code> <code>#studies</code> <code>#business</code> <code>#software</code> · <code>@project</code> · <code>!high</code> / <code>!low</code> · <code>today</code>, <code>tomorrow</code>, <code>fri</code>, <code>next week</code>, <code>12/10</code> · <code>waiting</code> · <code>+apex</code> (Apex may do it on its own)</p>
   <p id="message" class="message" role="status"></p>
 
   <div class="bar">
@@ -37,6 +37,7 @@
       <button role="tab" data-view="today" aria-selected="true">Today</button>
       <button role="tab" data-view="board" aria-selected="false">Board</button>
       <button role="tab" data-view="projects" aria-selected="false">Projects</button>
+      <button role="tab" data-view="agent" aria-selected="false">Always on <span id="agent-dot" class="dot" aria-hidden="true"></span></button>
     </div>
     <div class="areas" id="areas" aria-label="Filter by area"></div>
   </div>
@@ -51,6 +52,31 @@
       <button class="primary">Add project</button>
     </form>
     <div id="project-list"></div>
+  </section>
+  <section id="view-agent" class="view" hidden>
+    <form id="agent-form" class="card agent" autocomplete="off">
+      <div class="switches">
+        <label class="switch"><input type="checkbox" id="a-enabled"> <span><b>Always on</b> Morning brief, evening check, follow-ups on waiting work, and a note the moment Apex finishes something.</span></label>
+        <label class="switch"><input type="checkbox" id="a-auto"> <span><b>Work on its own</b> Apex picks up tasks you marked <code>+apex</code>, most urgent first, one at a time.</span></label>
+      </div>
+      <h3>Who does the work</h3>
+      <p class="fine">In this order. Your plans are used through their own apps signed in on this PC, so tasks count against your Claude and ChatGPT usage, not API credits. When one hits its limit, the next one takes over.</p>
+      <ol id="a-plans" class="plans"></ol>
+      <div class="grid">
+        <label>Plan tasks a day <input id="a-runs" type="number" min="0" max="50" step="1"></label>
+        <label>Rest a plan after its limit (hours) <input id="a-rest" type="number" min="0.5" max="168" step="0.5"></label>
+        <label>Morning brief <input id="a-brief" type="time"></label>
+        <label>Evening check <input id="a-evening" type="time"></label>
+        <label>API: cap per task ($) <input id="a-task" type="number" min="0.05" max="5" step="0.05"></label>
+        <label>API: cap per day ($) <input id="a-day" type="number" min="0" max="50" step="0.5"></label>
+      </div>
+      <div class="d-actions">
+        <span id="a-summary" class="muted grow"></span>
+        <button type="button" id="a-clear">Try resting plans now</button>
+        <button class="primary" id="a-save">Save</button>
+      </div>
+    </form>
+    <div class="section"><h2>What Apex did</h2><div id="a-events"></div></div>
   </section>
 </main>
 
@@ -71,8 +97,10 @@
       <p id="d-apex-state" class="muted"></p>
       <pre id="d-apex-summary" hidden></pre>
       <ul id="d-apex-files"></ul>
+      <label class="check"><input type="checkbox" id="d-apex-ok"> Apex can take this on its own (when Always on is working on its own)</label>
       <div class="apex-row">
-        <label>Spending cap ($) <input id="d-budget" type="number" min="0.05" max="5" step="0.05" value="0.5"></label>
+        <label>Use <select id="d-engine"><option value="claude">Claude plan</option><option value="chatgpt">ChatGPT plan</option><option value="api">API credits</option></select></label>
+        <label id="d-budget-label">Spending cap ($) <input id="d-budget" type="number" min="0.05" max="5" step="0.05" value="0.5"></label>
         <button type="button" id="d-give" class="primary">Give to Apex</button>
       </div>
       <p class="fine">Apex researches and writes the deliverable into its own folder, a reviewer pass checks it, and the task comes back to you for review. It never sends, pays or contacts anyone: it prepares drafts.</p>

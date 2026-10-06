@@ -1,6 +1,8 @@
 // Work page (dashboard/work.py, agent/work.py): projects and tasks across
 // job, studies, business and software; Today, Board and Projects views; and
-// handing a task to Apex, whose result comes back for your review.
+// handing a task to Apex, whose result comes back for your review; and the
+// Always on agent (agent/work_agent.py), which can work on your Claude or
+// ChatGPT plan instead of API credits.
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -50,6 +52,7 @@
     if (APEX_ACTIVE.includes(t.apex_state)) meta.append(el('span', 'apex', 'Apex is working…'));
     if (t.status === 'review') meta.append(el('span', 'rev', 'Apex finished · review'));
     if (t.status === 'waiting' && t.waiting_on) meta.append(el('span', '', 'waiting on ' + t.waiting_on));
+    if (t.apex_ok && !t.apex_state && t.status !== 'done' && t.status !== 'review') meta.append(el('span', 'apex', '+apex'));
     main.append(meta);
     const prio = el('span', `prio p${t.priority}`); prio.title = ['', 'High', 'Normal', 'Low'][t.priority] + ' priority';
     row.append(done, prio, main);
@@ -145,11 +148,12 @@
 
   function render() {
     renderHeader(); renderAreas();
-    for (const name of ['today', 'board', 'projects']) {
+    for (const name of ['today', 'board', 'projects', 'agent']) {
       $('view-' + name).hidden = view !== name;
       document.querySelector(`[data-view=${name}]`).setAttribute('aria-selected', String(view === name));
     }
-    if (view === 'today') renderToday(); else if (view === 'board') renderBoard(); else renderProjects();
+    $('areas').hidden = view === 'agent';
+    if (view === 'today') renderToday(); else if (view === 'board') renderBoard(); else if (view === 'agent') loadAgent(); else renderProjects();
   }
   function show(name) { view = name; try { localStorage.setItem('apex.work.view', view); } catch (_) {} render(); }
   document.querySelectorAll('[data-view]').forEach(b => { b.onclick = () => show(b.dataset.view); });
@@ -189,7 +193,10 @@
     $('d-apex-state').textContent = working ? 'Apex is working on this now. You can close this; it keeps going.'
       : t.apex_state === 'done' ? `Apex finished${t.apex_cost ? ` · $${Number(t.apex_cost).toFixed(2)}` : ''}. Check the result, then mark it done.`
       : t.apex_state ? `Apex stopped (${t.apex_state}). See what it got to below, then try again or finish it yourself.`
+      : t.apex_summary ? 'That plan could not take it (see below). Try the other plan, or Always on will.'
       : 'Apex can research this and draft the deliverable for you.';
+    $('d-apex-ok').checked = !!t.apex_ok;
+    $('d-engine').value = (agent && agent.engines && agent.engines[0]) || 'claude'; budgetShown();
     $('d-apex-summary').hidden = !t.apex_summary; $('d-apex-summary').textContent = t.apex_summary || '';
     $('d-apex-files').replaceChildren();
     $('d-give').disabled = working; $('d-give').textContent = t.apex_state && !working ? 'Ask Apex again' : 'Give to Apex';
@@ -208,7 +215,7 @@
       await api(`/api/work/tasks/${open.id}`, {method: 'PATCH', body: JSON.stringify({
         title: $('d-title').value, due: $('d-due').value || null, priority: Number($('d-priority').value), status: $('d-status').value,
         area: $('d-area').value, project_id: $('d-project').value ? Number($('d-project').value) : null,
-        notes: $('d-notes').value, waiting_on: $('d-waiting').value})});
+        notes: $('d-notes').value, waiting_on: $('d-waiting').value, apex_ok: $('d-apex-ok').checked})});
       $('detail').close(); say('Saved.', 'good'); await load();
     } catch (e) { say(e.message, 'error'); }
   };
@@ -221,10 +228,72 @@
     if (!open) return;
     $('d-give').disabled = true;
     try {
-      await api(`/api/work/tasks/${open.id}/apex`, {method: 'POST', body: JSON.stringify({budget_usd: Number($('d-budget').value)})});
-      $('detail').close(); say('Apex is on it. The task comes back to you for review when it is done.', 'good'); await load();
+      const engine = $('d-engine').value;
+      await api(`/api/work/tasks/${open.id}/apex`, {method: 'POST', body: JSON.stringify({budget_usd: Number($('d-budget').value), engine})});
+      $('detail').close(); say(`Apex is on it, on your ${$('d-engine').selectedOptions[0].textContent}. The task comes back to you for review when it is done.`, 'good'); await load();
     } catch (e) { say(e.message, 'error'); $('d-give').disabled = false; }
   };
+
+  function budgetShown() { $('d-budget-label').hidden = $('d-engine').value !== 'api'; }
+  $('d-engine').onchange = budgetShown;
+
+  // Always on -----------------------------------------------------------------
+  let agent = null, order = [];
+  const PLAN_NAMES = {claude: 'Claude plan', chatgpt: 'ChatGPT plan', api: 'API credits'};
+  function renderPlans() {
+    const root = $('a-plans'); root.replaceChildren();
+    const plans = Object.fromEntries((agent.plans || []).map(p => [p.id, p]));
+    const all = [...order, ...Object.keys(PLAN_NAMES).filter(e => !order.includes(e))];
+    all.forEach(e => {
+      const on = order.includes(e), p = plans[e] || {};
+      const li = el('li', on ? '' : 'off');
+      const box = el('input'); box.type = 'checkbox'; box.checked = on; box.setAttribute('aria-label', 'Use ' + PLAN_NAMES[e]);
+      box.onchange = () => { order = box.checked ? [...order, e] : order.filter(x => x !== e); renderPlans(); };
+      li.append(box, el('span', 'name', (on ? `${order.indexOf(e) + 1}. ` : '') + PLAN_NAMES[e]));
+      li.append(el('span', 'why' + (p.unavailable ? '' : ' ok'), p.unavailable || (e === 'api' ? 'uses credits, within the caps below' : 'ready')));
+      if (on && order.indexOf(e) > 0) {
+        const up = el('button', '', '↑'); up.setAttribute('aria-label', 'Move ' + PLAN_NAMES[e] + ' up');
+        up.onclick = () => { const i = order.indexOf(e); order.splice(i, 1); order.splice(i - 1, 0, e); renderPlans(); };
+        li.append(up);
+      }
+      root.append(li);
+    });
+  }
+  function renderAgent() {
+    $('agent-dot').className = 'dot' + (agent.enabled ? ' on' : '');
+    if (view !== 'agent' || $('agent-form').contains(document.activeElement)) return;
+    $('a-enabled').checked = agent.enabled; $('a-auto').checked = agent.auto_work;
+    $('a-runs').value = agent.plan_runs; $('a-rest').value = agent.rest_hours;
+    $('a-brief').value = agent.brief_time; $('a-evening').value = agent.evening_time;
+    $('a-task').value = agent.task_budget; $('a-day').value = agent.daily_budget;
+    order = [...agent.engines]; renderPlans();
+    $('a-summary').textContent = !agent.enabled ? 'Off.' : `${agent.plan_runs_today} of ${agent.plan_runs} plan tasks today · ${agent.eligible} marked +apex` +
+      (agent.engines.includes('api') ? ` · $${Number(agent.spent_today).toFixed(2)} of API credits today` : '');
+    const ev = $('a-events'); ev.replaceChildren();
+    if (!agent.events.length) ev.append(el('p', 'empty', 'Nothing yet. Turn on Always on, and Apex will note everything it does here.'));
+    for (const e of agent.events) {
+      const row = el('div', 'event');
+      row.append(el('time', '', new Date(e.ts * 1000).toLocaleString(undefined, {weekday: 'short', hour: '2-digit', minute: '2-digit'})), el('span', '', e.text));
+      ev.append(row);
+    }
+  }
+  async function loadAgent() {
+    try { agent = await api('/api/work/agent'); renderAgent(); } catch (e) { say(e.message, 'error'); }
+  }
+  async function saveAgent(extra = {}) {
+    if (!order.length) { say('Choose at least one way for Apex to work.', 'error'); return; }
+    try {
+      agent = await api('/api/work/agent', {method: 'PUT', body: JSON.stringify({
+        enabled: $('a-enabled').checked, auto_work: $('a-auto').checked, engines: order,
+        plan_runs: Number($('a-runs').value), rest_hours: Number($('a-rest').value),
+        brief_time: $('a-brief').value, evening_time: $('a-evening').value,
+        task_budget: Number($('a-task').value), daily_budget: Number($('a-day').value), ...extra})});
+      document.activeElement && document.activeElement.blur();
+      renderAgent(); say(agent.enabled ? 'Saved. Apex is always on.' : 'Saved. Always on is off.', 'good');
+    } catch (e) { say(e.message, 'error'); }
+  }
+  $('agent-form').onsubmit = e => { e.preventDefault(); saveAgent(); };
+  $('a-clear').onclick = () => saveAgent({clear_limits: true});
 
   // Projects -----------------------------------------------------------------
   $('new-project').onsubmit = async e => {
@@ -238,8 +307,10 @@
   $('token-save').onclick = () => { try { localStorage.setItem('apex_token', $('token').value.trim()); } catch (_) {} load(); };
   (async () => {
     await load();
+    loadAgent();
     fillSelect($('project-area'), data.areas.map(a => [a.id, a.name]), area || 'job');
   })();
   // Apex's progress shows up without reloading.
   setInterval(() => { if (!document.hidden && !$('detail').open && data.tasks.some(t => APEX_ACTIVE.includes(t.apex_state))) load(); }, 5000);
+  setInterval(() => { if (!document.hidden && view === 'agent') loadAgent(); }, 30000);
 })();

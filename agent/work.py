@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -57,6 +58,15 @@ def init_db() -> None:
             status TEXT NOT NULL DEFAULT 'todo', waiting_on TEXT NOT NULL DEFAULT '',
             apex_run TEXT, apex_state TEXT, apex_summary TEXT NOT NULL DEFAULT '', apex_folder TEXT NOT NULL DEFAULT '',
             apex_cost REAL NOT NULL DEFAULT 0, created REAL NOT NULL, updated REAL NOT NULL, done_at REAL)''')
+        # Runs on your Claude or ChatGPT plan (agent/work_engines.py), outside the team runner.
+        db.execute('''CREATE TABLE IF NOT EXISTS work_runs (
+            id TEXT PRIMARY KEY, task_id INTEGER NOT NULL, engine TEXT NOT NULL, status TEXT NOT NULL,
+            started REAL NOT NULL, ended REAL, summary TEXT NOT NULL DEFAULT '')''')
+        cols = {r[1] for r in db.execute('PRAGMA table_info(work_tasks)')}
+        if 'apex_engine' not in cols:
+            db.execute("ALTER TABLE work_tasks ADD COLUMN apex_engine TEXT NOT NULL DEFAULT ''")
+        if 'apex_ok' not in cols:                      # "Apex can take this on its own" (agent/work_agent.py)
+            db.execute('ALTER TABLE work_tasks ADD COLUMN apex_ok INTEGER NOT NULL DEFAULT 0')
 
 
 # ---------------------------------------------------------------- quick add
@@ -110,6 +120,8 @@ def parse_quick(text: str, today: date | None = None, projects=()) -> dict:
             out['due'] = _date_word(low, today).isoformat()
         elif low == 'waiting':
             out['status'] = 'waiting'
+        elif low == '+apex':                         # Apex may take this on its own (agent/work_agent.py)
+            out['apex_ok'] = True
         else:
             kept.append(w)
         i += 1
@@ -203,13 +215,15 @@ def get_task(tid):
         return _row(cur, row) if row else None
 
 
-def add_task(title=None, quick=None, area=None, project_id=None, due=None, priority=None, notes='', status=None, today=None):
+def add_task(title=None, quick=None, area=None, project_id=None, due=None, priority=None, notes='', status=None, today=None,
+             apex_ok=None):
     """Either a `quick` line of shorthand, or the fields themselves (fields win)."""
     init_db()
     fields = parse_quick(quick, today, list_projects()) if quick else {}
     if title is not None:
         fields['title'] = _clean_text(title, MAX_TITLE, 'A title')
-    for key, value in (('area', area), ('project_id', project_id), ('due', due), ('priority', priority), ('status', status)):
+    for key, value in (('area', area), ('project_id', project_id), ('due', due), ('priority', priority), ('status', status),
+                       ('apex_ok', apex_ok)):
         if value is not None:
             fields[key] = value
     if not fields.get('title'):
@@ -232,10 +246,10 @@ def add_task(title=None, quick=None, area=None, project_id=None, due=None, prior
         raise WorkError('Unknown status.')
     now = time.time()
     with longterm._conn() as db:
-        cur = db.execute('''INSERT INTO work_tasks (project_id, area, title, notes, due, priority, status, created, updated)
-                            VALUES (?,?,?,?,?,?,?,?,?)''',
+        cur = db.execute('''INSERT INTO work_tasks (project_id, area, title, notes, due, priority, status, apex_ok, created, updated)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)''',
                          (fields.get('project_id'), area, fields['title'], _clean_text(notes or '', MAX_NOTES, 'Notes'),
-                          _check_due(fields.get('due')), priority, status, now, now))
+                          _check_due(fields.get('due')), priority, status, int(bool(fields.get('apex_ok'))), now, now))
         tid = cur.lastrowid
     return get_task(tid)                        # read back after the insert is committed
 
@@ -265,6 +279,9 @@ def update_task(tid, **changes):
             if value not in STATUSES: raise WorkError('Unknown status.')
             fields['status'] = value
             fields['done_at'] = time.time() if value == 'done' else None
+        elif key == 'apex_ok':
+            if type(value) is not bool: raise WorkError('"Apex can take this" is on or off.')
+            fields['apex_ok'] = int(value)
     if fields:
         fields['updated'] = time.time()
         with longterm._conn() as db:
@@ -335,46 +352,103 @@ def apex_brief(task, folder: Path) -> str:
     return ' '.join(lines)
 
 
-def give_to_apex(tid, agent, budget_usd=APEX_BUDGET, roles=('researcher', 'coder', 'reviewer')):
-    """Hand a task to Apex's task runner. Returns the updated task."""
-    import config
-    from agent import team
+UNAVAILABLE = ('limited', 'signed_out', 'missing')   # the plan couldn't take it: the task itself was not tried
+_live_runs: set[str] = set()          # subscription runs this process is carrying out
+
+
+def give_to_apex(tid, agent, budget_usd=APEX_BUDGET, roles=('researcher', 'coder', 'reviewer'), engine='api'):
+    """Hand a task to Apex: on your Claude or ChatGPT plan (engine='claude' or
+    'chatgpt', no API credits), or the API task runner. Returns the updated task."""
+    from agent import work_engines
     task = get_task(tid)
     if not task:
         raise WorkError('No such task.')
+    if engine not in work_engines.ENGINES:
+        raise WorkError('Choose claude, chatgpt or api.')
     if task['apex_state'] in ('queued', 'running', 'verifying'):
         raise WorkError('Apex is already working on this task.')
     folder = WORK_DIR / f"{task['id']}-{_slug(task['title'])}"
     folder.mkdir(parents=True, exist_ok=True)
-    run_id = f"work_{task['id']}_{int(time.time())}"
-    try:
-        team.submit(dict(id=run_id, task=apex_brief(task, folder), roles=list(roles),
-                         models={r: config.AGENT_MODEL for r in (*roles, 'apex')}, budget_usd=budget_usd), agent)
-    except (ValueError, RuntimeError) as exc:
-        raise WorkError(str(exc)) from exc
+    stamp = int(time.time() * 1000)
+    if engine == 'api':
+        import config
+        from agent import team
+        run_id = f"work_{task['id']}_{stamp}"
+        try:
+            team.submit(dict(id=run_id, task=apex_brief(task, folder), roles=list(roles),
+                             models={r: config.AGENT_MODEL for r in (*roles, 'apex')}, budget_usd=budget_usd), agent)
+        except (ValueError, RuntimeError) as exc:
+            raise WorkError(str(exc)) from exc
+    else:
+        if not work_engines.installed()[engine]:
+            raise WorkError(work_engines.run(engine, '', folder)['summary'])
+        run_id = f"cli-{engine}-{task['id']}-{stamp}"
+        with longterm._conn() as db:
+            db.execute("INSERT INTO work_runs (id, task_id, engine, status, started) VALUES (?,?,?,'running',?)",
+                       (run_id, task['id'], engine, time.time()))
+        _live_runs.add(run_id)
+        prompt = apex_brief(task, folder)
+
+        def carry_out():
+            try:
+                result = work_engines.run(engine, prompt, folder)
+            except Exception as exc:                     # never leave a run marked running
+                result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
+            with longterm._conn() as db:
+                db.execute('UPDATE work_runs SET status=?, ended=?, summary=? WHERE id=?',
+                           (result['status'], time.time(), result['summary'][:4000], run_id))
+            _live_runs.discard(run_id)
+            if result['status'] in UNAVAILABLE:
+                from agent import work_agent
+                work_agent.mark_unavailable(engine, result['status'], result['summary'])
+            sync_apex()
     with longterm._conn() as db:
-        db.execute("UPDATE work_tasks SET apex_run=?, apex_state='queued', apex_folder=?, apex_summary='', status='doing', updated=? WHERE id=?",
-                   (run_id, str(folder), time.time(), tid))
+        db.execute("UPDATE work_tasks SET apex_run=?, apex_state='queued', apex_folder=?, apex_summary='', apex_engine=?, "
+                   "status='doing', updated=? WHERE id=?", (run_id, str(folder), engine, time.time(), tid))
+    if engine != 'api':
+        threading.Thread(target=carry_out, daemon=True, name=f'ApexWork-{engine}').start()
     return get_task(tid)
 
 
-def sync_apex():
-    """Bring the task runner's outcome onto each task Apex is working on."""
+def _run_outcome(run_id):
+    """(state, summary, cost) for a run, or None while it is still going."""
+    if run_id.startswith('cli-'):
+        with longterm._conn() as db:
+            row = db.execute('SELECT status, summary FROM work_runs WHERE id=?', (run_id,)).fetchone()
+        if not row:
+            return ('failed', 'The run record is missing.', 0)
+        status, summary = row
+        if status == 'running':
+            if run_id in _live_runs:
+                return None
+            # Apex restarted mid-run: the plan's tool was stopped with it.
+            with longterm._conn() as db:
+                db.execute("UPDATE work_runs SET status='interrupted', ended=? WHERE id=?", (time.time(), run_id))
+            return ('interrupted', 'Apex restarted while this was running. Check the folder for anything it wrote, then hand it over again.', 0)
+        return (status, summary, 0)
     from agent import team
+    run = team.get(run_id)
+    if not run or run['status'] in ('queued', 'running', 'verifying', 'stopping'):
+        return None if run else ('failed', 'The run record is missing.', 0)
+    apex_step = next((s for s in reversed(run['steps']) if s['result']), None)
+    return (run['status'], (apex_step['result'] if apex_step else run.get('error') or ''), run.get('cost_usd') or 0)
+
+
+def sync_apex():
+    """Bring each run's outcome onto its task. Finished work waits for the
+    owner's review; anything else goes back to them. A plan that hit its usage
+    limit (or isn't signed in) puts the task back untried, so it can go to the
+    other plan."""
     with longterm._conn() as db:
         rows = db.execute("SELECT id, apex_run FROM work_tasks WHERE apex_state IN ('queued','running','verifying')").fetchall()
     for tid, run_id in rows:
-        run = team.get(run_id)
-        if not run:
-            continue
-        state = run['status']
-        if state in ('queued', 'running', 'verifying', 'stopping'):
-            changes = {'apex_state': 'running' if state == 'stopping' else state}
+        outcome = _run_outcome(run_id)
+        if outcome is None:
+            changes = {'apex_state': 'running'}
         else:
-            apex_step = next((s for s in reversed(run['steps']) if s['result']), None)
-            summary = (apex_step['result'] if apex_step else run.get('error') or '')[:2000]
-            changes = {'apex_state': state, 'apex_summary': summary, 'apex_cost': round(run.get('cost_usd') or 0, 4),
-                       # Finished work waits for the owner's review; anything else goes back to them as-is.
+            state, summary, cost = outcome
+            changes = {'apex_summary': (summary or '')[:2000], 'apex_cost': round(cost, 4),
+                       'apex_state': None if state in UNAVAILABLE else state,
                        'status': 'review' if state == 'done' else 'todo'}
         changes['updated'] = time.time()
         with longterm._conn() as db:
@@ -425,6 +499,9 @@ def tool(inputs: dict) -> str:
             changes = {'status': 'done'} if action == 'done' else {k: inputs[k] for k in ('due', 'status', 'notes', 'area') if k in inputs}
             t = update_task(tid, **changes)
             return f"Updated {_line(t)}."
-        return 'Unknown work action. Use add, today, list, update or done.'
+        if action == 'agent':
+            from agent import work_agent
+            return work_agent.describe()
+        return 'Unknown work action. Use add, today, list, update, done or agent.'
     except WorkError as exc:
         return f'Could not do that: {exc}'

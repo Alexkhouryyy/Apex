@@ -67,3 +67,19 @@ dialog label{display:block;font-size:12.5px;color:var(--soft);margin:0 0 12px}di
 @media(max-width:480px){#work{padding:0 14px 60px}.quick{flex-direction:column}.grid{grid-template-columns:1fr}.task .give{display:none}}
 [hidden]{display:none!important}
 .col .t-title{white-space:normal;overflow:visible}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#ffffff22;margin-left:4px;vertical-align:middle}.dot.on{background:var(--good);box-shadow:0 0 8px var(--good)}
+.agent h3{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:18px 0 2px;font-weight:600}
+.switches{display:grid;gap:10px}
+.switch{display:flex;gap:12px;align-items:flex-start;font-size:13px;color:var(--soft);cursor:pointer}.switch b{display:block;color:var(--ink);font-weight:550}
+.switch input,.check input{width:18px;height:18px;flex:0 0 auto;margin:2px 0 0;accent-color:#65e7c4}
+.check{display:flex!important;gap:8px;align-items:center;margin:6px 0 10px!important}.check input{margin:0}
+.plans{list-style:none;padding:0;margin:10px 0 16px;display:grid;gap:6px}
+.plans li{display:flex;align-items:center;gap:10px;background:var(--field);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.plans li.off{opacity:.55}.plans li .name{flex:1}.plans li .why{font-size:11.5px;color:var(--warn)}.plans li .why.ok{color:var(--good)}
+.plans li button{min-height:28px;padding:2px 9px;font-size:12px}
+.event{display:flex;gap:12px;font-size:13px;padding:7px 2px;border-bottom:1px solid var(--line)}.event time{color:var(--muted);flex:0 0 92px;font-size:12px}
+.event span{white-space:pre-line}
+.plans li input{width:18px;height:18px;flex:0 0 auto;margin:0;padding:0;accent-color:#65e7c4}
+.agent .d-actions{flex-wrap:wrap;margin-top:6px}
+.plans li .name{flex:0 0 auto;white-space:nowrap}.plans li .why{flex:1;text-align:right}
+@media(max-width:480px){#a-summary{flex-basis:100%}}

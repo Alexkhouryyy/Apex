@@ -65,7 +65,7 @@ async def edit_project(pid: int, request: Request):
 @router.post('/api/work/tasks')
 async def new_task(request: Request):
     body = await _json(request)
-    fields = {k: body[k] for k in ('title', 'quick', 'area', 'project_id', 'due', 'priority', 'notes', 'status') if k in body}
+    fields = {k: body[k] for k in ('title', 'quick', 'area', 'project_id', 'due', 'priority', 'notes', 'status', 'apex_ok') if k in body}
     return _guard(work.add_task, **fields)
 
 
@@ -73,7 +73,7 @@ async def new_task(request: Request):
 async def edit_task(tid: int, request: Request):
     body = await _json(request)
     return _guard(work.update_task, tid, **{k: v for k, v in body.items()
-                                            if k in ('title', 'notes', 'due', 'priority', 'area', 'project_id', 'status', 'waiting_on')})
+                                            if k in ('title', 'notes', 'due', 'priority', 'area', 'project_id', 'status', 'waiting_on', 'apex_ok')})
 
 
 @router.delete('/api/work/tasks/{tid}')
@@ -92,15 +92,43 @@ async def one_task(tid: int):
     return {**task, 'files': work.files_of(task)}
 
 
+def _owner(request: Request, what: str):
+    if config.DASHBOARD_TOKEN and not getattr(request.state, 'is_master', False):
+        raise HTTPException(403, f'Only the owner (master dashboard token) can {what}.')
+
+
 @router.post('/api/work/tasks/{tid}/apex')
 async def hand_to_apex(tid: int, request: Request):
     body = await _json(request)
-    if config.DASHBOARD_TOKEN and not getattr(request.state, 'is_master', False):
-        raise HTTPException(403, 'Only the owner (master dashboard token) can hand work to Apex.')
+    _owner(request, 'hand work to Apex')
     budget = body.get('budget_usd', work.APEX_BUDGET)
     if type(budget) not in (int, float) or not 0.05 <= budget <= 5:
         raise HTTPException(400, 'The spending cap must be between $0.05 and $5.')
+    engine = body.get('engine', 'api')
+    from agent import work_engines
+    if engine not in work_engines.ENGINES:
+        raise HTTPException(400, 'Choose claude, chatgpt or api.')
     from dashboard import server
     if not server._agent_ref:
         raise HTTPException(503, 'Apex is still starting.')
-    return _guard(work.give_to_apex, tid, server._agent_ref, budget)
+    return _guard(work.give_to_apex, tid, server._agent_ref, budget, engine=engine)
+
+
+# The always-on agent (agent/work_agent.py). Changing it lets Apex act on its
+# own, so that needs the owner; any signed-in device can see what it's doing.
+
+@router.get('/api/work/agent')
+async def agent_status():
+    from agent import work_agent
+    return work_agent.status()
+
+
+@router.put('/api/work/agent')
+async def agent_settings(request: Request):
+    body = await _json(request)
+    _owner(request, 'change the always-on agent')
+    from agent import work_agent
+    if body.pop('clear_limits', False) is True:
+        work_agent.clear_limits()
+    _guard(work_agent.update_settings, **body)
+    return work_agent.status()

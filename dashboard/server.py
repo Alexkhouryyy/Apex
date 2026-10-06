@@ -59,6 +59,12 @@ def set_agent(agent, awareness_log=None) -> None:
         _missions.start_supervisor(agent)
     except Exception as exc:
         print(f"[Missions] not resumed: {exc}")
+    # The always-on Work agent (agent/work_agent.py): idle until switched on in /work.
+    try:
+        from agent import work_agent as _work_agent
+        _work_agent.start(agent)
+    except Exception as exc:
+        print(f"[Work] always-on agent not started: {exc}")
 
 
 # === WebSocket connection manager ===

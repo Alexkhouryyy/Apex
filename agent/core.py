@@ -1514,12 +1514,13 @@ TOOLS = [
                         "Use it when they mention something to do ('remind me to send the invoice Friday', 'add a task'), "
                         "ask what's on their plate, or finish something. action=add takes `quick`: one line of shorthand "
                         "('send invoice to Karim fri #job !high'); action=today summarises overdue, due, waiting and Apex-finished work; "
-                        "action=list lists open tasks (optionally for an area); action=done or action=update change task `id`."),
+                        "action=list lists open tasks (optionally for an area); action=done or action=update change task `id`; "
+                        "action=agent says what the always-on Work agent is doing and which plan (Claude or ChatGPT) it is using."),
         "input_schema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["add", "today", "list", "update", "done"]},
-                "quick": {"type": "string", "description": "add: the task in one line, with optional #area @project !high/!low and a date word"},
+                "action": {"type": "string", "enum": ["add", "today", "list", "update", "done", "agent"]},
+                "quick": {"type": "string", "description": "add: the task in one line, with optional #area @project !high/!low, a date word, and +apex if Apex may do it on its own"},
                 "id": {"type": "integer", "description": "update/done: the task's id"},
                 "area": {"type": "string", "enum": ["job", "studies", "business", "software", "other"]},
                 "due": {"type": "string", "description": "update: YYYY-MM-DD, or empty to clear"},

@@ -38,7 +38,7 @@ INIT_MODULES: tuple[str, ...] = (
     "lessons", "mcp_policy", "node_tasks", "observed", "outcomes", "perception",
     "relay", "reranker",
     "restraint", "scheduler", "skill_forge", "threads", "trajectory",
-    "vault_index", "verification", "voice_timing", "world_model", "continuity", "work",
+    "vault_index", "verification", "voice_timing", "world_model", "continuity", "work", "work_agent",
 )
 
 # Modules whose table-creating function is not called `init_db`. Listed rather
