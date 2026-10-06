@@ -278,9 +278,12 @@ async def _auth(request: Request, call_next):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "apex", "pid": os.getpid(),
+    result = {"status": "ok", "service": "apex", "pid": os.getpid(),
             "launch_id": os.environ.get("APEX_LAUNCH_ID", ""),
             "agent_ready": _agent_ref is not None}
+    if os.environ.get('APEX_PLATFORM_ID'):
+        result['platform_id'] = os.environ['APEX_PLATFORM_ID']
+    return result
 
 
 @app.get("/", response_class=HTMLResponse)

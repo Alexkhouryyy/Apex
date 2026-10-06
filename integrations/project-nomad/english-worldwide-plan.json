@@ -1,0 +1,688 @@
+{
+  "profile": "english-worldwide",
+  "nomad_revision": "5e1702efebfc5549f870911b2b042ed3bd312fcd",
+  "created_at": 1790955007,
+  "jobs": [
+    {
+      "id": "devdocs_en_bash",
+      "title": "Linux Documentation",
+      "url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_bash_2026-04.zim",
+      "version": "2026-04",
+      "bytes": 558428,
+      "path": "nomad/storage/zim/devdocs_en_bash_2026-04.zim",
+      "hash_algorithm": "sha256",
+      "hash": "fe62a540d06126fe4facfb39b51a05d494d93caf59f123ffa90301ca7eb54938",
+      "status": "pending"
+    },
+    {
+      "id": "devdocs_en_node",
+      "title": "Node.js Documentation",
+      "url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_node_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 1416442,
+      "path": "nomad/storage/zim/devdocs_en_node_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "3060bd03ee436920b03b54de908de368a58e34d9e96534ebd85bda7120686921",
+      "status": "pending"
+    },
+    {
+      "id": "devdocs_en_git",
+      "title": "Git Documentation",
+      "url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_git_2026-07.zim",
+      "version": "2026-07",
+      "bytes": 1577999,
+      "path": "nomad/storage/zim/devdocs_en_git_2026-07.zim",
+      "hash_algorithm": "sha256",
+      "hash": "4800493c04a98e20e361b3b57b77851df5c96be7f93f55de013948bbf93a1233",
+      "status": "pending"
+    },
+    {
+      "id": "devdocs_en_html",
+      "title": "HTML Documentation",
+      "url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_html_2026-10.zim",
+      "version": "2026-10",
+      "bytes": 1721660,
+      "path": "nomad/storage/zim/devdocs_en_html_2026-10.zim",
+      "hash_algorithm": "sha256",
+      "hash": "c0e1f40b73fd9831b48cda124e167c0847a779972afc406a27cd842edc909516",
+      "status": "pending"
+    },
+    {
+      "id": "devdocs_en_docker",
+      "title": "Docker Documentation",
+      "url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_docker_2026-10.zim",
+      "version": "2026-10",
+      "bytes": 1782594,
+      "path": "nomad/storage/zim/devdocs_en_docker_2026-10.zim",
+      "hash_algorithm": "sha256",
+      "hash": "3deccfa4bdac936c1377aef585414636695f8d67bf75302c6d7af130a29ee76c",
+      "status": "pending"
+    },
+    {
+      "id": "devdocs_en_javascript",
+      "title": "JavaScript Documentation",
+      "url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_javascript_2026-10.zim",
+      "version": "2026-10",
+      "bytes": 2641021,
+      "path": "nomad/storage/zim/devdocs_en_javascript_2026-10.zim",
+      "hash_algorithm": "sha256",
+      "hash": "a4a70cffdc68d2c70d40ff6bd55bf42c70d2e18c2445e5b481b22d6b9495f344",
+      "status": "pending"
+    },
+    {
+      "id": "devdocs_en_react",
+      "title": "React Documentation",
+      "url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_react_2026-05.zim",
+      "version": "2026-05",
+      "bytes": 2699686,
+      "path": "nomad/storage/zim/devdocs_en_react_2026-05.zim",
+      "hash_algorithm": "sha256",
+      "hash": "307fa2ba82b32d88d6f7018276b7017812812dd86f987b09ea16ae16e629d2de",
+      "status": "pending"
+    },
+    {
+      "id": "devdocs_en_css",
+      "title": "CSS Documentation",
+      "url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_css_2026-10.zim",
+      "version": "2026-10",
+      "bytes": 2732639,
+      "path": "nomad/storage/zim/devdocs_en_css_2026-10.zim",
+      "hash_algorithm": "sha256",
+      "hash": "3f286000670d80d013d0385c580ef13b9307a2065bd3be0cf7d6cf792c00bab2",
+      "status": "pending"
+    },
+    {
+      "id": "devdocs_en_python",
+      "title": "Python Documentation",
+      "url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_python_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 4390070,
+      "path": "nomad/storage/zim/devdocs_en_python_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "289e5d3e0e8c3d3470bf183e5c913be3be0b61a730ce52a247c23812799baa51",
+      "status": "pending"
+    },
+    {
+      "id": "freecodecamp_en_all",
+      "title": "freeCodeCamp",
+      "url": "https://lb.download.kiwix.org/zim/freecodecamp/freecodecamp_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 7892996,
+      "path": "nomad/storage/zim/freecodecamp_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "f145e4620bebb3f3e99d438934e39a05cff1ffe15b8f7988134e071dc18bfecb",
+      "status": "pending"
+    },
+    {
+      "id": "based.cooking_en_all",
+      "title": "Based.Cooking",
+      "url": "https://lb.download.kiwix.org/zim/zimit/based.cooking_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 15774733,
+      "path": "nomad/storage/zim/based.cooking_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "52ca9fedc61da2fc846f71b1f74cf7fb8e96193fe9f671bb4632bcaf1181ce72",
+      "status": "pending"
+    },
+    {
+      "id": "zimgit-water_en",
+      "title": "Water Treatment Library",
+      "url": "https://lb.download.kiwix.org/zim/other/zimgit-water_en_2024-08.zim",
+      "version": "2024-08",
+      "bytes": 20924451,
+      "path": "nomad/storage/zim/zimgit-water_en_2024-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "392c7bc970a44fddd61dd17f6eabf1f4e21936f2d5c27c83093e1dc475cb56b6",
+      "status": "pending"
+    },
+    {
+      "id": "foss.cooking_en_all",
+      "title": "FOSS Cooking",
+      "url": "https://lb.download.kiwix.org/zim/zimit/foss.cooking_en_all_2026-05.zim",
+      "version": "2026-05",
+      "bytes": 24238743,
+      "path": "nomad/storage/zim/foss.cooking_en_all_2026-05.zim",
+      "hash_algorithm": "sha256",
+      "hash": "1b6722fe3260382a67c6e3a0bdec3531d440fecc135f31de9966a32375f94ba3",
+      "status": "pending"
+    },
+    {
+      "id": "zimgit-knots_en",
+      "title": "A Library of Knots",
+      "url": "https://lb.download.kiwix.org/zim/other/zimgit-knots_en_2024-08.zim",
+      "version": "2024-08",
+      "bytes": 27945133,
+      "path": "nomad/storage/zim/zimgit-knots_en_2024-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "7c3120b19fc2dc190b5ebfee01af54150136643d7b9d29d7fa9a6ba29787a57b",
+      "status": "pending"
+    },
+    {
+      "id": "zimgit-medicine_en",
+      "title": "Medical Library",
+      "url": "https://lb.download.kiwix.org/zim/other/zimgit-medicine_en_2024-08.zim",
+      "version": "2024-08",
+      "bytes": 70179585,
+      "path": "nomad/storage/zim/zimgit-medicine_en_2024-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "a86c31b93e9800aae2cd812ef18cbf9c087a7537784c62fbc259db7f9f9d18c0",
+      "status": "pending"
+    },
+    {
+      "id": "ham.stackexchange.com_en_all",
+      "title": "Amateur Radio Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/ham.stackexchange.com_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 75931239,
+      "path": "nomad/storage/zim/ham.stackexchange.com_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "71480bd280ffaede3084fa2c9f47f87c3178f8ce8d67cdb19fb66a8025a7b93e",
+      "status": "pending"
+    },
+    {
+      "id": "librepathology_en_all_maxi",
+      "title": "LibrePathology",
+      "url": "https://lb.download.kiwix.org/zim/other/librepathology_en_all_maxi_2026-09.zim",
+      "version": "2026-09",
+      "bytes": 95279611,
+      "path": "nomad/storage/zim/librepathology_en_all_maxi_2026-09.zim",
+      "hash_algorithm": "sha256",
+      "hash": "9474d11f9104e9e649ea09efefff943e10b3fcc0f3afc60d804eeb1b20bd3a3f",
+      "status": "pending"
+    },
+    {
+      "id": "zimgit-food-preparation_en",
+      "title": "Food for Preppers",
+      "url": "https://lb.download.kiwix.org/zim/other/zimgit-food-preparation_en_2025-04.zim",
+      "version": "2025-04",
+      "bytes": 97822565,
+      "path": "nomad/storage/zim/zimgit-food-preparation_en_2025-04.zim",
+      "hash_algorithm": "sha256",
+      "hash": "db92c6c9dac14ff30f1cbc15aa834a7c012c6e87d4ff0519f33a0902ab6e732b",
+      "status": "pending"
+    },
+    {
+      "id": "woodworking.stackexchange.com_en_all",
+      "title": "Woodworking Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/woodworking.stackexchange.com_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 105570459,
+      "path": "nomad/storage/zim/woodworking.stackexchange.com_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "a41140515d25c9906ceed8a818dd4a0645b7c040a9dc4a8419a2d729af7c3ccb",
+      "status": "pending"
+    },
+    {
+      "id": "outdoors.stackexchange.com_en_all",
+      "title": "The Great Outdoors Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/outdoors.stackexchange.com_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 141407927,
+      "path": "nomad/storage/zim/outdoors.stackexchange.com_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "78dccd2b5f784b17d1a22b1f65e64a74c53fa473e08f995440ff38bd8417cf1b",
+      "status": "pending"
+    },
+    {
+      "id": "100r.co_en_all",
+      "title": "Hundred Rabbits",
+      "url": "https://lb.download.kiwix.org/zim/zimit/100r.co_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 177187648,
+      "path": "nomad/storage/zim/100r.co_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "4520e5e0b308c5c357f3707acaaff82aaa5b7ff3b788731a271522f5b9712083",
+      "status": "pending"
+    },
+    {
+      "id": "wwwnc.cdc.gov_en_all",
+      "title": "CDC Health Information",
+      "url": "https://lb.download.kiwix.org/zim/zimit/wwwnc.cdc.gov_en_all_2024-11.zim",
+      "version": "2024-11",
+      "bytes": 178326622,
+      "path": "nomad/storage/zim/wwwnc.cdc.gov_en_all_2024-11.zim",
+      "hash_algorithm": "sha256",
+      "hash": "45c1c8d79a38a814098be41044a42d4ac7cc3dfa5cdfe398e9974e08d80591dc",
+      "status": "pending"
+    },
+    {
+      "id": "cooking.stackexchange.com_en_all",
+      "title": "Cooking Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/cooking.stackexchange.com_en_all_2026-07.zim",
+      "version": "2026-07",
+      "bytes": 237005541,
+      "path": "nomad/storage/zim/cooking.stackexchange.com_en_all_2026-07.zim",
+      "hash_algorithm": "sha256",
+      "hash": "b0529b24e964e2552e6a1fc41ca7573ed269635802c01fb4cb082b25b7099ae1",
+      "status": "pending"
+    },
+    {
+      "id": "robotics.stackexchange.com_en_all",
+      "title": "Robotics Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/robotics.stackexchange.com_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 243724181,
+      "path": "nomad/storage/zim/robotics.stackexchange.com_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "c1b24d2c0f76eb530092641300dd71a9d2c46dd7cf40f639153955e3faa38c5e",
+      "status": "pending"
+    },
+    {
+      "id": "arduino.stackexchange.com_en_all",
+      "title": "Arduino Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/arduino.stackexchange.com_en_all_2026-07.zim",
+      "version": "2026-07",
+      "bytes": 259175193,
+      "path": "nomad/storage/zim/arduino.stackexchange.com_en_all_2026-07.zim",
+      "hash_algorithm": "sha256",
+      "hash": "772015585d544ade807395dc8527d022e12ae363478a92da92b9a79f264ae695",
+      "status": "pending"
+    },
+    {
+      "id": "raspberrypi.stackexchange.com_en_all",
+      "title": "Raspberry Pi Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/raspberrypi.stackexchange.com_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 298462727,
+      "path": "nomad/storage/zim/raspberrypi.stackexchange.com_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "6d1beba203e725bc58eafe525d94c30a969169606c8db8328fe900ba619e5fe2",
+      "status": "pending"
+    },
+    {
+      "id": "mechanics.stackexchange.com_en_all",
+      "title": "Motor Vehicle Maintenance Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/mechanics.stackexchange.com_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 339833641,
+      "path": "nomad/storage/zim/mechanics.stackexchange.com_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "20f1547c29c621b3d44ccdc46ac9047cfa99df75227cc68c5284ce7850eac864",
+      "status": "pending"
+    },
+    {
+      "id": "libretexts.org_en_phys",
+      "title": "LibreTexts Physics",
+      "url": "https://lb.download.kiwix.org/zim/libretexts/libretexts.org_en_phys_2026-01.zim",
+      "version": "2026-01",
+      "bytes": 559554453,
+      "path": "nomad/storage/zim/libretexts.org_en_phys_2026-01.zim",
+      "hash_algorithm": "sha256",
+      "hash": "ace498581e085093cc86383439342d9ff5a4604bd87f6b82448c019e1264830f",
+      "status": "pending"
+    },
+    {
+      "id": "cd3wdproject.org_en_all",
+      "title": "CD3WD: Appropriate Technology Library",
+      "url": "https://lb.download.kiwix.org/zim/zimit/cd3wdproject.org_en_all_2025-11.zim",
+      "version": "2025-11",
+      "bytes": 581165229,
+      "path": "nomad/storage/zim/cd3wdproject.org_en_all_2025-11.zim",
+      "hash_algorithm": "sha256",
+      "hash": "f79a27413af0bd17d14adb3a556d282515a8bc1e127d791a5961c93ea9167b92",
+      "status": "pending"
+    },
+    {
+      "id": "zimgit-post-disaster_en",
+      "title": "Post Disaster Resource Library",
+      "url": "https://lb.download.kiwix.org/zim/other/zimgit-post-disaster_en_2024-05.zim",
+      "version": "2024-05",
+      "bytes": 644665513,
+      "path": "nomad/storage/zim/zimgit-post-disaster_en_2024-05.zim",
+      "hash_algorithm": "sha256",
+      "hash": "0ba9bb358b768b94eb0d7920752fe356bf097de514ee61843f3a4da6cce174f8",
+      "status": "pending"
+    },
+    {
+      "id": "libretexts.org_en_eng",
+      "title": "LibreTexts Engineering",
+      "url": "https://lb.download.kiwix.org/zim/libretexts/libretexts.org_en_eng_2025-01.zim",
+      "version": "2025-01",
+      "bytes": 678394631,
+      "path": "nomad/storage/zim/libretexts.org_en_eng_2025-01.zim",
+      "hash_algorithm": "sha256",
+      "hash": "3d4b25d03082172f4793625163b366a7d21655a5f8868d0758a9c3649ce9d5c2",
+      "status": "pending"
+    },
+    {
+      "id": "libretexts.org_en_math",
+      "title": "LibreTexts Mathematics",
+      "url": "https://lb.download.kiwix.org/zim/libretexts/libretexts.org_en_math_2026-01.zim",
+      "version": "2026-01",
+      "bytes": 830646230,
+      "path": "nomad/storage/zim/libretexts.org_en_math_2026-01.zim",
+      "hash_algorithm": "sha256",
+      "hash": "7a07f9a4c7ad1ca51c300d573bc74df27a5556f7c4c6fe9407bc337ad9b7b4c8",
+      "status": "pending"
+    },
+    {
+      "id": "libretexts.org_en_biz",
+      "title": "LibreTexts Business",
+      "url": "https://lb.download.kiwix.org/zim/libretexts/libretexts.org_en_biz_2026-01.zim",
+      "version": "2026-01",
+      "bytes": 839753856,
+      "path": "nomad/storage/zim/libretexts.org_en_biz_2026-01.zim",
+      "hash_algorithm": "sha256",
+      "hash": "1c969499cb8b800999921270a48b69af6f615e5d7d748fe1e26cbe532eaedfa3",
+      "status": "pending"
+    },
+    {
+      "id": "canadian-prepper_en_bugoutroll",
+      "title": "Canadian Prepper: Bug Out Roll",
+      "url": "https://lb.download.kiwix.org/zim/videos/canadian-prepper_en_bugoutroll_2026-07.zim",
+      "version": "2026-07",
+      "bytes": 879087767,
+      "path": "nomad/storage/zim/canadian-prepper_en_bugoutroll_2026-07.zim",
+      "hash_algorithm": "sha256",
+      "hash": "556f93e20146910a2da859549ed82ded4ecda0ba1339a5ccae10e0bd5107dd9a",
+      "status": "pending"
+    },
+    {
+      "id": "gardening.stackexchange.com_en_all",
+      "title": "Gardening Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/gardening.stackexchange.com_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 926805273,
+      "path": "nomad/storage/zim/gardening.stackexchange.com_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "b8a3e0db65d8a678b47accefd8565f78af0caeb454672fe0d5f365336c71c25e",
+      "status": "pending"
+    },
+    {
+      "id": "libretexts.org_en_geo",
+      "title": "LibreTexts Geosciences",
+      "url": "https://lb.download.kiwix.org/zim/libretexts/libretexts.org_en_geo_2026-01.zim",
+      "version": "2026-01",
+      "bytes": 1188116861,
+      "path": "nomad/storage/zim/libretexts.org_en_geo_2026-01.zim",
+      "hash_algorithm": "sha256",
+      "hash": "ffceff9d0d14dbd2e154c6734658257daf301bde18962ee0d87aa1dd0d5cfaef",
+      "status": "pending"
+    },
+    {
+      "id": "libretexts.org_en_med",
+      "title": "LibreTexts Medicine",
+      "url": "https://lb.download.kiwix.org/zim/libretexts/libretexts.org_en_med_2025-01.zim",
+      "version": "2025-01",
+      "bytes": 1192567339,
+      "path": "nomad/storage/zim/libretexts.org_en_med_2025-01.zim",
+      "hash_algorithm": "sha256",
+      "hash": "1def4fb3c76d347cfd2af9eabd8f8edefd24086cc17b476130f710214a5bbc1e",
+      "status": "pending"
+    },
+    {
+      "id": "gutenberg_en_lcc-u",
+      "title": "Project Gutenberg: Military Science",
+      "url": "https://lb.download.kiwix.org/zim/gutenberg/gutenberg_en_lcc-u_2026-03.zim",
+      "version": "2026-03",
+      "bytes": 1288016430,
+      "path": "nomad/storage/zim/gutenberg_en_lcc-u_2026-03.zim",
+      "hash_algorithm": "sha256",
+      "hash": "c3ce508358e9465b5864f8dc986de987c40801b4f4369014702b4424bdc865d2",
+      "status": "pending"
+    },
+    {
+      "id": "canadian-prepper_en_winterprepping",
+      "title": "Canadian Prepper: Winter Prepping",
+      "url": "https://lb.download.kiwix.org/zim/videos/canadian-prepper_en_winterprepping_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 1341548037,
+      "path": "nomad/storage/zim/canadian-prepper_en_winterprepping_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "e23febf7dad71818a18a0d46aa24aa8876e5accd6eebe03d0a9fea932d133a79",
+      "status": "pending"
+    },
+    {
+      "id": "medlineplus.gov_en_all",
+      "title": "MedlinePlus",
+      "url": "https://lb.download.kiwix.org/zim/zimit/medlineplus.gov_en_all_2025-01.zim",
+      "version": "2025-01",
+      "bytes": 1944841111,
+      "path": "nomad/storage/zim/medlineplus.gov_en_all_2025-01.zim",
+      "hash_algorithm": "sha256",
+      "hash": "3ce8933e8b249cf685f5f108e8f10d9a7e3becb2ee4e91f3aedb5b0cf4d2e596",
+      "status": "pending"
+    },
+    {
+      "id": "diy.stackexchange.com_en_all",
+      "title": "DIY & Home Improvement Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/diy.stackexchange.com_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 2062547155,
+      "path": "nomad/storage/zim/diy.stackexchange.com_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "94cbd4daeebe180bb8908b767d3c1477753049a29c2c092f6a752b6f691863da",
+      "status": "pending"
+    },
+    {
+      "id": "canadian-prepper_en_preppingfood",
+      "title": "Canadian Prepper: Prepping Food",
+      "url": "https://lb.download.kiwix.org/zim/videos/canadian-prepper_en_preppingfood_2026-07.zim",
+      "version": "2026-07",
+      "bytes": 2160662880,
+      "path": "nomad/storage/zim/canadian-prepper_en_preppingfood_2026-07.zim",
+      "hash_algorithm": "sha256",
+      "hash": "2e63c886d584ed01fcb6d7b53201989c670051a4aefbc04c81a49b5164800b41",
+      "status": "pending"
+    },
+    {
+      "id": "libretexts.org_en_chem",
+      "title": "LibreTexts Chemistry",
+      "url": "https://lb.download.kiwix.org/zim/libretexts/libretexts.org_en_chem_2025-01.zim",
+      "version": "2025-01",
+      "bytes": 2182916266,
+      "path": "nomad/storage/zim/libretexts.org_en_chem_2025-01.zim",
+      "hash_algorithm": "sha256",
+      "hash": "83ba2fbfe36d72abe919661de5548103bb6674749bc26531cd61f83d8a825764",
+      "status": "pending"
+    },
+    {
+      "id": "wikipedia_en_medicine_maxi",
+      "title": "Wikipedia Medicine",
+      "url": "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_medicine_maxi_2026-04.zim",
+      "version": "2026-04",
+      "bytes": 2215520569,
+      "path": "nomad/storage/zim/wikipedia_en_medicine_maxi_2026-04.zim",
+      "hash_algorithm": "sha256",
+      "hash": "6f67340a7cd7665bb57c27d2bbff97e26f2037477c9ea597345a118286820331",
+      "status": "pending"
+    },
+    {
+      "id": "libretexts.org_en_bio",
+      "title": "LibreTexts Biology",
+      "url": "https://lb.download.kiwix.org/zim/libretexts/libretexts.org_en_bio_2025-01.zim",
+      "version": "2025-01",
+      "bytes": 2240946728,
+      "path": "nomad/storage/zim/libretexts.org_en_bio_2025-01.zim",
+      "hash_algorithm": "sha256",
+      "hash": "aa914c19a690429b5d41ccbc91ba8cf7bc2980211b998c8a4a82ef3a21375321",
+      "status": "pending"
+    },
+    {
+      "id": "urban-prepper_en_all",
+      "title": "Urban Prepper",
+      "url": "https://lb.download.kiwix.org/zim/videos/urban-prepper_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 2245235674,
+      "path": "nomad/storage/zim/urban-prepper_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "84e0b6212f6cd0010042fa7ed4595a5738d073a377c3e5f6c0e73e61e0e469e2",
+      "status": "pending"
+    },
+    {
+      "id": "www.ready.gov_en",
+      "title": "Ready.gov",
+      "url": "https://lb.download.kiwix.org/zim/zimit/www.ready.gov_en_2024-12.zim",
+      "version": "2024-12",
+      "bytes": 2429921822,
+      "path": "nomad/storage/zim/www.ready.gov_en_2024-12.zim",
+      "hash_algorithm": "sha256",
+      "hash": "5bb4cf0dc0aeeab4c28ba8b01a1284b95b36670c22c2a97ea570a01efaec0439",
+      "status": "pending"
+    },
+    {
+      "id": "wikiversity_en_all_maxi",
+      "title": "Wikiversity",
+      "url": "https://lb.download.kiwix.org/zim/wikiversity/wikiversity_en_all_maxi_2026-05.zim",
+      "version": "2026-05",
+      "bytes": 2459209431,
+      "path": "nomad/storage/zim/wikiversity_en_all_maxi_2026-05.zim",
+      "hash_algorithm": "sha256",
+      "hash": "f2667509251c1784270c8c8dd0cd8a79d438a5c4940a6cc70653a6f77318a421",
+      "status": "pending"
+    },
+    {
+      "id": "canadian-prepper_en_bugoutconcepts",
+      "title": "Canadian Prepper: Bug Out Concepts",
+      "url": "https://lb.download.kiwix.org/zim/videos/canadian-prepper_en_bugoutconcepts_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 2886219997,
+      "path": "nomad/storage/zim/canadian-prepper_en_bugoutconcepts_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "1ddc1acf36606a4c9e6716e4b1ff57cf95a4c2bd30427d96fca5b28ebd7c9e88",
+      "status": "pending"
+    },
+    {
+      "id": "ifixit_en_all",
+      "title": "iFixit Repair Guides",
+      "url": "https://lb.download.kiwix.org/zim/ifixit/ifixit_en_all_2025-12.zim",
+      "version": "2025-12",
+      "bytes": 3570695757,
+      "path": "nomad/storage/zim/ifixit_en_all_2025-12.zim",
+      "hash_algorithm": "sha256",
+      "hash": "9bb5f3408707fd0300c6ef47a425c3217187f144cd9154a928183816aa72eead",
+      "status": "pending"
+    },
+    {
+      "id": "lrnselfreliance_en_all",
+      "title": "Learning Self-Reliance: Homesteading",
+      "url": "https://lb.download.kiwix.org/zim/videos/lrnselfreliance_en_all_2026-09.zim",
+      "version": "2026-09",
+      "bytes": 3974043902,
+      "path": "nomad/storage/zim/lrnselfreliance_en_all_2026-09.zim",
+      "hash_algorithm": "sha256",
+      "hash": "e5b6cb51a65c4d4d97f1f4eadbe4752891ba54ab03b70a4aa18c9f63e024897c",
+      "status": "pending"
+    },
+    {
+      "id": "electronics.stackexchange.com_en_all",
+      "title": "Electronics Q&A",
+      "url": "https://lb.download.kiwix.org/zim/stack_exchange/electronics.stackexchange.com_en_all_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 4214186044,
+      "path": "nomad/storage/zim/electronics.stackexchange.com_en_all_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "5a23c08a3c1275128c247b0c67ec8ed03a953a504c6a23e2cd6a9ac5422b88c1",
+      "status": "pending"
+    },
+    {
+      "id": "libretexts.org_en_human",
+      "title": "LibreTexts Humanities",
+      "url": "https://lb.download.kiwix.org/zim/libretexts/libretexts.org_en_human_2026-07.zim",
+      "version": "2026-07",
+      "bytes": 4433682987,
+      "path": "nomad/storage/zim/libretexts.org_en_human_2026-07.zim",
+      "hash_algorithm": "sha256",
+      "hash": "c172268bbcc37b0d3dd21e462c6f5e308edb7ad5d76e5c11fa2bbd1b11027cd8",
+      "status": "pending"
+    },
+    {
+      "id": "gutenberg_en_lcc-s",
+      "title": "Project Gutenberg: Agriculture",
+      "url": "https://lb.download.kiwix.org/zim/gutenberg/gutenberg_en_lcc-s_2026-03.zim",
+      "version": "2026-03",
+      "bytes": 4532683039,
+      "path": "nomad/storage/zim/gutenberg_en_lcc-s_2026-03.zim",
+      "hash_algorithm": "sha256",
+      "hash": "3012dfb7936d5bc8a5c3bdd0c9f864cd81e9514c28c40afc548415fd95272fcc",
+      "status": "pending"
+    },
+    {
+      "id": "wikibooks_en_all_maxi",
+      "title": "Wikibooks (With Images)",
+      "url": "https://lb.download.kiwix.org/zim/wikibooks/wikibooks_en_all_maxi_2026-04.zim",
+      "version": "2026-04",
+      "bytes": 6177865115,
+      "path": "nomad/storage/zim/wikibooks_en_all_maxi_2026-04.zim",
+      "hash_algorithm": "sha256",
+      "hash": "c2ded9afe4647c2b05aceb9d30260100369cbba22f3d00e467a634546da3f610",
+      "status": "pending"
+    },
+    {
+      "id": "ted_mul_ted-ed",
+      "title": "TED-Ed",
+      "url": "https://lb.download.kiwix.org/zim/ted/ted_mul_ted-ed_2026-09.zim",
+      "version": "2026-09",
+      "bytes": 6380955947,
+      "path": "nomad/storage/zim/ted_mul_ted-ed_2026-09.zim",
+      "hash_algorithm": "sha256",
+      "hash": "a049eda3db3ee0aacb8d5e3e0de9ee189a5ac1440fa938b5de2aaa6813c1a97b",
+      "status": "pending"
+    },
+    {
+      "id": "ted_mul_ted-conference",
+      "title": "TED Conference",
+      "url": "https://lb.download.kiwix.org/zim/ted/ted_mul_ted-conference_2026-09.zim",
+      "version": "2026-09",
+      "bytes": 18135532626,
+      "path": "nomad/storage/zim/ted_mul_ted-conference_2026-09.zim",
+      "hash_algorithm": "sha256",
+      "hash": "65bb97f31c4f13b3fc1d7842115760324d0022a97f3ae0e6c7298204740fe9a6",
+      "status": "pending"
+    },
+    {
+      "id": "wikipedia_en_all_maxi",
+      "title": "Full English Wikipedia with images",
+      "url": "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
+      "version": "2026-08",
+      "bytes": 127418087648,
+      "path": "nomad/storage/zim/wikipedia_en_all_maxi_2026-08.zim",
+      "hash_algorithm": "sha256",
+      "hash": "34162d18b9f96f494eac48a73a309c72e0bc95d85f76be405d0f5de795854aa6",
+      "status": "pending"
+    },
+    {
+      "id": "worldwide-map",
+      "title": "Worldwide detailed map",
+      "url": "https://build.protomaps.com/20261002.pmtiles",
+      "version": "20261002",
+      "bytes": 138538266061,
+      "path": "nomad/storage/maps/pmtiles/20261002.pmtiles",
+      "hash_algorithm": "md5",
+      "hash": "162a2e257a46fe06593314df3a70ace8",
+      "status": "pending"
+    }
+  ],
+  "remaining_setup": [
+    {
+      "id": "nhs.uk_en_medicines",
+      "reason": "No current Kiwix archive found for nhs.uk_en_medicines"
+    },
+    {
+      "id": "fas-military-medicine_en",
+      "reason": "No current Kiwix archive found for fas-military-medicine_en"
+    },
+    {
+      "id": "openfda-drug-labels",
+      "reason": "Needs NOMAD database download and ingestion, not a ZIM file."
+    },
+    {
+      "id": "nomad-readers",
+      "reason": "Install/start Docker and NOMAD, then prepare its apps."
+    },
+    {
+      "id": "map-fonts-styles-basemap",
+      "reason": "Prepare local map base assets and overview in NOMAD while online."
+    },
+    {
+      "id": "english-courses",
+      "reason": "Install Kolibri, choose English channels and import their content before disconnecting."
+    },
+    {
+      "id": "nomad-ai-rag",
+      "reason": "Configure NOMAD AI and embedding models. Its default 11434 port conflicts with existing Ollama."
+    }
+  ],
+  "offline_verified": false,
+  "updated_at": 1790955007
+}

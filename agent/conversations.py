@@ -88,12 +88,14 @@ def _title_from(text: str) -> str:
     return one_line[:_TITLE_CHARS] + ("…" if len(one_line) > _TITLE_CHARS else "")
 
 
-def add_message(thread_id: int, role: str, text: str) -> None:
+def add_message(thread_id: int, role: str, text: str, *, strict: bool = False) -> None:
     """Append a message, titling the thread from the first thing you said."""
     _ensure_db()
     now = time.time()
     try:
         with longterm._conn() as c:
+            if strict and not c.execute('SELECT 1 FROM chat_threads WHERE id=?', (thread_id,)).fetchone():
+                raise ValueError('Conversation no longer exists.')
             c.execute(
                 "INSERT INTO chat_messages (thread_id, ts, role, text) VALUES (?,?,?,?)",
                 (int(thread_id), now, role, text or ""))
@@ -106,6 +108,8 @@ def add_message(thread_id: int, role: str, text: str) -> None:
                     c.execute("UPDATE chat_threads SET title = ? WHERE id = ?",
                               (_title_from(text), int(thread_id)))
     except Exception as e:
+        if strict:
+            raise
         print(f"[Conversations] could not store message: {e}")
 
 
@@ -131,7 +135,7 @@ def exists(thread_id: int) -> bool:
         return c.execute("SELECT 1 FROM chat_threads WHERE id=?", (thread_id,)).fetchone() is not None
 
 
-def messages(thread_id: int, limit: int = 500, *, newest: bool = False) -> list[dict]:
+def messages(thread_id: int, limit: int = 500, *, newest: bool = False, strict: bool = False) -> list[dict]:
     _ensure_db()
     try:
         with longterm._conn() as c:
@@ -140,6 +144,8 @@ def messages(thread_id: int, limit: int = 500, *, newest: bool = False) -> list[
                 + ("ORDER BY ts DESC, id DESC LIMIT ?" if newest else "ORDER BY ts ASC, id ASC LIMIT ?"),
                 (int(thread_id), limit)).fetchall()
     except Exception:
+        if strict:
+            raise
         return []
     if newest:
         rows = rows[::-1]

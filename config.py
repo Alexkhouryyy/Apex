@@ -1,7 +1,8 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / '.env')
 
 # Explicit offline launches install this before providers or background workers.
 from agent.apocalypse import install_network_guard

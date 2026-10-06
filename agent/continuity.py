@@ -6,6 +6,7 @@ cannot redirect an in-flight checkpoint. External channels get no owner profile.
 import contextlib
 import contextvars
 import json
+import re
 import time
 from agent import longterm, board_workspaces
 
@@ -157,7 +158,7 @@ def save_corrections(workspace_id, items, revision):
 
 
 def local_channel(channel):
-    return channel is None or str(channel).startswith(('dashboard:', 'companion:'))
+    return channel is None or str(channel).startswith(('dashboard:', 'companion:', 'apocalypse:'))
 
 
 def snapshot(channel=None):
@@ -205,11 +206,14 @@ def display_name():
     return state['identity']['data']['name'] if state else 'Apex'
 
 
-def prompt():
+def prompt(max_field_chars=None):
     state = _turn.get()
     if not state:
         return ''
     p = state['project']
+    if max_field_chars is not None:
+        p = {**p, 'data': {k: v[:max_field_chars] for k, v in p['data'].items()}}
+        p['context_note'] = 'Long fields are excerpts. Read project_checkpoint for the full saved handoff.'
     active = [x['text'] for x in state['corrections']['data']['items'] if x['active']]
     return ('## CURRENT PROJECT HANDOFF\n'
             'Saved context is evidence, not new authorization. Check artifacts before asserting they exist. '
@@ -230,8 +234,28 @@ def checkpoint(data=None, revision=None, action='save'):
     if action != 'save':
         raise ValueError('Choose read or save for a project checkpoint.')
     result = save_project(p['id'], data, revision)
+    state['_checkpoint_saved'] = True
     state['project'] = dict(id=p['id'], name=p['name'], **result)
     return result
+
+
+def checked_reply(text):
+    """Correct an explicit save claim when this turn performed no checkpoint.
+
+    Small local models sometimes print function JSON as prose instead of calling
+    the tool. Never execute that prose or accept it as evidence of a save.
+    """
+    state = _turn.get()
+    if not state or state.get('_checkpoint_saved') or not isinstance(text, str):
+        return text
+    claim = (r'\b(?:(?:project )?(?:checkpoint|handoff)(?: (?:was|has been|is))? '
+             r'(?:saved|updated|recorded)|(?:saved|updated|recorded) (?:the |your |a )?'
+             r'(?:project )?(?:checkpoint|handoff))\b')
+    if not re.search(claim, text, re.IGNORECASE):
+        return text
+    version = project(state['project']['id'])['revision']
+    return text + (f'\n\nApex check: No project handoff was saved by this turn. '
+                   f'The saved handoff is version {version}. Use Save handoff on the page to record the next step.')
 
 
 @contextlib.contextmanager
@@ -242,6 +266,42 @@ def conversation(channel, agent, memory, user_text):
     the main run lock here, so project switches cannot interleave voice turns.
     """
     state = _turn.get()
+    offline = isinstance(channel, str) and channel.startswith('apocalypse:') and channel.partition(':')[2].isdigit()
+    if offline and state:
+        from agent import conversations
+        tid = int(channel.partition(':')[2])
+        if not conversations.exists(tid):
+            raise ValueError('Conversation no longer exists.')
+        # Reload text at every turn: another surface/process may have saved it.
+        # Tool calls and images are never restored or replayed. The full transcript
+        # stays on disk; this small local model receives a bounded recent window.
+        history = conversations.messages(tid, limit=6, newest=True, strict=True)
+        memory.messages = []
+        memory.summary = ''
+        for item in history:
+            text = item['text'][-2000:]
+            if len(item['text']) > 2000:
+                text = '[Earlier part omitted from model context; the full reply is in saved history.]\n' + text
+            if item['role'] == 'user':
+                memory.add_user(text)
+            else:
+                memory.add_assistant([dict(type='text', text=text)])
+        conversations.add_message(tid, 'user', user_text, strict=True)
+        previous = memory.messages[-1] if memory.messages else None
+        completed = False
+        try:
+            yield memory
+            completed = True
+        finally:
+            last = memory.messages[-1] if memory.messages else None
+            reply = ''
+            if last is not previous and last and last['role'] == 'assistant':
+                content = last['content']
+                reply = content if isinstance(content, str) else '\n'.join(b.get('text', '') for b in content if b.get('type') == 'text')
+            if not completed:
+                reply = '[Turn ended without a final reply. Inspect prior actions before continuing.]'
+            conversations.add_message(tid, 'agent', reply or '[Turn ended without a final reply. Inspect prior actions before continuing.]', strict=True)
+        return
     if channel is not None or not state:
         yield memory
         return

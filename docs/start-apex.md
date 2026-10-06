@@ -1,5 +1,19 @@
 # Start Apex and Celine together
 
+For the prepared platform (Apex, Celine, Apocalypse and cached NOMAD), open Docker Desktop first, stop earlier Apex launcher windows with Ctrl+C, then run:
+
+```cmd
+cd /d C:\Users\alexk\Apex
+set "APEX_APOCALYPSE_HOME=D:\Apex-Apocalypse"
+Start-Apex-Platform.cmd
+```
+
+This opens Apex Home and Apocalypse after checking their service identities and agent readiness. Celine still needs browser Voice mode for microphone/playback. NOMAD is optional: the launcher checks Linux Docker and cached images, then uses `--pull never --no-build`. Missing images are skipped, with no model, content, reader-image or map downloads. The large library remains deferred. A ready dashboard is not proof that every app is authorized or every downloaded archive has a reader.
+
+Without internet, use `Start-Apex-Platform.cmd --offline-only`. Add `--no-nomad` to skip Docker. This starts the offline dashboard only; normal cloud Apex and Celine are omitted. The existing launchers below still work independently.
+
+Keep the platform console open. Ctrl+C requests a graceful stop of the Apex processes it created; a failed service stops its companion Apex processes. Previously running services are never killed. NOMAD containers remain managed by Docker Desktop after the launcher closes, preserving database and library volumes.
+
 In Command Prompt:
 
 ```cmd
