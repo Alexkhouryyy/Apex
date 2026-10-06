@@ -120,42 +120,61 @@ _limits_lock = threading.Lock()
 WHY = {'limited': 'reached its usage limit', 'signed_out': 'is not signed in on this PC', 'missing': 'is not installed on this PC'}
 
 
-def mark_unavailable(engine: str, why: str, summary: str = '', now: float | None = None) -> None:
+def mark_unavailable(engine: str, why: str, summary: str = '', now: float | None = None, until: float | None = None) -> None:
     """A plan couldn't take a task: rest it, so the next plan in the order is used.
-    Stored apart from the tick's state, because a run's thread calls this."""
+    Until the reset time the tool gave (plus a couple of minutes), else for
+    `rest_hours`. Stored apart from the tick's state, because a run's thread
+    calls this."""
     now = now or time.time()
-    hours = settings()['rest_hours'] if why == 'limited' else 1
-    until = now + hours * 3600
+    if until and now < until < now + 8 * 86400:
+        until += 120
+    else:
+        until = now + (settings()['rest_hours'] if why == 'limited' else 1) * 3600
     with _limits_lock:
         limits = _state('limits')
         limits[engine] = {'until': until, 'why': why, 'detail': (summary or '')[:300]}
         _save_state(limits, 'limits')
     name = work_engines.NAMES.get(engine, engine)
     text = f"Your {name} {WHY.get(why, why)}. Apex will use the next one in your order"
-    text += f" and try it again after {datetime.fromtimestamp(until).strftime('%H:%M')}." if why == 'limited' else \
-            ' until you sign in (run `claude` or `codex` once on this PC).'
+    if why == 'limited':
+        text += f" and try it again after {_when(until, now)}."
+    else:
+        text += '. ' + (summary.split('. ', 1)[-1] if summary else 'Run Setup-Apex-Work-Plans.cmd to sign in.')
     if log('plan', text, key=f'plan:{engine}:{why}:{int(until // 3600)}', now=now):
         _notify('Apex · Work', text)
+
+
+def _when(ts: float, now: float) -> str:
+    at = datetime.fromtimestamp(ts)
+    return at.strftime('%H:%M') if at.date() == datetime.fromtimestamp(now).date() else at.strftime('%a %H:%M')
 
 
 def clear_limits() -> None:
     with _limits_lock:
         _save_state({}, 'limits')
+    work_engines.forget_checks()
+
+
+def check_plans() -> dict:
+    """Ask each tool afresh how it is signed in (uses none of your plan)."""
+    work_engines.forget_checks()
+    return status()
 
 
 def available(now: float | None = None) -> dict:
     """engine -> None if Apex can use it now, else why not (a short phrase)."""
     now = now or time.time()
-    have, limits = work_engines.installed(), _state('limits')
+    limits = _state('limits')
     out = {}
     for e in work_engines.ENGINES:
         lim = limits.get(e)
-        if not have[e]:
-            out[e] = WHY['missing']
-        elif lim and lim['until'] > now:
-            out[e] = f"{WHY.get(lim['why'], lim['why'])}, resting until {datetime.fromtimestamp(lim['until']).strftime('%H:%M')}"
+        signed = work_engines.check(e)
+        if not signed['ok']:
+            out[e] = signed['why']
+        elif lim and lim['until'] > now and lim['why'] == 'limited':
+            out[e] = f"{WHY['limited']}, resting until {_when(lim['until'], now)}"
         else:
-            out[e] = None
+            out[e] = None                 # a sign-in problem clears itself once the check passes
     return out
 
 
@@ -253,7 +272,9 @@ def tick(now: datetime | None = None, agent=None) -> list[str]:
             text = f'Apex finished "{title}". Review it in Work.'
         else:
             text = f'Apex stopped on "{title}" ({apex_state}): {(summary or "")[:160]}'
-        if log('finished' if apex_state == 'done' else 'stopped', text, tid, key=f'back:{run_id}', now=now.timestamp()):
+        if apex_state == 'stopped':           # you stopped it yourself: no need to tell you
+            log('stopped', f'You stopped Apex on "{title}".', tid, key=f'back:{run_id}', now=now.timestamp())
+        elif log('finished' if apex_state == 'done' else 'stopped', text, tid, key=f'back:{run_id}', now=now.timestamp()):
             _notify('Apex · Work', text); done.append(text)
 
     view = work.today_view(now.date())
@@ -365,7 +386,7 @@ def status(now: datetime | None = None) -> dict:
     return {**s, 'running': bool(_thread and _thread.is_alive()), 'spent_today': spent_today(now),
             'plan_runs_today': plan_runs_today(now),
             'plans': [{'id': e, 'name': work_engines.NAMES[e], 'installed': e == 'api' or bool(work_engines.binary(e)),
-                       'unavailable': free[e]} for e in work_engines.ENGINES],
+                       'unavailable': free[e], 'how': work_engines.check(e)['how']} for e in work_engines.ENGINES],
             'eligible': sum(1 for t in work.list_tasks() if t.get('apex_ok') and t['status'] != 'done' and not t['apex_state']),
             'events': events()}
 

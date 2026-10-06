@@ -66,11 +66,15 @@ don't look. It is off until you switch it on.
   your **ChatGPT plan**:
   - they run through the official apps, signed in with your own account, so
     tasks count against your plans' usage, not API credits;
-  - Apex removes its API keys from what it passes to those apps, so they can
-    only use your sign-in;
+  - before a plan runs, Apex asks the app how it is signed in (`claude auth
+    status`, `codex login status`; this uses none of your plan). If it is
+    signed in with an API key, a Console account or a cloud account, which
+    would bill credits, Apex refuses it and tells you how to switch;
+  - Apex also removes its own API keys from what it passes to those apps;
   - when one plan hits its usage limit, the task goes back untried and the next
-    plan takes it; the limited plan rests for 5 hours (you can change this, or
-    press **Try resting plans now**);
+    plan takes it. The limited plan rests until the reset time the app gives
+    ("try again in 2 hours", "resets 3pm"), or for 5 hours if it gives none.
+    You can change the 5 hours, or press **Try resting plans now**;
   - **API credits** are only used if you tick them, and then only within the
     per-task and per-day caps.
 - **Plan tasks a day** (default 8) stops Apex from using up your week's usage
@@ -81,15 +85,25 @@ What the plans may do:
 - Claude Code may read, write and edit files in the task's folder and search
   the web. It has no shell.
 - Codex runs in its workspace-write sandbox, in the task's folder.
-- Each run stops after 30 minutes.
+- Each run stops after 30 minutes. **Stop** in the task ends it sooner.
+  Either way, the app and everything it started is ended, so nothing keeps
+  running on your plan.
+- The task text goes to the app on stdin, never on the command line, so a
+  title with `&` or `%` can't be read as a Windows command.
+- **Check sign-in** on the Always on tab asks both apps again.
 
 ### Set it up on your PC (once)
 
-1. Install Node.js LTS from nodejs.org if you don't have it.
-2. Double-click **`Setup-Apex-Work-Plans.cmd`** in your Apex folder. It installs
-   Claude Code and Codex, then opens each so you can sign in:
-   - Claude Code: choose your **Claude account** (Pro or Max), not an API key;
-   - Codex: choose **Sign in with ChatGPT**.
+1. Install Node.js LTS from nodejs.org if you don't have it (Codex needs it).
+2. Double-click **`Setup-Apex-Work-Plans.cmd`** in your Apex folder. It:
+   - installs Claude Code (Anthropic's installer) and Codex (npm);
+   - opens each so you can sign in. In Claude Code, choose your **Claude
+     account** (Pro or Max), not an API key. For Codex, choose **Sign in with
+     ChatGPT**;
+   - runs `scripts\work_plans_check.py --live`. For each plan, this checks the
+     install, that it's signed in with the plan, and that it accepts every
+     option Apex uses. Then it runs one tiny real task that must write a file.
+     It ends with **READY** or **NOT READY** and what to do.
 3. Restart Apex and open **Work → Always on**. Both plans should say
    **ready**.
 4. Tick **Always on** and **Work on its own**, then **Save**.
@@ -104,8 +118,11 @@ What the plans may do:
   configured model and API key.
 - These apps sometimes change their sign-in or output. If a plan says "not
   signed in", run `claude` or `codex` once in a terminal.
-- Not yet run against real subscriptions: the checks use fake `claude` and
-  `codex` programs. The first real run on your PC is the real test.
+- What has been checked against the real apps (Claude Code 2.1, Codex
+  0.160): every option Apex passes; how each app reports its sign-in; that a
+  Codex signed in with an API key is refused. What hasn't, because it needs
+  your accounts: a full task on your own plans, and the wording of a real
+  limit message. The `--live` check in the setup script covers the first.
 
 ## From chat and voice
 
@@ -135,6 +152,13 @@ up with it.
   - the chat tool;
   - the API, including the cross-site and owner-only rules.
 - `tests/test_work_agent.py` (fake `claude` and `codex` programs on PATH):
+  - only a plan sign-in counts, using each app's real answers (an API key,
+    an API key helper, Bedrock or Vertex, an API key in the environment, or
+    signed out are all refused, and a key is never repeated back); the
+    answer is cached for ten minutes and **Check sign-in** refreshes it;
+  - Stop and the 30-minute limit end the app and the helper it started;
+  - reset times in the apps' formats; noise kept out of summaries; a `429`
+    inside a timestamp is not a limit;
   - each plan runs in the task folder;
   - no API key reaches it;
   - the task text goes on stdin, `&` and `%` included;
@@ -147,6 +171,9 @@ up with it.
     never using credits unless chosen, the daily plan-task limit, and no
     retries;
   - settings validation, the chat answer, and the owner-only API.
+- `tests/test_work_plans_real.py`: against the real Codex and Claude Code
+  when installed (skipped in CI). It checks every option Apex uses, and that a
+  signed-out or API-key Codex is refused. It uses no plan.
 - `scripts/check_work_ui.cjs`: the page's views, area filter, quick add,
   drag-to-column, the detail panel, Give to Apex on the chosen plan,
   "Apex can take this", the Always on panel, and ticking done.

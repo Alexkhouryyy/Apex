@@ -380,8 +380,9 @@ def give_to_apex(tid, agent, budget_usd=APEX_BUDGET, roles=('researcher', 'coder
         except (ValueError, RuntimeError) as exc:
             raise WorkError(str(exc)) from exc
     else:
-        if not work_engines.installed()[engine]:
-            raise WorkError(work_engines.run(engine, '', folder)['summary'])
+        signed = work_engines.check(engine)
+        if not signed['ok']:
+            raise WorkError(f"Your {work_engines.NAMES[engine]} {signed['why']}. {signed['how']}")
         run_id = f"cli-{engine}-{task['id']}-{stamp}"
         with longterm._conn() as db:
             db.execute("INSERT INTO work_runs (id, task_id, engine, status, started) VALUES (?,?,?,'running',?)",
@@ -391,7 +392,7 @@ def give_to_apex(tid, agent, budget_usd=APEX_BUDGET, roles=('researcher', 'coder
 
         def carry_out():
             try:
-                result = work_engines.run(engine, prompt, folder)
+                result = work_engines.run(engine, prompt, folder, run_id=run_id)
             except Exception as exc:                     # never leave a run marked running
                 result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
             with longterm._conn() as db:
@@ -400,13 +401,31 @@ def give_to_apex(tid, agent, budget_usd=APEX_BUDGET, roles=('researcher', 'coder
             _live_runs.discard(run_id)
             if result['status'] in UNAVAILABLE:
                 from agent import work_agent
-                work_agent.mark_unavailable(engine, result['status'], result['summary'])
+                work_agent.mark_unavailable(engine, result['status'], result['summary'], until=result.get('reset_at'))
             sync_apex()
     with longterm._conn() as db:
         db.execute("UPDATE work_tasks SET apex_run=?, apex_state='queued', apex_folder=?, apex_summary='', apex_engine=?, "
                    "status='doing', updated=? WHERE id=?", (run_id, str(folder), engine, time.time(), tid))
     if engine != 'api':
         threading.Thread(target=carry_out, daemon=True, name=f'ApexWork-{engine}').start()
+    return get_task(tid)
+
+
+def stop_apex(tid):
+    """Stop Apex working on a task. What it wrote so far stays in the folder."""
+    task = get_task(tid)
+    if not task:
+        raise WorkError('No such task.')
+    run_id = task['apex_run'] or ''
+    if task['apex_state'] not in ('queued', 'running', 'verifying'):
+        raise WorkError('Apex is not working on this task.')
+    if run_id.startswith('cli-'):
+        from agent import work_engines
+        if not work_engines.stop(run_id):          # finished a moment ago, or Apex restarted
+            sync_apex()
+    else:
+        from agent import team
+        team.stop(run_id)
     return get_task(tid)
 
 

@@ -199,6 +199,7 @@
     $('d-engine').value = (agent && agent.engines && agent.engines[0]) || 'claude'; budgetShown();
     $('d-apex-summary').hidden = !t.apex_summary; $('d-apex-summary').textContent = t.apex_summary || '';
     $('d-apex-files').replaceChildren();
+    $('d-stop').hidden = !working;
     $('d-give').disabled = working; $('d-give').textContent = t.apex_state && !working ? 'Ask Apex again' : 'Give to Apex';
     $('detail').showModal();
     if (focusApex) $('d-give').focus();
@@ -234,6 +235,13 @@
     } catch (e) { say(e.message, 'error'); $('d-give').disabled = false; }
   };
 
+  $('d-stop').onclick = async () => {
+    if (!open) return;
+    $('d-stop').disabled = true;
+    try { await api(`/api/work/tasks/${open.id}/apex/stop`, {method: 'POST', body: '{}'}); $('detail').close(); say('Stopped. Anything Apex wrote so far is in its folder.', 'good'); await load(); }
+    catch (e) { say(e.message, 'error'); }
+    $('d-stop').disabled = false;
+  };
   function budgetShown() { $('d-budget-label').hidden = $('d-engine').value !== 'api'; }
   $('d-engine').onchange = budgetShown;
 
@@ -256,6 +264,7 @@
         up.onclick = () => { const i = order.indexOf(e); order.splice(i, 1); order.splice(i - 1, 0, e); renderPlans(); };
         li.append(up);
       }
+      if (p.unavailable && p.how) li.append(el('span', 'how', p.how));
       root.append(li);
     });
   }
@@ -294,6 +303,15 @@
   }
   $('agent-form').onsubmit = e => { e.preventDefault(); saveAgent(); };
   $('a-clear').onclick = () => saveAgent({clear_limits: true});
+  $('a-check').onclick = async () => {
+    $('a-check').disabled = true; say('Asking Claude Code and Codex how they are signed in…');
+    try {
+      agent = await api('/api/work/agent/check', {method: 'POST', body: '{}'}); renderAgent();
+      const bad = agent.plans.filter(p => p.id !== 'api' && agent.engines.includes(p.id) && p.unavailable);
+      say(bad.length ? bad.map(p => `${p.name} ${p.unavailable}.`).join(' ') : 'Your plans are signed in and ready.', bad.length ? 'error' : 'good');
+    } catch (e) { say(e.message, 'error'); }
+    $('a-check').disabled = false;
+  };
 
   // Projects -----------------------------------------------------------------
   $('new-project').onsubmit = async e => {

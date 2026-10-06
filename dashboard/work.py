@@ -114,6 +114,13 @@ async def hand_to_apex(tid: int, request: Request):
     return _guard(work.give_to_apex, tid, server._agent_ref, budget, engine=engine)
 
 
+@router.post('/api/work/tasks/{tid}/apex/stop')
+async def stop_apex(tid: int, request: Request):
+    await _json(request)
+    _owner(request, 'stop Apex')
+    return _guard(work.stop_apex, tid)
+
+
 # The always-on agent (agent/work_agent.py). Changing it lets Apex act on its
 # own, so that needs the owner; any signed-in device can see what it's doing.
 
@@ -132,3 +139,13 @@ async def agent_settings(request: Request):
         work_agent.clear_limits()
     _guard(work_agent.update_settings, **body)
     return work_agent.status()
+
+
+@router.post('/api/work/agent/check')
+async def check_plans(request: Request):
+    """Ask Claude Code and Codex how they're signed in. Uses none of your plan."""
+    await _json(request)
+    _owner(request, 'check the plans')
+    from agent import work_agent
+    import asyncio
+    return await asyncio.to_thread(work_agent.check_plans)

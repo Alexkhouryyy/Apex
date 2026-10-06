@@ -83,3 +83,4 @@ dialog label{display:block;font-size:12.5px;color:var(--soft);margin:0 0 12px}di
 .agent .d-actions{flex-wrap:wrap;margin-top:6px}
 .plans li .name{flex:0 0 auto;white-space:nowrap}.plans li .why{flex:1;text-align:right}
 @media(max-width:480px){#a-summary{flex-basis:100%}}
+.plans li{flex-wrap:wrap}.plans li .how{flex-basis:100%;font-size:11.5px;color:var(--muted);padding-left:28px}

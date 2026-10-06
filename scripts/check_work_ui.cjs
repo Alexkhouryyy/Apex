@@ -11,18 +11,21 @@ w.confirm=()=>true;
 const today=new Date(),iso=n=>{const x=new Date(today);x.setDate(x.getDate()+n);return new Date(x-x.getTimezoneOffset()*60000).toISOString().slice(0,10);};
 let tasks=[{id:1,title:'late report',area:'studies',due:iso(-2),priority:1,status:'todo',project_id:null,notes:'',waiting_on:'',apex_state:null},
   {id:2,title:'invoice Karim',area:'job',due:iso(0),priority:2,status:'todo',project_id:7,notes:'',waiting_on:'',apex_state:null},
+  {id:4,title:'draft proposal',area:'job',due:null,priority:2,status:'doing',project_id:null,notes:'',waiting_on:'',apex_state:'running',apex_run:'cli-claude-4-1',apex_folder:'C:\\ApexWork\\4'},
   {id:3,title:'laptop research',area:'business',due:null,priority:2,status:'review',project_id:null,notes:'',waiting_on:'',apex_state:'done',apex_summary:'Wrote result.md',apex_cost:0.04,apex_folder:'C:\\ApexWork\\3'}];
 const calls=[];
 let agent={enabled:false,auto_work:false,engines:['claude','chatgpt'],plan_runs:8,rest_hours:5,daily_budget:2,task_budget:0.5,brief_time:'08:30',evening_time:'18:00',
   spent_today:0,plan_runs_today:2,eligible:1,running:true,events:[{ts:Date.now()/1000,kind:'plan',task_id:null,text:'Your Claude plan reached its usage limit.'}],
-  plans:[{id:'claude',name:'Claude plan',installed:true,unavailable:'reached its usage limit, resting until 15:00'},{id:'chatgpt',name:'ChatGPT plan',installed:true,unavailable:null},{id:'api',name:'API credits',installed:true,unavailable:null}]};
+  plans:[{id:'claude',name:'Claude plan',installed:true,unavailable:'reached its usage limit, resting until 15:00',how:''},{id:'chatgpt',name:'ChatGPT plan',installed:true,unavailable:null,how:''},{id:'api',name:'API credits',installed:true,unavailable:null}]};
 const overview=()=>({areas:['job','studies','business','software','other'].map(id=>({id,name:id})),projects:[{id:7,name:'Website',area:'job',client:'Karim'}],tasks,
   today:{overdue:tasks.filter(t=>t.id===1&&t.status!=='done'),today:tasks.filter(t=>t.id===2&&t.status!=='done'),week:[],review:tasks.filter(t=>t.status==='review'),apex_working:[],waiting:[],doing:[],counts:{job:1,studies:1,business:1}}});
 w.fetch=async(url,opts={})=>{
   calls.push({url,method:opts.method||'GET',body:opts.body?JSON.parse(opts.body):null});
   if(url==='/api/work')return Response.json(overview());
   if(url==='/api/work/agent'&&opts.method==='PUT'){const b=JSON.parse(opts.body);delete b.clear_limits;Object.assign(agent,b);return Response.json(agent);}
+  if(url==='/api/work/agent/check'){agent.plans[1].unavailable='is signed in with an API key, which is not your ChatGPT plan';agent.plans[1].how='Run `codex logout`, then `codex login`.';return Response.json(agent);}
   if(url==='/api/work/agent')return Response.json(agent);
+  if(/\/apex\/stop$/.test(url)){const t=tasks.find(x=>x.id===4);t.apex_state='stopped';t.status='todo';return Response.json(t);}
   if(url==='/api/work/tasks'&&opts.method==='POST'){const b=JSON.parse(opts.body);const t={id:9,title:b.quick,area:b.area||'other',due:null,priority:2,status:'todo',project_id:null};tasks.push(t);return Response.json(t);}
   let m=url.match(/^\/api\/work\/tasks\/(\d+)$/);
   if(m&&opts.method==='PATCH'){const t=tasks.find(x=>x.id===+m[1]);Object.assign(t,JSON.parse(opts.body));return Response.json(t);}
@@ -63,6 +66,11 @@ const tick=()=>new Promise(r=>setTimeout(r,30));
   $('d-engine').value='api';$('d-engine').dispatchEvent(new w.Event('change'));assert.equal($('d-budget-label').hidden,false);
   $('d-budget').value='1.5';$('d-give').click();await tick();await tick();
   assert.deepEqual(calls.find(c=>/\/apex$/.test(c.url)).body,{budget_usd:1.5,engine:'api'});assert.equal($('detail').open,false);
+  // While Apex works, Stop is offered and ends it.
+  [...d.querySelectorAll('.t-main')].find(e=>e.textContent.includes('draft proposal')).click();await tick();await tick();
+  assert.equal($('d-stop').hidden,false);assert.equal($('d-give').disabled,true);
+  $('d-stop').click();await tick();await tick();
+  assert.ok(calls.some(c=>c.url==='/api/work/tasks/4/apex/stop'&&c.method==='POST'));assert.match($('message').textContent,/Stopped/);
   // "Apex can take this" saves with the task.
   [...d.querySelectorAll('.t-main')].find(e=>e.textContent.includes('invoice Karim')).click();await tick();
   $('d-apex-ok').checked=true;$('d-save').click();await tick();
@@ -88,6 +96,10 @@ const tick=()=>new Promise(r=>setTimeout(r,30));
   $('agent-form').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
   assert.match($('message').textContent,/at least one/);
   $('a-clear').click();await tick();
-  console.log('PASS: Today headline and sections, area filter and quick add into it, views switch, drag to a column changes status, the detail shows Apex\'s result and files, ticking marks done, Give to Apex uses the chosen plan (cap only for API credits), "Apex can take this" saves, and Always on orders plans, shows resting ones and saves.');
+  // Check sign-in: a plan signed in with an API key is flagged, with what to do.
+  $('a-check').click();await tick();await tick();
+  assert.match($('message').textContent,/ChatGPT plan is signed in with an API key/);assert.equal($('message').className,'message error');
+  assert.match(plans().find(li=>li.textContent.includes('ChatGPT')).querySelector('.how').textContent,/codex login/);
+  console.log('PASS: Today headline and sections, area filter and quick add into it, views switch, drag to a column changes status, the detail shows Apex\'s result and files, ticking marks done, Give to Apex uses the chosen plan (cap only for API credits), "Apex can take this" saves, and Stop ends a running task, and Always on orders plans, shows resting ones, saves, and Check sign-in flags a plan that would bill credits.');
   process.exit(0);
 })().catch(e=>{console.error(e);process.exit(1);});

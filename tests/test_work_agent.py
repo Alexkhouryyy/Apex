@@ -17,13 +17,30 @@ from agent import work, work_agent, work_engines
 pytestmark = pytest.mark.skipif(os.name == 'nt', reason='fake CLIs are POSIX scripts')
 
 FAKE = r'''#!{python}
-import json, os, sys, pathlib
-mode = pathlib.Path(os.environ['FAKE_DIR'], '{name}.mode').read_text().strip()
-pathlib.Path(os.environ['FAKE_DIR'], '{name}.args').write_text(json.dumps({{
+import json, os, subprocess, sys, pathlib
+here = pathlib.Path(os.environ['FAKE_DIR'])
+# How it is signed in: the real tools' own answers (claude auth status --json, codex login status).
+if sys.argv[1:3] in (['auth', 'status'], ['login', 'status']):
+    (here / '{name}.asked').write_text('yes')
+    auth = (here / '{name}.auth').read_text().strip()
+    if '{name}' == 'claude':
+        print(auth); sys.exit(0 if '"loggedIn": true' in auth else 1)
+    print(auth, file=sys.stderr); sys.exit(0 if auth.startswith('Logged in') else 1)
+if '--help' in sys.argv or '--version' in sys.argv:   # what the real tools print, in short
+    print('{name} 9.9 -p --output-format --permission-mode --allowedTools --skip-git-repo-check --ephemeral '
+          '--cd --sandbox workspace-write --output-last-message instructions are read from stdin'); sys.exit(0)
+mode = (here / '{name}.mode').read_text().strip()
+(here / '{name}.args').write_text(json.dumps({{
     'argv': sys.argv[1:], 'cwd': os.getcwd(), 'stdin': sys.stdin.read(),
     'keys': [k for k in ('ANTHROPIC_API_KEY', 'OPENAI_API_KEY') if k in os.environ]}}))
 if mode == 'slow':
     import time; time.sleep(5)
+if mode == 'check':                    # does what the live check asks, like a real plan would
+    pathlib.Path('apex-check.md').write_text('ready'); mode = 'done'
+if mode == 'hang':                     # starts a helper of its own, as the real tools do, then hangs
+    helper = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+    (here / '{name}.helper').write_text(str(helper.pid))
+    import time; time.sleep(60)
 if '{name}' == 'claude':
     if mode == 'done':
         pathlib.Path('result.md').write_text('# Draft')
@@ -48,6 +65,9 @@ else:
 '''
 
 
+PLAN_CLAUDE = json.dumps({'loggedIn': True, 'authMethod': 'claude.ai', 'apiProvider': 'firstParty', 'subscriptionType': 'max'}, indent=2)
+
+
 @pytest.fixture
 def fake(tmp_path, monkeypatch, test_db):
     bin_dir = tmp_path / 'bin'; bin_dir.mkdir()
@@ -56,6 +76,9 @@ def fake(tmp_path, monkeypatch, test_db):
         p.write_text(FAKE.format(python=sys.executable, name=name))
         p.chmod(p.stat().st_mode | stat.S_IEXEC)
         (bin_dir / f'{name}.mode').write_text('done')
+    (bin_dir / 'claude.auth').write_text(PLAN_CLAUDE)
+    (bin_dir / 'codex.auth').write_text('Logged in using ChatGPT')
+    work_engines.forget_checks()
     monkeypatch.setenv('FAKE_DIR', str(bin_dir))
     monkeypatch.setenv('PATH', f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'sk-ant-should-not-reach-the-plan')
@@ -70,7 +93,11 @@ def fake(tmp_path, monkeypatch, test_db):
         def mode(self, name, mode): (bin_dir / f'{name}.mode').write_text(mode)
         def args(self, name): return json.loads((bin_dir / f'{name}.args').read_text())
         def remove(self, name): (bin_dir / name).unlink()
-    return Fake()
+        def auth(self, name, text): (bin_dir / f'{name}.auth').write_text(text); work_engines.forget_checks()
+        def asked(self, name): return (bin_dir / f'{name}.asked').exists()
+        def helper(self, name): return int((bin_dir / f'{name}.helper').read_text())
+    yield Fake()
+    work_engines.forget_checks()
 
 
 def wait_for(task_id, timeout=10):
@@ -119,11 +146,146 @@ def test_a_finished_answer_that_mentions_limits_is_still_finished(fake, tmp_path
 def test_missing_tool_and_timeout(fake, tmp_path):
     fake.remove('codex')
     r = work_engines.run('chatgpt', 'x', tmp_path / 'f')
-    assert r['status'] == 'missing' and 'npm install -g @openai/codex' in r['summary']
+    assert r['status'] == 'missing' and 'Setup-Apex-Work-Plans.cmd' in r['summary']
     assert work_engines.installed() == {'claude': True, 'chatgpt': False, 'api': True}
     fake.mode('claude', 'slow')
     r = work_engines.run('claude', 'x', tmp_path / 'g', timeout=1)
     assert r['status'] == 'failed' and 'longer than' in r['summary']
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:                                   # a finished child that is not reaped yet counts as gone
+        return open(f'/proc/{pid}/stat').read().split(')')[-1].split()[0] != 'Z'
+    except OSError:
+        return True
+
+
+@pytest.mark.parametrize('engine,name,auth,ok,why', [
+    ('claude', 'claude', PLAN_CLAUDE, True, ''),
+    ('claude', 'claude', json.dumps({'loggedIn': True, 'authMethod': 'oauth_token', 'apiProvider': 'firstParty'}), True, ''),
+    ('claude', 'claude', json.dumps({'loggedIn': True, 'authMethod': 'api_key', 'apiProvider': 'firstParty'}), False, 'bills credits'),
+    ('claude', 'claude', json.dumps({'loggedIn': True, 'authMethod': 'apiKeyHelper', 'apiProvider': 'firstParty'}), False, 'bills credits'),
+    ('claude', 'claude', json.dumps({'loggedIn': True, 'authMethod': 'third_party', 'apiProvider': 'bedrock'}), False, 'bills credits'),
+    ('claude', 'claude', json.dumps({'loggedIn': True, 'authMethod': 'claude.ai', 'apiProvider': 'firstParty',
+                                     'apiKeySource': 'ANTHROPIC_API_KEY'}), False, 'bills credits'),
+    ('claude', 'claude', json.dumps({'loggedIn': False, 'authMethod': 'none', 'apiProvider': 'firstParty'}), False, 'not signed in'),
+    ('claude', 'claude', 'Error: something odd', False, 'could not read'),
+    ('chatgpt', 'codex', 'Logged in using ChatGPT', True, ''),
+    ('chatgpt', 'codex', 'Logged in using an API key - sk-proj-***ABCDE', False, 'with an API key, which is not your ChatGPT plan'),
+    ('chatgpt', 'codex', 'Logged in using Amazon Bedrock API key', False, 'not your ChatGPT plan'),
+    ('chatgpt', 'codex', 'Not logged in', False, 'not signed in'),
+])
+def test_only_a_plan_sign_in_counts(fake, engine, name, auth, ok, why):
+    """The real tools' sign-in answers (checked against Claude Code 2.1 and Codex 0.160)."""
+    fake.auth(name, auth)
+    got = work_engines.check(engine)
+    assert got['ok'] is ok and why in got['why']
+    assert 'sk-' not in got['why']                                   # a key is never repeated, even masked
+    if not ok:                                                       # and the task never reaches it
+        r = work_engines.run(engine, 'x', fake.dir / 'f')
+        assert r['status'] == 'signed_out' and not (fake.dir / f'{name}.args').exists()
+
+
+def test_the_sign_in_check_is_cached_and_refreshed(fake):
+    assert work_engines.check('claude')['plan'] == 'Claude Max'
+    (fake.dir / 'claude.auth').write_text(json.dumps({'loggedIn': True, 'authMethod': 'api_key'}))
+    assert work_engines.check('claude')['ok'] is True                # within ten minutes: the last answer
+    work_agent.check_plans()                                         # "Check sign-in" asks again
+    assert work_engines.check('claude')['ok'] is False
+
+
+def test_handing_over_refuses_a_plan_that_would_bill_credits(fake):
+    fake.auth('codex', 'Logged in using an API key - sk-***')
+    t = work.add_task(title='x')
+    with pytest.raises(work.WorkError, match='not your ChatGPT plan'):
+        work.give_to_apex(t['id'], agent=object(), engine='chatgpt')
+    assert work.get_task(t['id'])['apex_state'] is None
+
+
+@pytest.mark.parametrize('engine,name', [('claude', 'claude'), ('chatgpt', 'codex')])
+def test_stop_ends_the_tool_and_everything_it_started(fake, engine, name):
+    fake.mode(name, 'hang')
+    t = work.add_task(title='long one')
+    run_id = work.give_to_apex(t['id'], agent=object(), engine=engine)['apex_run']
+    end = time.time() + 10
+    while not (fake.dir / f'{name}.helper').exists() and time.time() < end:
+        time.sleep(0.05)
+    helper = fake.helper(name)
+    assert _alive(helper)
+    assert work.stop_apex(t['id'])['apex_run'] == run_id
+    back = wait_for(t['id'])
+    assert back['apex_state'] == 'stopped' and back['status'] == 'todo' and 'You stopped it' in back['apex_summary']
+    end = time.time() + 10
+    while _alive(helper) and time.time() < end:
+        time.sleep(0.05)
+    assert not _alive(helper), 'the helper the tool started must not keep running on your plan'
+    with pytest.raises(work.WorkError, match='not working'):
+        work.stop_apex(t['id'])
+
+
+def test_a_timeout_ends_the_whole_tree(fake, tmp_path):
+    fake.mode('claude', 'hang')
+    r = work_engines.run('claude', 'x', tmp_path / 'f', timeout=2)
+    assert r['status'] == 'failed' and 'longer than' in r['summary']
+    helper = fake.helper('claude')
+    end = time.time() + 10
+    while _alive(helper) and time.time() < end:
+        time.sleep(0.05)
+    assert not _alive(helper)
+
+
+@pytest.mark.parametrize('text,hours', [
+    ('Claude AI usage limit reached|1791306000', None),             # an exact time (epoch)
+    ("You've hit your usage limit. Upgrade to Pro or try again in 2 hours 14 minutes.", 2 + 14 / 60),
+    ('5-hour limit reached ∙ resets 3pm', 3),                       # 12:00 now
+    ("You've hit your usage limit. Try again at 1:30 PM.", 1.5),
+    ('try again in 3 days', 72),
+    ('Weekly limit reached', -1),                                   # no time given
+])
+def test_reset_times_the_tools_give(text, hours):
+    got = work_engines.reset_time(text, NOON)
+    if hours is None:
+        assert got == 1791306000
+    elif hours < 0:
+        assert got is None
+    else:
+        assert abs(got - (NOON.timestamp() + hours * 3600)) < 1
+    assert work_engines.reset_time('resets 9am', NOON) == datetime(2026, 10, 7, 9, 0).timestamp()   # tomorrow
+
+
+def test_a_plan_rests_until_its_reset_time(fake):
+    now = NOON.timestamp()
+    work_agent.mark_unavailable('chatgpt', 'limited', 'try again in 2 hours', now=now, until=now + 7200)
+    assert work_agent.available(now + 7200)['chatgpt'].endswith('resting until 14:02')
+    assert work_agent.available(now + 7400)['chatgpt'] is None
+    work_agent.mark_unavailable('claude', 'limited', 'limit', now=now, until=now + 30 * 86400)   # nonsense: use rest_hours
+    assert work_agent.available(now)['claude'].endswith('resting until 17:00')
+
+
+def test_limits_carry_the_reset_time_into_the_run(fake, tmp_path):
+    fake.mode('codex', 'limited')
+    r = work_engines.run('chatgpt', 'x', tmp_path / 'f')
+    assert r['status'] == 'limited' and abs(r['reset_at'] - (time.time() + 3 * 3600)) < 60
+
+
+def test_noise_is_left_out_of_summaries_and_numbers_are_not_limits():
+    real = """WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries
+2026-10-06T08:11:22.735859Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 403 Forbidden
+ERROR: Reconnecting... 2/5
+ERROR: Reconnecting... 3/5
+warning: Codex could not find bubblewrap on PATH.
+ERROR: unexpected status 403 Forbidden: Host not in allowlist: api.openai.com.
+ERROR: unexpected status 403 Forbidden: Host not in allowlist: api.openai.com."""
+    tidy = work_engines._tidy(real)
+    assert 'WARNING' not in tidy and 'Reconnecting' not in tidy and 'bubblewrap' not in tidy
+    assert tidy.count('Host not in allowlist') == 1 and tidy.startswith('ERROR codex_api')
+    assert work_engines._classify(real, failed=True) == 'failed'
+    assert work_engines._classify('2026-10-06T08:14:29.429123Z ERROR boom', failed=True) == 'failed'
+    assert work_engines._classify('HTTP 429 Too Many Requests', failed=True) == 'limited'
 
 
 # ---------------------------------------------------------------- handing a task to a plan
@@ -310,3 +472,32 @@ def test_agent_routes(api, monkeypatch):
     monkeypatch.setattr(config, 'DASHBOARD_TOKEN', 'master')        # a device, not the owner
     assert client.get('/api/work/agent').status_code == 200
     assert client.put('/api/work/agent', json={'enabled': False}).status_code == 403
+
+
+def test_found_where_the_installers_put_them_before_path_catches_up(fake, tmp_path, monkeypatch):
+    home = tmp_path / 'home'; local = home / '.local' / 'bin'; local.mkdir(parents=True)
+    tool = local / 'claude'; tool.write_text('#!/bin/sh\n'); tool.chmod(0o755)
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setenv('PATH', '/usr/bin:/bin')
+    assert work_engines.binary('claude') == str(tool)
+    assert work_engines.binary('chatgpt') is None
+
+
+def test_the_plan_checker_script(fake, capsys):
+    from scripts import work_plans_check
+    fake.mode('claude', 'done')
+    # The fake claude writes result.md, not apex-check.md: the live task must notice.
+    assert work_plans_check.main(['--live', '--only', 'claude']) == 1
+    assert 'FAIL  it did not write apex-check.md' in capsys.readouterr().out
+    fake.auth('codex', 'Logged in using an API key - sk-***')
+    assert work_plans_check.main(['--only', 'chatgpt']) == 1
+    out = capsys.readouterr().out
+    assert 'not your ChatGPT plan' in out and 'ChatGPT plan: NOT READY' in out
+    fake.auth('codex', 'Logged in using ChatGPT')
+    assert work_plans_check.main([]) == 0
+    out = capsys.readouterr().out
+    assert 'signed in with your plan (Claude Max)' in out and 'Apex can work on Claude plan and ChatGPT plan.' in out
+    fake.mode('claude', 'check'); fake.mode('codex', 'check')
+    assert work_plans_check.main(['--live']) == 0
+    out = capsys.readouterr().out
+    assert out.count('PASS  it wrote apex-check.md') == 2 and 'Claude plan: READY (real task passed)' in out

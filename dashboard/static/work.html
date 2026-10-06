@@ -4,8 +4,8 @@
   <meta charset="utf-8"><script src="/static/theme.js"></script><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Apex · Work</title>
   <link rel="icon" href="/static/icons/apex-refined.svg">
-  <link rel="stylesheet" href="/static/work.css?v=work-2">
-  <script src="/static/work.js?v=work-2" defer></script>
+  <link rel="stylesheet" href="/static/work.css?v=work-3">
+  <script src="/static/work.js?v=work-3" defer></script>
   <link rel="stylesheet" href="/static/brand.css?v=brand40"><link rel="stylesheet" href="/static/theme.css">
 </head>
 <body>
@@ -72,6 +72,7 @@
       </div>
       <div class="d-actions">
         <span id="a-summary" class="muted grow"></span>
+        <button type="button" id="a-check">Check sign-in</button>
         <button type="button" id="a-clear">Try resting plans now</button>
         <button class="primary" id="a-save">Save</button>
       </div>
@@ -102,6 +103,7 @@
         <label>Use <select id="d-engine"><option value="claude">Claude plan</option><option value="chatgpt">ChatGPT plan</option><option value="api">API credits</option></select></label>
         <label id="d-budget-label">Spending cap ($) <input id="d-budget" type="number" min="0.05" max="5" step="0.05" value="0.5"></label>
         <button type="button" id="d-give" class="primary">Give to Apex</button>
+        <button type="button" id="d-stop" class="danger" hidden>Stop</button>
       </div>
       <p class="fine">Apex researches and writes the deliverable into its own folder, a reviewer pass checks it, and the task comes back to you for review. It never sends, pays or contacts anyone: it prepares drafts.</p>
     </section>
