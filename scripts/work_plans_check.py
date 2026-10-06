@@ -98,14 +98,15 @@ def _fresh(work_dir, name: str) -> Path:
     return Path(tempfile.mkdtemp(prefix=f"{name}-{time.strftime('%Y%m%d-%H%M%S')}-", dir=parent))
 
 
-def _readable(path: Path, tries: int = 10):
-    """True if it says ready, False if missing or wrong, 'unreadable' if Windows refuses.
-    Retries for a few seconds, so a file still held open for a moment isn't mistaken."""
+def _readable(path: Path, tries: int = 10, word: str = 'ready'):
+    """True if it holds the word, False if missing or wrong, 'unreadable' if Windows
+    refuses. Retries for a few seconds, so a file held for a moment isn't mistaken."""
+    error = None
     for i in range(tries):
         if not path.exists():
             return False
         try:
-            return 'ready' in path.read_text(encoding='utf-8', errors='replace').lower()
+            return word in path.read_text(encoding='utf-8', errors='replace').lower()
         except PermissionError as exc:
             error = exc
             time.sleep(0.5)
@@ -157,19 +158,43 @@ def code_check(engine: str) -> bool:
     except (OSError, subprocess.CalledProcessError) as exc:
         return _say(False, f'git is needed for Apex Code and did not work here: {exc}')
     made = folder / 'apex-code-check.md'
-    read = lambda: made.read_text(encoding='utf-8', errors='replace').lower() if made.exists() else ''
     steps: list = []
     first = code_engines.turn(engine, CODE_TASKS[0], folder, 'safe', None, steps.append, timeout=300)
-    ok = _say(first['status'] == 'done' and 'ready' in read(),
-              f"a live coding step finished as {first['status']}, with {len(steps) - 1} steps streamed")
+    wrote = _readable(made)
+    ok = _say(first['status'] == 'done' and wrote is True,
+              f"a live coding step finished as {first['status']}, with {len(steps) - 1} steps streamed"
+              + (', but Windows blocks reading the file it wrote' if wrote == 'unreadable' else ''))
+    if wrote == 'unreadable':
+        print(f'        folder: {folder}')
+        return _unelevated_retry(engine) if engine == 'chatgpt' and os.name == 'nt' else False
     if not first.get('session'):
         return _say(False, 'it gave no conversation id, so follow-ups could not continue it')
     steps.clear()
     second = code_engines.turn(engine, CODE_TASKS[1], folder, 'safe', first['session'], steps.append, timeout=300)
-    ok &= _say(second['status'] == 'done' and 'again' in read(), f"a follow-up continued the same conversation ({second['status']})")
+    again = _readable(made, word='again')
+    ok &= _say(second['status'] == 'done' and again is True, f"a follow-up continued the same conversation ({second['status']})"
+               + (', but Windows blocks reading the file' if again == 'unreadable' else ''))
     if not ok:
         print('        it said: ' + ((second if first['status'] == 'done' else first).get('summary') or '').replace('\n', ' ')[:300])
     print(f'        folder: {folder}')
+    return ok
+
+
+def _unelevated_retry(engine: str) -> bool:
+    """Codex's files stay locked on this PC: try its other Windows sandbox mode once."""
+    import config
+    current = we.codex_windows_sandbox()
+    if current == 'unelevated':
+        return False
+    print(f'        Trying again with Codex\'s "unelevated" Windows sandbox (now: {current or "Codex default"})...')
+    config.WORK_CODEX_WINDOWS_SANDBOX = 'unelevated'
+    try:
+        ok = code_check(engine)
+    finally:
+        config.WORK_CODEX_WINDOWS_SANDBOX = current
+    if ok:
+        print('  FIX   That works. Run this once, then restart Apex:')
+        print('          .venv\\Scripts\\python.exe scripts\\set_env_key.py WORK_CODEX_WINDOWS_SANDBOX unelevated')
     return ok
 
 

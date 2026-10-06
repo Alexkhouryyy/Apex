@@ -317,6 +317,11 @@ def run(engine: str, prompt: str, folder: Path, timeout: int = TIMEOUT, run_id: 
         except OSError:
             pass
         blocked = unreadable(folder)
+        for _ in range(16):                       # a file held for a moment (sandbox, virus scan) isn't a problem
+            if not blocked:
+                break
+            time.sleep(0.5)
+            blocked = unreadable(folder)
         if blocked:
             summary += ('\n\nWindows won\'t let you open what Codex wrote (' + ', '.join(blocked[:5]) +
                         '). Run `python scripts\\work_plans_check.py --live --only chatgpt` to find the fix.')
