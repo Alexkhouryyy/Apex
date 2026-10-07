@@ -520,7 +520,7 @@
   async function copyText(text) {
     try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; } } catch (_) {}
     const ta = el('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-    (document.querySelector('dialog[open]') || document.body).append(ta); ta.select();
+    (document.querySelector('dialog[open]') || document.body).append(ta); ta.focus({preventScroll: true}); ta.select();
     try { return !!document.execCommand('copy'); } catch (_) { return false; } finally { ta.remove(); }
   }
   function copyBtn(getText) {
@@ -775,8 +775,11 @@
     if (lv.text || lv.thinking) {
       if (!box) { box = el('div', 'typing'); box.append(el('div', 'think'), el('div', 'prose')); $('feed').append(box); }
       box.querySelector('.think').textContent = lv.thinking ? '✻ ' + lv.thinking.slice(-280) : '';
-      const p = box.querySelector('.prose'); p.replaceChildren(md(lv.text));
-      (p.lastElementChild && !/^(PRE|UL|DIV)$/.test(p.lastElementChild.tagName) ? p.lastElementChild : p).append(el('span', 'cursor', '▍'));   // right after the last word
+      const p = box.querySelector('.prose');
+      if (p.dataset.src !== lv.text) {                    // the same words again: leave the buttons (and their "Copied") alone
+        p.dataset.src = lv.text; p.replaceChildren(md(lv.text));
+        (p.lastElementChild && !/^(PRE|UL|DIV)$/.test(p.lastElementChild.tagName) ? p.lastElementChild : p).append(el('span', 'cursor', '▍'));   // right after the last word
+      }
     } else if (box) { box.remove(); box = null; }
     for (const [ref, out] of Object.entries(lv.outputs || {})) {
       const s = (feed && feed.turn && feed.turn.tools[ref]) || $('feed').querySelector(`[data-ref="${CSS.escape(ref)}"]`);
@@ -840,12 +843,12 @@
     const log = $('t-log');
     if (e.kind === 'term') {
       const row = el('div', 't-row'); row.dataset.ref = e.ref;
-      const out = el('pre', 'out', '…');
-      row.append(el('div', 't-cmd', '❯ ' + e.command), withCopy(out, () => out.textContent));
+      const out = el('pre', 'out', '…'); out.dataset.raw = '';       // Copy gives the output alone, not the … or the exit line
+      row.append(el('div', 't-cmd', '❯ ' + e.command), withCopy(out, () => out.dataset.raw));
       log.prepend(row);
     } else {
       const row = log.querySelector(`[data-ref="${CSS.escape(e.ref)}"]`);
-      if (row) { row.querySelector('pre').textContent = (e.output || '(no output)') + `\n[exit ${e.exit_code ?? '?'} · ${clock(e.seconds || 0)}]`; row.classList.toggle('bad', e.exit_code !== 0); }
+      if (row) { const pre = row.querySelector('pre'); pre.dataset.raw = e.output || ''; pre.textContent =(e.output || '(no output)') + `\n[exit ${e.exit_code ?? '?'} · ${clock(e.seconds || 0)}]`; row.classList.toggle('bad', e.exit_code !== 0); }
     }
   }
   $('t-form').onsubmit = e => { e.preventDefault(); const c = $('t-cmd').value.trim(); $('t-cmd').value = ''; runTerminal(c); };

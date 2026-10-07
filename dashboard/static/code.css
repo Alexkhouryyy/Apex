@@ -291,7 +291,7 @@ dialog h2{font-size:18px;font-weight:600;margin:0 0 8px}
 .step.file .p{cursor:pointer}
 .step .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}.step .acts button{min-height:30px;font-size:12px}
 .you-sym{color:var(--warn)!important}
-.live-out{max-height:220px}
+.live-out>pre{max-height:220px}
 .t-form{display:flex;align-items:center;gap:8px;background:#060d14;border:1px solid var(--line2);border-radius:9px;padding:2px 10px}
 .t-form .sym{color:var(--warn);font-family:var(--mono)}.t-form input{border:0;background:none;font:12.5px var(--mono);padding:8px 0}
 .t-form input:focus{outline:0}
@@ -340,7 +340,7 @@ body.term .step.cmd .line{border-radius:5px}
 body.term .inline-diff{border-radius:5px}
 
 /* ---------------------------------------------------------------- copy buttons */
-.cw{position:relative}.cw>.copy{position:absolute;top:6px;right:8px;z-index:1}
+.cw{position:relative}.cw>pre{padding-right:64px}.cw>.copy{position:absolute;top:6px;right:8px;z-index:1}
 .copy{font:11px var(--mono);min-height:0;padding:2px 8px;border-radius:6px;color:var(--muted);background:rgba(13,21,31,.9);border:1px solid var(--line2);flex:none;opacity:.7}
 .copy:hover,.copy:focus-visible,.cw:hover>.copy{opacity:1;color:var(--ink)}
 .copy.done{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent);opacity:1}

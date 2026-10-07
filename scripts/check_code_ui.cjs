@@ -161,14 +161,23 @@ const last = (re) => calls.filter(c => re.test(c.url) && c.method === 'POST').at
   await tick();
   assert.ok(calls.some(c => c.url === '/api/code/sessions/9/stop' && c.method === 'POST'));
   // The live stream connects: the AI's words appear as it types, then the rest of the turn.
-  streamOn = true; streamLive = {v: 3, text: 'Typing **now**', thinking: 'weighing it', outputs: {}};
+  streamOn = true; streamLive = {v: 3, text: 'Typing **now**', thinking: 'weighing it', outputs: {b1: 'line 1\nline 2'}};
   await tick(1700);
   assert.ok(calls.some(c => /\/stream\?after=13$/.test(c.url)), 'the stream asks from the last step it has');
   assert.equal(f.querySelector('.typing .prose').textContent, 'Typing now▍'); assert.match(f.querySelector('.typing .think').textContent, /weighing it/);
+  // Live command output sits in a Copy wrapper; the height cap stays on the pre, and Copy gives just the output.
+  Object.defineProperty(w.navigator, 'clipboard', {configurable: true, value: {writeText: async t => { copied.push(t); }}});
+  const lo = f.querySelector('.live-out');
+  assert.ok(lo.classList.contains('cw') && lo.firstChild.tagName === 'PRE' && lo.firstChild.classList.contains('out'), 'live output: a pre inside the Copy wrapper');
+  assert.equal(lo.firstChild.textContent, 'line 1\nline 2');
+  await clickCopy(copyOf(lo)); assert.equal(copied.at(-1), 'line 1\nline 2');
+  const para = f.querySelector('.typing .prose p'); streamLive = {...streamLive, v: 5};   // same words, newer snapshot…
+  await tick(1000);
+  assert.equal(f.querySelector('.typing .prose p'), para, '…leaves the typed words (and their buttons) alone'); assert.equal(f.querySelectorAll('.typing .cursor').length, 1);
   streamLive = {v: 2, text: '', thinking: '', outputs: {}};             // an older snapshot arriving late…
   await tick(1000);
   assert.equal(f.querySelector('.typing .prose').textContent, 'Typing now▍', '…never wipes the newer one');
-  streamLive = {v: 4, text: '', thinking: '', outputs: {}};
+  streamLive = {v: 6, text: '', thinking: '', outputs: {}};
   feed.push(E(14, 'text', {text: 'Added Focus.'}), E(15, 'checkpoint', {sha: 'a', prev: 'b', files: 2}),
             E(16, 'done', {status: 'done', summary: 'Added Focus.', seconds: 75, files: 2, total: 2, engine: 'claude', tokens: 12345}),
             E(17, 'review_started', {engine: 'chatgpt'}), E(18, 'review_step', {title: 'Read work.js'}),
@@ -192,16 +201,30 @@ const last = (re) => calls.filter(c => re.test(c.url) && c.method === 'POST').at
   assert.equal($('diff').open, true); assert.equal($('diff-path').textContent, 'work.js');
   assert.deepEqual([...d.querySelectorAll('#diff-body .dl')].map(r => r.className.split(' ')[1]), ['hunk', 'ctx', 'del', 'add', 'add']);
   assert.deepEqual([...d.querySelectorAll('#diff-body .dl.add .ln')].map(x => x.textContent), ['', '2', '', '3']);
+  await clickCopy(copyOf($('diff-body'))); assert.equal(copied.at(-1), '@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d', 'the diff viewer copies the diff');
   $('diff-next').click(); await tick(); assert.equal($('diff-path').textContent, 'new.css');
   $('diff').close();
   // !command runs in the terminal; its output lands in the feed and the Terminal tab.
   type('!ls -la'); key('Enter', {ctrlKey: true}); await tick();
   assert.deepEqual(last(/\/terminal$/).body, {command: 'ls -la'});
-  feed.push(E(20, 'term', {command: 'ls -la', ref: 't1'}), E(21, 'term_done', {ref: 't1', exit_code: 0, output: 'total 0', seconds: 1}));
+  feed.push(E(20, 'term', {command: 'ls -la', ref: 't1'}), E(21, 'term_done', {ref: 't1', exit_code: 0, output: 'total 0', seconds: 1}),
+            E(22, 'file', {path: 'big.js', change: 'update', plus: 30, minus: 0, ref: 'e2', diff: '@@ -1,1 +1,31 @@\n' + Array.from({length: 30}, (_, i) => '+l' + i).join('\n')}),
+            E(23, 'checks', {command: 'pytest -q', passed: false, seconds: 3, output: 'F'}));
   await tick(900);
   const term = f.querySelector('.step.term');
   assert.match(term.textContent, /❯ls -la✓ 0:01/); assert.match(term.querySelector('pre').textContent, /total 0/);
   assert.match($('t-log').textContent, /❯ ls -latotal 0/);
+  // Copy on the !command line and its output, on the Terminal tab (output only, not the exit line), on a folded diff, and on checks.
+  await clickCopy(copyOf(term.querySelector('.line'))); assert.equal(copied.at(-1), 'ls -la');
+  await clickCopy(copyOf(term.querySelector('details'))); assert.equal(copied.at(-1), 'total 0');
+  assert.match($('t-log').querySelector('pre').textContent, /\[exit 0/);
+  await clickCopy(copyOf($('t-log'))); assert.equal(copied.at(-1), 'total 0', 'the Terminal tab copies the output alone');
+  const big = [...f.querySelectorAll('.step.file')].at(-1);
+  assert.ok(big.querySelector('.cw > .inline-diff.folded') && big.querySelector('.more-lines') && !big.querySelector('.cw .more-lines'), 'a long diff stays folded, Copy outside the fold');
+  await clickCopy(copyOf(big)); assert.match(copied.at(-1), /^@@ -1,1 \+1,31 @@\n\+l0\n/); assert.equal(copied.at(-1).split('\n').length, 31, 'a folded diff copies all of it');
+  const chk = [...f.querySelectorAll('.step.cmd')].find(x => /Checks: pytest/.test(x.textContent));
+  await clickCopy(copyOf(chk.querySelector('.line'))); assert.equal(copied.at(-1), 'pytest -q');
+  await clickCopy(copyOf(chk.querySelector('details'))); assert.equal(copied.at(-1), 'F');
   // /commands.
   type('/review'); key('Enter', {ctrlKey: true}); await tick();
   assert.ok(last(/\/review$/), '/review asks for a second opinion');
