@@ -41,9 +41,12 @@ FILE_TOOLS = ['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Glob', 'Gre
 CLAUDE_TOOLS = {
     'safe': FILE_TOOLS + [f'Bash({c}:*)' for c in SAFE_COMMANDS],
     'full': FILE_TOOLS + ['Bash', 'PowerShell'],
-    'review': ['Read', 'Glob', 'Grep'],
+    # The second opinion reads and may run the checks (tests, git diff, syntax checks), never edit:
+    # three real reviews of Apex Code's own change all said "I couldn't run the tests".
+    'review': ['Read', 'Glob', 'Grep'] + [f'Bash({c}:*)' for c in SAFE_COMMANDS],
 }
-REVIEW_DENIED = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']
+REVIEW_DENIED = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'PowerShell']
+QUIET_TOOLS = ('ExitPlanMode',)          # Plan first stops it on purpose: not an error to show
 CODEX_SANDBOX = {'safe': 'workspace-write', 'full': 'danger-full-access', 'review': 'read-only'}
 SESSION_ID = re.compile(r'^[A-Za-z0-9_-]{6,80}$')   # what may be put on a command line
 OUTPUT_TAIL = 2000
@@ -92,7 +95,8 @@ def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None =
     if engine == 'claude':
         tools = list(CLAUDE_TOOLS[mode])
         if mode != 'review':                 # Allow once: exactly that command. Always: it, with any arguments.
-            tools += [f'Bash({c})' for c in o['allow']] + [f'Bash({c}:*)' for c in o['always']]
+            tools += [f'Bash({c})' for c in o['allow']]
+        tools += [f'Bash({c}:*)' for c in o['always']]      # what you always allow, the reviewer may run too
         cmd = [exe, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
                '--permission-mode', 'plan' if o['plan'] else 'acceptEdits', '--allowedTools', *tools, '--strict-mcp-config']
         if mode == 'review':
@@ -228,6 +232,11 @@ def diff_counts(diff: str) -> tuple[int, int]:
 def _claude_tool(name: str, args: dict, folder: Path) -> list[dict]:
     """A tool call as feed events: what it does, in a few words."""
     path = _rel(args.get('file_path') or args.get('notebook_path') or args.get('path') or '', folder)
+    if name in ('Write', 'Edit', 'MultiEdit') and (path.startswith(('/', '../')) or re.match(r'^[A-Za-z]:/', path)):
+        # Outside the project: Plan first saves its plan in Claude's own folder.
+        if '/.claude/plans/' in path:
+            return [{'kind': 'note', 'text': 'Wrote down its plan.'}]
+        return [{'kind': 'tool', 'tool': 'other', 'title': f'Wrote {path} (outside the project)'}]
     if name == 'Read':
         return [{'kind': 'tool', 'tool': 'read', 'title': f'Read {path}', 'path': path}]
     if name in ('Edit', 'MultiEdit'):
@@ -299,6 +308,8 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
             elif t == 'tool_use':
                 name, args = block.get('name') or '', block.get('input') or {}
                 state.setdefault('tools', {})[block.get('id')] = name
+                if name in QUIET_TOOLS:
+                    continue
                 made = [{**e, 'id': block.get('id')} for e in _claude_tool(name, args, folder)]
                 if made and made[0]['kind'] == 'file':
                     # The edit happens after this message: show it, with its diff, once it's done.
@@ -312,6 +323,8 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
             if block.get('type') != 'tool_result':
                 continue
             name = state.get('tools', {}).get(block.get('tool_use_id'))
+            if name in QUIET_TOOLS:
+                continue
             text = block.get('content')
             if isinstance(text, list):
                 text = '\n'.join(str(x.get('text', '')) for x in text if isinstance(x, dict))
@@ -352,8 +365,9 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
         out.append({'kind': 'done', 'status': status,
                     'summary': str(d.get('result') or '') if not failed else error_text(detail) or 'It stopped with an error.',
                     'reset_at': we.reset_time(detail) if status == 'limited' else None,
+                    # Cached re-reads of the same context are left out: counting them made a short session look like millions.
                     'tokens': (usage.get('input_tokens') or 0) + (usage.get('output_tokens') or 0)
-                              + (usage.get('cache_read_input_tokens') or 0) + (usage.get('cache_creation_input_tokens') or 0)})
+                              + (usage.get('cache_creation_input_tokens') or 0)})
         if d.get('session_id'):
             state['session'] = d['session_id']
         return out

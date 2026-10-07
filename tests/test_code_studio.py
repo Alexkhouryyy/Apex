@@ -820,3 +820,24 @@ def test_the_stream_sends_steps_and_live_text(api, lab):
     assert client.get(f"/api/code/sessions/{s['id']}/file", params={'path': '../x'}).status_code == 400
     assert client.post(f"/api/code/sessions/{s['id']}/terminal", json={'command': 'echo hi'},
                        headers={'Origin': 'https://evil.example'}).status_code == 403
+
+
+
+def test_lessons_from_apex_building_itself(lab, tmp_path):
+    """From the first real session, where Apex Code built its own Copy buttons."""
+    review = code_engines.command('claude', 'claude', tmp_path, 'review', options={'always': ['npm run check']})
+    tools = review[review.index('--allowedTools') + 1:review.index('--strict-mcp-config')]
+    assert 'Bash(python -m pytest:*)' in tools and 'Bash(npm run check:*)' in tools          # the reviewer can run the checks
+    assert not any(t in tools for t in ('Write', 'Edit', 'Bash'))                           # …and still never edit
+    assert review[review.index('--disallowedTools') + 1:][:2] == ['Write', 'Edit']
+    state = {}
+    plan_write = {'type': 'assistant', 'message': {'content': [
+        {'type': 'tool_use', 'id': 'p1', 'name': 'Write', 'input': {'file_path': '/root/.claude/plans/x.md', 'content': '# plan'}},
+        {'type': 'tool_use', 'id': 'x1', 'name': 'ExitPlanMode', 'input': {}}]}}
+    assert code_engines.parse('claude', json.dumps(plan_write), tmp_path, state) == [{'kind': 'note', 'text': 'Wrote down its plan.', 'id': 'p1'}]
+    refused = {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'tool_use_id': 'x1', 'is_error': True,
+               'content': 'Error: No such tool available: ExitPlanMode.'}]}}
+    assert code_engines.parse('claude', json.dumps(refused), tmp_path, state) == []        # expected, so not shown as an error
+    done = {'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'ok', 'permission_denials': [],
+            'usage': {'input_tokens': 10, 'output_tokens': 5, 'cache_read_input_tokens': 340000, 'cache_creation_input_tokens': 100}}
+    assert code_engines.parse('claude', json.dumps(done), tmp_path, {})[-1]['tokens'] == 115
