@@ -66,7 +66,7 @@
     const frag = document.createDocumentFragment();
     const parts = String(text || '').split(/```[\w+-]*\n?([\s\S]*?)```/g);
     parts.forEach((part, i) => {
-      if (i % 2) { const pre = el('pre'); pre.append(el('code', '', part.replace(/\n$/, ''))); frag.append(pre); return; }
+      if (i % 2) { const code = part.replace(/\n$/, ''), pre = el('pre'); pre.append(el('code', '', code)); frag.append(withCopy(pre, () => code)); return; }
       let list = null, para = [];
       const flush = () => { if (para.length) { const p = el('p'); inline(p, para.join('\n')); frag.append(p); para = []; } };
       for (const raw of part.split('\n')) {
@@ -371,7 +371,7 @@
           const s = step('cmd'), line = el('div', 'line');
           line.append(el('span', 'sym', '$'), el('span', 'c', e.title), el('span', 'st muted', '…'));
           line.title = e.detail || e.title; s.dataset.label = `Running ${e.title}`;
-          s.append(line); if (e.ref) { t.tools[e.ref] = s; s.dataset.ref = e.ref; }
+          copyLine(line, e.title); s.append(line); if (e.ref) { t.tools[e.ref] = s; s.dataset.ref = e.ref; }
         } else { t.reads = null; step('', ic(e.tool === 'web' ? '◌' : '·'), e.title); }
         break;
       case 'result': {
@@ -380,7 +380,7 @@
           const st = s.querySelector('.st');
           st.className = 'st ' + (e.ok ? 'ok' : 'bad');
           st.textContent = e.ok ? '✓' : (e.exit_code != null ? `✗ exit ${e.exit_code}` : '✗');
-          if (e.output) { const d = el('details', 'more'); if (!e.ok) d.open = true; d.append(el('summary', '', 'Output'), el('pre', 'out', e.output)); s.append(d); }
+          if (e.output) { const d = el('details', 'more'); if (!e.ok) d.open = true; d.append(el('summary', '', 'Output'), withCopy(el('pre', 'out', e.output), () => e.output)); s.append(d); }
         } else if (!e.ok && e.output) step('error', ic('✗'), e.output.split('\n')[0].slice(0, 300));
         break;
       }
@@ -414,6 +414,7 @@
       case 'term': {
         const line = el('div', 'line');
         line.append(el('span', 'sym you-sym', '❯'), el('span', 'c', e.command), el('span', 'st muted', '…'));
+        copyLine(line, e.command);
         const s = step('cmd term', line); s.dataset.ref = e.ref; s.dataset.label = `You ran ${e.command}`;
         t.tools[e.ref] = s; termLog(e); break;
       }
@@ -423,7 +424,7 @@
           const st = s.querySelector('.st'); st.className = 'st ' + (e.exit_code === 0 ? 'ok' : 'bad');
           st.textContent = e.exit_code === 0 ? `✓ ${clock(e.seconds || 0)}` : `✗ exit ${e.exit_code ?? '?'}`;
           s.querySelectorAll('.live-out').forEach(x => x.remove());
-          if (e.output) { const d = el('details', 'more'); d.open = true; d.append(el('summary', '', 'Output'), el('pre', 'out', e.output)); s.append(d); }
+          if (e.output) { const d = el('details', 'more'); d.open = true; d.append(el('summary', '', 'Output'), withCopy(el('pre', 'out', e.output), () => e.output)); s.append(d); }
         }
         termLog(e); break;
       }
@@ -449,13 +450,13 @@
       case 'checks_started': {
         const line = el('div', 'line');
         line.append(el('span', 'sym', '▶'), el('span', 'c', `Checks: ${e.command}`), el('span', 'st muted', '…'));
-        t.checks = step('cmd', line); break;
+        t.checks = step('cmd', line); copyLine(line, e.command); break;
       }
       case 'checks': {
         const s = t.checks || step('cmd');
-        if (!t.checks) { const line = el('div', 'line'); line.append(el('span', 'sym', '▶'), el('span', 'c', `Checks: ${e.command}`), el('span', 'st')); s.append(line); }
+        if (!t.checks) { const line = el('div', 'line'); line.append(el('span', 'sym', '▶'), el('span', 'c', `Checks: ${e.command}`), el('span', 'st')); copyLine(line, e.command); s.append(line); }
         const st = s.querySelector('.st'); st.className = 'st ' + (e.passed ? 'ok' : 'bad'); st.textContent = `${e.passed ? '✓ passed' : '✗ failed'} · ${clock(e.seconds)}`;
-        if (e.output) { const d = el('details', 'more'); if (!e.passed) d.open = true; d.append(el('summary', '', 'Output'), el('pre', 'out', e.output)); s.append(d); }
+        if (e.output) { const d = el('details', 'more'); if (!e.passed) d.open = true; d.append(el('summary', '', 'Output'), withCopy(el('pre', 'out', e.output), () => e.output)); s.append(d); }
         t.checks = null; feed.turn = null; break;
       }
       case 'kept': {
@@ -515,6 +516,23 @@
     c.append(acts); t.tl.append(c);
   }
   function button(text, fn, cls = '') { const b = el('button', cls, text); b.type = 'button'; b.onclick = fn; return b; }
+  // Copy buttons: navigator.clipboard, or a hidden textarea where that isn't allowed.
+  async function copyText(text) {
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; } } catch (_) {}
+    const ta = el('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    (document.querySelector('dialog[open]') || document.body).append(ta); ta.select();
+    try { return !!document.execCommand('copy'); } catch (_) { return false; } finally { ta.remove(); }
+  }
+  function copyBtn(getText) {
+    const b = button('Copy', async () => {
+      const ok = await copyText(String(getText()));
+      b.textContent = ok ? 'Copied' : 'Copy failed'; b.classList.toggle('done', ok);
+      clearTimeout(b.timer); b.timer = setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1500);
+    }, 'copy');
+    b.title = 'Copy to clipboard'; return b;
+  }
+  function withCopy(node, getText) { const w = el('div', 'cw'); w.append(node, copyBtn(getText)); return w; }
+  function copyLine(line, text) { line.append(copyBtn(() => text)); }
 
   function working() {
     let w = $('feed').querySelector('.working');
@@ -679,7 +697,7 @@
     $('diff-stat').textContent = f ? (f.plus == null ? 'binary' : `+${f.plus} −${f.minus}`) : '';
     $('diff-body').replaceChildren(el('p', 'fine', 'Loading…'));
     if (!$('diff').open) $('diff').showModal();
-    try { $('diff-body').replaceChildren(renderDiff(await api(`/api/code/sessions/${current}/diff?path=${encodeURIComponent(path)}`, {}, 'text'))); }
+    try { const text = await api(`/api/code/sessions/${current}/diff?path=${encodeURIComponent(path)}`, {}, 'text'); $('diff-body').replaceChildren(withCopy(renderDiff(text), () => text)); }
     catch (err) { $('diff-body').replaceChildren(el('p', 'fine', err.message)); }
   }
   function renderDiff(text) {
@@ -758,13 +776,14 @@
       if (!box) { box = el('div', 'typing'); box.append(el('div', 'think'), el('div', 'prose')); $('feed').append(box); }
       box.querySelector('.think').textContent = lv.thinking ? '✻ ' + lv.thinking.slice(-280) : '';
       const p = box.querySelector('.prose'); p.replaceChildren(md(lv.text));
-      (p.lastElementChild && !/^(PRE|UL)$/.test(p.lastElementChild.tagName) ? p.lastElementChild : p).append(el('span', 'cursor', '▍'));   // right after the last word
+      (p.lastElementChild && !/^(PRE|UL|DIV)$/.test(p.lastElementChild.tagName) ? p.lastElementChild : p).append(el('span', 'cursor', '▍'));   // right after the last word
     } else if (box) { box.remove(); box = null; }
     for (const [ref, out] of Object.entries(lv.outputs || {})) {
       const s = (feed && feed.turn && feed.turn.tools[ref]) || $('feed').querySelector(`[data-ref="${CSS.escape(ref)}"]`);
       if (!s) continue;
-      let pre = s.querySelector('.live-out');
-      if (!pre) { pre = el('pre', 'out live-out'); s.append(pre); }
+      let box = s.querySelector('.live-out');
+      if (!box) { const o = el('pre', 'out'); box = withCopy(o, () => o.textContent); box.classList.add('live-out'); s.append(box); }
+      const pre = box.firstChild;
       pre.textContent = out; pre.scrollTop = pre.scrollHeight;
     }
     placeLive();
@@ -794,12 +813,13 @@
   function inlineDiff(text) {
     const lines = text.split('\n').length;
     const box = el('div', 'inline-diff'); box.append(renderDiff(text));
+    const cw = withCopy(box, () => text);
     if (lines > 24) {
       box.classList.add('folded');
       const more = button(`Show all ${lines} lines`, () => { box.classList.remove('folded'); more.remove(); }, 'small more-lines');
-      const wrap = el('div'); wrap.append(box, more); return wrap;
+      const wrap = el('div'); wrap.append(cw, more); return wrap;
     }
-    return box;
+    return cw;
   }
 
   // ---------------------------------------------------------------- allow, terminal
@@ -820,7 +840,8 @@
     const log = $('t-log');
     if (e.kind === 'term') {
       const row = el('div', 't-row'); row.dataset.ref = e.ref;
-      row.append(el('div', 't-cmd', '❯ ' + e.command), el('pre', 'out', '…'));
+      const out = el('pre', 'out', '…');
+      row.append(el('div', 't-cmd', '❯ ' + e.command), withCopy(out, () => out.textContent));
       log.prepend(row);
     } else {
       const row = log.querySelector(`[data-ref="${CSS.escape(e.ref)}"]`);

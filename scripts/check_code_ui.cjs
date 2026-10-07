@@ -4,6 +4,7 @@
 // stream; every kind of step (reads grouped, commands with their result, edits
 // with their diff inline, the plan, checkpoints, done, the second opinion's
 // rating); nothing an agent writes ever running as HTML; Allow once; Esc stops;
+// a Copy button on every code block, command, output and diff (with a fallback);
 // !commands and the terminal; /commands; the file tree and coloured viewer;
 // Ctrl+K; Plan first then Build it; history; Keep only on a real "yes" (never
 // Esc), Keep & push; and a resting plan never offered by default.
@@ -30,7 +31,7 @@ const E = (id, kind, extra = {}) => ({id, ts: now - 60 + id, kind, ...extra});
 let feed = [
   E(1, 'you', {text: 'Add Focus mode', engine: 'claude', mode: 'safe'}),
   E(2, 'thinking', {text: 'Plan it'}),
-  E(3, 'text', {text: 'I\'ll add **Focus**. <img src=x onerror="window.pwned=1"> `code`'}),
+  E(3, 'text', {text: 'I\'ll add **Focus**. <img src=x onerror="window.pwned=1"> `code`\n```sh\nnpm test\n```'}),
   E(4, 'todo', {items: [{text: 'Add button', done: false, active: true}, {text: 'Test', done: false, active: false}]}),
   E(5, 'tool', {tool: 'read', title: 'Read work.js', path: 'work.js', ref: 'r1'}),
   E(6, 'result', {ref: 'r1', ok: true, output: ''}),
@@ -134,6 +135,24 @@ const last = (re) => calls.filter(c => re.test(c.url) && c.method === 'POST').at
   assert.match(f.querySelector('.step.blocked').textContent, /Safe mode stopped: Bash: rm -rf build/);
   assert.match(f.querySelector('.working').textContent, /Apex is working · Claude plan · 1:1\d/, 'the clock counts from when you sent it');
   assert.equal($('send').textContent, '■ Stop');
+  // Copy buttons: every code block, command, output and diff copies its own text and says "Copied".
+  const copied = [];
+  Object.defineProperty(w.navigator, 'clipboard', {configurable: true, value: {writeText: async t => { copied.push(t); }}});
+  const copyOf = (root) => { const b = root.querySelector('button.copy'); assert.ok(b, 'a Copy button is there'); assert.equal(b.textContent, 'Copy'); return b; };
+  const clickCopy = async (b) => { b.click(); await tick(10); };
+  let b = copyOf(f.querySelector('.prose .cw'));
+  await clickCopy(b); assert.equal(copied.at(-1), 'npm test', 'a code block copies just its code'); assert.equal(b.textContent, 'Copied');
+  assert.equal(f.querySelector('.prose .cw pre').textContent, 'npm test', 'the button is not part of the code');
+  b = copyOf(cmd.querySelector('.line')); await clickCopy(b); assert.equal(copied.at(-1), 'python -m pytest -q', 'a command copies the command');
+  b = copyOf(cmd.querySelector('details')); await clickCopy(b); assert.equal(copied.at(-1), '1 failed', 'its output copies the output');
+  b = copyOf(f.querySelector('.step.file .cw')); await clickCopy(b); assert.equal(copied.at(-1), '@@ -4,1 +4,2 @@\n a\n+b', 'a diff copies the raw diff');
+  await tick(1700); assert.equal(b.textContent, 'Copy', 'Copied fades back to Copy');
+  // No clipboard API (or it refuses): a hidden textarea and execCommand('copy').
+  Object.defineProperty(w.navigator, 'clipboard', {configurable: true, value: undefined});
+  let viaExec = null; d.execCommand = c => { viaExec = {c, text: d.querySelector('textarea[readonly]').value}; return true; };
+  b = copyOf(cmd.querySelector('.line')); await clickCopy(b);
+  assert.deepEqual(viaExec, {c: 'copy', text: 'python -m pytest -q'}); assert.equal(b.textContent, 'Copied'); assert.equal(d.querySelector('textarea[readonly]'), null, 'the helper textarea is cleaned up');
+  d.execCommand = () => false; await clickCopy(b); assert.equal(b.textContent, 'Copy failed', 'a refused copy says so');
   // Allow once, like Claude Code's prompt.
   [...f.querySelectorAll('.step.blocked button')].find(b => b.textContent === 'Allow once').click(); await tick();
   assert.deepEqual(last(/\/allow$/).body, {command: 'rm -rf build', always: false});
@@ -244,7 +263,7 @@ const last = (re) => calls.filter(c => re.test(c.url) && c.method === 'POST').at
   $('back').click(); await tick();
   assert.ok(d.body.classList.contains('view-home')); assert.equal(w.location.hash, '');
   console.log('PASS: greeting and plans, @ and / as you type, starting with a model and effort, polling then the live stream (typing as it writes), '
-    + 'every feed step (agent text never HTML, plan in place, reads grouped, failed command open, edits with their diff inline), Allow once, Esc stops, '
+    + 'every feed step (agent text never HTML, plan in place, reads grouped, failed command open, edits with their diff inline), Copy buttons (and their fallback), Allow once, Esc stops, '
     + 'done with tokens, the second opinion ring, the diff viewer, !commands and the terminal, /commands, the file tree and coloured viewer with @, '
     + 'history, Ctrl+K, Plan first then Build it, Keep only on a real yes, Keep & push, and back home.');
   process.exit(0);
