@@ -52,6 +52,20 @@ if '{name}' == 'claude':
              'errors': ['No conversation found with session ID: ' + sys.argv[sys.argv.index('--resume') + 1]]}})
         sys.exit(1)
     out({{'type': 'system', 'subtype': 'init', 'session_id': sid, 'cwd': str(cwd), 'tools': ['Read', 'Write'], 'model': 'm'}})
+    for chunk in ('Work', 'ing on it'):
+        out({{'type': 'stream_event', 'session_id': sid, 'event': {{'type': 'content_block_delta', 'index': 0,
+             'delta': {{'type': 'text_delta', 'text': chunk}}}}}})
+    if mode == 'editor':
+        f = cwd / 'README.md'
+        f.write_text(f.read_text().replace('hello', 'hello there'))
+        out({{'type': 'assistant', 'session_id': sid, 'message': {{'content': [
+            {{'type': 'tool_use', 'id': 'ed1', 'name': 'Edit', 'input': {{'file_path': str(f), 'old_string': 'hello', 'new_string': 'hello there'}}}},
+            {{'type': 'tool_use', 'id': 'ed2', 'name': 'Edit', 'input': {{'file_path': str(cwd / 'nope.py'), 'old_string': 'a', 'new_string': 'b'}}}}]}}}})
+        out({{'type': 'user', 'session_id': sid, 'message': {{'content': [
+            {{'type': 'tool_result', 'tool_use_id': 'ed1', 'content': 'ok'}},
+            {{'type': 'tool_result', 'tool_use_id': 'ed2', 'content': 'File does not exist.', 'is_error': True}}]}}}})
+        out({{'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Edited.', 'session_id': sid, 'permission_denials': []}})
+        sys.exit(0)
     if mode == 'limited':
         out({{'type': 'result', 'subtype': 'success', 'is_error': True, 'result': 'Claude AI usage limit reached|1791306000',
              'session_id': sid, 'permission_denials': []}}); sys.exit(1)
@@ -184,7 +198,8 @@ def test_a_session_works_in_its_own_copy_and_your_project_is_untouched(lab):
     feed = code_studio.events(s['id'])
     assert [e['kind'] for e in feed][:3] == ['you', 'thinking', 'file']
     file_event = next(e for e in feed if e['kind'] == 'file')
-    assert file_event['path'] == 'step1.py' and file_event['change'] == 'write' and file_event['plus'] == 1
+    assert file_event['path'] == 'step1.py' and file_event['change'] == 'add' and file_event['plus'] == 1
+    assert file_event['diff'] == '@@ -0,0 +1,1 @@\n+print(1)'                 # the edit itself, shown in the feed
     cmd = next(e for e in feed if e['kind'] == 'tool' and e['tool'] == 'command')
     assert cmd['title'] == 'python -m pytest -q'
     assert next(e for e in feed if e['kind'] == 'result' and e['ref'] == cmd['ref'])['output'] == '3 passed'
@@ -636,3 +651,172 @@ def test_codex_gets_the_windows_note_in_code_sessions_not_reviews(lab, monkeypat
     lab.mode('codex', 'review')
     code_studio.review(s['id'], engine='chatgpt'); wait(s['id'])
     assert not lab.calls('codex')[-1]['stdin'].startswith(work_engines.WINDOWS_CODEX_NOTE)   # read-only: nothing to write
+
+
+
+# ---------------------------------------------------------------- the pro features
+
+def test_edits_show_their_diff_with_real_line_numbers_and_failed_edits_say_so(lab):
+    lab.mode('claude', 'editor')
+    s = wait(code_studio.start(lab.pid, 'Edit the readme', 'claude')['id'])
+    feed = code_studio.events(s['id'])
+    f = next(e for e in feed if e['kind'] == 'file')
+    assert f['path'] == 'README.md' and f['diff'] == '@@ -1,1 +1,1 @@\n-hello\n+hello there'
+    assert next(e for e in feed if e['kind'] == 'error')['text'].startswith("Couldn't change nope.py: File does not exist.")
+
+
+def test_live_text_streams_then_gives_way_to_the_stored_message(lab):
+    sid = 99
+    code_studio._feed_live(sid, {'kind': 'delta', 'text': 'Work'})
+    code_studio._feed_live(sid, {'kind': 'delta', 'text': 'ing'})
+    code_studio._feed_live(sid, {'kind': 'live', 'ref': 'c1', 'output': 'running…'})
+    lv = code_studio.live(sid)
+    assert lv['text'] == 'Working' and lv['outputs'] == {'c1': 'running…'}
+    code_studio._feed_live(sid, {'kind': 'text', 'text': 'Working'})
+    code_studio._feed_live(sid, {'kind': 'result', 'id': 'c1'})
+    v = code_studio.live(sid)['v']
+    assert code_studio.live(sid)['text'] == '' and code_studio.live(sid)['outputs'] == {}
+    code_studio._live.pop(sid)                                          # a step ends; the next one starts
+    assert code_studio.live(sid)['v'] > v                               # versions only go up: the page never goes back
+    assert code_engines.parse('claude', json.dumps({'type': 'stream_event', 'event': {'type': 'content_block_delta',
+        'delta': {'type': 'text_delta', 'text': 'Hi'}}}), Path('.'), {}) == [{'kind': 'delta', 'text': 'Hi'}]
+    assert code_engines.parse('chatgpt', json.dumps({'type': 'item.updated', 'item': {'id': 'c9', 'type': 'command_execution',
+        'aggregated_output': 'line 1\n'}}), Path('.'), {}) == [{'kind': 'live', 'ref': 'c9', 'output': 'line 1\n'}]
+    s = wait(code_studio.start(lab.pid, 'Add a step', 'claude')['id'])
+    assert not any(e['kind'] == 'delta' for e in code_studio.events(s['id']))      # chunks are never stored
+
+
+def test_model_effort_and_plan_reach_the_tools(lab):
+    s = wait(code_studio.start(lab.pid, 'Plan a step', 'claude', model='opus', effort='high', plan=True)['id'])
+    call = lab.calls('claude')[-1]
+    argv = call['argv']
+    assert argv[argv.index('--model') + 1] == 'opus' and argv[argv.index('--effort') + 1] == 'high'
+    assert argv[argv.index('--permission-mode') + 1] == 'plan' and '--include-partial-messages' in argv
+    assert call['stdin'].startswith(code_engines.PLAN_ONLY)
+    assert code_studio.session(s['id'])['model'] == 'opus'                     # kept for the next message
+    code_studio.send(s['id'], 'Go ahead with that plan.')
+    wait(s['id'])
+    argv = lab.calls('claude')[-1]['argv']
+    assert argv[argv.index('--permission-mode') + 1] == 'acceptEdits' and argv[argv.index('--model') + 1] == 'opus'
+    code_studio.send(s['id'], 'Finish on ChatGPT', engine='chatgpt', model='', effort='max', plan=True)
+    wait(s['id'])
+    argv = lab.calls('codex')[-1]['argv']
+    assert 'sandbox_mode=read-only' in argv and 'model_reasoning_effort=high' in argv and '-m' not in argv
+    for bad in (dict(model='opus; rm -rf'), dict(effort='ludicrous')):
+        with pytest.raises(code_studio.CodeError):
+            code_studio.send(s['id'], 'x', **bad)
+
+
+def test_allow_once_and_always_like_claude_codes_prompt(lab):
+    s = wait(code_studio.start(lab.pid, 'Add a step', 'claude')['id'])
+    blocked = next(e for e in code_studio.events(s['id']) if e['kind'] == 'blocked')
+    assert blocked['command'] == 'rm -rf build'
+    code_studio.allow(s['id'], blocked['command'])
+    wait(s['id'])
+    argv = lab.calls('claude')[-1]['argv']
+    assert 'Bash(rm -rf build)' in argv and 'Bash(rm -rf build:*)' not in argv
+    assert '`rm -rf build`' in lab.calls('claude')[-1]['stdin']
+    code_studio.allow(s['id'], 'npm run build', always=True)
+    wait(s['id'])
+    code_studio.send(s['id'], 'Later message'); wait(s['id'])
+    assert 'Bash(npm run build:*)' in lab.calls('claude')[-1]['argv']           # this project, from now on
+    assert json.loads(code_studio.project(lab.pid)['allow']) == ['npm run build']
+    code_studio.forget_allowed(lab.pid, 'npm run build')
+    code_studio.send(s['id'], 'Again'); wait(s['id'])
+    assert 'Bash(npm run build:*)' not in lab.calls('claude')[-1]['argv']
+    for bad in ('rm (x)', 'two\nlines', ''):
+        with pytest.raises(code_studio.CodeError):
+            code_studio.allow(s['id'], bad)
+    # Codex can't allow one command: that message gets full access instead.
+    code_studio.send(s['id'], 'x', engine='chatgpt', allow=['make']); wait(s['id'])
+    assert 'sandbox_mode=danger-full-access' in lab.calls('codex')[-1]['argv']
+
+
+def test_at_mentions_point_the_plan_at_files(lab):
+    s = wait(code_studio.start(lab.pid, 'Look at @README.md and @nope.txt', 'claude')['id'])
+    call = lab.calls('claude')[-1]
+    assert call['stdin'].startswith('Files the owner pointed at (read these first): README.md\n')
+    assert code_studio.events(s['id'])[0]['files'] == ['README.md']
+
+
+def test_your_own_terminal_in_the_sessions_copy(lab):
+    s = wait(code_studio.start(lab.pid, 'Add a step', 'claude')['id'])
+    code_studio.terminal(s['id'], 'ls && echo done-here')
+    end = time.time() + 10
+    while code_studio.session(s['id'])['terminal'] and time.time() < end:
+        time.sleep(0.05)
+    done = [e for e in code_studio.events(s['id']) if e['kind'] == 'term_done'][-1]
+    assert done['exit_code'] == 0 and 'step1.py' in done['output'] and 'done-here' in done['output']
+    code_studio.terminal(s['id'], 'exit 3')
+    end = time.time() + 10
+    while code_studio.session(s['id'])['terminal'] and time.time() < end:
+        time.sleep(0.05)
+    assert [e for e in code_studio.events(s['id']) if e['kind'] == 'term_done'][-1]['exit_code'] == 3
+    code_studio.terminal(s['id'], 'sleep 30')
+    with pytest.raises(code_studio.CodeError, match='still running'):
+        code_studio.terminal(s['id'], 'ls')
+    assert code_studio.stop(s['id'])
+    with pytest.raises(code_studio.CodeError):
+        code_studio.terminal(s['id'], '')
+
+
+def test_file_tree_and_viewer_stay_inside_the_project(lab):
+    (lab.root / 'logo.bin').write_bytes(b'\x00\x01binary')
+    (lab.root / '.gitignore').write_text('secret.env\n'); (lab.root / 'secret.env').write_text('KEY=1')
+    git(lab.root, 'add', 'logo.bin', '.gitignore'); git(lab.root, 'commit', '-qm', 'more')
+    t = code_studio.tree(pid=lab.pid)
+    assert 'README.md' in t['files'] and 'logo.bin' in t['files'] and 'secret.env' not in t['files']
+    f = code_studio.read_file('README.md', pid=lab.pid)
+    assert f['text'] == 'hello\n' and f['lang'] == 'md'
+    assert code_studio.read_file('logo.bin', pid=lab.pid)['binary'] is True
+    for bad in ('secret.env', '../../etc/passwd', '/etc/passwd'):
+        with pytest.raises(code_studio.CodeError):
+            code_studio.read_file(bad, pid=lab.pid)
+    s = wait(code_studio.start(lab.pid, 'Add a step', 'claude')['id'])
+    assert 'step1.py' in code_studio.tree(s['id'])['files']                         # the session's copy
+    assert code_studio.read_file('step1.py', sid=s['id'])['lang'] == 'python'
+
+
+def test_history_of_checkpoints_and_their_diffs(lab):
+    sid = code_studio.start(lab.pid, 'Step one', 'claude')['id']; wait(sid)
+    code_studio.send(sid, 'Step two'); wait(sid)
+    h = code_studio.history(sid)
+    assert len(h) == 2 and h[0]['files'] == 1 and not h[0]['undone']
+    assert '+print(2)' in code_studio.commit_diff(sid, h[0]['sha'])
+    with pytest.raises(code_studio.CodeError):
+        code_studio.commit_diff(sid, 'HEAD~5')
+    code_studio.undo(sid)
+    assert code_studio.history(sid)[0]['undone']
+
+
+def test_keep_and_push(lab, tmp_path):
+    remote = tmp_path / 'remote.git'
+    subprocess.run(['git', 'init', '-q', '--bare', str(remote)], check=True)
+    git(lab.root, 'remote', 'add', 'origin', str(remote)); git(lab.root, 'push', '-q', '-u', 'origin', 'main')
+    s = wait(code_studio.start(lab.pid, 'Add a step', 'claude')['id'])
+    code_studio.keep(s['id'], push=True)
+    pushed = code_studio.events(s['id'])[-1]
+    assert pushed['kind'] == 'pushed' and pushed['ok'] and pushed['text'] == 'Pushed to GitHub.'
+    assert 'step1.py' in subprocess.run(['git', 'ls-tree', '-r', '--name-only', 'main'], cwd=remote,
+                                        capture_output=True, text=True).stdout
+    git(lab.root, 'remote', 'set-url', 'origin', str(tmp_path / 'gone.git'))
+    s2 = wait(code_studio.start(lab.pid, 'Another step', 'claude')['id'])
+    kept = code_studio.keep(s2['id'], push=True)
+    assert kept['status'] == 'kept' and not code_studio.events(s2['id'])[-1]['ok']    # kept, even if the push fails
+
+
+def test_the_stream_sends_steps_and_live_text(api, lab):
+    client, _ = api
+    s = wait(code_studio.start(lab.pid, 'Add a step', 'claude')['id'])
+    code_studio._feed_live(s['id'], {'kind': 'delta', 'text': 'still typing'})
+    lines = [json.loads(l) for l in client.get(f"/api/code/sessions/{s['id']}/stream", params={'once': True}).text.splitlines()]
+    kinds = [l['t'] for l in lines]
+    assert kinds.count('live') == 1 and kinds.index('live') == len(kinds) - 1
+    assert [l['kind'] for l in lines if l['t'] == 'event'][0] == 'you'
+    assert lines[-1]['text'] == 'still typing'
+    later = client.get(f"/api/code/sessions/{s['id']}/stream", params={'once': True, 'after': lines[-2]['id']}).text
+    assert [json.loads(l)['t'] for l in later.splitlines()] == ['live']
+    assert client.get(f"/api/code/sessions/{s['id']}/tree").json()['files']
+    assert client.get(f"/api/code/sessions/{s['id']}/file", params={'path': '../x'}).status_code == 400
+    assert client.post(f"/api/code/sessions/{s['id']}/terminal", json={'command': 'echo hi'},
+                       headers={'Origin': 'https://evil.example'}).status_code == 403

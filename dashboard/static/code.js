@@ -34,6 +34,9 @@
   let ov = null, current = null, detail = null, lastId = 0, feed = null, pollTimer = null, lastOverview = 0, quiet = 0;
   let project = Number(store.get('apex.code.project')) || null;
   let engine = store.get('apex.code.engine'), mode = store.get('apex.code.mode', 'safe');
+  let model = '', effort = '', planFirst = false, files = null, filesFor = null, live = null, liveSeen = -1, initial = true;
+  const MODELS = {claude: [['', 'Model: default'], ['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']],
+    chatgpt: [['', 'Model: default'], ['__other', 'Type a model…']]};
   const busy = () => !!(detail && (detail.working || detail.side));
 
   // ---------------------------------------------------------------- small pieces
@@ -192,6 +195,14 @@
       b.title = p ? (p.ready ? `${p.name}: ready` : `${p.name} ${p.why}`) : '';
     }
     for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
+    const sel = $('model'), opts = MODELS[engine] || MODELS.claude;
+    const known = opts.some(([v]) => v === model);
+    sel.replaceChildren(...opts.map(([v, t]) => { const o = el('option', '', t); o.value = v; return o; }));
+    if (model && !known) { const o = el('option', '', model); o.value = model; sel.insertBefore(o, sel.lastChild); }
+    sel.value = model || '';
+    $('model-custom').hidden = true;
+    $('effort').value = effort || '';
+    $('plan-toggle').setAttribute('aria-pressed', String(planFirst));
     const hint = $('hint'), p = ov && ov.plans.find(x => x.id === engine);
     let text = 'Every session works on its own branch. Nothing touches your project until you press Keep.', warn = false;
     if (p && !p.ready) { text = `Your ${p.name} ${p.why}. ${p.how || 'Pick the other plan.'}`; warn = true; }
@@ -199,7 +210,7 @@
     else if (mode === 'full') { text = 'Full: Apex may run any command, inside this session\'s own copy of the project.'; warn = true; }
     hint.textContent = text; hint.className = 'hint' + (warn ? ' warn' : '');
     const send = $('send'); send.classList.toggle('stop', busy());
-    send.replaceChildren(busy() ? '■ Stop' : current ? 'Send' : 'Build it', ...(busy() ? [] : [el('kbd', '', 'Ctrl ⏎')]));
+    send.replaceChildren(busy() ? '■ Stop' : planFirst ? 'Plan it' : current ? 'Send' : 'Build it', ...(busy() ? [] : [el('kbd', '', 'Ctrl ⏎')]));
     send.classList.toggle('primary', !busy());
     const finished = detail && detail.status !== 'ready';
     $('prompt').disabled = !!finished; send.disabled = !!finished;
@@ -208,6 +219,13 @@
   }
   for (const b of document.querySelectorAll('[data-engine]')) b.onclick = () => { engine = b.dataset.engine; store.set('apex.code.engine', engine); renderEngine(); };
   for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => { mode = b.dataset.mode; store.set('apex.code.mode', mode); renderEngine(); };
+  $('model').onchange = () => {
+    if ($('model').value === '__other') { $('model-custom').hidden = false; $('model-custom').value = model; $('model-custom').focus(); return; }
+    model = $('model').value;
+  };
+  $('model-custom').onchange = () => { model = $('model-custom').value.trim(); renderEngine(); };
+  $('effort').onchange = () => { effort = $('effort').value; };
+  $('plan-toggle').onclick = () => { planFirst = !planFirst; renderEngine(); };
   function autosize() { const p = $('prompt'); p.style.height = 'auto'; p.style.height = Math.min(p.scrollHeight + 2, innerHeight * 0.4) + 'px'; }
   $('prompt').addEventListener('input', autosize);
   $('prompt').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); $('brief-form').requestSubmit(); } });
@@ -217,16 +235,23 @@
     if (busy()) return stop();
     const text = $('prompt').value.trim();
     if (!text) { $('prompt').focus(); return; }
+    hideSuggest();
+    if (text.startsWith('/')) { $('prompt').value = ''; autosize(); return slash(text); }
+    if (text.startsWith('!')) {
+      if (!current) { say('Start a session first: terminal commands run in its own copy.', 'error'); return; }
+      $('prompt').value = ''; autosize(); return runTerminal(text.slice(1).trim());
+    }
     $('send').disabled = true;
+    const opts = {engine, mode, model, effort, plan: planFirst};
     try {
       if (!current) {
         if (!project) throw new Error('Add a project first.');
-        const s = await post('/api/code/sessions', {project_id: project, prompt: text, engine, mode});
-        $('prompt').value = ''; autosize();
+        const s = await post('/api/code/sessions', {project_id: project, prompt: text, ...opts});
+        $('prompt').value = ''; autosize(); planFirst = false;
         await open(s.id);
       } else {
-        detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, engine, mode});
-        $('prompt').value = ''; autosize(); renderEngine(); schedule(300);
+        detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, ...opts});
+        $('prompt').value = ''; autosize(); planFirst = false; renderEngine(); schedule(300);
       }
     } catch (err) { say(err.message, 'error'); }
     $('send').disabled = false; renderEngine();
@@ -268,7 +293,7 @@
 
   // ---------------------------------------------------------------- views
   function show(view) {
-    document.body.className = 'view-' + view;
+    document.body.classList.remove('view-home', 'view-session'); document.body.classList.add('view-' + view);
     $('home').hidden = view !== 'home'; $('session').hidden = view !== 'session';
     (view === 'home' ? $('home-slot') : $('session-slot')).append($('brief-form'));
   }
@@ -278,7 +303,8 @@
     if (location.hash !== `#s=${id}`) history.replaceState(null, '', `#s=${id}`);
     try {
       await Promise.all([refreshDetail(), loadOverview()]);  // fresh plan status: one may have hit its limit since
-      engine = detail.engine; mode = detail.mode;
+      engine = detail.engine; mode = detail.mode; model = detail.model || ''; effort = detail.effort || ''; planFirst = false;
+      files = null; live = null; liveSeen = -1; initial = true;
       const mine = ov && ov.plans.find(p => p.id === engine), other = ov && ov.plans.find(p => p.id === OTHER[engine]);
       if (mine && !mine.ready && other && other.ready) engine = other.id;      // its plan is resting: offer the ready one
       renderEngine(); await pull();
@@ -286,10 +312,12 @@
     catch (err) { say(err.message, 'error'); home(); return; }
     if (ov) renderRail();
     $('feed').scrollTop = $('feed').scrollHeight;
+    initial = false;
+    connect(id);
     schedule(400);
   }
   function home() {
-    current = null; detail = null; show('home');
+    current = null; detail = null; files = null; show('home'); disconnect();
     history.replaceState(null, '', location.pathname);
     engine = store.get('apex.code.engine') || (ov && ov.default_engine) || 'claude'; mode = store.get('apex.code.mode', 'safe');
     if (ov) { renderHome(); renderRail(); } renderEngine();
@@ -343,7 +371,7 @@
           const s = step('cmd'), line = el('div', 'line');
           line.append(el('span', 'sym', '$'), el('span', 'c', e.title), el('span', 'st muted', '…'));
           line.title = e.detail || e.title; s.dataset.label = `Running ${e.title}`;
-          s.append(line); if (e.ref) t.tools[e.ref] = s;
+          s.append(line); if (e.ref) { t.tools[e.ref] = s; s.dataset.ref = e.ref; }
         } else { t.reads = null; step('', ic(e.tool === 'web' ? '◌' : '·'), e.title); }
         break;
       case 'result': {
@@ -363,7 +391,8 @@
         if (e.plus != null) s.append(el('span', 'plus', `+${e.plus}`), el('span', 'minus', `−${e.minus || 0}`));
         if (e.change === 'add') s.append(el('span', 'muted', '  new file'));
         if (e.change === 'delete') s.append(el('span', 'muted', '  deleted'));
-        s.onclick = () => openDiff(e.path);
+        s.querySelector('.p').onclick = () => openDiff(e.path);
+        if (e.diff) s.append(inlineDiff(e.diff));
         break;
       }
       case 'todo': {
@@ -372,7 +401,33 @@
         if (t.todo) t.todo.replaceWith(box); else t.tl.append(box);
         t.todo = box; break;
       }
-      case 'blocked': step('blocked', ic('⛔'), `Blocked in Safe mode: ${e.title}. Switch to Full if you trust it.`); break;
+      case 'blocked': {
+        const s = step('blocked', ic('⛔'), `Safe mode stopped: ${e.title}`);
+        if (e.command && current && detail && detail.status === 'ready') {
+          const acts = el('div', 'acts');
+          acts.append(button('Allow once', () => allowCmd(e.command, false), 'primary'),
+            button('Always allow in this project', () => allowCmd(e.command, true)));
+          s.append(acts);
+        }
+        break;
+      }
+      case 'term': {
+        const line = el('div', 'line');
+        line.append(el('span', 'sym you-sym', '❯'), el('span', 'c', e.command), el('span', 'st muted', '…'));
+        const s = step('cmd term', line); s.dataset.ref = e.ref; s.dataset.label = `You ran ${e.command}`;
+        t.tools[e.ref] = s; termLog(e); break;
+      }
+      case 'term_done': {
+        const s = t.tools[e.ref] || $('feed').querySelector(`[data-ref="${CSS.escape(e.ref)}"]`);
+        if (s) {
+          const st = s.querySelector('.st'); st.className = 'st ' + (e.exit_code === 0 ? 'ok' : 'bad');
+          st.textContent = e.exit_code === 0 ? `✓ ${clock(e.seconds || 0)}` : `✗ exit ${e.exit_code ?? '?'}`;
+          s.querySelectorAll('.live-out').forEach(x => x.remove());
+          if (e.output) { const d = el('details', 'more'); d.open = true; d.append(el('summary', '', 'Output'), el('pre', 'out', e.output)); s.append(d); }
+        }
+        termLog(e); break;
+      }
+      case 'pushed': step(e.ok ? 'mark' : 'error', e.ok ? `⇡ ${e.text}` : e.text); break;
       case 'error': step('error', ic('✗'), e.text); break;
       case 'checkpoint': step('mark', e.catch_up ? 'Caught up with your latest work' : `Checkpoint · ${e.files} file${e.files === 1 ? '' : 's'} saved on the session's branch`); break;
       case 'undo': step('mark', `↶ Undid a step (${e.files} file${e.files === 1 ? '' : 's'})`); break;
@@ -417,10 +472,20 @@
     signed_out: ['⚠ Plan not signed in', 'warnish'], missing: ['⚠ Plan not set up', 'warnish'], failed: ['✗ Stopped with an error', 'done-bad'],
     interrupted: ['⚠ Interrupted', 'warnish']};
   function renderDone(e, t) {
+    if (!initial) chime(e.status);
+    if (e.plan && e.status === 'done') {                    // Plan first: the plan, then Build it
+      if (t.lastProse) t.lastProse.classList.add('final');
+      const c = el('div', 'card2 done-ok'), h = el('div', 'h');
+      h.append('📋 Plan ready', el('span', 'st', `${clock(e.seconds || 0)} · nothing changed yet`));
+      const acts = el('div', 'acts');
+      acts.append(button('▶ Build it', () => sendText('Go ahead with that plan.'), 'primary'),
+        button('Change the plan', () => { $('prompt').value = 'Change the plan: '; $('prompt').focus(); planFirst = true; renderEngine(); }));
+      c.append(h, acts); t.tl.append(c); return;
+    }
     const [label, cls] = DONE[e.status] || [e.status, ''];
     if (e.status === 'done' && t.lastProse && plain(t.lastText) === plain(e.summary)) t.lastProse.classList.add('final');
     const c = el('div', 'card2 ' + cls), h = el('div', 'h');
-    const bits = [clock(e.seconds || 0), e.files ? `${e.files} file${e.files === 1 ? '' : 's'} this step` : 'no file changes', e.total != null ? `${e.total} in total` : '', `on your ${NAME[e.engine] || 'plan'}`];
+    const bits = [clock(e.seconds || 0), e.files ? `${e.files} file${e.files === 1 ? '' : 's'} this step` : 'no file changes', e.total != null ? `${e.total} in total` : '', e.tokens ? `${tokens(e.tokens)} tokens` : '', `on your ${NAME[e.engine] || 'plan'}`];
     h.append(label, el('span', 'st', bits.filter(Boolean).join(' · ')));
     c.append(h);
     if (e.summary && !(e.status === 'done' && t.lastProse && t.lastProse.classList.contains('final'))) { const p = el('div', 'prose'); p.append(md(e.summary)); c.append(p); }
@@ -478,24 +543,31 @@
       if (current) await pull();
       if (Date.now() - lastOverview > (current ? 15000 : 6000)) await loadOverview();
     } catch (err) { console.warn('[Code] update failed, retrying:', err); }   // offline for a moment, or a bug: never silent
-    schedule(document.hidden ? 10000 : busy() ? 1000 : 4000);
+    schedule(document.hidden ? 10000 : stream.on ? 5000 : busy() ? 1000 : 4000);
   }
-  const REFRESH = new Set(['done', 'checkpoint', 'review', 'checks', 'kept', 'discarded', 'conflict', 'undo', 'file', 'review_started', 'checks_started', 'you']);
+  const REFRESH = new Set(['done', 'checkpoint', 'review', 'checks', 'kept', 'discarded', 'conflict', 'undo', 'file', 'review_started', 'checks_started', 'you', 'term_done', 'pushed']);
   async function pull() {
     const id = current;
     const {events} = await api(`/api/code/sessions/${id}/events?after=${lastId}`);
     if (id !== current) return;
-    const nearBottom = $('feed').scrollHeight - $('feed').scrollTop - $('feed').clientHeight < 160;
-    let refresh = false;
-    for (const e of events) {
-      lastId = Math.max(lastId, e.id);
-      render(e);
-      if (REFRESH.has(e.kind)) refresh = true;
-    }
+    const refresh = take(events);
     // The change list costs Apex some git work: fetch it when something changed, and now and then.
     if (refresh || (busy() && ++quiet % 5 === 0)) await refreshDetail();
     working();
-    if (nearBottom && events.length) $('feed').scrollTop = $('feed').scrollHeight;
+    if (!stream.on && busy()) { try { showLive(await api(`/api/code/sessions/${id}/live`)); } catch (_) {} }
+  }
+  // New steps, from the stream or a poll: drawn once each, in order.
+  function take(events) {
+    const nearBottom = $('feed').scrollHeight - $('feed').scrollTop - $('feed').clientHeight < 160;
+    let refresh = false;
+    for (const e of events) {
+      if (e.id <= lastId) continue;
+      lastId = e.id;
+      render(e);
+      if (REFRESH.has(e.kind)) refresh = true;
+    }
+    if (events.length) { placeLive(); if (nearBottom) $('feed').scrollTop = $('feed').scrollHeight; }
+    return refresh;
   }
   async function refreshDetail() {
     detail = await api(`/api/code/sessions/${current}`);
@@ -510,12 +582,12 @@
     meta.append(el('span', '', s.project), el('code', '', s.branch || ''), el('span', 'badge ' + s.engine, NAME[s.engine]));
     if (s.mode === 'full') meta.append(el('span', 'badge full', 'FULL'));
     if (s.status !== 'ready') meta.append(el('span', 'badge ' + (s.status === 'kept' ? 'kept' : ''), s.status === 'kept' ? 'KEPT' : 'THROWN AWAY'));
-    const files = s.changes.files;
-    $('c-count').textContent = files.length ? `${files.length} · +${s.changes.plus} −${s.changes.minus}` : '';
-    $('side-count').textContent = files.length ? String(files.length) : '';
+    const changed = s.changes.files;
+    $('c-count').textContent = changed.length ? `${changed.length} · +${s.changes.plus} −${s.changes.minus}` : '';
+    $('side-count').textContent = changed.length ? String(changed.length) : '';
     const list = $('c-files'); list.replaceChildren();
-    if (!files.length) list.append(el('p', 'fine', s.status === 'discarded' ? 'Thrown away.' : 'No changes yet.'));
-    for (const f of files) {
+    if (!changed.length) list.append(el('p', 'fine', s.status === 'discarded' ? 'Thrown away.' : 'No changes yet.'));
+    for (const f of changed) {
       const b = el('button', 'frow ' + f.change); b.type = 'button'; b.title = f.path;
       b.append(el('span', 'k', f.change === 'add' ? '+' : f.change === 'delete' ? '−' : '●'), el('span', 'p', f.path),
         el('span', 'plus', f.plus == null ? 'bin' : `+${f.plus}`), el('span', 'minus', f.minus == null ? '' : `−${f.minus}`));
@@ -546,10 +618,14 @@
     $('k-out').hidden = !s.check_output; $('k-out').textContent = s.check_output || '';
     // Actions
     const ready = s.status === 'ready', idle = ready && !busy();
-    $('a-keep').disabled = !idle || !files.length || !!s.conflict;
+    $('a-keep').disabled = !idle || !changed.length || !!s.conflict;
+    $('a-push').disabled = $('a-keep').disabled;
+    $('s-tokens').textContent = s.tokens ? `${tokens(s.tokens)} tokens` : '';
+    $('t-where').textContent = s.worktree || '';
+    $('t-cmd').disabled = !ready;
     $('a-keep').textContent = s.status === 'kept' ? '✓ Kept' : `✓ Keep it${proj && proj.branch ? ` → ${proj.branch}` : ''}`;
     $('a-undo').disabled = !idle; $('a-catchup').disabled = !idle; $('a-discard').disabled = !ready;
-    $('r-go').disabled = !idle || !files.length; $('k-go').disabled = !idle || !ready;
+    $('r-go').disabled = !idle || !changed.length; $('k-go').disabled = !idle || !ready;
     $('a-folder').disabled = !ready;
     $('a-where').textContent = ready ? `Working copy: ${s.worktree}` : s.status === 'kept' ? `Merged as ${s.kept_commit.slice(0, 10)}.` : '';
   }
@@ -567,7 +643,7 @@
   async function review() { try { detail = await post(`/api/code/sessions/${current}/review`, {}); renderDetail(); renderEngine(); schedule(200); } catch (err) { say(err.message, 'error'); } }
   const runChecks = () => act('checks');
   async function sendText(text) {
-    try { detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, engine, mode}); renderEngine(); schedule(200); }
+    try { detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, engine, mode, model, effort, plan: false}); renderEngine(); schedule(200); }
     catch (err) { say(err.message, 'error'); }
   }
   $('a-keep').onclick = async () => {
@@ -611,7 +687,8 @@
     for (const line of text.split('\n')) {
       let cls = 'ctx', l = '', r = '';
       if (line.startsWith('@@')) { const m = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)/); if (m) { a = +m[1]; b = +m[2]; } cls = 'hunk'; }
-      else if (/^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode|similarity|rename |old mode|new mode)/.test(line)) continue;
+      else if (line.startsWith('diff --git ')) { cls = 'file'; l = ''; r = ''; const row = el('div', 'dl file'); row.append(el('span', 'ln'), el('span', 'ln'), el('span', 'tx', line.replace(/^diff --git a\/(.*) b\/.*$/, '$1'))); box.append(row); continue; }
+      else if (/^(index |--- |\+\+\+ |new file mode|deleted file mode|similarity|rename |old mode|new mode)/.test(line)) continue;
       else if (line.startsWith('+')) { cls = 'add'; r = b++; }
       else if (line.startsWith('-')) { cls = 'del'; l = a++; }
       else if (line.startsWith('\\')) cls = 'hunk';
@@ -629,6 +706,372 @@
   $('diff-prev').onclick = () => stepDiff(-1); $('diff-next').onclick = () => stepDiff(1);
   $('diff-close').onclick = () => $('diff').close();
   $('diff').addEventListener('keydown', e => { if (e.key === 'ArrowDown' || e.key === 'j') stepDiff(1); if (e.key === 'ArrowUp' || e.key === 'k') stepDiff(-1); });
+
+  // ---------------------------------------------------------------- live: the stream, typing, running output
+  // One request that stays open and brings every step as it happens (one JSON per
+  // line), read with fetch so it carries the token. If it can't connect, polling
+  // takes over, so nothing depends on it.
+  const stream = {on: false, gen: 0, fails: 0, ctrl: null};
+  function disconnect() { stream.gen++; stream.on = false; if (stream.ctrl) { try { stream.ctrl.abort(); } catch (_) {} } stream.ctrl = null; }
+  async function connect(id) {
+    disconnect();
+    const gen = stream.gen;
+    if (!window.ReadableStream || !window.AbortController) return;
+    while (gen === stream.gen && current === id) {
+      stream.ctrl = new AbortController();
+      try {
+        const r = await fetch(`/api/code/sessions/${id}/stream?after=${lastId}`, {headers: auth(), signal: stream.ctrl.signal});
+        if (!r.ok || !r.body) throw new Error(`stream ${r.status}`);
+        stream.on = true; stream.fails = 0;
+        const reader = r.body.getReader(), dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const {value, done} = await reader.read();
+          if (done || gen !== stream.gen) break;
+          buf += dec.decode(value, {stream: true});
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+            if (line.trim()) onStream(JSON.parse(line));
+          }
+        }
+      } catch (err) { if (gen !== stream.gen) return; stream.fails++; console.warn('[Code] live stream dropped, retrying:', err && err.message); }
+      stream.on = false;
+      if (gen !== stream.gen || stream.fails > 3) return;                   // polling carries on alone
+      await new Promise(r => setTimeout(r, 400 * (stream.fails + 1)));
+    }
+  }
+  let refreshSoon = null;
+  function onStream(m) {
+    if (m.t === 'event') {
+      const {t, ...e} = m;
+      if (take([e])) { clearTimeout(refreshSoon); refreshSoon = setTimeout(() => refreshDetail().then(working).catch(() => {}), 250); }
+      working();
+    } else if (m.t === 'live') showLive(m);
+  }
+  function showLive(lv) {
+    if (!lv || lv.v <= liveSeen) return;               // never go back to an older snapshot
+    liveSeen = lv.v; live = lv;
+    const nearBottom = $('feed').scrollHeight - $('feed').scrollTop - $('feed').clientHeight < 160;
+    let box = $('feed').querySelector('.typing');
+    if (lv.text || lv.thinking) {
+      if (!box) { box = el('div', 'typing'); box.append(el('div', 'think'), el('div', 'prose')); $('feed').append(box); }
+      box.querySelector('.think').textContent = lv.thinking ? '✻ ' + lv.thinking.slice(-280) : '';
+      const p = box.querySelector('.prose'); p.replaceChildren(md(lv.text));
+      (p.lastElementChild && !/^(PRE|UL)$/.test(p.lastElementChild.tagName) ? p.lastElementChild : p).append(el('span', 'cursor', '▍'));   // right after the last word
+    } else if (box) { box.remove(); box = null; }
+    for (const [ref, out] of Object.entries(lv.outputs || {})) {
+      const s = (feed && feed.turn && feed.turn.tools[ref]) || $('feed').querySelector(`[data-ref="${CSS.escape(ref)}"]`);
+      if (!s) continue;
+      let pre = s.querySelector('.live-out');
+      if (!pre) { pre = el('pre', 'out live-out'); s.append(pre); }
+      pre.textContent = out; pre.scrollTop = pre.scrollHeight;
+    }
+    placeLive();
+    if (nearBottom) $('feed').scrollTop = $('feed').scrollHeight;
+  }
+  function placeLive() {                                  // typing, then "working", always last
+    const box = $('feed').querySelector('.typing'); if (box) $('feed').append(box);
+    const w = $('feed').querySelector('.working'); if (w) $('feed').append(w);
+  }
+  const tokens = n => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  let audio = null;
+  function chime(status) {                                // a soft two-note chime when a step ends
+    if (store.get('apex.code.sound', 'on') !== 'on') return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const notes = status === 'done' ? [660, 880] : [440, 330];
+      notes.forEach((f, i) => {
+        const o = audio.createOscillator(), g = audio.createGain(), t0 = audio.currentTime + i * 0.12;
+        o.frequency.value = f; o.type = 'sine'; g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.06, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25);
+        o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + 0.3);
+      });
+    } catch (_) {}
+  }
+
+  // ---------------------------------------------------------------- inline diffs
+  function inlineDiff(text) {
+    const lines = text.split('\n').length;
+    const box = el('div', 'inline-diff'); box.append(renderDiff(text));
+    if (lines > 24) {
+      box.classList.add('folded');
+      const more = button(`Show all ${lines} lines`, () => { box.classList.remove('folded'); more.remove(); }, 'small more-lines');
+      const wrap = el('div'); wrap.append(box, more); return wrap;
+    }
+    return box;
+  }
+
+  // ---------------------------------------------------------------- allow, terminal
+  async function allowCmd(command, always) {
+    try {
+      detail = await post(`/api/code/sessions/${current}/allow`, {command, always});
+      say(always ? `Allowed from now on in this project: ${command}` : `Allowed once: ${command}`, 'good');
+      renderEngine(); schedule(200);
+    } catch (err) { say(err.message, 'error'); }
+  }
+  async function runTerminal(command) {
+    if (!command) return;
+    try { await post(`/api/code/sessions/${current}/terminal`, {command}); termHistory.unshift(command); termAt = -1; schedule(200); }
+    catch (err) { say(err.message, 'error'); }
+  }
+  const termHistory = []; let termAt = -1;
+  function termLog(e) {
+    const log = $('t-log');
+    if (e.kind === 'term') {
+      const row = el('div', 't-row'); row.dataset.ref = e.ref;
+      row.append(el('div', 't-cmd', '❯ ' + e.command), el('pre', 'out', '…'));
+      log.prepend(row);
+    } else {
+      const row = log.querySelector(`[data-ref="${CSS.escape(e.ref)}"]`);
+      if (row) { row.querySelector('pre').textContent = (e.output || '(no output)') + `\n[exit ${e.exit_code ?? '?'} · ${clock(e.seconds || 0)}]`; row.classList.toggle('bad', e.exit_code !== 0); }
+    }
+  }
+  $('t-form').onsubmit = e => { e.preventDefault(); const c = $('t-cmd').value.trim(); $('t-cmd').value = ''; runTerminal(c); };
+  $('t-cmd').addEventListener('keydown', e => {
+    if (e.key === 'ArrowUp' && termHistory.length) { termAt = Math.min(termAt + 1, termHistory.length - 1); $('t-cmd').value = termHistory[termAt]; e.preventDefault(); }
+    if (e.key === 'ArrowDown') { termAt = Math.max(termAt - 1, -1); $('t-cmd').value = termAt < 0 ? '' : termHistory[termAt]; e.preventDefault(); }
+  });
+
+  // ---------------------------------------------------------------- slash commands
+  const SLASH = [
+    ['/plan', 'Plan first: it reads and writes a plan, changes nothing', 'task'],
+    ['/review', 'Second opinion from the other plan, out of 10'],
+    ['/test', 'Run the project checks in this session'],
+    ['/undo', 'Undo the last step'],
+    ['/keep', 'Keep it: merge into your branch'],
+    ['/push', 'Keep it and git push'],
+    ['/catchup', 'Bring in your latest commits'],
+    ['/discard', 'Throw this session away'],
+    ['/model', 'Choose the model (fable, opus, sonnet, haiku…)', 'name'],
+    ['/effort', 'low, medium, high or max', 'level'],
+    ['/claude', 'Next messages on your Claude plan'],
+    ['/chatgpt', 'Next messages on your ChatGPT plan'],
+    ['/safe', 'Safe mode'], ['/full', 'Full mode'],
+    ['/files', 'Browse the project files'], ['/history', 'Checkpoints of this session'],
+    ['/terminal', 'Open the terminal (or type !command)'],
+    ['/new', 'Start a new session'], ['/look', 'Switch the Terminal / Studio look'], ['/sound', 'Chime on or off'],
+  ];
+  async function slash(text) {
+    const [cmd, ...rest] = text.split(/\s+/); const arg = rest.join(' ').trim();
+    const need = () => { if (!current) { say('Open a session first.', 'error'); return false; } return true; };
+    switch (cmd) {
+      case '/plan': planFirst = true; renderEngine(); if (arg) { $('prompt').value = arg; $('brief-form').requestSubmit(); } else $('prompt').focus(); break;
+      case '/review': if (need()) review(); break;
+      case '/test': if (need()) runChecks(); break;
+      case '/undo': if (need()) $('a-undo').click(); break;
+      case '/keep': if (need()) $('a-keep').click(); break;
+      case '/push': if (need()) $('a-push').click(); break;
+      case '/catchup': if (need()) $('a-catchup').click(); break;
+      case '/discard': if (need()) $('a-discard').click(); break;
+      case '/model': model = arg === 'default' ? '' : arg; renderEngine(); say(model ? `Model: ${model}` : 'Model: the plan\'s default', 'good'); break;
+      case '/effort': if (['', 'low', 'medium', 'high', 'max'].includes(arg)) { effort = arg; renderEngine(); say(`Effort: ${arg || 'default'}`, 'good'); } else say('Effort is low, medium, high or max.', 'error'); break;
+      case '/claude': case '/chatgpt': engine = cmd.slice(1); store.set('apex.code.engine', engine); renderEngine(); break;
+      case '/safe': case '/full': mode = cmd.slice(1); store.set('apex.code.mode', mode); renderEngine(); break;
+      case '/files': if (need()) tab('files'); break;
+      case '/history': if (need()) tab('history'); break;
+      case '/terminal': if (need()) { tab('terminal'); $('t-cmd').focus(); } break;
+      case '/new': home(); $('prompt').focus(); break;
+      case '/look': toggleLook(); break;
+      case '/sound': store.set('apex.code.sound', store.get('apex.code.sound', 'on') === 'on' ? 'off' : 'on'); say(`Chime ${store.get('apex.code.sound', 'on')}.`); break;
+      default: say(`Unknown command ${cmd}. Type / to see them all.`, 'error');
+    }
+  }
+
+  // ---------------------------------------------------------------- @ files and / commands, as you type
+  async function loadFiles() {
+    const key = current ? `s${current}` : `p${project}`;
+    if (files && filesFor === key) return files;
+    const r = await api(current ? `/api/code/sessions/${current}/tree` : `/api/code/projects/${project}/tree`);
+    files = r.files; filesFor = key; return files;
+  }
+  function fuzzy(list, q, n = 40) {
+    q = q.toLowerCase();
+    if (!q) return list.slice(0, n);
+    const scored = [];
+    for (const item of list) {
+      const s = item.toLowerCase(); let i = 0, score = 0, last = -1;
+      for (const ch of s) { if (i < q.length && ch === q[i]) { score += last === -1 ? 0 : (s.indexOf(ch, last) - last === 1 ? 3 : 1); last = s.indexOf(ch, last + 1); i++; } }
+      if (i === q.length) scored.push([score + (s.endsWith(q) ? 5 : 0) + (s.includes(q) ? 10 : 0) - s.length / 100, item]);
+    }
+    return scored.sort((a, b) => b[0] - a[0]).slice(0, n).map(x => x[1]);
+  }
+  let sugg = {items: [], at: 0, kind: '', start: 0};
+  function hideSuggest() { $('suggest').hidden = true; sugg.items = []; }
+  async function suggest() {
+    const p = $('prompt'), upto = p.value.slice(0, p.selectionStart);
+    const at = upto.match(/(?:^|\s)@([\w./\\-]*)$/), sl = upto.match(/^\/(\w*)$/);
+    if (sl) {
+      sugg = {kind: 'slash', start: 0, at: 0, items: SLASH.filter(([c]) => c.startsWith('/' + sl[1])).map(([c, d]) => ({value: c, label: c, hint: d}))};
+    } else if (at) {
+      let list = [];
+      try { list = await loadFiles(); } catch (_) { return hideSuggest(); }
+      sugg = {kind: 'file', start: upto.length - at[1].length - 1, at: 0, items: fuzzy(list, at[1], 12).map(f => ({value: '@' + f, label: f, hint: ''}))};
+    } else return hideSuggest();
+    const box = $('suggest'); box.replaceChildren();
+    if (!sugg.items.length) return hideSuggest();
+    sugg.items.forEach((it, i) => {
+      const r = el('div', 'sg' + (i === sugg.at ? ' on' : '')); r.setAttribute('role', 'option');
+      r.append(el('b', '', it.label), el('span', '', it.hint));
+      r.onmousedown = ev => { ev.preventDefault(); sugg.at = i; pick(); };
+      box.append(r);
+    });
+    box.hidden = false;
+  }
+  function pick() {
+    const it = sugg.items[sugg.at]; if (!it) return;
+    const p = $('prompt'), end = p.selectionStart;
+    const before = sugg.kind === 'slash' ? '' : p.value.slice(0, sugg.start), after = p.value.slice(end);
+    p.value = before + it.value + ' ' + after.replace(/^\S*/, '');
+    const pos = (before + it.value + ' ').length; p.setSelectionRange(pos, pos); hideSuggest(); autosize();
+  }
+  $('prompt').addEventListener('input', () => { suggest(); });
+  $('prompt').addEventListener('keydown', e => {
+    if ($('suggest').hidden) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); sugg.at = (sugg.at + (e.key === 'ArrowDown' ? 1 : -1) + sugg.items.length) % sugg.items.length;
+      [...$('suggest').children].forEach((c, i) => c.classList.toggle('on', i === sugg.at));
+    } else if ((e.key === 'Tab' || e.key === 'Enter') && !e.ctrlKey && !e.metaKey) { e.preventDefault(); pick(); }
+    else if (e.key === 'Escape') { e.stopPropagation(); hideSuggest(); }
+  }, true);
+  $('prompt').addEventListener('blur', () => setTimeout(hideSuggest, 150));
+
+  // ---------------------------------------------------------------- side tabs: files, terminal, history
+  function tab(name) {
+    for (const b of document.querySelectorAll('[data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
+    for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
+    if (innerWidth <= 1100) { $('side').classList.add('open'); $('scrim').hidden = false; }
+    if (name === 'files') renderFiles();
+    if (name === 'history') renderHistory();
+  }
+  for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => tab(b.dataset.tab);
+  async function renderFiles() {
+    const list = $('f-list');
+    try { await loadFiles(); } catch (err) { list.replaceChildren(el('p', 'fine', err.message)); return; }
+    const shown = fuzzy(files, $('f-filter').value.trim(), 300);
+    list.replaceChildren(...shown.map(f => {
+      const b = el('button', 'frow'); b.type = 'button'; b.title = f;
+      b.append(el('span', 'k', '·'), el('span', 'p', f)); b.onclick = () => openFile(f); return b;
+    }));
+    $('f-count').textContent = `${files.length.toLocaleString()} files${shown.length < files.length ? ` · showing ${shown.length}` : ''}`;
+  }
+  $('f-filter').addEventListener('input', renderFiles);
+  async function renderHistory() {
+    const list = $('h-list');
+    try {
+      const {checkpoints} = await api(`/api/code/sessions/${current}/history`);
+      list.replaceChildren(...(checkpoints.length ? checkpoints.map((c, i) => {
+        const b = el('button', 'frow' + (c.undone ? ' undone' : '')); b.type = 'button';
+        b.append(el('span', 'k', c.undone ? '↶' : '◆'), el('span', 'p', `${c.catch_up ? 'Caught up' : `Step ${checkpoints.length - i}`} · ${c.files} file${c.files === 1 ? '' : 's'}${c.undone ? ' · undone' : ''}`),
+          el('span', 'muted', c.short));
+        b.onclick = () => openCommit(c); return b;
+      }) : [el('p', 'fine', 'No checkpoints yet: one is saved after every step.')]));
+    } catch (err) { list.replaceChildren(el('p', 'fine', err.message)); }
+  }
+  async function openCommit(c) {
+    $('diff-path').textContent = `Checkpoint ${c.short}`; $('diff-stat').textContent = `${c.files} file${c.files === 1 ? '' : 's'}`;
+    $('diff-body').replaceChildren(el('p', 'fine', 'Loading…')); if (!$('diff').open) $('diff').showModal();
+    try { $('diff-body').replaceChildren(renderDiff(await api(`/api/code/sessions/${current}/commit?sha=${c.sha}`, {}, 'text'))); }
+    catch (err) { $('diff-body').replaceChildren(el('p', 'fine', err.message)); }
+  }
+
+  // ---------------------------------------------------------------- the code viewer, with colours
+  const KW = {
+    python: 'and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield self',
+    js: 'async await break case catch class const continue default delete do else export extends false finally for function if import in instanceof let new null of return static super switch this throw true try typeof undefined var void while yield',
+    css: '', html: '', json: 'true false null', md: '', yaml: 'true false null', toml: 'true false', shell: 'if then else fi for do done while case esac echo set call goto exit', sql: 'select from where insert update delete create table into values and or not null join on group by order limit',
+  };
+  function highlight(text, lang) {
+    const frag = document.createDocumentFragment();
+    const kws = new Set((KW[lang] || '').split(' ').filter(Boolean));
+    const comment = {python: '#[^\\n]*', yaml: '#[^\\n]*', toml: '#[^\\n]*', shell: '(?:#|::|REM )[^\\n]*', sql: '--[^\\n]*',
+      js: '//[^\\n]*|/\\*[\\s\\S]*?\\*/', css: '/\\*[\\s\\S]*?\\*/', html: '<!--[\\s\\S]*?-->', json: '(?!)', md: '(?!)'}[lang] || '(?!)';
+    const re = new RegExp(`(${comment})|("""[\\s\\S]*?"""|'''[\\s\\S]*?'''|"(?:\\\\.|[^"\\\\\\n])*"|'(?:\\\\.|[^'\\\\\\n])*'|\`(?:\\\\.|[^\`\\\\])*\`)|(\\b\\d[\\d_.xXa-fA-F]*\\b)|([A-Za-z_$][\\w$-]*)`, 'g');
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) frag.append(text.slice(last, m.index));
+      if (m[1]) frag.append(el('span', 'tk-c', m[1]));
+      else if (m[2]) frag.append(el('span', 'tk-s', m[2]));
+      else if (m[3]) frag.append(el('span', 'tk-n', m[3]));
+      else if (kws.has(m[4])) frag.append(el('span', 'tk-k', m[4]));
+      else if (lang === 'css' && /^[a-z-]+$/.test(m[4]) && text[re.lastIndex] === ':') frag.append(el('span', 'tk-p', m[4]));
+      else frag.append(m[4]);
+      last = re.lastIndex;
+    }
+    if (last < text.length) frag.append(text.slice(last));
+    return frag;
+  }
+  let viewing = null;
+  async function openFile(path) {
+    viewing = path;
+    $('viewer-path').textContent = path; $('viewer-meta').textContent = '';
+    $('viewer-body').replaceChildren(el('p', 'fine', 'Loading…'));
+    if (!$('viewer').open) $('viewer').showModal();
+    try {
+      const f = await api(current ? `/api/code/sessions/${current}/file?path=${encodeURIComponent(path)}` : `/api/code/projects/${project}/file?path=${encodeURIComponent(path)}`);
+      if (f.binary || f.too_big) { $('viewer-body').replaceChildren(el('p', 'fine', f.binary ? 'A binary file.' : `Too big to show here (${(f.size / 1024).toFixed(0)} KB).`)); return; }
+      const lines = f.text.split('\n'); const shown = lines.slice(0, 6000);
+      $('viewer-meta').textContent = `${lines.length.toLocaleString()} lines${f.lang ? ' · ' + f.lang : ''}`;
+      const gutter = el('pre', 'gutter', shown.map((_, i) => i + 1).join('\n'));
+      const code = el('pre', 'code'); code.append(highlight(shown.join('\n'), f.lang));
+      $('viewer-body').replaceChildren(gutter, code);
+    } catch (err) { $('viewer-body').replaceChildren(el('p', 'fine', err.message)); }
+  }
+  $('viewer-close').onclick = () => $('viewer').close();
+  $('viewer-mention').onclick = () => {
+    const p = $('prompt'); p.value = (p.value.trimEnd() + ' @' + viewing + ' ').trimStart(); $('viewer').close(); closeDrawers(); p.focus(); autosize();
+  };
+
+  // ---------------------------------------------------------------- Ctrl+K: everything you can do
+  let palItems = [], palAt = 0;
+  function paletteItems() {
+    const items = [];
+    if (current && detail && detail.status === 'ready') {
+      items.push(['⚖ Second opinion', () => review()], ['▶ Run checks', () => runChecks()], ['↶ Undo last step', () => $('a-undo').click()],
+        ['✓ Keep it', () => $('a-keep').click()], ['⇡ Keep & push', () => $('a-push').click()], ['⇣ Catch up', () => $('a-catchup').click()],
+        ['❯ Terminal', () => { tab('terminal'); $('t-cmd').focus(); }], ['◆ History', () => tab('history')], ['🗂 Files', () => tab('files')],
+        ['✕ Throw away', () => $('a-discard').click()]);
+    }
+    items.push(['＋ New session', () => { home(); $('prompt').focus(); }], ['📋 Plan first', () => { planFirst = true; renderEngine(); $('prompt').focus(); }],
+      ['◐ Switch look', toggleLook], [`Use your ${NAME[OTHER[engine]]}`, () => { engine = OTHER[engine]; renderEngine(); }]);
+    for (const s of (ov ? ov.sessions : []).slice(0, 30)) items.push([`Session: ${s.title}`, () => open(s.id)]);
+    for (const f of (files || []).slice(0, 4000)) items.push([`File: ${f}`, () => openFile(f)]);
+    return items;
+  }
+  function openPalette() {
+    if (!files && (current || project)) loadFiles().then(() => { if ($('palette').open) renderPalette(); }).catch(() => {});
+    $('palette-q').value = ''; palAt = 0; renderPalette(); $('palette').showModal(); $('palette-q').focus();
+  }
+  function renderPalette() {
+    const all = paletteItems(), labels = fuzzy(all.map(x => x[0]), $('palette-q').value.trim(), 14);
+    palItems = labels.map(l => all.find(x => x[0] === l));
+    palAt = Math.min(palAt, Math.max(0, palItems.length - 1));
+    $('palette-list').replaceChildren(...palItems.map(([label, fn], i) => {
+      const r = el('div', 'sg' + (i === palAt ? ' on' : ''), label); r.setAttribute('role', 'option');
+      r.onclick = () => { $('palette').close(); fn(); }; return r;
+    }));
+  }
+  $('palette-q').addEventListener('input', () => { palAt = 0; renderPalette(); });
+  $('palette-q').addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); palAt = (palAt + (e.key === 'ArrowDown' ? 1 : -1) + palItems.length) % Math.max(1, palItems.length); renderPalette(); }
+    if (e.key === 'Enter' && palItems[palAt]) { e.preventDefault(); const fn = palItems[palAt][1]; $('palette').close(); fn(); }
+  });
+  $('palette-btn').onclick = openPalette;
+
+  // ---------------------------------------------------------------- the look
+  function applyLook() {
+    const term = store.get('apex.code.look', 'term') === 'term';
+    document.body.classList.toggle('term', term);
+    $('look-btn').textContent = term ? 'Studio look' : 'Terminal look';
+  }
+  function toggleLook() { store.set('apex.code.look', store.get('apex.code.look', 'term') === 'term' ? 'studio' : 'term'); applyLook(); }
+  $('look-btn').onclick = toggleLook;
+  $('a-push').onclick = async () => {
+    const proj = ov.projects.find(p => p.id === detail.project_id);
+    if (!await confirmBox('Keep and push?', `This merges the session into ${proj && proj.branch ? proj.branch : 'your branch'} of ${detail.project}, then runs git push.`, 'Keep & push')) return;
+    try { await post(`/api/code/sessions/${current}/keep`, {push: true}); say('Kept. Pushing…', 'good'); await loadOverview(); await refreshDetail(); schedule(200); }
+    catch (err) { say(err.message, 'error'); }
+  };
 
   // ---------------------------------------------------------------- dialogs, voice out, drawers, keys
   function confirmBox(title, text, ok) {
@@ -662,6 +1105,8 @@
   document.addEventListener('keydown', e => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
     const dialog = [...document.querySelectorAll('dialog')].some(d => d.open);
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (!$('palette').open) openPalette(); return; }
+    if (e.ctrlKey && e.key === '`' && current) { e.preventDefault(); tab('terminal'); $('t-cmd').focus(); return; }
     if (e.key === 'Escape' && busy() && !dialog) { e.preventDefault(); stop(); }
     else if (e.key === '/' && !typing && !dialog) { e.preventDefault(); $('prompt').focus(); }
   });
@@ -675,5 +1120,5 @@
     if (m) await open(Number(m[1])); else home();
     schedule(1000);
   }
-  show('home'); boot();
+  applyLook(); show('home'); boot();
 })();

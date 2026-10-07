@@ -50,6 +50,13 @@ OUTPUT_TAIL = 2000
 RETRYING = re.compile(r'^(Reconnecting|Falling back|Retrying)\b', re.I)
 # The tool no longer has the conversation to resume (seen with the real tools).
 RESUME_LOST = re.compile(r'no rollout found|No conversation found', re.I)
+EFFORTS = ('low', 'medium', 'high', 'max')
+CODEX_EFFORT = {'low': 'low', 'medium': 'medium', 'high': 'high', 'max': 'high'}
+MODEL = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,63}$')
+ALLOWED_COMMAND = re.compile(r'^[^\n\r()]{1,300}$')     # fits inside a Bash(...) rule
+PLAN_ONLY = ('Plan only, for now: read what you need, then write a short step-by-step plan for the request below '
+             '(the files you would change and how, and how you would check it). Do not change any file yet.')
+DIFF_CAP = 12000
 
 
 def error_text(text: str) -> str:
@@ -59,16 +66,41 @@ def error_text(text: str) -> str:
     return we._tidy('\n'.join(keep))
 
 
-def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None = None) -> list[str]:
+def check_options(options: dict | None) -> dict:
+    """Model, effort, plan-only and allowed commands for one message, checked:
+    every value here ends up on a command line."""
+    o = dict(options or {})
+    if o.get('model') and not MODEL.match(str(o['model'])):
+        raise ValueError('That model name has characters Apex does not pass on.')
+    if o.get('effort') and o['effort'] not in EFFORTS:
+        raise ValueError(f"Effort is one of: {', '.join(EFFORTS)}.")
+    for key in ('allow', 'always'):
+        cmds = o.get(key) or []
+        if not isinstance(cmds, list) or any(not isinstance(c, str) or not ALLOWED_COMMAND.match(c) for c in cmds):
+            raise ValueError('An allowed command is one line, without brackets, at most 300 characters.')
+        o[key] = [c.strip() for c in cmds if c.strip()]
+    o['plan'] = bool(o.get('plan'))
+    return o
+
+
+def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None = None, options: dict | None = None) -> list[str]:
     if mode not in MODES:
         raise ValueError('Mode is safe, full or review.')
     if resume and not SESSION_ID.match(resume):
         raise ValueError('That session id is not one Apex made.')
+    o = check_options(options)
     if engine == 'claude':
-        cmd = [exe, '-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
-               '--allowedTools', *CLAUDE_TOOLS[mode], '--strict-mcp-config']
+        tools = list(CLAUDE_TOOLS[mode])
+        if mode != 'review':                 # Allow once: exactly that command. Always: it, with any arguments.
+            tools += [f'Bash({c})' for c in o['allow']] + [f'Bash({c}:*)' for c in o['always']]
+        cmd = [exe, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+               '--permission-mode', 'plan' if o['plan'] else 'acceptEdits', '--allowedTools', *tools, '--strict-mcp-config']
         if mode == 'review':
             cmd += ['--disallowedTools', *REVIEW_DENIED]
+        if o.get('model'):
+            cmd += ['--model', o['model']]
+        if o.get('effort'):
+            cmd += ['--effort', o['effort']]
         if resume:
             cmd += ['--resume', resume]
         return cmd
@@ -79,7 +111,13 @@ def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None =
     cmd = [exe, 'exec']
     if resume:
         cmd += ['resume']
-    cmd += ['--json', '--skip-git-repo-check', '-c', f'sandbox_mode={CODEX_SANDBOX[mode]}']
+    # Codex can't allow one command: an allowed command gets that message full access.
+    sandbox = 'read-only' if o['plan'] else 'danger-full-access' if o['allow'] and mode != 'review' else CODEX_SANDBOX[mode]
+    cmd += ['--json', '--skip-git-repo-check', '-c', f'sandbox_mode={sandbox}']
+    if o.get('model'):
+        cmd += ['-m', o['model']]
+    if o.get('effort'):
+        cmd += ['-c', f"model_reasoning_effort={CODEX_EFFORT[o['effort']]}"]
     mode_nt = we.codex_windows_sandbox()
     if mode_nt and os.name == 'nt':
         cmd += ['-c', f'windows.sandbox={mode_nt}']
@@ -127,6 +165,64 @@ def _delta(old, new) -> tuple[int, int]:
         if tag in ('replace', 'insert'):
             plus += j2 - j1
     return plus, minus
+
+
+def _run_git(folder, *args) -> subprocess.CompletedProcess | None:
+    try:
+        return subprocess.run(['git', '-c', 'core.quotepath=false', *args], cwd=str(folder), capture_output=True,
+                              text=True, encoding='utf-8', errors='replace', timeout=30, **we._hidden())
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _cap(text: str) -> str:
+    return text if len(text) <= DIFF_CAP else text[:DIFF_CAP] + f'\n… (cut: {len(text):,} characters in all)'
+
+
+def file_diff(folder, path: str) -> str:
+    """What this step did to a file so far: git's diff since the last checkpoint,
+    or the whole file if it is new."""
+    p = _run_git(folder, 'diff', '--no-renames', 'HEAD', '--', path)
+    text = p.stdout if p and p.returncode == 0 else ''
+    if text.strip():
+        return _cap('\n'.join(l for l in text.splitlines() if not l.startswith(('diff --git', 'index ', '--- ', '+++ '))))
+    tracked = _run_git(folder, 'ls-files', '--error-unmatch', '--', path)
+    if tracked is not None and tracked.returncode == 0:
+        return ''                                          # unchanged since the last checkpoint
+    try:
+        lines = (Path(folder) / path).read_text(encoding='utf-8').splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ''
+    return _cap(f'@@ -0,0 +1,{len(lines)} @@\n' + '\n'.join('+' + l for l in lines))
+
+
+def edit_hunk(folder, path: str, old, new) -> str:
+    """One edit as a diff hunk with real line numbers: found in the file as it is now."""
+    a, b = str(old or '').splitlines(), str(new or '').splitlines()
+    try:
+        text = (Path(folder) / path).read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        text = ''
+    idx = text.find(str(new)) if new else -1
+    body = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag == 'equal':
+            body += [' ' + l for l in a[i1:i2]]
+        else:
+            body += ['-' + l for l in a[i1:i2]] + ['+' + l for l in b[j1:j2]]
+    if idx < 0:
+        return _cap('\n'.join(['@@ @@'] + body))
+    lines = text.splitlines()
+    start = text[:idx].count('\n')
+    before, after = lines[max(0, start - 3):start], lines[start + len(b):start + len(b) + 3]
+    first = start - len(before) + 1
+    head = f'@@ -{first},{len(before) + len(a) + len(after)} +{first},{len(before) + len(b) + len(after)} @@'
+    return _cap('\n'.join([head] + [' ' + l for l in before] + body + [' ' + l for l in after]))
+
+
+def diff_counts(diff: str) -> tuple[int, int]:
+    lines = diff.splitlines()
+    return (sum(1 for l in lines if l.startswith('+')), sum(1 for l in lines if l.startswith('-')))
 
 
 def _claude_tool(name: str, args: dict, folder: Path) -> list[dict]:
@@ -184,6 +280,14 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
         elif d.get('subtype') == 'api_retry':
             out.append({'kind': 'note', 'text': 'The plan is busy; retrying…'})
         return out
+    if kind == 'stream_event':                            # live chunks, as Claude writes
+        ev = d.get('event') or {}
+        delta = ev.get('delta') or {} if ev.get('type') == 'content_block_delta' else {}
+        if delta.get('type') == 'text_delta' and delta.get('text'):
+            return [{'kind': 'delta', 'text': delta['text']}]
+        if delta.get('type') == 'thinking_delta' and delta.get('thinking'):
+            return [{'kind': 'delta', 'thinking': delta['thinking']}]
+        return []
     if kind == 'assistant':
         for block in (d.get('message') or {}).get('content') or []:
             t = block.get('type')
@@ -193,9 +297,14 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
             elif t == 'thinking' and block.get('thinking', '').strip():
                 out.append({'kind': 'thinking', 'text': _tail(block['thinking'], 4000)})
             elif t == 'tool_use':
-                state.setdefault('tools', {})[block.get('id')] = block.get('name')
-                for e in _claude_tool(block.get('name') or '', block.get('input') or {}, folder):
-                    out.append({**e, 'id': block.get('id')})
+                name, args = block.get('name') or '', block.get('input') or {}
+                state.setdefault('tools', {})[block.get('id')] = name
+                made = [{**e, 'id': block.get('id')} for e in _claude_tool(name, args, folder)]
+                if made and made[0]['kind'] == 'file':
+                    # The edit happens after this message: show it, with its diff, once it's done.
+                    state.setdefault('pending', {})[block.get('id')] = (name, args, made)
+                else:
+                    out += made
         return out
     if kind == 'user':
         content = (d.get('message') or {}).get('content')
@@ -207,6 +316,24 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
             if isinstance(text, list):
                 text = '\n'.join(str(x.get('text', '')) for x in text if isinstance(x, dict))
             ok = not block.get('is_error')
+            pending = state.get('pending', {}).pop(block.get('tool_use_id'), None)
+            if pending:
+                tname, args, made = pending
+                if not ok:
+                    out.append({'kind': 'error', 'text': f"Couldn't change {made[0]['path']}: {_short(text, 300)}"})
+                    continue
+                for e in made:
+                    if tname in ('Edit', 'MultiEdit'):
+                        edits = args.get('edits') if tname == 'MultiEdit' else [args]
+                        e['diff'] = _cap('\n'.join(edit_hunk(folder, e['path'], x.get('old_string'), x.get('new_string'))
+                                                   for x in edits or []))
+                    else:
+                        e['diff'] = file_diff(folder, e['path'])
+                        if e['diff']:
+                            e['plus'], e['minus'] = diff_counts(e['diff'])
+                            e['change'] = 'add' if e['diff'].startswith('@@ -0,0 ') else 'update'
+                    out.append(e)
+                continue
             # Command output is worth showing; a file's contents are not (they're in the diff).
             show = name in ('Bash', 'PowerShell') or not ok
             out.append({'kind': 'result', 'id': block.get('tool_use_id'), 'ok': ok,
@@ -216,7 +343,8 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
         for denied in d.get('permission_denials') or []:
             args = denied.get('tool_input') or {}
             what = args.get('command') or args.get('file_path') or args.get('url') or ''
-            out.append({'kind': 'blocked', 'title': f"{denied.get('tool_name')}: {_short(what, 160)}"})
+            out.append({'kind': 'blocked', 'title': f"{denied.get('tool_name')}: {_short(what, 160)}",
+                        'command': args.get('command') if denied.get('tool_name') in ('Bash', 'PowerShell') else None})
         failed = bool(d.get('is_error')) or d.get('subtype') not in (None, 'success')
         detail = '\n'.join([str(d.get('result') or '')] + [str(e) for e in d.get('errors') or []])
         status = we._classify(detail, failed)
@@ -259,6 +387,10 @@ def _parse_codex(d: dict, folder: Path, state: dict) -> list[dict]:
         return [{'kind': 'text', 'text': item['text']}]
     if t == 'reasoning' and done and str(item.get('text', '')).strip():
         return [{'kind': 'thinking', 'text': _tail(item['text'], 4000)}]
+    if t == 'agent_message' and kind == 'item.updated' and item.get('text'):
+        return [{'kind': 'delta', 'replace': item['text']}]
+    if t == 'command_execution' and kind == 'item.updated' and item.get('aggregated_output'):
+        return [{'kind': 'live', 'ref': iid, 'output': _tail(item['aggregated_output'])}]
     if t == 'command_execution':
         if kind == 'item.started':
             return [{'kind': 'tool', 'tool': 'command', 'title': _short(item.get('command'), 200), 'id': iid}]
@@ -266,9 +398,14 @@ def _parse_codex(d: dict, folder: Path, state: dict) -> list[dict]:
             return [{'kind': 'result', 'id': iid, 'ok': item.get('exit_code') == 0 and item.get('status') != 'failed',
                      'exit_code': item.get('exit_code'), 'output': _tail(item.get('aggregated_output'))}]
     if t == 'file_change' and done:
-        return [{'kind': 'file', 'path': _rel(c.get('path', ''), folder), 'id': iid,
-                 'change': {'add': 'add', 'delete': 'delete'}.get(c.get('kind'), 'update'), 'plus': None, 'minus': None}
-                for c in item.get('changes') or []]
+        out = []
+        for c in item.get('changes') or []:
+            path = _rel(c.get('path', ''), folder)
+            diff = file_diff(folder, path) if c.get('kind') != 'delete' else ''
+            plus, minus = diff_counts(diff) if diff else (None, None)
+            out.append({'kind': 'file', 'path': path, 'id': iid, 'diff': diff, 'plus': plus, 'minus': minus,
+                        'change': {'add': 'add', 'delete': 'delete'}.get(c.get('kind'), 'update')})
+        return out
     if t == 'web_search' and kind == 'item.started':
         return [{'kind': 'tool', 'tool': 'web', 'title': f"Searched the web: {_short(item.get('query'), 120)}", 'id': iid}]
     if t == 'todo_list':
@@ -285,7 +422,7 @@ def _parse_codex(d: dict, folder: Path, state: dict) -> list[dict]:
 
 def turn(engine: str, prompt: str, folder: Path, mode: str = 'safe', resume: str | None = None,
          on_event: Callable[[dict], None] = lambda e: None, run_id: str | None = None,
-         timeout: int = TURN_TIMEOUT, env_extra: dict | None = None) -> dict:
+         timeout: int = TURN_TIMEOUT, env_extra: dict | None = None, options: dict | None = None) -> dict:
     """Run one message's work, calling on_event for each step. Never raises
     for a failed run. Returns the final 'done' event plus the session id."""
     def finish(status, summary, **more):
@@ -301,9 +438,11 @@ def turn(engine: str, prompt: str, folder: Path, mode: str = 'safe', resume: str
     if not signed['ok']:
         return finish('signed_out', f"Your {we.NAMES[engine]} {signed['why']}. {signed['how']}")
     try:
-        cmd = command(engine, exe, Path(folder), mode, resume)
+        cmd = command(engine, exe, Path(folder), mode, resume, options)
     except ValueError as exc:
         return finish('failed', str(exc))
+    if (options or {}).get('plan'):
+        prompt = f'{PLAN_ONLY}\n\n{prompt}'
     if engine == 'chatgpt' and mode != 'review':
         prompt = we.codex_prompt(prompt)
     env = we._env()

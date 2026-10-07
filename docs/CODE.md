@@ -57,6 +57,50 @@ git worktree under `ApexWork\code\`).
   ready.
 - **Keys:** Ctrl+Enter sends. Esc stops Apex mid-step. `/` jumps to the brief.
 
+## The power tools
+
+It works like Claude Code or Codex, in a page.
+
+- **Live typing.** The AI's words appear as it writes them (Claude Code's
+  `--include-partial-messages`). A command's output streams while it runs.
+  Everything arrives over one open connection the moment it happens, and
+  polling takes over if that connection drops.
+- **Inline diffs.** Every edit shows its red and green lines in the feed,
+  with real line numbers, found in the file as it is after the edit.
+  Click the file name for the whole diff.
+- **Allow once / Always allow.** When Safe mode stops a command, you can run
+  that exact command now, or let this project's sessions run it with any
+  arguments from now on. That's like Claude Code's permission prompt. On
+  Codex, which can't allow one command, the message gets full access.
+- **Model, effort, Plan first.**
+  - Pick Fable, Opus, Sonnet or Haiku for Claude, or type a model name for
+    ChatGPT.
+  - Effort goes from low to max.
+  - **Plan first:** the AI reads, then writes a plan and changes nothing
+    until you press **Build it**.
+- **`@` files.** Type `@` and pick any file in the project. The AI is told to
+  read those first.
+- **`/` commands.** `/plan`, `/review`, `/test`, `/undo`, `/keep`, `/push`,
+  `/catchup`, `/discard`, `/model`, `/effort`, `/claude`, `/chatgpt`,
+  `/safe`, `/full`, `/files`, `/history`, `/terminal`, `/new`, `/look`,
+  `/sound`.
+- **Terminal.** `!command` in the chat box, or the Terminal tab (↑/↓ for
+  history; Ctrl+\` opens it). It runs in the session's copy with your
+  project's `.venv`, and the output streams into the feed.
+- **Files.** The Files tab is the project's file tree with a fuzzy filter.
+  The viewer shows the code with colours and line numbers, and **@ Mention**
+  points the AI at that file.
+- **History.** Every checkpoint of the session, each with its diff.
+- **Ctrl+K.** Everything you can do, every session and every file, by name.
+- **Keep & push.** Keep it, then `git push`. If the push fails, the work is
+  still kept and the feed says why.
+- **Tokens.** Each step and the whole session show how many tokens they used,
+  from your plan, never API credits.
+- **Terminal look** (the default): dense and monospace like Claude Code.
+  **Studio look** is the roomier one. Switch with the button in the session's
+  header or `/look`.
+- **A chime** when a step ends, so you can look away (`/sound` turns it off).
+
 ## Safe and Full
 
 | | Claude plan (Claude Code) | ChatGPT plan (Codex) |

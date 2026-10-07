@@ -25,6 +25,7 @@ Coding never uses API credits: only the two plans, signed in on this PC.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -59,6 +60,46 @@ class CodeError(ValueError):
 _lock = threading.Lock()
 _turns: dict[int, str] = {}           # session id -> run id of its running turn
 _side: dict[int, str] = {}            # session id -> run id of a running review or checks
+_terms: dict[int, str] = {}           # session id -> run id of your terminal command
+_live: dict[int, dict] = {}           # session id -> what's being written right now (not stored)
+_live_seq = itertools.count(1)        # live versions only ever go up, across steps, so the page can't go back
+
+
+def _live_for(sid: int) -> dict:
+    with _lock:
+        return _live.setdefault(sid, {'v': next(_live_seq), 'text': '', 'thinking': '', 'outputs': {}})
+
+
+def live(sid: int) -> dict:
+    """The text the plan is typing, its thinking, and command output as it runs."""
+    lv = _live_for(sid)
+    with _lock:
+        return {'v': lv['v'], 'text': lv['text'][-20000:], 'thinking': lv['thinking'][-6000:],
+                'outputs': {k: v[-4000:] for k, v in lv['outputs'].items()}}
+
+
+def _feed_live(sid: int, e: dict) -> bool:
+    """Live chunks go to the live buffer; the stored message replaces them. True if consumed."""
+    lv = _live_for(sid)
+    with _lock:
+        if e['kind'] == 'delta':
+            if 'replace' in e:
+                lv['text'] = e['replace']
+            else:
+                lv['text'] += e.get('text', '')
+                lv['thinking'] += e.get('thinking', '')
+        elif e['kind'] == 'live':
+            lv['outputs'][str(e.get('ref'))] = e.get('output', '')
+        elif e['kind'] == 'text':
+            lv['text'] = ''
+        elif e['kind'] == 'thinking':
+            lv['thinking'] = ''
+        elif e['kind'] == 'result':
+            lv['outputs'].pop(str(e.get('id', e.get('ref'))), None)
+        else:
+            return False
+        lv['v'] = next(_live_seq)
+        return e['kind'] in ('delta', 'live')
 _recovered = False
 
 
@@ -85,6 +126,13 @@ def init_db() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL, ts REAL NOT NULL,
             kind TEXT NOT NULL, data TEXT NOT NULL)''')
         db.execute('CREATE INDEX IF NOT EXISTS code_events_session ON code_events (session_id, id)')
+        have = {r[1] for r in db.execute('PRAGMA table_info(code_sessions)')}
+        for col, ddl in (('model', "TEXT NOT NULL DEFAULT ''"), ('effort', "TEXT NOT NULL DEFAULT ''"),
+                         ('tokens', 'INTEGER NOT NULL DEFAULT 0')):
+            if col not in have:
+                db.execute(f'ALTER TABLE code_sessions ADD COLUMN {col} {ddl}')
+        if 'allow' not in {r[1] for r in db.execute('PRAGMA table_info(code_projects)')}:
+            db.execute("ALTER TABLE code_projects ADD COLUMN allow TEXT NOT NULL DEFAULT '[]'")
     if not _recovered:
         _recovered = True
         _recover()
@@ -258,6 +306,7 @@ def session(sid: int) -> dict:
     with _lock:
         s['working'] = sid in _turns
         s['side'] = 'review' if s['review_state'] == 'working' else ('checks' if s['check_state'] == 'running' else '')
+        s['terminal'] = sid in _terms
     s['engine_name'] = we.NAMES.get(s['engine'], s['engine'])
     s['since'] = None                                     # when the work now running began, for the page's clock
     if s['working'] or s['side']:
@@ -294,7 +343,8 @@ def _title(prompt: str) -> str:
     return first if len(first) <= 70 else first[:69].rstrip() + '…'
 
 
-def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'safe') -> dict:
+def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'safe', model: str = '',
+          effort: str = '', plan: bool = False) -> dict:
     """A new session: its own branch and working copy, then the first message."""
     prompt = _clean_prompt(prompt)
     if engine not in ENGINES:
@@ -333,7 +383,7 @@ def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'saf
     _set(sid, branch=branch, worktree=str(folder))
     notes = [f"Your {len(dirty)} unsaved change{'s' if len(dirty) != 1 else ''} in {proj['name']} "
              f"{'are' if len(dirty) != 1 else 'is'} not in this session: it starts from your last commit."] if dirty else []
-    return send(sid, prompt, engine, mode, _notes=notes)
+    return send(sid, prompt, engine, mode, _notes=notes, model=model, effort=effort, plan=plan)
 
 
 def _brief(s: dict, prompt: str) -> str:
@@ -364,10 +414,31 @@ def _recap(s: dict, new_prompt: str) -> str:
     return '\n'.join(lines)
 
 
-def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = None, _notes=()) -> dict:
-    """One message: Apex works on it in the background; the feed shows each step."""
+MENTION = re.compile(r'(?<![\w/])@([\w./\\-]+)')
+
+
+def mentions(sid: int, prompt: str) -> list[str]:
+    """Files the message points at with @path that exist in the session's copy."""
+    found = MENTION.findall(prompt)
+    if not found:
+        return []
+    files = set(tree(sid)['files'])
+    return [f.replace('\\', '/') for f in dict.fromkeys(found) if f.replace('\\', '/') in files]
+
+
+def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = None, _notes=(),
+         model: str | None = None, effort: str | None = None, plan: bool = False, allow=None, always=None) -> dict:
+    """One message: Apex works on it in the background; the feed shows each step.
+    model/effort stay with the session; plan and allow are for this message only."""
     prompt = _clean_prompt(prompt)
     s = session(sid)
+    model = s['model'] if model is None else str(model).strip()
+    effort = s['effort'] if effort is None else str(effort).strip()
+    try:
+        options = code_engines.check_options({'model': model, 'effort': effort, 'plan': plan,
+                                              'allow': list(allow or []), 'always': list(always or []) + _project_allow(s)})
+    except ValueError as exc:
+        raise CodeError(str(exc)) from exc
     if s['status'] != 'ready':
         raise CodeError('This session is finished (kept or thrown away). Start a new one.')
     engine = engine or s['engine']
@@ -396,15 +467,21 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
             text = prompt
         if s['pending_note'] and not first:
             text = s['pending_note'] + '\n\n' + text
-        event(sid, 'you', text=prompt, engine=engine, mode=mode)
+        pointed = mentions(sid, prompt)
+        if pointed:
+            text = f"Files the owner pointed at (read these first): {', '.join(pointed)}\n\n{text}"
+        event(sid, 'you', text=prompt, engine=engine, mode=mode, model=model, effort=effort, plan=bool(plan),
+              files=pointed, allow=list(allow or []))
         for note in _notes:
             event(sid, 'note', text=note)
         if switched and not first:
             event(sid, 'note', text=f'Switched to your {we.NAMES[engine]}. It gets a recap of the session so far.')
         resume = None if (switched or first) else s['engine_session']
-        _set(sid, engine=engine, mode=mode, turn_state='working', pending_note='',
+        _set(sid, engine=engine, mode=mode, model=model, effort=effort, turn_state='working', pending_note='',
              **({'engine_session': None} if switched else {}))
-        threading.Thread(target=_run_turn, args=(sid, run_id, engine, mode, text, resume, prompt),
+        with _lock:
+            _live[sid] = {'v': next(_live_seq), 'text': '', 'thinking': '', 'outputs': {}}
+        threading.Thread(target=_run_turn, args=(sid, run_id, engine, mode, text, resume, prompt, options),
                          daemon=True, name=f'ApexCode-{sid}').start()
     except Exception:
         with _lock:
@@ -413,7 +490,7 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
     return session(sid)
 
 
-def _run_turn(sid, run_id, engine, mode, text, resume, prompt) -> None:
+def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None) -> None:
     started = time.time()
     s = session(sid)
     folder = Path(s['worktree'])
@@ -425,16 +502,18 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt) -> None:
         def on_event(e):
             if e['kind'] == 'session':
                 _set(sid, engine_session=e['id'])
+            elif _feed_live(sid, e):
+                return
             elif e['kind'] != 'done':                    # the turn's end is recorded below, with its numbers
                 # A tool's own id (to pair a command with its result) is kept as `ref`.
                 event(sid, e['kind'], **{('ref' if k == 'id' else k): v for k, v in e.items() if k != 'kind'})
 
         extra = _venv(s['project_path'])
-        result = code_engines.turn(engine, text, folder, mode, resume, on_event, run_id, env_extra=extra)
+        result = code_engines.turn(engine, text, folder, mode, resume, on_event, run_id, env_extra=extra, options=options)
         if result['status'] == 'failed' and resume and code_engines.RESUME_LOST.search(result.get('summary') or ''):
             event(sid, 'note', text='The plan had lost this conversation, so Apex started it fresh with a recap.')
             result = code_engines.turn(engine, _recap(session(sid), prompt), folder, mode, None, on_event, run_id,
-                                       env_extra=extra)
+                                       env_extra=extra, options=options)
         if result.get('session'):
             _set(sid, engine_session=result['session'])
         locked = _wait_readable(folder)
@@ -452,8 +531,11 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt) -> None:
         total = _count_changed(sid)
         event(sid, 'done', status=result['status'], summary=(result.get('summary') or '')[:6000], seconds=took,
               files=files, total=total, engine=engine, tokens=result.get('tokens') or 0,
-              reset_at=result.get('reset_at'))
-        fields = {'turn_state': 'idle', 'last_status': result['status'], 'files_changed': total}
+              reset_at=result.get('reset_at'), plan=bool((options or {}).get('plan')))
+        fields = {'turn_state': 'idle', 'last_status': result['status'], 'files_changed': total,
+                  'tokens': (session(sid).get('tokens') or 0) + (result.get('tokens') or 0)}
+        with _lock:
+            _live.pop(sid, None)
         if result['status'] == 'done':
             fields['summary'] = (result.get('summary') or '')[:6000]
         _set(sid, **fields)
@@ -635,7 +717,7 @@ def diff(sid: int, path: str) -> str:
 def stop(sid: int) -> bool:
     """Stop whatever is running in the session, even if it is only just starting."""
     with _lock:
-        ids = [x for x in (_turns.get(sid), _side.get(sid)) if x]
+        ids = [x for x in (_turns.get(sid), _side.get(sid), _terms.get(sid)) if x]
     return any([we.stop(r, before_start=True) for r in ids])
 
 
@@ -695,7 +777,7 @@ def catch_up(sid: int) -> dict:
     return {**session(sid), 'caught_up': 'merged'}
 
 
-def keep(sid: int) -> dict:
+def keep(sid: int, push: bool = False) -> dict:
     """Merge the session into the project, then tidy away its working copy."""
     s = session(sid)
     _idle(s)
@@ -738,6 +820,11 @@ def keep(sid: int) -> dict:
           restart=Path(repo).resolve() == APEX_ROOT)
     _remove_copy(repo, folder)
     _git(repo, 'branch', '-d', s['branch'], check=False)
+    if push:
+        p = _git(repo, 'push', timeout=180, check=False)
+        said = (p.stderr or p.stdout).strip()
+        event(sid, 'pushed', ok=p.returncode == 0, into=target,
+              text=('Pushed to GitHub.' if p.returncode == 0 else f'Kept, but the push failed: {said[-400:]}'))
     return session(sid)
 
 
@@ -916,6 +1003,159 @@ def run_checks(sid: int) -> dict:
                 _side.pop(sid, None)
     threading.Thread(target=go, daemon=True, name=f'ApexCodeChecks-{sid}').start()
     return session(sid)
+
+
+# ---------------------------------------------------------------- allow, files, terminal, history
+
+def _project_allow(s: dict) -> list[str]:
+    try:
+        return [c for c in json.loads(project(s['project_id']).get('allow') or '[]') if isinstance(c, str)]
+    except (ValueError, CodeError):
+        return []
+
+
+def allow(sid: int, command: str, always: bool = False) -> dict:
+    """Safe mode blocked a command: run it now (Allow once), or let this project's
+    sessions run it, with any arguments, from now on (Always allow)."""
+    command = str(command or '').strip()
+    if not code_engines.ALLOWED_COMMAND.match(command):
+        raise CodeError('That command can\'t be allowed: one line, without brackets, at most 300 characters.')
+    s = session(sid)
+    if always:
+        rules = _project_allow(s)
+        if command not in rules:
+            rules.append(command)
+            with longterm._conn() as db:
+                db.execute('UPDATE code_projects SET allow=? WHERE id=?', (json.dumps(rules[-50:]), s['project_id']))
+    return send(sid, f'I allowed `{command}`. Run it now, then carry on with what you were doing.',
+                allow=[command])
+
+
+def forget_allowed(pid: int, command: str) -> dict:
+    rules = [c for c in json.loads(project(pid).get('allow') or '[]') if c != command]
+    with longterm._conn() as db:
+        db.execute('UPDATE code_projects SET allow=? WHERE id=?', (json.dumps(rules), pid))
+    return project(pid)
+
+
+TREE_LIMIT = 20000
+FILE_LIMIT = 512_000
+LANGS = {'.py': 'python', '.js': 'js', '.cjs': 'js', '.mjs': 'js', '.ts': 'js', '.tsx': 'js', '.jsx': 'js',
+         '.json': 'json', '.css': 'css', '.html': 'html', '.md': 'md', '.yml': 'yaml', '.yaml': 'yaml',
+         '.toml': 'toml', '.sh': 'shell', '.cmd': 'shell', '.bat': 'shell', '.ps1': 'shell', '.sql': 'sql'}
+
+
+def _folder_of(sid: int | None, pid: int | None) -> Path:
+    if sid is not None:
+        s = session(sid)
+        if s['worktree'] and Path(s['worktree']).is_dir():
+            return Path(s['worktree'])
+        return Path(s['project_path'])
+    return Path(project(pid)['path'])
+
+
+def tree(sid: int | None = None, pid: int | None = None) -> dict:
+    """Every file git knows or would add (ignored files left out), for the file
+    tree and @mentions."""
+    folder = _folder_of(sid, pid)
+    out = _git(folder, 'ls-files', '--cached', '--others', '--exclude-standard', timeout=60)
+    files = sorted({l for l in out.splitlines() if l})
+    return {'files': files[:TREE_LIMIT], 'cut': len(files) > TREE_LIMIT, 'root': str(folder)}
+
+
+def read_file(path: str, sid: int | None = None, pid: int | None = None) -> dict:
+    """One file's text for the viewer. Only files in the tree: never anything else on the PC."""
+    folder = _folder_of(sid, pid)
+    path = str(path or '').replace('\\', '/')
+    if path not in set(tree(sid, pid)['files']):
+        raise CodeError('That file is not in this project.')
+    f = (folder / path)
+    if not f.is_file():
+        raise CodeError('That file was deleted.')
+    size = f.stat().st_size
+    if size > FILE_LIMIT:
+        return {'path': path, 'binary': False, 'too_big': True, 'size': size, 'text': '', 'lang': ''}
+    raw = f.read_bytes()
+    if b'\0' in raw[:4096]:
+        return {'path': path, 'binary': True, 'too_big': False, 'size': size, 'text': '', 'lang': ''}
+    return {'path': path, 'binary': False, 'too_big': False, 'size': size,
+            'text': raw.decode('utf-8', errors='replace'), 'lang': LANGS.get(Path(path).suffix.lower(), '')}
+
+
+TERMINAL_TIMEOUT = 900
+
+
+def terminal(sid: int, command: str) -> dict:
+    """Run your own command in the session's copy, like a terminal there. Output
+    streams into the feed. One at a time per session."""
+    command = str(command or '').strip()
+    if not command or len(command) > 2000:
+        raise CodeError('Type a command (one line, at most 2000 characters).')
+    s = session(sid)
+    if s['status'] != 'ready':
+        raise CodeError('This session is finished (kept or thrown away).')
+    run_id = f'term-{sid}-{int(time.time() * 1000)}'
+    with _lock:
+        if sid in _terms:
+            raise CodeError('Your last command is still running. Wait, or press Stop.')
+        _terms[sid] = run_id
+    ref = run_id
+    event(sid, 'term', command=command, ref=ref)
+    argv = ['cmd.exe', '/d', '/s', '/c', command] if os.name == 'nt' else ['bash', '-lc', command]
+    env = we._env()
+    env.update(_venv(s['project_path']))
+
+    def go():
+        started, out, code = time.time(), [], None
+        try:
+            proc = subprocess.Popen(argv, cwd=s['worktree'], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', **we._hidden())
+            we.track(run_id, proc)
+            timer = threading.Timer(TERMINAL_TIMEOUT, lambda: we._kill_tree(proc))
+            timer.daemon = True
+            timer.start()
+            for line in proc.stdout:
+                out.append(line)
+                if len(out) > 4000:
+                    del out[:2000]
+                _feed_live(sid, {'kind': 'live', 'ref': ref, 'output': ''.join(out)[-4000:]})
+            proc.wait()
+            timer.cancel()
+            stopped = we.untrack(run_id)
+            code = proc.returncode
+            if stopped:
+                out.append('\n(stopped)')
+        except (OSError, ValueError) as exc:
+            out.append(f'Could not run it: {exc}')
+        finally:
+            text = ''.join(out)
+            _feed_live(sid, {'kind': 'result', 'id': ref})
+            event(sid, 'term_done', ref=ref, exit_code=code, output=text[-6000:], seconds=round(time.time() - started))
+            with _lock:
+                _terms.pop(sid, None)
+    threading.Thread(target=go, daemon=True, name=f'ApexCodeTerm-{sid}').start()
+    return session(sid)
+
+
+def history(sid: int) -> list[dict]:
+    """The session's checkpoints, newest first, with what each changed."""
+    s = session(sid)
+    undone = {e['sha'] for e in events(sid) if e['kind'] == 'undo'}
+    out = []
+    for e in reversed([e for e in events(sid) if e['kind'] == 'checkpoint']):
+        out.append({'sha': e['sha'], 'short': e['sha'][:8], 'files': e.get('files', 0), 'ts': e['ts'],
+                    'undone': e['sha'] in undone, 'catch_up': bool(e.get('catch_up'))})
+    return out
+
+
+def commit_diff(sid: int, sha: str) -> str:
+    """One checkpoint's changes. Only the session's own checkpoints."""
+    s = session(sid)
+    if sha not in {e['sha'] for e in events(sid) if e['kind'] == 'checkpoint'}:
+        raise CodeError('That is not one of this session\'s checkpoints.')
+    folder = s['worktree'] if s['worktree'] and Path(s['worktree']).is_dir() else s['project_path']
+    text = _git(folder, 'show', '--no-renames', '--format=%s%n', sha, check=False).stdout
+    return text[:DIFF_LIMIT] + (f'\n… (cut: {len(text):,} characters)' if len(text) > DIFF_LIMIT else '')
 
 
 # ---------------------------------------------------------------- the page's overview
