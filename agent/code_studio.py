@@ -863,7 +863,8 @@ def discard(sid: int) -> dict:
 
 REVIEW = """You are giving a second opinion on a code change another AI made in this git repository, for {owner}.
 Be brutally honest: {owner} wants the truth, not flattery. Look for bugs, things that don't do what was asked,
-missing or weak tests, security problems and needless complexity. Read any file you need. Do not change anything.
+missing or weak tests, security problems and needless complexity. Read any file you need, and run the project's
+tests or checks if that helps you judge it. Do not change any file.
 
 What {owner} asked for:
 {asks}
@@ -922,7 +923,8 @@ def review(sid: int, engine: str | None = None) -> dict:
                 if e['kind'] in ('tool', 'file') and e.get('title', e.get('path')):
                     event(sid, 'review_step', title=e.get('title') or f"Read {e.get('path')}")
             result = code_engines.turn(engine, prompt, Path(folder), 'review', None, on_event, run_id,
-                                       timeout=1200, env_extra=_venv(s['project_path']))
+                                       timeout=1200, env_extra=_venv(s['project_path']),
+                                       options={'always': _project_allow(s)})
         except Exception as exc:
             result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
         finally:
