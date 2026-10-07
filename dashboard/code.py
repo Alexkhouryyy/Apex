@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
 import config
 from agent import code_studio
@@ -71,6 +71,8 @@ async def add_project(request: Request):
 @router.patch('/api/code/projects/{pid}')
 async def edit_project(pid: int, request: Request):
     body = await _json(request)
+    if isinstance(body.get('forget_allowed'), str):
+        return await _do(code_studio.forget_allowed, pid, body['forget_allowed'])
     return await _do(code_studio.update_project, pid, body.get('name'), body.get('checks'))
 
 
@@ -80,7 +82,8 @@ async def start_session(request: Request):
     if not isinstance(body.get('project_id'), int):
         raise HTTPException(400, 'Choose a project.')
     return await _do(code_studio.start, body['project_id'], body.get('prompt', ''),
-                     body.get('engine', 'claude'), body.get('mode', 'safe'))
+                     body.get('engine', 'claude'), body.get('mode', 'safe'), body.get('model') or '',
+                     body.get('effort') or '', body.get('plan') is True)
 
 
 @router.get('/api/code/sessions/{sid}')
@@ -110,11 +113,107 @@ async def file_diff(sid: int, request: Request, path: str = ''):
 @router.post('/api/code/sessions/{sid}/messages')
 async def send(sid: int, request: Request):
     body = await _json(request)
-    return await _do(code_studio.send, sid, body.get('prompt', ''), body.get('engine'), body.get('mode'))
+    return await _do(code_studio.send, sid, body.get('prompt', ''), body.get('engine'), body.get('mode'),
+                     model=body.get('model'), effort=body.get('effort'), plan=body.get('plan') is True)
 
 
 ACTIONS = {'stop': code_studio.stop, 'undo': code_studio.undo, 'catch-up': code_studio.catch_up,
-           'keep': code_studio.keep, 'discard': code_studio.discard, 'checks': code_studio.run_checks}
+           'discard': code_studio.discard, 'checks': code_studio.run_checks}
+
+
+@router.post('/api/code/sessions/{sid}/keep')
+async def keep(sid: int, request: Request):
+    body = await _json(request)
+    return await _do(code_studio.keep, sid, body.get('push') is True)
+
+
+@router.post('/api/code/sessions/{sid}/allow')
+async def allow(sid: int, request: Request):
+    body = await _json(request)
+    return await _do(code_studio.allow, sid, body.get('command', ''), body.get('always') is True)
+
+
+@router.post('/api/code/sessions/{sid}/terminal')
+async def terminal(sid: int, request: Request):
+    body = await _json(request)
+    return await _do(code_studio.terminal, sid, body.get('command', ''))
+
+
+@router.get('/api/code/sessions/{sid}/live')
+async def live(sid: int, request: Request):
+    _owner(request)
+    return code_studio.live(sid)
+
+
+@router.get('/api/code/sessions/{sid}/tree')
+async def session_tree(sid: int, request: Request):
+    _owner(request)
+    return await _do(code_studio.tree, sid)
+
+
+@router.get('/api/code/projects/{pid}/tree')
+async def project_tree(pid: int, request: Request):
+    _owner(request)
+    return await _do(code_studio.tree, None, pid)
+
+
+@router.get('/api/code/sessions/{sid}/file')
+async def session_file(sid: int, request: Request, path: str = ''):
+    _owner(request)
+    return await _do(code_studio.read_file, path, sid)
+
+
+@router.get('/api/code/projects/{pid}/file')
+async def project_file(pid: int, request: Request, path: str = ''):
+    _owner(request)
+    return await _do(code_studio.read_file, path, None, pid)
+
+
+@router.get('/api/code/sessions/{sid}/history')
+async def history(sid: int, request: Request):
+    _owner(request)
+    return {'checkpoints': await _do(code_studio.history, sid)}
+
+
+@router.get('/api/code/sessions/{sid}/commit')
+async def commit(sid: int, request: Request, sha: str = ''):
+    _owner(request)
+    return PlainTextResponse(await _do(code_studio.commit_diff, sid, sha))
+
+
+@router.get('/api/code/sessions/{sid}/stream')
+async def stream(sid: int, request: Request, after: int = 0, once: bool = False):
+    """Everything as it happens, one JSON object per line: stored steps ({"t":"event"}),
+    the live text and command output ({"t":"live"}), and a ping every 10 s. The page
+    reads it with fetch (which can carry the token) and falls back to polling."""
+    _owner(request)
+    await _do(code_studio.session, sid)
+
+    async def lines():
+        last, seen_live, quiet, started = max(0, after), -1, 0.0, asyncio.get_running_loop().time()
+        while True:
+            if await request.is_disconnected():
+                return
+            for e in await asyncio.to_thread(code_studio.events, sid, last):
+                last = e['id']
+                yield json.dumps({'t': 'event', **e}) + '\n'
+                quiet = 0.0
+            lv = code_studio.live(sid)
+            if lv['v'] != seen_live:
+                seen_live = lv['v']
+                yield json.dumps({'t': 'live', **lv}) + '\n'
+                quiet = 0.0
+            if once:                                          # what there is now, then close (tests, slow links)
+                return
+            quiet += 0.15
+            if quiet >= 10:
+                yield '{"t":"ping"}\n'
+                quiet = 0.0
+            if asyncio.get_running_loop().time() - started > 600:    # the page reconnects
+                return
+            await asyncio.sleep(0.15)
+    return StreamingResponse(lines(), media_type='application/x-ndjson',
+                             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 @router.post('/api/code/sessions/{sid}/review')

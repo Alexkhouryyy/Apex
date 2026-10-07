@@ -5,11 +5,11 @@
   <title>Apex · Code</title>
   <link rel="icon" href="/static/icons/apex-refined.svg">
   <link rel="stylesheet" href="/static/brand.css?v=brand40">
-  <link rel="stylesheet" href="/static/code.css?v=code-1">
-  <script src="/static/code.js?v=code-1" defer></script>
+  <link rel="stylesheet" href="/static/code.css?v=code-2">
+  <script src="/static/code.js?v=code-2" defer></script>
   <link rel="stylesheet" href="/static/theme.css">
 </head>
-<body class="view-home">
+<body class="view-home term">
 <div id="code-app">
   <header class="top">
     <button type="button" class="icon only-narrow" id="open-rail" aria-label="Sessions" aria-controls="rail">☰</button>
@@ -50,6 +50,9 @@
             <h1 id="s-title"></h1>
             <p class="meta" id="s-meta"></p>
           </div>
+          <span class="tokens" id="s-tokens" title="Tokens this session (your plan's usage, never API credits)"></span>
+          <button type="button" class="small" id="look-btn" title="Terminal or Studio look">Studio look</button>
+          <button type="button" class="small" id="palette-btn" title="Everything you can do (Ctrl+K)">⌘ Ctrl K</button>
           <button type="button" class="only-narrow" id="open-side" aria-controls="side">Changes <em id="side-count"></em></button>
         </div>
         <div class="feed" id="feed" aria-live="polite"></div>
@@ -58,8 +61,9 @@
 
       <form id="brief-form" class="composer" autocomplete="off">
         <div class="brief">
-          <textarea id="prompt" rows="3" maxlength="20000" aria-label="Tell Apex what to do"
-            placeholder="Tell Apex what to build, fix or explain…"></textarea>
+          <div class="suggest" id="suggest" role="listbox" hidden></div>
+          <textarea id="prompt" rows="3" maxlength="20000" aria-label="Tell Apex what to do" spellcheck="false"
+            placeholder="Tell Apex what to build, fix or explain…  /  for commands · @ for files · ! to run a command"></textarea>
           <div class="brief-bar">
             <div class="seg" id="engine-seg" role="radiogroup" aria-label="Which plan does the work">
               <button type="button" role="radio" data-engine="claude"><i class="dot claude"></i>Claude plan</button>
@@ -69,6 +73,13 @@
               <button type="button" role="radio" data-mode="safe" title="Edit files, run tests and git status/diff/log. Nothing else.">Safe</button>
               <button type="button" role="radio" data-mode="full" title="Any command, inside the session's own copy of the project.">Full</button>
             </div>
+            <select id="model" aria-label="Model" title="Model"></select>
+            <input id="model-custom" class="model-custom" placeholder="model name" aria-label="Model name" spellcheck="false" hidden>
+            <select id="effort" aria-label="Effort" title="How hard it thinks">
+              <option value="">Effort: default</option><option value="low">Effort: low</option><option value="medium">Effort: medium</option>
+              <option value="high">Effort: high</option><option value="max">Effort: max</option>
+            </select>
+            <button type="button" class="toggle" id="plan-toggle" aria-pressed="false" title="Plan first: it reads and writes a plan, changes nothing until you say Build it">Plan first</button>
             <span class="grow"></span>
             <button type="button" class="mic" id="mic" aria-label="Talk instead of typing" title="Talk instead of typing">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
@@ -82,9 +93,28 @@
 
     <aside class="side" id="side" aria-label="Changes, second opinion and checks">
       <div class="side-head only-narrow"><b>This session</b><button type="button" class="icon" id="close-side" aria-label="Close">✕</button></div>
-      <section class="box">
+      <div class="tabs" id="side-tabs" role="tablist">
+        <button type="button" role="tab" data-tab="changes" aria-selected="true">Changes</button>
+        <button type="button" role="tab" data-tab="files" aria-selected="false">Files</button>
+        <button type="button" role="tab" data-tab="terminal" aria-selected="false">Terminal</button>
+        <button type="button" role="tab" data-tab="history" aria-selected="false">History</button>
+      </div>
+      <section class="box tab-pane" data-pane="changes">
         <h3>Changes <em id="c-count"></em></h3>
         <div id="c-files" class="files"></div>
+      </section>
+      <section class="box tab-pane" data-pane="files" hidden>
+        <input id="f-filter" placeholder="Find a file…" aria-label="Find a file" spellcheck="false">
+        <div id="f-list" class="files tall"></div>
+        <p class="fine" id="f-count"></p>
+      </section>
+      <section class="box tab-pane" data-pane="terminal" hidden>
+        <form id="t-form" class="t-form" autocomplete="off"><span class="sym">❯</span><input id="t-cmd" placeholder="Run a command in this session's copy" aria-label="Command" spellcheck="false"></form>
+        <div id="t-log" class="t-log"></div>
+        <p class="fine">Runs here: <code id="t-where"></code>. Same as <code>!command</code> in the chat box.</p>
+      </section>
+      <section class="box tab-pane" data-pane="history" hidden>
+        <div id="h-list" class="files tall"></div>
       </section>
       <section class="box review" id="box-review">
         <h3>Second opinion <small>brutally honest</small></h3>
@@ -101,7 +131,10 @@
         <div class="row"><button type="button" id="k-go">▶ Run checks</button></div>
       </section>
       <section class="box actions" id="box-actions">
-        <button type="button" class="primary keep" id="a-keep">✓ Keep it</button>
+        <div class="row keep-row">
+          <button type="button" class="primary keep" id="a-keep">✓ Keep it</button>
+          <button type="button" id="a-push" title="Keep it, then git push">Keep &amp; push</button>
+        </div>
         <div class="row">
           <button type="button" id="a-undo" title="Put the files back to before the last step">↶ Undo last step</button>
           <button type="button" id="a-catchup" title="Bring your latest commits into this session">⇣ Catch up</button>
@@ -125,6 +158,21 @@
     <button type="button" id="diff-close" aria-label="Close">✕</button>
   </div>
   <div id="diff-body" class="diff-body"></div>
+</dialog>
+
+<dialog id="viewer" aria-labelledby="viewer-path">
+  <div class="dialog-head">
+    <b id="viewer-path"></b> <span id="viewer-meta" class="muted"></span>
+    <span class="grow"></span>
+    <button type="button" id="viewer-mention" title="Point Apex at this file in your next message">@ Mention</button>
+    <button type="button" id="viewer-close" aria-label="Close">✕</button>
+  </div>
+  <div id="viewer-body" class="code-body"></div>
+</dialog>
+
+<dialog id="palette" aria-label="Command palette">
+  <input id="palette-q" placeholder="Type a command, a session or a file…" aria-label="Search" spellcheck="false" autocomplete="off">
+  <div id="palette-list" class="palette-list" role="listbox"></div>
 </dialog>
 
 <dialog id="confirm" aria-labelledby="confirm-title">

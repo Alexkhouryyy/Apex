@@ -254,9 +254,87 @@ dialog h2{font-size:18px;font-weight:600;margin:0 0 8px}
   .plan span{display:none}.plan{padding:3px 9px 3px 4px}.credits{display:none}
   .look{display:none}
   .meta code{display:none}
+  #look-btn,#palette-btn,.tokens{display:none}
+  .session-head{gap:8px}
+  .session-head h1{font-size:16px}
   .home{padding:26px 14px 40px}.home h1{font-size:30px}
   .feed{padding:16px 14px 8px}.session-head{padding:10px 12px}
   #session-slot{padding:0 10px 10px}
   .brief-bar{gap:6px}.seg button{padding:4px 8px}.send kbd{display:none}
   .timeline{margin-left:8px;padding-left:18px}.step::before{left:-23px}
 }
+
+/* ---------------------------------------------------------------- pro controls */
+.brief-bar select,.brief-bar .model-custom{width:auto;min-height:32px;padding:4px 8px;font-size:12.5px;background:var(--field)}
+.brief-bar .model-custom{width:150px;font-family:var(--mono)}
+.toggle{min-height:32px;padding:4px 11px;font-size:12.5px}
+.toggle[aria-pressed=true]{color:var(--a);border-color:var(--a);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--a) 45%,transparent)}
+.brief{position:relative}
+.suggest{position:absolute;left:10px;right:10px;bottom:calc(100% - 6px);z-index:30;background:#0d1822;border:1px solid var(--line2);border-radius:12px;
+  padding:6px;max-height:300px;overflow:auto;box-shadow:0 -12px 40px rgba(0,0,0,.45)}
+.sg{display:flex;gap:12px;align-items:baseline;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:13px}
+.sg b{font:500 12.5px var(--mono);color:var(--ink)}.sg span{color:var(--muted);font-size:12px}
+.sg.on,.sg:hover{background:#163042}
+.tokens{font:11.5px var(--mono);color:var(--muted);white-space:nowrap}
+.session-head .small{white-space:nowrap}
+
+/* ---------------------------------------------------------------- live typing, inline diffs, terminal steps */
+.typing{max-width:860px;margin:0 auto 10px;padding:6px 0 0 39px}
+.typing .think{font-size:12.5px;color:var(--muted);font-style:italic;margin-bottom:4px;white-space:pre-wrap}
+.typing .prose{color:var(--ink);font-size:14.5px;line-height:1.62}
+.cursor{display:inline-block;color:var(--a);animation:pulse .9s steps(2) infinite;margin-left:1px}
+.inline-diff{margin:6px 0 4px;border:1px solid var(--line);border-radius:8px;overflow:auto;font:12px/1.45 var(--mono);background:#060d14}
+.inline-diff.folded{max-height:330px;overflow:hidden;-webkit-mask:linear-gradient(#000 80%,transparent)}
+.inline-diff .dl{grid-template-columns:40px 40px 1fr}
+.more-lines{margin-top:4px}
+.dl.file{background:#10202d;color:var(--ink);font-weight:600}.dl.file .tx{color:var(--a)}
+.step.file .p{cursor:pointer}
+.step .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}.step .acts button{min-height:30px;font-size:12px}
+.you-sym{color:var(--warn)!important}
+.live-out{max-height:220px}
+.t-form{display:flex;align-items:center;gap:8px;background:#060d14;border:1px solid var(--line2);border-radius:9px;padding:2px 10px}
+.t-form .sym{color:var(--warn);font-family:var(--mono)}.t-form input{border:0;background:none;font:12.5px var(--mono);padding:8px 0}
+.t-form input:focus{outline:0}
+.t-log{display:flex;flex-direction:column;gap:8px;margin-top:10px;max-height:46vh;overflow:auto}
+.t-row .t-cmd{font:12px var(--mono);color:var(--warn)}.t-row pre{margin-top:4px}.t-row.bad pre{border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);padding-bottom:8px}
+.tabs button{background:none;border-color:transparent;min-height:30px;padding:4px 10px;font-size:12.5px;color:var(--muted)}
+.tabs button[aria-selected=true]{color:var(--ink);background:#13212e;border-color:var(--line2)}
+.files.tall{max-height:58vh}
+.frow.undone{opacity:.55;text-decoration:line-through}
+#f-filter{font:12.5px var(--mono);margin-bottom:8px}
+.keep-row .keep{flex:2}.keep-row #a-push{flex:1}
+
+/* ---------------------------------------------------------------- code viewer and palette */
+#viewer{width:min(1180px,97vw);height:88vh;padding:0;display:none;flex-direction:column}
+#viewer[open]{display:flex}
+.code-body{flex:1;overflow:auto;display:flex;font:12.5px/1.55 var(--mono);background:#060d14}
+.code-body .gutter{margin:0;padding:10px 10px 10px 14px;text-align:right;color:#4f6474;user-select:none;border-right:1px solid var(--line);min-width:52px}
+.code-body .code{margin:0;padding:10px 18px;white-space:pre;color:#d6e7ee;flex:1}
+.tk-c{color:#6f8796;font-style:italic}.tk-s{color:#a6e3a1}.tk-n{color:#fab387}.tk-k{color:#cba6f7}.tk-p{color:#89dceb}
+#palette{width:min(640px,94vw);padding:10px;top:12vh;margin-top:0}
+#palette-q{font-size:15px;padding:12px 14px;margin-bottom:8px}
+.palette-list{max-height:52vh;overflow:auto}
+
+/* ---------------------------------------------------------------- the Terminal look: dense and mono, like Claude Code */
+body.term .feed{font-family:var(--mono)}
+body.term .feed>*{max-width:1000px}
+body.term .turn{margin-bottom:18px}
+body.term .you .avatar{display:none}
+body.term .you .bubble{border-radius:6px;background:#0c1620;border-color:var(--line);padding:8px 12px}
+body.term .you .text{font-size:13.5px}
+body.term .you .text::before{content:"> ";color:var(--a)}
+body.term .timeline{margin:8px 0 0 2px;padding-left:18px;border-left:1px dashed var(--line)}
+body.term .step{font-size:12.8px;padding:3px 0}
+body.term .step::before{content:"●";border:0;background:none;width:auto;height:auto;left:-23px;top:3px;font-size:10px;color:var(--muted)}
+body.term .step.prose::before{color:var(--a)}
+body.term .step.file::before{color:var(--good)}
+body.term .step.cmd::before{color:var(--warn)}
+body.term .step.error::before,body.term .step.blocked::before{color:var(--bad)}
+body.term .step.prose{font-size:13.5px;line-height:1.6}
+body.term .step.prose.final{border-radius:6px}
+body.term .card2{border-radius:8px;padding:10px 12px}
+body.term .typing{font-family:var(--mono);padding-left:22px}
+body.term .typing .prose{font-size:13.5px}
+body.term .step.cmd .line{border-radius:5px}
+body.term .inline-diff{border-radius:5px}
