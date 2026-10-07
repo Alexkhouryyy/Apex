@@ -520,9 +520,11 @@
   // Copy buttons: navigator.clipboard, or a hidden textarea where that isn't allowed.
   async function copyText(text) {
     try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; } } catch (_) {}
+    const was = document.activeElement;                    // focus goes back here afterwards
     const ta = el('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
     (document.querySelector('dialog[open]') || document.body).append(ta); ta.focus({preventScroll: true}); ta.select();
-    try { return !!document.execCommand('copy'); } catch (_) { return false; } finally { ta.remove(); }
+    try { return !!document.execCommand('copy'); } catch (_) { return false; }
+    finally { ta.remove(); if (was && was !== document.body && was.focus) was.focus({preventScroll: true}); }
   }
   function copyBtn(getText) {
     const b = button('Copy', async () => {

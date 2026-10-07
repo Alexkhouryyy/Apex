@@ -152,7 +152,8 @@ const last = (re) => calls.filter(c => re.test(c.url) && c.method === 'POST').at
   // No clipboard API (or it refuses): a hidden textarea and execCommand('copy').
   Object.defineProperty(w.navigator, 'clipboard', {configurable: true, value: undefined});
   let viaExec = null; d.execCommand = c => { viaExec = {c, text: d.querySelector('textarea[readonly]').value}; return true; };
-  b = copyOf(cmd.querySelector('.line')); await clickCopy(b);
+  b = copyOf(cmd.querySelector('.line')); b.focus(); await clickCopy(b);
+  assert.equal(d.activeElement, b, 'focus returns to the Copy button after the fallback');
   assert.deepEqual(viaExec, {c: 'copy', text: 'python -m pytest -q'}); assert.equal(b.textContent, 'Copied'); assert.equal(d.querySelector('textarea[readonly]'), null, 'the helper textarea is cleaned up');
   d.execCommand = () => false; await clickCopy(b); assert.equal(b.textContent, 'Copy failed', 'a refused copy says so');
   // The API is there but refuses (insecure page, no focus): fall back to the textarea rather than fail.

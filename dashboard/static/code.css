@@ -346,4 +346,4 @@ body.term .inline-diff{border-radius:5px}
 .copy:hover,.copy:focus-visible,.cw:hover>.copy{opacity:1;color:var(--ink)}
 .copy.done{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent);opacity:1}
 .step.cmd .line .copy{margin-left:auto;padding:0 7px}
-@media (hover:none){.copy{opacity:1}}
+@media (hover:none){.copy,.step.cmd .line .copy{opacity:1;min-height:32px;padding:4px 12px}}
