@@ -341,6 +341,7 @@ body.term .inline-diff{border-radius:5px}
 
 /* ---------------------------------------------------------------- copy buttons */
 .cw{position:relative}.cw>pre{padding-right:64px}.cw>.copy{position:absolute;top:6px;right:8px;z-index:1}
+.cw.bar>.copy{position:static;display:block;margin:0 0 4px auto}
 .copy{font:11px var(--mono);min-height:0;padding:2px 8px;border-radius:6px;color:var(--muted);background:rgba(13,21,31,.9);border:1px solid var(--line2);flex:none;opacity:.7}
 .copy:hover,.copy:focus-visible,.cw:hover>.copy{opacity:1;color:var(--ink)}
 .copy.done{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent);opacity:1}

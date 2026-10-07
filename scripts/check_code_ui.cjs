@@ -146,6 +146,8 @@ const last = (re) => calls.filter(c => re.test(c.url) && c.method === 'POST').at
   b = copyOf(cmd.querySelector('.line')); await clickCopy(b); assert.equal(copied.at(-1), 'python -m pytest -q', 'a command copies the command');
   b = copyOf(cmd.querySelector('details')); await clickCopy(b); assert.equal(copied.at(-1), '1 failed', 'its output copies the output');
   b = copyOf(f.querySelector('.step.file .cw')); await clickCopy(b); assert.equal(copied.at(-1), '@@ -4,1 +4,2 @@\n a\n+b', 'a diff copies the raw diff');
+  assert.equal(b.parentNode.firstChild, b, 'a diff’s button has its own row above it, never over its first line');
+  assert.equal(f.querySelector('.prose .cw').firstChild.tagName, 'PRE', 'a code block’s button floats in the corner of the pre');
   await tick(1700); assert.equal(b.textContent, 'Copy', 'Copied fades back to Copy');
   // No clipboard API (or it refuses): a hidden textarea and execCommand('copy').
   Object.defineProperty(w.navigator, 'clipboard', {configurable: true, value: undefined});
@@ -153,6 +155,10 @@ const last = (re) => calls.filter(c => re.test(c.url) && c.method === 'POST').at
   b = copyOf(cmd.querySelector('.line')); await clickCopy(b);
   assert.deepEqual(viaExec, {c: 'copy', text: 'python -m pytest -q'}); assert.equal(b.textContent, 'Copied'); assert.equal(d.querySelector('textarea[readonly]'), null, 'the helper textarea is cleaned up');
   d.execCommand = () => false; await clickCopy(b); assert.equal(b.textContent, 'Copy failed', 'a refused copy says so');
+  // The API is there but refuses (insecure page, no focus): fall back to the textarea rather than fail.
+  Object.defineProperty(w.navigator, 'clipboard', {configurable: true, value: {writeText: async () => { throw new Error('denied'); }}});
+  viaExec = null; d.execCommand = c => { viaExec = {c, text: d.querySelector('textarea[readonly]').value}; return true; };
+  await clickCopy(b); assert.deepEqual(viaExec, {c: 'copy', text: 'python -m pytest -q'}, 'a refused writeText falls back'); assert.equal(b.textContent, 'Copied');
   // Allow once, like Claude Code's prompt.
   [...f.querySelectorAll('.step.blocked button')].find(b => b.textContent === 'Allow once').click(); await tick();
   assert.deepEqual(last(/\/allow$/).body, {command: 'rm -rf build', always: false});
@@ -171,13 +177,17 @@ const last = (re) => calls.filter(c => re.test(c.url) && c.method === 'POST').at
   assert.ok(lo.classList.contains('cw') && lo.firstChild.tagName === 'PRE' && lo.firstChild.classList.contains('out'), 'live output: a pre inside the Copy wrapper');
   assert.equal(lo.firstChild.textContent, 'line 1\nline 2');
   await clickCopy(copyOf(lo)); assert.equal(copied.at(-1), 'line 1\nline 2');
-  const para = f.querySelector('.typing .prose p'); streamLive = {...streamLive, v: 5};   // same words, newer snapshot…
+  // Words still being typed have no Copy buttons (they'd be rebuilt on every snapshot); they appear once the message is whole.
+  streamLive = {...streamLive, v: 5, text: 'Typing **now**\n```sh\nls\n```'};
   await tick(1000);
-  assert.equal(f.querySelector('.typing .prose p'), para, '…leaves the typed words (and their buttons) alone'); assert.equal(f.querySelectorAll('.typing .cursor').length, 1);
+  assert.ok(f.querySelector('.typing .prose pre'), 'a finished code fence still being typed shows as code'); assert.equal(f.querySelectorAll('.typing .copy').length, 0, '…without a Copy button yet');
+  assert.equal(f.querySelectorAll('.typing .cursor').length, 1);
+  streamLive = {...streamLive, v: 7, text: 'Typing **now**'};
+  await tick(1000);
   streamLive = {v: 2, text: '', thinking: '', outputs: {}};             // an older snapshot arriving late…
   await tick(1000);
   assert.equal(f.querySelector('.typing .prose').textContent, 'Typing now▍', '…never wipes the newer one');
-  streamLive = {v: 6, text: '', thinking: '', outputs: {}};
+  streamLive = {v: 8, text: '', thinking: '', outputs: {}};
   feed.push(E(14, 'text', {text: 'Added Focus.'}), E(15, 'checkpoint', {sha: 'a', prev: 'b', files: 2}),
             E(16, 'done', {status: 'done', summary: 'Added Focus.', seconds: 75, files: 2, total: 2, engine: 'claude', tokens: 12345}),
             E(17, 'review_started', {engine: 'chatgpt'}), E(18, 'review_step', {title: 'Read work.js'}),

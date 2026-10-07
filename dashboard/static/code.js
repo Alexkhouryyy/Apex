@@ -62,11 +62,12 @@
   }
   // A safe little Markdown: paragraphs, lists, **bold**, `code` and ``` blocks. Built
   // as DOM nodes, never innerHTML, so nothing an agent writes can run in the page.
-  function md(text) {
+  // `live` is the text still being typed: no Copy buttons until the message is whole.
+  function md(text, live) {
     const frag = document.createDocumentFragment();
     const parts = String(text || '').split(/```[\w+-]*\n?([\s\S]*?)```/g);
     parts.forEach((part, i) => {
-      if (i % 2) { const code = part.replace(/\n$/, ''), pre = el('pre'); pre.append(el('code', '', code)); frag.append(withCopy(pre, () => code)); return; }
+      if (i % 2) { const code = part.replace(/\n$/, ''), pre = el('pre'); pre.append(el('code', '', code)); frag.append(live ? pre : withCopy(pre, () => code)); return; }
       let list = null, para = [];
       const flush = () => { if (para.length) { const p = el('p'); inline(p, para.join('\n')); frag.append(p); para = []; } };
       for (const raw of part.split('\n')) {
@@ -525,13 +526,15 @@
   }
   function copyBtn(getText) {
     const b = button('Copy', async () => {
-      const ok = await copyText(String(getText()));
-      b.textContent = ok ? 'Copied' : 'Copy failed'; b.classList.toggle('done', ok);
+      const text = String(getText());
+      const ok = text ? await copyText(text) : false;          // a command still running has no output yet
+      b.textContent = ok ? 'Copied' : text ? 'Copy failed' : 'Nothing yet'; b.classList.toggle('done', ok);
       clearTimeout(b.timer); b.timer = setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1500);
     }, 'copy');
     b.title = 'Copy to clipboard'; return b;
   }
-  function withCopy(node, getText) { const w = el('div', 'cw'); w.append(node, copyBtn(getText)); return w; }
+  // `bar`: the button gets its own row above (diffs, whose first line would sit under it) instead of floating over the corner.
+  function withCopy(node, getText, bar) { const w = el('div', bar ? 'cw bar' : 'cw'); w.append(node, copyBtn(getText)); if (bar) w.prepend(w.lastChild); return w; }
   function copyLine(line, text) { line.append(copyBtn(() => text)); }
 
   function working() {
@@ -697,7 +700,7 @@
     $('diff-stat').textContent = f ? (f.plus == null ? 'binary' : `+${f.plus} −${f.minus}`) : '';
     $('diff-body').replaceChildren(el('p', 'fine', 'Loading…'));
     if (!$('diff').open) $('diff').showModal();
-    try { const text = await api(`/api/code/sessions/${current}/diff?path=${encodeURIComponent(path)}`, {}, 'text'); $('diff-body').replaceChildren(withCopy(renderDiff(text), () => text)); }
+    try { const text = await api(`/api/code/sessions/${current}/diff?path=${encodeURIComponent(path)}`, {}, 'text'); $('diff-body').replaceChildren(withCopy(renderDiff(text), () => text, true)); }
     catch (err) { $('diff-body').replaceChildren(el('p', 'fine', err.message)); }
   }
   function renderDiff(text) {
@@ -775,18 +778,15 @@
     if (lv.text || lv.thinking) {
       if (!box) { box = el('div', 'typing'); box.append(el('div', 'think'), el('div', 'prose')); $('feed').append(box); }
       box.querySelector('.think').textContent = lv.thinking ? '✻ ' + lv.thinking.slice(-280) : '';
-      const p = box.querySelector('.prose');
-      if (p.dataset.src !== lv.text) {                    // the same words again: leave the buttons (and their "Copied") alone
-        p.dataset.src = lv.text; p.replaceChildren(md(lv.text));
-        (p.lastElementChild && !/^(PRE|UL|DIV)$/.test(p.lastElementChild.tagName) ? p.lastElementChild : p).append(el('span', 'cursor', '▍'));   // right after the last word
-      }
+      const p = box.querySelector('.prose'); p.replaceChildren(md(lv.text, true));
+      (p.lastElementChild && !/^(PRE|UL)$/.test(p.lastElementChild.tagName) ? p.lastElementChild : p).append(el('span', 'cursor', '▍'));   // right after the last word
     } else if (box) { box.remove(); box = null; }
     for (const [ref, out] of Object.entries(lv.outputs || {})) {
       const s = (feed && feed.turn && feed.turn.tools[ref]) || $('feed').querySelector(`[data-ref="${CSS.escape(ref)}"]`);
       if (!s) continue;
-      let box = s.querySelector('.live-out');
-      if (!box) { const o = el('pre', 'out'); box = withCopy(o, () => o.textContent); box.classList.add('live-out'); s.append(box); }
-      const pre = box.firstChild;
+      let lo = s.querySelector('.live-out');
+      if (!lo) { const o = el('pre', 'out'); lo = withCopy(o, () => o.textContent); lo.classList.add('live-out'); s.append(lo); }
+      const pre = lo.firstChild;
       pre.textContent = out; pre.scrollTop = pre.scrollHeight;
     }
     placeLive();
@@ -816,7 +816,7 @@
   function inlineDiff(text) {
     const lines = text.split('\n').length;
     const box = el('div', 'inline-diff'); box.append(renderDiff(text));
-    const cw = withCopy(box, () => text);
+    const cw = withCopy(box, () => text, true);
     if (lines > 24) {
       box.classList.add('folded');
       const more = button(`Show all ${lines} lines`, () => { box.classList.remove('folded'); more.remove(); }, 'small more-lines');
@@ -848,7 +848,7 @@
       log.prepend(row);
     } else {
       const row = log.querySelector(`[data-ref="${CSS.escape(e.ref)}"]`);
-      if (row) { const pre = row.querySelector('pre'); pre.dataset.raw = e.output || ''; pre.textContent =(e.output || '(no output)') + `\n[exit ${e.exit_code ?? '?'} · ${clock(e.seconds || 0)}]`; row.classList.toggle('bad', e.exit_code !== 0); }
+      if (row) { const pre = row.querySelector('pre'); pre.dataset.raw = e.output || ''; pre.textContent = (e.output || '(no output)') + `\n[exit ${e.exit_code ?? '?'} · ${clock(e.seconds || 0)}]`; row.classList.toggle('bad', e.exit_code !== 0); }
     }
   }
   $('t-form').onsubmit = e => { e.preventDefault(); const c = $('t-cmd').value.trim(); $('t-cmd').value = ''; runTerminal(c); };
