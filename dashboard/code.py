@@ -4,17 +4,20 @@ and ChatGPT plans, each on its own branch.
 Coding runs tools on this PC and reads your code, so every Code route needs
 the owner's master token (when a dashboard token is set), reading included;
 changes also need a same-site request. The page itself is public, like every
-Apex page: it holds no data until the API answers.
+Apex page: it holds no data until the API answers. The one exception is away
+mode's /api/code/allow/{token}: a command Safe mode stopped, answered from your
+phone, which any signed-in device holding that link's secret can do.
 """
 import asyncio
 import json
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 import config
-from agent import code_studio
+from agent import board_workspaces, code_brain, code_studio
 from dashboard.companion import _check_origin
 
 router = APIRouter()
@@ -26,9 +29,10 @@ def _owner(request: Request) -> None:
         raise HTTPException(403, 'Apex Code is for the owner only (master dashboard token).')
 
 
-async def _json(request: Request, limit=60000) -> dict:
+async def _json(request: Request, limit=60000, owner=True) -> dict:
     _check_origin(request)
-    _owner(request)
+    if owner:
+        _owner(request)
     raw = bytearray()
     async for chunk in request.stream():
         raw.extend(chunk)
@@ -47,7 +51,7 @@ async def _do(call, *args, **kwargs):
     """Run in a thread (git and the plan checks take a moment); errors in plain words."""
     try:
         return await asyncio.to_thread(call, *args, **kwargs)
-    except code_studio.CodeError as exc:
+    except (code_studio.CodeError, code_brain.CodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
@@ -62,6 +66,56 @@ async def overview(request: Request):
     return await _do(code_studio.overview)
 
 
+@router.get('/api/code/overnight')
+async def overnight(request: Request):
+    """What the night shift built, for the morning (agent/code_studio.overnight): each
+    session waiting for you, with the proof's verdict, the second opinion and the files."""
+    _owner(request)
+    return {'sessions': await _do(code_studio.overnight)}
+
+
+@router.get('/api/code/approvals')
+async def approvals_waiting(request: Request):
+    """Memories a session suggested through Apex's memory server, waiting for your OK
+    (agent/code_brain.suggested). Approve and Reject are the queue's own:
+    /api/staged-writes/{id}/approve and /reject."""
+    _owner(request)
+    return {'items': await asyncio.to_thread(code_brain.suggested)}
+
+
+# Away mode: a command Safe mode stopped, answered from your phone (agent/code_studio.answer_allow).
+# These two skip _owner on purpose: the link's secret is the permission, so a phone
+# paired with its own device token can answer (the auth middleware still wants a
+# valid token). They show nothing else about the session, can only allow once or
+# say no, and are the only Code routes a device token reaches.
+ALLOW_LINK = re.compile(r'[\w-]{16,64}')
+
+
+async def _away(call, token: str, *args):
+    if not ALLOW_LINK.fullmatch(token):
+        raise HTTPException(404, "Apex doesn't know that request.")
+    try:
+        return await asyncio.to_thread(call, token, *args)
+    except code_studio.NoSuchAllow as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except code_studio.CodeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get('/api/code/allow/{token}')
+async def allow_request(token: str):
+    """What the link asks: the command, the session's title and project, the plan and until when."""
+    return await _away(code_studio.pending_allow, token)
+
+
+@router.post('/api/code/allow/{token}')
+async def answer_allow(token: str, request: Request):
+    """{"choice": "once"} runs it now; {"choice": "no"} tells the plan to find another way."""
+    body = await _json(request, limit=2000, owner=False)
+    who = f"{request.client.host if request.client else '?'} {request.headers.get('user-agent', '')[:80]}".strip()
+    return await _away(code_studio.answer_allow, token, body.get('choice'), who)
+
+
 @router.post('/api/code/projects')
 async def add_project(request: Request):
     body = await _json(request)
@@ -73,7 +127,7 @@ async def edit_project(pid: int, request: Request):
     body = await _json(request)
     if isinstance(body.get('forget_allowed'), str):
         return await _do(code_studio.forget_allowed, pid, body['forget_allowed'])
-    return await _do(code_studio.update_project, pid, body.get('name'), body.get('checks'))
+    return await _do(code_studio.update_project, pid, body.get('name'), body.get('checks'), body.get('exit_ok'))
 
 
 @router.post('/api/code/sessions')
@@ -117,14 +171,45 @@ async def send(sid: int, request: Request):
                      model=body.get('model'), effort=body.get('effort'), plan=body.get('plan') is True)
 
 
+# 'discard' has its own route above, which takes the reason (an empty body is no reason).
 ACTIONS = {'stop': code_studio.stop, 'undo': code_studio.undo, 'catch-up': code_studio.catch_up,
            'discard': code_studio.discard, 'checks': code_studio.run_checks}
 
 
 @router.post('/api/code/sessions/{sid}/keep')
 async def keep(sid: int, request: Request):
+    """Keep only what Apex saw work, unless you say {"unverified_ok": true}: without
+    proof it's 409, with the proof saying why, so the page can ask you first."""
     body = await _json(request)
-    return await _do(code_studio.keep, sid, body.get('push') is True)
+    try:
+        return await asyncio.to_thread(code_studio.keep, sid, body.get('push') is True,
+                                       body.get('unverified_ok') is not True)
+    except code_studio.NotProved as exc:
+        return JSONResponse({'detail': str(exc), 'proof': exc.proof}, status_code=409)
+    except code_studio.CodeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post('/api/code/sessions/{sid}/discard')
+async def discard(sid: int, request: Request):
+    """Throw the session away, with why ({"reason": "wrong"}; none is fine): it goes
+    into the project's decision log and the outcomes ledger (agent/code_brain.py)."""
+    body = await _json(request)
+    return await _do(code_studio.discard, sid, body.get('reason') or '')
+
+
+@router.get('/api/code/sessions/{sid}/proof')
+async def session_proof(sid: int, request: Request):
+    """What the agent said it checked, next to what Apex saw (agent/code_studio.proof)."""
+    _owner(request)
+    return await _do(code_studio.proof, sid)
+
+
+@router.post('/api/code/sessions/{sid}/evidence')
+async def evidence(sid: int, request: Request):
+    """Output you pasted from running the checks yourself: kept as yours, never as Apex's."""
+    body = await _json(request, limit=code_studio.MAX_EVIDENCE * 4 + 1000)
+    return await _do(code_studio.owner_evidence, sid, body.get('output', ''))
 
 
 @router.post('/api/code/sessions/{sid}/allow')
@@ -155,6 +240,99 @@ async def session_tree(sid: int, request: Request):
 async def project_tree(pid: int, request: Request):
     _owner(request)
     return await _do(code_studio.tree, None, pid)
+
+
+@router.get('/api/code/projects/{pid}/brain')
+async def project_brain(pid: int, request: Request, q: str = ''):
+    """What a new session in this project would be told about you, line by line
+    (agent/code_brain.py). A memory is forgotten with DELETE /api/memories/{id}."""
+    _owner(request)
+    await _do(code_studio.project, pid)
+    out = await asyncio.to_thread(code_brain.brief_block, pid, q[:code_studio.MAX_PROMPT])
+    out['unvouched'] = await asyncio.to_thread(code_brain.unvouched, pid)
+    return out
+
+
+@router.post('/api/code/memories/{mid}/vouch')
+async def vouch_memory(mid: int, request: Request):
+    """You say a coding memory is yours, so later sessions hear it (agent/code_brain.vouch).
+    Owner-only: a device token or a model's tool call can save a memory, never vouch for one."""
+    _owner(request)
+    return await _do(code_brain.vouch, mid)
+
+
+# Rules: corrections said once (agent/code_brain.py), for this project or for all code.
+RULES_CONFLICT = 'Rules changed in another window. Reload; your text is kept.'
+LOG_CONFLICT = 'The decision log changed in another window. Reload, then restore again.'
+
+
+async def _rules(call, pid: int, *args, conflict=RULES_CONFLICT):
+    """A rules call for a project that exists: a stale revision is 409, anything else wrong 400."""
+    await _do(code_studio.project, pid)
+    try:
+        return await asyncio.to_thread(call, pid, *args)
+    except board_workspaces.Conflict as exc:          # before ValueError: it is one
+        raise HTTPException(409, conflict) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get('/api/code/projects/{pid}/rules')
+async def project_rules(pid: int, request: Request):
+    _owner(request)
+    return await _rules(code_brain.rules, pid)
+
+
+@router.post('/api/code/projects/{pid}/rules')
+async def add_rule(pid: int, request: Request):
+    body = await _json(request)
+    return await _rules(code_brain.add_rule, pid, body.get('text'), body.get('scope', 'project'), body.get('revision'))
+
+
+@router.put('/api/code/projects/{pid}/rules')
+async def save_rules(pid: int, request: Request):
+    body = await _json(request)
+    return await _rules(code_brain.save_rules, pid, body.get('items'), body.get('revision'))
+
+
+@router.get('/api/code/projects/{pid}/rules/history')
+async def rules_history(pid: int, request: Request):
+    _owner(request)
+    return {'versions': await _rules(code_brain.rules_history, pid)}
+
+
+@router.post('/api/code/projects/{pid}/rules/restore')
+async def restore_rules(pid: int, request: Request):
+    body = await _json(request)
+    return await _rules(code_brain.restore_rules, pid, body.get('revision'), body.get('current_revision'))
+
+
+# What every session taught Apex (agent/code_brain.py): the counted track record,
+# and the project's decision log that Keep and Throw away write (read-only here).
+
+@router.get('/api/code/projects/{pid}/record')
+async def project_record(pid: int, request: Request, days: int = 90):
+    _owner(request)
+    return await _rules(code_brain.track_record, pid, max(1, min(days, 3650)))
+
+
+@router.get('/api/code/projects/{pid}/decisions')
+async def decision_log(pid: int, request: Request):
+    _owner(request)
+    return await _rules(code_brain.decision_log, pid)
+
+
+@router.get('/api/code/projects/{pid}/decisions/history')
+async def decision_log_history(pid: int, request: Request):
+    _owner(request)
+    return {'versions': await _rules(code_brain.decision_log_history, pid)}
+
+
+@router.post('/api/code/projects/{pid}/decisions/restore')
+async def restore_decision_log(pid: int, request: Request):
+    body = await _json(request)
+    return await _rules(code_brain.restore_decision_log, pid, body.get('revision'), body.get('current_revision'),
+                        conflict=LOG_CONFLICT)
 
 
 @router.get('/api/code/sessions/{sid}/file')

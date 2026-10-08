@@ -109,7 +109,7 @@ def list_pending(status: str = "pending") -> list[dict]:
     ]
 
 
-def _apply(kind: str, payload: dict) -> str:
+def _apply(kind: str, payload: dict, by_owner: bool = True) -> str:
     """Apply a previously staged write, bypassing the approval gate."""
     if kind == "memory":
         return longterm.save_memory_entry(
@@ -156,8 +156,11 @@ def _apply(kind: str, payload: dict) -> str:
     if kind == "remember":
         # Suggested by an outside AI tool through Apex's MCP server
         # (agent/mcp_server.py). Applied only here, when the user approves.
+        # The server sets the tags (an Apex Code session's add "code"), never the tool.
+        # The owner's OK is the provenance a coding agent's brief trusts (agent/code_brain);
+        # a paired device's OK saves it like any other memory.
         return longterm.remember(payload["content"], kind=payload.get("kind", "note"),
-                                 tags="from-mcp")
+                                 tags=payload.get("tags") or "from-mcp", source="approved" if by_owner else "")
     if kind == "goal_proposal":
         # THE gate for agent-originated goals. agent/initiative.py only ever
         # stages; this line is the sole path from a proposal to a real goal, and
@@ -170,12 +173,13 @@ def _apply(kind: str, payload: dict) -> str:
     return f"Unknown staged kind: {kind!r}"
 
 
-def approve(write_id) -> str:
-    """Approve one staged write, or 'all' to approve every pending write."""
+def approve(write_id, *, by_owner: bool = True) -> str:
+    """Approve one staged write, or 'all' to approve every pending write.
+    `by_owner`: False when a paired device (not the master token) approved it."""
     if str(write_id).lower() == "all":
         results = []
         for w in list_pending("pending"):
-            results.append(approve(w["id"]))
+            results.append(approve(w["id"], by_owner=by_owner))
         return f"Approved {len(results)} write(s)." if results else "Nothing pending."
 
     # Atomically CLAIM the row before applying, so two concurrent approvals
@@ -193,7 +197,7 @@ def approve(write_id) -> str:
         ).fetchone()
     kind, payload_json = row
     try:
-        result = _apply(kind, json.loads(payload_json))
+        result = _apply(kind, json.loads(payload_json), by_owner)
     except Exception as e:
         # Don't leave the row stuck in 'approving' — release it back to pending so
         # it stays visible/re-approvable instead of vanishing from the queue.

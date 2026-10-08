@@ -2,7 +2,9 @@
 // job, studies, business and software; Today, Board and Projects views; and
 // handing a task to Apex, whose result comes back for your review; and the
 // Always on agent (agent/work_agent.py), which can work on your Claude or
-// ChatGPT plan instead of API credits.
+// ChatGPT plan instead of API credits. A software project can be linked to an
+// Apex Code project (owner only): its +apex tasks are then coded overnight, and a
+// task Apex coded opens its session in Apex Code instead of a folder.
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -116,10 +118,38 @@
       const late = open.filter(t => t.due && t.due < todayISO()).length;
       row.append(el('b', '', p.name), el('span', 'muted', [p.client, `${open.length} open`, late ? `${late} late` : ''].filter(Boolean).join(' · ')));
       const go = el('button', '', 'Board'); go.onclick = () => { area = p.area; show('board'); };
+      if (p.area === 'software' && codeProjects) row.append(codeSelect(p));
       const archive = el('button', '', 'Archive');
       archive.onclick = async () => { try { await api(`/api/work/projects/${p.id}`, {method: 'PATCH', body: JSON.stringify({status: 'archived'})}); load(); } catch (e) { say(e.message, 'error'); } };
       row.append(go, archive); list.append(row);
     }
+  }
+
+  // The Apex Code project a software project's code lives in (owner only: /api/code
+  // answers the master token alone). Linked, its +apex tasks are coded overnight.
+  let codeProjects = null, codeAsked = false;
+  async function loadCodeProjects() {
+    if (codeAsked) return;
+    codeAsked = true;
+    try { codeProjects = (await api('/api/code')).projects.map(p => ({id: p.id, name: p.name})); }
+    catch (_) { codeProjects = null; return; }                // not the owner, or Apex Code isn't set up: no select
+    if (view === 'projects') renderProjects();
+  }
+  function codeSelect(p) {
+    const label = el('label', 'code-link'), sel = el('select');
+    label.title = 'Its +apex tasks are coded overnight in this Apex Code project, and wait for you to Keep them.';
+    sel.setAttribute('aria-label', `Apex Code project for ${p.name}`);
+    sel.replaceChildren(...[['', 'No code project'], ...codeProjects.map(c => [c.id, c.name])].map(([v, t]) => { const o = el('option', '', t); o.value = v; return o; }));
+    sel.value = p.code_project_id == null ? '' : String(p.code_project_id);
+    sel.onchange = async () => {
+      const code_project_id = sel.value ? Number(sel.value) : null;
+      try {
+        await api(`/api/work/projects/${p.id}`, {method: 'PATCH', body: JSON.stringify({code_project_id})});
+        say(code_project_id ? `${p.name}'s +apex tasks will be coded overnight in Apex Code.` : `${p.name} is no longer linked to Apex Code.`, 'good'); await load();
+      } catch (e) { say(e.message, 'error'); sel.value = p.code_project_id == null ? '' : String(p.code_project_id); }
+    };
+    label.append('Code project ', sel);
+    return label;
   }
 
   function renderAreas() {
@@ -153,7 +183,8 @@
       document.querySelector(`[data-view=${name}]`).setAttribute('aria-selected', String(view === name));
     }
     $('areas').hidden = view === 'agent';
-    if (view === 'today') renderToday(); else if (view === 'board') renderBoard(); else if (view === 'agent') loadAgent(); else renderProjects();
+    if (view === 'today') renderToday(); else if (view === 'board') renderBoard(); else if (view === 'agent') loadAgent();
+    else { renderProjects(); if (data.projects.some(p => p.area === 'software')) loadCodeProjects(); }
   }
   function show(name) { view = name; try { localStorage.setItem('apex.work.view', view); } catch (_) {} render(); }
   document.querySelectorAll('[data-view]').forEach(b => { b.onclick = () => show(b.dataset.view); });
@@ -203,7 +234,11 @@
     $('d-give').disabled = working; $('d-give').textContent = t.apex_state && !working ? 'Ask Apex again' : 'Give to Apex';
     $('detail').showModal();
     if (focusApex) $('d-give').focus();
-    if (t.apex_folder) {
+    const code = /^code-(\d+)$/.exec(t.apex_run || '');
+    if (code) {                                              // coded in Apex Code: its session, not a folder
+      const li = el('li'), a = el('a', '', 'Open the session in Apex Code');
+      a.href = `/code#s=${code[1]}`; li.append(a); $('d-apex-files').append(li);
+    } else if (t.apex_folder) {
       try {
         const full = await api(`/api/work/tasks/${t.id}`);
         for (const f of full.files) $('d-apex-files').append(el('li', '', `${full.apex_folder}\\${f}`));
@@ -273,7 +308,7 @@
     if (view !== 'agent' || $('agent-form').contains(document.activeElement)) return;
     $('a-enabled').checked = agent.enabled; $('a-auto').checked = agent.auto_work;
     $('a-runs').value = agent.plan_runs; $('a-rest').value = agent.rest_hours;
-    $('a-brief').value = agent.brief_time; $('a-evening').value = agent.evening_time;
+    $('a-brief').value = agent.brief_time; $('a-evening').value = agent.evening_time; $('a-night').value = agent.night_until || '';
     $('a-task').value = agent.task_budget; $('a-day').value = agent.daily_budget;
     order = [...agent.engines]; renderPlans();
     $('a-summary').textContent = !agent.enabled ? 'Off.' : `${agent.plan_runs_today} of ${agent.plan_runs} plan tasks today · ${agent.eligible} marked +apex` +
@@ -296,7 +331,8 @@
         enabled: $('a-enabled').checked, auto_work: $('a-auto').checked, engines: order,
         plan_runs: Number($('a-runs').value), rest_hours: Number($('a-rest').value),
         brief_time: $('a-brief').value, evening_time: $('a-evening').value,
-        task_budget: Number($('a-task').value), daily_budget: Number($('a-day').value), ...extra})});
+        task_budget: Number($('a-task').value), daily_budget: Number($('a-day').value),
+        ...($('a-night').value ? {night_until: $('a-night').value} : {}), ...extra})});
       document.activeElement && document.activeElement.blur();
       renderAgent(); say(agent.enabled ? 'Saved. Apex is always on.' : 'Saved. Always on is off.', 'good');
     } catch (e) { say(e.message, 'error'); }

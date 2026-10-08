@@ -300,3 +300,45 @@ def test_history_routes_are_owner_only(isolated, monkeypatch):
     assert c.post('/api/home/identity', json={'revision': 0, 'data': {**continuity.DEFAULT_IDENTITY, 'name': 'Jarvis'}}).status_code == 200
     assert c.get('/api/home/identity/history').json()['versions'][0]['data']['name'] == 'Jarvis'
     assert c.post('/api/home/identity/restore', json={'revision': 7, 'current': 1}).status_code == 400
+
+
+def test_code_projects_keep_a_handoff_and_rules_without_a_board_workspace(test_db, monkeypatch):
+    """Apex Code projects (agent/code_studio.py) are not board workspaces: their
+    handoff and rules need no board_workspaces row, and are kept apart from them."""
+    from agent import longterm
+    blank = continuity.code_project(3)
+    assert blank['revision'] == 0 and blank['data'] == dict(brief='', decisions='', artifacts='', next_step='')
+    saved = continuity.save_code_project(3, {**blank['data'], 'decisions': 'SQLite, not Postgres'}, 0)
+    assert saved['revision'] == 1 and continuity.code_project(3)['data']['decisions'] == 'SQLite, not Postgres'
+    assert continuity.code_project(4)['data']['decisions'] == ''                # each project its own
+    with pytest.raises(board_workspaces.Conflict):
+        continuity.save_code_project(3, {**blank['data'], 'decisions': 'stale'}, 0)
+    with pytest.raises(ValueError, match='at most 3500'):
+        continuity.save_code_project(3, {**blank['data'], 'decisions': 'x' * 3501}, 1)
+    rules = [dict(text=' Use pathlib ', active=True), dict(text='Old rule', active=False)]
+    assert continuity.save_code_corrections(3, rules, 0)['data']['items'][0] == dict(text='Use pathlib', active=True)
+    assert continuity.code_corrections(3)['data']['items'][1] == dict(text='Old rule', active=False)
+    with pytest.raises(board_workspaces.Conflict):
+        continuity.save_code_corrections(3, rules, 0)
+    for bad in ('3', True, 0, -1):
+        with pytest.raises(ValueError):
+            continuity.code_project(bad)
+    # History and restore are the shared ones, on the code project's key.
+    key = continuity.code_key('project', 3)
+    assert [v['data']['decisions'] for v in continuity.history(key)] == ['SQLite, not Postgres']
+    with longterm._conn() as db:                                             # the board was never touched
+        assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='board_workspaces'").fetchone()
+    # Board corrections and code corrections are checked by the same rules, in one place.
+    seen = []
+    real = continuity._clean_corrections
+    monkeypatch.setattr(continuity, '_clean_corrections', lambda items: seen.append(len(items)) or real(items))
+    continuity.save_code_corrections(3, [], 1)
+    board_workspaces.ensure_db()
+    continuity.save_corrections('default', [dict(text='Use millimeters.', active=True)], 0)
+    assert seen == [0, 1]
+    for bad in ([dict(text='x', active=True)] * 21, [dict(text='', active=True)], [dict(text='x', active='yes')],
+                [dict(text='x' * 501, active=True)], 'not a list'):
+        with pytest.raises(ValueError):
+            continuity.save_corrections('default', bad, 1)
+        with pytest.raises(ValueError):
+            continuity.save_code_corrections(3, bad, 2)

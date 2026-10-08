@@ -93,6 +93,8 @@ jobs:
           node --check dashboard/static/work.js
           node scripts/check_code_ui.cjs
           node --check dashboard/static/code.js
+          node scripts/check_code_narration.cjs
+          node --check dashboard/static/code_narration.js
           node --check dashboard/static/live-avatar.js
           node --check dashboard/static/video-avatar.js
           node --check dashboard/static/avatar-pose.js

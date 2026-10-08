@@ -67,6 +67,10 @@ def init_db() -> None:
             db.execute("ALTER TABLE work_tasks ADD COLUMN apex_engine TEXT NOT NULL DEFAULT ''")
         if 'apex_ok' not in cols:                      # "Apex can take this on its own" (agent/work_agent.py)
             db.execute('ALTER TABLE work_tasks ADD COLUMN apex_ok INTEGER NOT NULL DEFAULT 0')
+        # The Apex Code project a software project's code lives in: its +apex tasks become
+        # coding sessions on the night shift (agent/work_agent.py, agent/code_studio.py).
+        if 'code_project_id' not in {r[1] for r in db.execute('PRAGMA table_info(work_projects)')}:
+            db.execute('ALTER TABLE work_projects ADD COLUMN code_project_id INTEGER')
 
 
 # ---------------------------------------------------------------- quick add
@@ -200,11 +204,27 @@ def update_project(pid, **changes):
         elif key == 'status':
             if value not in ('active', 'archived'): raise WorkError('A project is active or archived.')
             fields['status'] = value
+        elif key == 'code_project_id':
+            fields['code_project_id'] = _code_project(value)
     if fields:
         fields['updated'] = time.time()
         with longterm._conn() as db:
             db.execute(f"UPDATE work_projects SET {', '.join(k + '=?' for k in fields)} WHERE id=?", (*fields.values(), pid))
     return get_project(pid)
+
+
+def _code_project(value):
+    """None (no link), or the id of a project in Apex Code."""
+    if value is None:
+        return None
+    if type(value) is not int:
+        raise WorkError('The Apex Code project is a project id, or none.')
+    from agent import code_studio
+    try:
+        code_studio.project(value)
+    except code_studio.CodeError:
+        raise WorkError('No such project in Apex Code.') from None
+    return value
 
 
 def get_task(tid):
@@ -335,9 +355,10 @@ def _slug(text):
     return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')[:40] or 'task'
 
 
-def apex_brief(task, folder: Path) -> str:
+def _task_lines(task) -> list[str]:
+    """What the owner wrote about a task: its notes, its project and when it is due."""
     project = get_project(task['project_id']) if task['project_id'] else None
-    lines = [f"Do this work task end to end: {task['title']}."]
+    lines = []
     if task['notes']:
         lines.append(f"Details from the owner: {task['notes']}")
     if project:
@@ -346,10 +367,26 @@ def apex_brief(task, folder: Path) -> str:
             lines.append(f"Project notes: {project['notes'][:1500]}")
     if task['due']:
         lines.append(f"It is due {task['due']}.")
+    return lines
+
+
+def apex_brief(task, folder: Path) -> str:
+    lines = [f"Do this work task end to end: {task['title']}.", *_task_lines(task)]
     lines += [f"Write the finished deliverable into the folder `{folder}` (create the files there, for example result.md),",
               "and start your final answer with a two-sentence summary of what you produced and anything the owner must check or decide.",
               "Do not send, publish, pay or contact anyone: prepare drafts for the owner instead."]
     return ' '.join(lines)
+
+
+def code_brief(task) -> str:
+    """The first message of a night-shift coding session (agent/work_agent.py). Its
+    first line is the task's title, which becomes the session's title. Apex Code adds
+    its own framing (work on the branch, don't commit), so no folder line here."""
+    import config
+    owner = getattr(config, 'OWNER_NAME', '') or 'the owner'
+    return '\n'.join([task['title'], *_task_lines(task),
+                      'You are working unattended overnight: if a command is blocked, stop and explain; '
+                      f'{owner} answers in the morning.'])
 
 
 UNAVAILABLE = ('limited', 'signed_out', 'missing')   # the plan couldn't take it: the task itself was not tried
@@ -423,6 +460,15 @@ def stop_apex(tid):
         from agent import work_engines
         if not work_engines.stop(run_id):          # finished a moment ago, or Apex restarted
             sync_apex()
+    elif run_id.startswith('code-'):               # the night shift: stop the session, and its checks or review
+        from agent import code_studio
+        try:
+            code_studio.stop(int(run_id[len('code-'):]))
+        except (ValueError, code_studio.CodeError):
+            pass
+        with longterm._conn() as db:
+            db.execute("UPDATE work_tasks SET apex_state='stopped', status='todo', updated=?, apex_summary=? WHERE id=?",
+                       (time.time(), 'You stopped the night shift. The session stays in Apex Code: keep it, carry on or throw it away there.', tid))
     else:
         from agent import team
         team.stop(run_id)
@@ -431,6 +477,8 @@ def stop_apex(tid):
 
 def _run_outcome(run_id):
     """(state, summary, cost) for a run, or None while it is still going."""
+    if run_id.startswith('code-'):                 # a night-shift session in Apex Code
+        return _code_outcome(run_id)
     if run_id.startswith('cli-'):
         with longterm._conn() as db:
             row = db.execute('SELECT status, summary FROM work_runs WHERE id=?', (run_id,)).fetchone()
@@ -453,6 +501,33 @@ def _run_outcome(run_id):
     return (run['status'], (apex_step['result'] if apex_step else run.get('error') or ''), run.get('cost_usd') or 0)
 
 
+def _code_outcome(run_id):
+    """A night-shift coding session (run id 'code-<session>', agent/code_studio.py):
+    None while its turn, checks or second opinion are still to come; 'done' with
+    what Apex saw once all three are settled; the plan's own end otherwise. A plan
+    at its limit (or not signed in) puts the task back untried, like any other run."""
+    from agent import code_studio
+    try:
+        sid = int(run_id[len('code-'):])
+        s = code_studio.session(sid)
+    except (ValueError, code_studio.CodeError):
+        return ('failed', 'The Apex Code session is missing.', 0)
+    if s['status'] == 'discarded':
+        return ('stopped', 'You threw the session away in Apex Code.', 0)
+    if s['status'] == 'ready' and (s['working'] or s['side'] or s['turn_state'] != 'idle'):
+        return None
+    if s['status'] == 'ready' and s['last_status'] != 'done':
+        if not s['last_status']:
+            return None                                # its first turn hasn't ended yet
+        said = code_studio.events(sid)
+        end = next((e for e in reversed(said) if e['kind'] == 'done'), {})
+        state = s['last_status'] if s['last_status'] in (*UNAVAILABLE, 'stopped', 'interrupted') else 'failed'
+        return (state, end.get('summary') or s['summary'] or f'The session ended: {s["last_status"]}.', 0)
+    if s['status'] == 'ready' and not code_studio.settled(s):
+        return None                                    # Apex's checks or the second opinion are still to come
+    return ('done', code_studio.outcome_text(sid), 0)
+
+
 def sync_apex():
     """Bring each run's outcome onto its task. Finished work waits for the
     owner's review; anything else goes back to them. A plan that hit its usage
@@ -466,7 +541,8 @@ def sync_apex():
             changes = {'apex_state': 'running'}
         else:
             state, summary, cost = outcome
-            changes = {'apex_summary': (summary or '')[:2000], 'apex_cost': round(cost, 4),
+            from agent.working_context import redact      # a task is readable by any signed-in device
+            changes = {'apex_summary': redact(summary or '')[:2000], 'apex_cost': round(cost, 4),
                        'apex_state': None if state in UNAVAILABLE else state,
                        'status': 'review' if state == 'done' else 'todo'}
         changes['updated'] = time.time()

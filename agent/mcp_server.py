@@ -29,11 +29,22 @@ an instruction, and memories ride into every future Apex prompt. So
 Every call is logged to ~/.apex/mcp.log (time, tool, size), so you can see
 which tool read what.
 
+## Inside an Apex Code session
+
+Apex Code (agent/code_studio.py) starts this server in every coding session,
+with APEX_CODE_PROJECT (and APEX_CODE_SESSION) set. `context` then describes
+that code project, its handoff and its rules, not the board's active
+workspace; a memory the session suggests is labelled with it, so the Code
+page can list it under "Waiting for your OK". APEX_CODE_READ_ONLY (the second
+opinion) refuses `remember` outright.
+
 Run with `scripts/apex_mcp.py` (stdio). docs/MCP_SERVER.md has the setup.
 """
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 import time
 from functools import wraps, partial
 from pathlib import Path
@@ -104,21 +115,57 @@ def _memories(rows: list[dict]) -> str:
     return '\n'.join(lines)
 
 
-def _project() -> str:
-    from agent import continuity
+def _env_number(name: str) -> int | None:
+    value = os.environ.get(name, '').strip()
+    return int(value) if value.isdigit() and int(value) > 0 else None
+
+
+def _code_project() -> int | None:
+    """The Apex Code project this server was started for, if any."""
+    return _env_number('APEX_CODE_PROJECT')
+
+
+def _code_name(pid: int) -> str:
+    from agent import longterm
     try:
+        with longterm._conn() as db:
+            row = db.execute('SELECT name FROM code_projects WHERE id=?', (pid,)).fetchone()
+        return row[0] if row else ''
+    except sqlite3.Error:                      # Apex Code has not run against this database
+        return ''
+
+
+def _handoff(name: str, data: dict, rules: list[str], everywhere: list[str] | None = None,
+             rules_title: str = 'Corrections the user asked for') -> str:
+    fields = [(k, data.get(k)) for k in ('brief', 'decisions', 'artifacts', 'next_step') if data.get(k)]
+    out = [f'Project: {name}'] if name else []
+    out += [f"{k.replace('_', ' ').capitalize()}: {v}" for k, v in fields]
+    if rules:
+        out.append(f'{rules_title}: ' + '; '.join(rules))
+    if everywhere:
+        out.append('Rules the user gave for all their code: ' + '; '.join(everywhere))
+    return '\n'.join(out)
+
+
+def _project() -> str:
+    """The project being worked on: in an Apex Code session, that code project
+    (its handoff, its active rules and the rules for all code); otherwise the
+    active board workspace. continuity keeps a document's fields under 'data'."""
+    from agent import continuity
+    pid = _code_project()
+    try:
+        if pid:
+            from agent import code_brain
+            data = continuity.code_project(pid)['data']
+            rules = [r['text'] for r in code_brain.active_rules(pid)]
+            return _handoff(_code_name(pid) or f'code project {pid}', data, rules,
+                            [g['text'] for g in code_brain.global_rules()], 'Rules the user gave for this project')
         snap = continuity.snapshot(None)
     except Exception:
         return ''
     p = snap.get('project') or {}
-    fields = [(k, p.get(k)) for k in ('brief', 'decisions', 'artifacts', 'next_step') if p.get(k)]
-    if not fields:
-        return f"Project: {p['name']}" if p.get('name') else ''
-    active = [x['text'] for x in (snap.get('corrections') or {}).get('data', {}).get('items', []) if x.get('active')]
-    out = [f"Project: {p.get('name', '')}"] + [f"{k.replace('_', ' ').capitalize()}: {v}" for k, v in fields]
-    if active:
-        out.append('Corrections the user asked for: ' + '; '.join(active))
-    return '\n'.join(out)
+    items = (snap.get('corrections') or {}).get('data', {}).get('items', [])
+    return _handoff(p.get('name') or '', p.get('data') or {}, [x['text'] for x in items if x.get('active')])
 
 
 @_tool()
@@ -145,7 +192,7 @@ def context() -> str:
         parts.append('## Goals, current state and lessons\n' + state)
     project = _project()
     if project:
-        parts.append('## Current project\n' + project)
+        parts.append(('## This code project (Apex Code)\n' if _code_project() else '## Current project\n') + project)
     try:
         names = [s['name'] for s in skill_md.list_skills()]
     except Exception:
@@ -164,7 +211,12 @@ def recall(query: str, limit: int = 8, semantic: bool = False) -> str:
     _tables()
     from agent import longterm
     query = (query or '').strip()[:500]
-    rows = longterm.recall(query, limit=max(1, min(int(limit), 20)), semantic=semantic)
+    limit = max(1, min(int(limit), 20))
+    rows = longterm.recall(query, limit=limit, semantic=semantic)
+    if not rows and query:
+        # The text search wants the whole query in one memory, so a question in a
+        # few words ("upload retry policy") found nothing: match its words instead.
+        rows = longterm.match_terms(query, limit)
     return _out('recall', _memories(rows) or f'Nothing in memory about {query!r}.', query=query)
 
 
@@ -212,6 +264,8 @@ def remember(content: str, kind: str = 'note', why: str = '') -> str:
     """Suggest something Apex should remember about the user or their work (a preference,
     decision, fact). It is staged for the user's approval in Apex, not saved directly.
     kind: fact, preference, project, decision or note. Say briefly why in `why`."""
+    if os.environ.get('APEX_CODE_READ_ONLY'):
+        return _out('remember', 'This is a read-only review: it can read Apex\'s memory, not suggest to it.')
     _tables()
     from agent import approvals
     content = ' '.join((content or '').split())
@@ -219,6 +273,13 @@ def remember(content: str, kind: str = 'note', why: str = '') -> str:
         return 'A memory must be 5 to 1000 characters.'
     if kind not in {'fact', 'preference', 'project', 'decision', 'note'}:
         kind = 'note'
-    note = approvals.stage('remember', {'content': content, 'kind': kind, 'why': ' '.join(why.split())[:200],
-                                        'source': 'outside AI tool (MCP)'})
-    return _out('remember', note + ' Tell the user it is waiting for their approval in Apex.', kind=kind)
+    payload = {'content': content, 'kind': kind, 'why': ' '.join((why or '').split())[:200], 'source': 'outside AI tool (MCP)'}
+    pid = _code_project()
+    if pid:
+        # From an Apex Code session: the Code page lists it for the owner's OK. Once
+        # approved it is tagged code, so the next session's brief can bring it back.
+        payload.update(source=f'Apex Code session, project {pid}', tags='from-mcp,code', project_id=pid,
+                       session_id=_env_number('APEX_CODE_SESSION'))
+    note = approvals.stage('remember', payload)
+    where = 'in Apex Code (Waiting for your OK)' if pid else 'in Apex'
+    return _out('remember', note + f' Tell the user it is waiting for their approval {where}.', kind=kind)

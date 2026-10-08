@@ -16,6 +16,12 @@ Modes:
   full    any command, in the worktree. For when Safe gets in the way.
   review  read-only: the second opinion on someone else's change.
 
+Apex's own memory server (agent/mcp_server.py) is the one MCP server a session
+gets: its reading tools in every mode, and `remember`, which only stages a
+memory for the owner's approval, never in review. Claude Code loads it from a
+file (--mcp-config, with --strict-mcp-config so nothing else loads); Codex gets
+the same server as config overrides.
+
 As with Work tasks, the prompt goes in on stdin (never through cmd.exe), Apex's
 API keys are removed from the tool's environment, and Stop or the time limit
 ends the whole process tree.
@@ -60,6 +66,10 @@ ALLOWED_COMMAND = re.compile(r'^[^\n\r()]{1,300}$')     # fits inside a Bash(...
 PLAN_ONLY = ('Plan only, for now: read what you need, then write a short step-by-step plan for the request below '
              '(the files you would change and how, and how you would check it). Do not change any file yet.')
 DIFF_CAP = 12000
+# Apex's memory server: these only read (and what they return is redacted); remember stages for approval.
+APEX_MCP_READ = ['mcp__apex__context', 'mcp__apex__recall', 'mcp__apex__lessons', 'mcp__apex__search_files']
+APEX_MCP_WRITE = ['mcp__apex__remember']
+ENV_NAME = re.compile(r'^[A-Z][A-Z0-9_]{0,63}$')     # a bare TOML key, and a plain environment name
 
 
 def error_text(text: str) -> str:
@@ -69,10 +79,23 @@ def error_text(text: str) -> str:
     return we._tidy('\n'.join(keep))
 
 
+def _file_option(o: dict, key: str, what: str) -> None:
+    """A file passed on the command line: one that exists, by its full path, on one line."""
+    if o.get(key):
+        path = str(o[key])
+        if '\n' in path or '\r' in path or not os.path.isabs(path) or not os.path.isfile(path):
+            raise ValueError(f'{what} is passed as a file that exists, by its full path.')
+        o[key] = path
+    else:
+        o[key] = ''
+
+
 def check_options(options: dict | None) -> dict:
-    """Model, effort, plan-only and allowed commands for one message, checked:
-    every value here ends up on a command line."""
+    """Model, effort, plan-only, allowed commands, the brief file and the memory
+    server's file for one message, checked: every value here ends up on a command line."""
     o = dict(options or {})
+    _file_option(o, 'system_file', 'The brief')
+    _file_option(o, 'mcp_file', "Apex's memory server")
     if o.get('model') and not MODEL.match(str(o['model'])):
         raise ValueError('That model name has characters Apex does not pass on.')
     if o.get('effort') and o['effort'] not in EFFORTS:
@@ -97,8 +120,16 @@ def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None =
         if mode != 'review':                 # Allow once: exactly that command. Always: it, with any arguments.
             tools += [f'Bash({c})' for c in o['allow']]
         tools += [f'Bash({c}:*)' for c in o['always']]      # what you always allow, the reviewer may run too
+        if o['mcp_file']:                    # Apex's memory: reading always; suggesting a memory, not in a review
+            tools += APEX_MCP_READ + (APEX_MCP_WRITE if mode != 'review' else [])
         cmd = [exe, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
                '--permission-mode', 'plan' if o['plan'] else 'acceptEdits', '--allowedTools', *tools, '--strict-mcp-config']
+        if o['mcp_file']:
+            cmd += ['--mcp-config', o['mcp_file']]          # the only MCP server it loads
+        if o['system_file']:
+            # What Apex knows about you (agent/code_brain.py), as a file: multi-line text
+            # on the command line would go through cmd.exe on Windows (claude.cmd).
+            cmd += ['--append-system-prompt-file', o['system_file']]
         if mode == 'review':
             cmd += ['--disallowedTools', *REVIEW_DENIED]
         if o.get('model'):
@@ -122,12 +153,34 @@ def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None =
         cmd += ['-m', o['model']]
     if o.get('effort'):
         cmd += ['-c', f"model_reasoning_effort={CODEX_EFFORT[o['effort']]}"]
+    if o['mcp_file']:
+        cmd += _codex_mcp(o['mcp_file'], mode)
     mode_nt = we.codex_windows_sandbox()
     if mode_nt and os.name == 'nt':
         cmd += ['-c', f'windows.sandbox={mode_nt}']
     if resume:
         cmd += [resume]
     return cmd + ['-']                         # '-': the message comes in on stdin
+
+
+def _codex_mcp(path: str, mode: str) -> list[str]:
+    """Apex's memory server for Codex, from the same file Claude Code reads, as
+    config overrides. json.dumps writes a valid TOML basic string (Windows
+    backslashes included); ensure_ascii=False keeps an accent in a path as it is.
+    In a review the server itself refuses to suggest a memory."""
+    try:
+        server = json.loads(Path(path).read_text(encoding='utf-8'))['mcpServers']['apex']
+        command, args, env = str(server['command']), [str(a) for a in server['args']], dict(server.get('env') or {})
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ValueError(f"Apex's memory server file can't be read: {exc}") from exc
+    if mode == 'review':
+        env['APEX_CODE_READ_ONLY'] = '1'
+    if any(not ENV_NAME.match(str(k)) for k in env):
+        raise ValueError("Apex's memory server file names an environment variable Apex does not pass on.")
+    table = ', '.join(f'{k}={json.dumps(str(v), ensure_ascii=False)}' for k, v in env.items())
+    return ['-c', f'mcp_servers.apex.command={json.dumps(command, ensure_ascii=False)}',
+            '-c', f'mcp_servers.apex.args={json.dumps(args, ensure_ascii=False)}',
+            '-c', f'mcp_servers.apex.env={{{table}}}']
 
 
 # ---------------------------------------------------------------- the feed
@@ -229,8 +282,23 @@ def diff_counts(diff: str) -> tuple[int, int]:
     return (sum(1 for l in lines if l.startswith('+')), sum(1 for l in lines if l.startswith('-')))
 
 
+MEMORY_TOOLS = {'context': 'what it knows about you and this project', 'lessons': 'what works and what fails',
+                'skills': 'its skills'}
+
+
+def _memory_tool(tool: str, args: dict) -> dict:
+    """A call to Apex's memory server, in words: what it asked, or what it suggested."""
+    args = args if isinstance(args, dict) else {}
+    if tool == 'remember':
+        return {'kind': 'tool', 'tool': 'memory', 'title': f"Suggested a memory for your OK: {_short(args.get('content'), 160)}"}
+    what = args.get('query') or args.get('name') or MEMORY_TOOLS.get(tool) or tool
+    return {'kind': 'tool', 'tool': 'memory', 'title': f"Checked Apex's memory: {_short(what, 120)}"}
+
+
 def _claude_tool(name: str, args: dict, folder: Path) -> list[dict]:
     """A tool call as feed events: what it does, in a few words."""
+    if name.startswith('mcp__apex__'):
+        return [_memory_tool(name.removeprefix('mcp__apex__'), args)]
     path = _rel(args.get('file_path') or args.get('notebook_path') or args.get('path') or '', folder)
     if name in ('Write', 'Edit', 'MultiEdit') and (path.startswith(('/', '../')) or re.match(r'^[A-Za-z]:/', path)):
         # Outside the project: Plan first saves its plan in Claude's own folder.
@@ -426,7 +494,13 @@ def _parse_codex(d: dict, folder: Path, state: dict) -> list[dict]:
         return [{'kind': 'todo', 'items': [{'text': _short(x.get('text'), 160), 'done': bool(x.get('completed')), 'active': False}
                                             for x in item.get('items') or []]}]
     if t == 'mcp_tool_call' and kind == 'item.started':
+        if item.get('server') == 'apex':
+            return [{**_memory_tool(str(item.get('tool') or ''), item.get('arguments')), 'id': iid}]
         return [{'kind': 'tool', 'tool': 'other', 'title': f"{item.get('server', '')} {item.get('tool', '')}".strip(), 'id': iid}]
+    if t == 'mcp_tool_call' and done and item.get('server') == 'apex':
+        failed = item.get('status') == 'failed' or bool(item.get('error'))
+        why = (item.get('error') or {}).get('message') if isinstance(item.get('error'), dict) else item.get('error')
+        return [{'kind': 'result', 'id': iid, 'ok': not failed, 'output': _tail(why) if failed and why else ''}]
     if t == 'error' and done:
         return [{'kind': 'error', 'text': _short(item.get('message'), 400)}]
     return []

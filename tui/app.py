@@ -51,7 +51,7 @@ def run_tui(agent) -> None:
             streamer.start()
             try:
                 agent.run(text, include_screenshot=False, streamer=streamer,
-                          cancel_event=cancel)
+                          cancel_event=cancel, withhold=frozenset())
             except Exception as exc:
                 print(f"\n[error] {exc}")
             finally:

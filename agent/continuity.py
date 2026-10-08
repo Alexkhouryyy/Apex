@@ -107,15 +107,18 @@ def _workspace(workspace_id):
     return row[0]
 
 
+PROJECT_LIMITS = dict(brief=2500, decisions=3500, artifacts=2500, next_step=1500)
+EMPTY_PROJECT = dict(brief='', decisions='', artifacts='', next_step='')
+
+
 def project(workspace_id):
     name = _workspace(workspace_id)
-    return dict(id=workspace_id, name=name, **read('project:'+workspace_id,
-        dict(brief='', decisions='', artifacts='', next_step='')))
+    return dict(id=workspace_id, name=name, **read('project:'+workspace_id, EMPTY_PROJECT))
 
 
 def save_project(workspace_id, data, revision):
     _workspace(workspace_id)
-    data = _fields(data, dict(brief=2500, decisions=3500, artifacts=2500, next_step=1500))
+    data = _fields(data, PROJECT_LIMITS)
     return write('project:'+workspace_id, data, revision)
 
 
@@ -142,8 +145,8 @@ def corrections(workspace_id):
     return read('corrections:'+workspace_id, dict(items=[]))
 
 
-def save_corrections(workspace_id, items, revision):
-    _workspace(workspace_id)
+def _clean_corrections(items):
+    """At most 20 corrections, each 1–500 characters with an active flag."""
     if not isinstance(items, list) or len(items) > 20:
         raise ValueError('Keep at most 20 corrections per project.')
     cleaned = []
@@ -154,7 +157,42 @@ def save_corrections(workspace_id, items, revision):
         if not isinstance(text, str) or not 1 <= len(text.strip()) <= 500:
             raise ValueError('Each correction needs 1–500 characters.')
         cleaned.append(dict(text=text.strip(), active=item['active']))
-    return write('corrections:'+workspace_id, dict(items=cleaned), revision)
+    return cleaned
+
+
+def save_corrections(workspace_id, items, revision):
+    _workspace(workspace_id)
+    return write('corrections:'+workspace_id, dict(items=_clean_corrections(items)), revision)
+
+
+# Apex Code projects (agent/code_studio.py) keep their own handoff and rules. They
+# are not board workspaces, so these need no workspace row: the key is the code
+# project's number. History and restore are the plain history()/restore() with
+# code_key(), so a save the agent made can be seen and undone the same way.
+
+def code_key(kind, pid):
+    """'project:code-<n>' or 'corrections:code-<n>' for code project n."""
+    if type(pid) is not int or pid < 1:
+        raise ValueError('A code project is a positive number.')
+    if kind not in ('project', 'corrections'):
+        raise ValueError('A code project keeps a project handoff or corrections.')
+    return f'{kind}:code-{pid}'
+
+
+def code_project(pid):
+    return read(code_key('project', pid), EMPTY_PROJECT)
+
+
+def save_code_project(pid, data, revision):
+    return write(code_key('project', pid), _fields(data, PROJECT_LIMITS), revision)
+
+
+def code_corrections(pid):
+    return read(code_key('corrections', pid), dict(items=[]))
+
+
+def save_code_corrections(pid, items, revision):
+    return write(code_key('corrections', pid), dict(items=_clean_corrections(items)), revision)
 
 
 def local_channel(channel):

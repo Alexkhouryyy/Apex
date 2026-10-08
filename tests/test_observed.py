@@ -151,6 +151,22 @@ class TestRecording:
         assert observed.note_tool_result(
             "bash", "ok", "=== 5 passed ===", {"command": "pytest"}) is None
 
+    def test_an_outcome_seen_outside_a_tool_call_is_observed_and_tri_state(self, db):
+        """Apex Code's checks (agent/code_studio.py): passed, failed, or
+        undecided when the run couldn't say. Undecided is stored as NULL."""
+        ids = [observed.record("ran the checks", "checks passed: 3 passed", True, "code:apex"),
+               observed.record("ran the checks", "checks unknown: no count", None, "code:apex"),
+               observed.record("ran the checks", "checks failed: 1 failed", False, "code:apex")]
+        assert all(isinstance(i, int) for i in ids)
+        assert [(r[2], r[3], r[4]) for r in self._rows(db)] == [
+            (1, "code:apex", "observed"), (None, "code:apex", "observed"), (0, "code:apex", "observed")]
+
+    def test_recording_an_outcome_never_raises(self, db, monkeypatch):
+        from agent import longterm
+        monkeypatch.setattr(longterm, "_conn",
+                            lambda: (_ for _ in ()).throw(RuntimeError("db gone")))
+        assert observed.record("ran the checks", "checks passed", True, "code:apex") is None
+
     def test_split_separates_what_was_seen_from_what_was_claimed(self, db):
         from agent import outcomes
         observed.note_tool_result("bash", "ok", "=== 5 passed ===",

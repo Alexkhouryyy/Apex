@@ -59,21 +59,53 @@ async def new_project(request: Request):
 @router.patch('/api/work/projects/{pid}')
 async def edit_project(pid: int, request: Request):
     body = await _json(request)
-    return _guard(work.update_project, pid, **{k: v for k, v in body.items() if k in ('name', 'area', 'client', 'notes', 'status')})
+    if 'code_project_id' in body:                  # lets the night shift code in that project: the owner's call
+        _owner(request, 'link a project to Apex Code')
+    return _guard(work.update_project, pid, **{k: v for k, v in body.items()
+                                               if k in ('name', 'area', 'client', 'notes', 'status', 'code_project_id')})
+
+
+def _codes_at_night(task: dict) -> bool:
+    """True when the night shift would code this task in the owner's repo: Apex may
+    take it, and it is software in a Work project the owner linked to Apex Code."""
+    if task.get('project_id') is not None and not task.get('area'):
+        try:
+            task['area'] = (work.get_project(int(task['project_id'])) or {}).get('area')
+        except (TypeError, ValueError):
+            return False
+    from agent import work_agent
+    return bool(task.get('apex_ok')) and work_agent.code_project_for(task) is not None
+
+
+# What a coding task's session is made of (its prompt, its repo, whether Apex takes it).
+_PROMPT_FIELDS = ('title', 'quick', 'notes', 'area', 'project_id', 'apex_ok')
 
 
 @router.post('/api/work/tasks')
 async def new_task(request: Request):
     body = await _json(request)
     fields = {k: body[k] for k in ('title', 'quick', 'area', 'project_id', 'due', 'priority', 'notes', 'status', 'apex_ok') if k in body}
+    after = {}
+    if isinstance(fields.get('quick'), str) and fields['quick']:
+        try:
+            after = work.parse_quick(fields['quick'], None, work.list_projects())
+        except work.WorkError:
+            pass                                     # add_task reports it
+    after.update({k: v for k, v in fields.items() if k != 'quick' and v is not None})
+    if _codes_at_night(after):                       # Apex Code work in the owner's repo: the owner's call
+        _owner(request, 'give Apex Code work')
     return _guard(work.add_task, **fields)
 
 
 @router.patch('/api/work/tasks/{tid}')
 async def edit_task(tid: int, request: Request):
     body = await _json(request)
-    return _guard(work.update_task, tid, **{k: v for k, v in body.items()
-                                            if k in ('title', 'notes', 'due', 'priority', 'area', 'project_id', 'status', 'waiting_on', 'apex_ok')})
+    changes = {k: v for k, v in body.items()
+               if k in ('title', 'notes', 'due', 'priority', 'area', 'project_id', 'status', 'waiting_on', 'apex_ok')}
+    task = work.get_task(tid)
+    if task and any(k in changes for k in _PROMPT_FIELDS) and _codes_at_night({**task, **changes}):
+        _owner(request, 'give Apex Code work')
+    return _guard(work.update_task, tid, **changes)
 
 
 @router.delete('/api/work/tasks/{tid}')
