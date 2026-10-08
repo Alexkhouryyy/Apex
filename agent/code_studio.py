@@ -15,11 +15,26 @@ possible and keeps Keep a plain merge.
 Around that:
   second opinion  the other plan reviews the change, read-only, and rates it
                   out of 10, without the flattery
-  checks          the project's test command, run in the session's copy
+  checks          the project's test command, run in the session's copy:
+                  passed, failed or unknown, on a known commit
+  proof           what the agent said it checked next to what Apex saw for
+                  itself; Keep asks before keeping work nothing proved
   catch up        merge your latest work into the session; if that conflicts,
                   Apex can be asked to resolve it
   switch plan     continue on the other plan (say, at a usage limit) with a
                   recap, because one tool can't resume the other's chat
+  knows you       every new conversation starts with what Apex knows about
+                  you (agent/code_brain.py): profile, rules, preferences
+  brain on tap    while it works, the plan can ask Apex's memory itself (Apex's
+                  own memory server); a memory it suggests waits for your OK
+  rules           a correction, said once, becomes a rule: new sessions get it
+                  in their brief, open ones ahead of their next message
+  write-back      Keep and Throw away (with why) go into Apex's memory: the
+                  project's decision log, today's note and the outcomes ledger;
+                  what tends to happen here is counted from the sessions, live
+  away mode       a command Safe mode stopped reaches your phone, and one tap
+                  allows it once (or says no); a finished session pings you, and
+                  Apex's restraint holds a 1 a.m. finish until you're around
 
 Coding never uses API credits: only the two plans, signed in on this PC.
 """
@@ -29,6 +44,7 @@ import itertools
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -37,7 +53,7 @@ import threading
 import time
 from pathlib import Path
 
-from agent import code_engines, longterm, work, work_engines as we
+from agent import code_brain, code_engines, longterm, work, work_engines as we
 
 APEX_ROOT = Path(__file__).resolve().parents[1]
 ENGINES = ('claude', 'chatgpt')
@@ -47,10 +63,16 @@ MAX_PARALLEL = 3                      # sessions working at once
 CHECK_TIMEOUT = 1800
 REVIEW_DIFF_LIMIT = 60000             # characters of diff the second opinion gets
 DIFF_LIMIT = 400_000                  # characters of one file's diff shown
+ALLOW_TTL = 7200                      # seconds a blocked command can be answered from your phone
+MAX_ASKS = 3                          # phone asks for blocked commands, at most, per turn
 APEX_CHECKS = 'python -m pytest -q -x -p no:cacheprovider'
 CONFLICT_MARK = re.compile(r'^(<{7}|>{7})( |$)', re.M)
 RATING = re.compile(r'rating\s*[:\-]?\s*\**\s*(\d{1,2})(?:\.\d+)?\s*/\s*10', re.I)
 ANY_RATING = re.compile(r'\b(\d{1,2})(?:\.\d+)?\s*/\s*10\b')
+# A follow-up that corrects the agent ("no, never touch the public API"): the page
+# offers to make it a rule (agent/code_brain.py). Nothing is saved without a tap.
+CORRECTION = re.compile(r"^\s*(no\b|nope\b|don[’']?t\b|do not\b|never\b|always\b|stop\b|instead\b|not like that|"
+                        r"that[’']?s (wrong|not)|wrong\b)", re.I)
 
 
 class CodeError(ValueError):
@@ -126,13 +148,23 @@ def init_db() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL, ts REAL NOT NULL,
             kind TEXT NOT NULL, data TEXT NOT NULL)''')
         db.execute('CREATE INDEX IF NOT EXISTS code_events_session ON code_events (session_id, id)')
+        # Away mode: a command Safe mode stopped, sent to your phone to answer. The id is
+        # the link's secret; answered, choice and who (which device) are the audit.
+        db.execute('''CREATE TABLE IF NOT EXISTS code_pending_allows (
+            id TEXT PRIMARY KEY, session_id INTEGER NOT NULL, command TEXT NOT NULL, created REAL NOT NULL,
+            expires REAL NOT NULL, answered REAL, choice TEXT NOT NULL DEFAULT '', who TEXT NOT NULL DEFAULT '')''')
+        # check_sha: the commit the last checks ran on; check_evidence: why they count as passed, failed or unknown.
         have = {r[1] for r in db.execute('PRAGMA table_info(code_sessions)')}
         for col, ddl in (('model', "TEXT NOT NULL DEFAULT ''"), ('effort', "TEXT NOT NULL DEFAULT ''"),
-                         ('tokens', 'INTEGER NOT NULL DEFAULT 0')):
+                         ('tokens', 'INTEGER NOT NULL DEFAULT 0'), ('check_sha', "TEXT NOT NULL DEFAULT ''"),
+                         ('check_evidence', "TEXT NOT NULL DEFAULT ''")):
             if col not in have:
                 db.execute(f'ALTER TABLE code_sessions ADD COLUMN {col} {ddl}')
-        if 'allow' not in {r[1] for r in db.execute('PRAGMA table_info(code_projects)')}:
-            db.execute("ALTER TABLE code_projects ADD COLUMN allow TEXT NOT NULL DEFAULT '[]'")
+        # checks_exit_ok: this project's test runner prints no count, so exit 0 is taken as a pass.
+        have = {r[1] for r in db.execute('PRAGMA table_info(code_projects)')}
+        for col, ddl in (('allow', "TEXT NOT NULL DEFAULT '[]'"), ('checks_exit_ok', 'INTEGER NOT NULL DEFAULT 0')):
+            if col not in have:
+                db.execute(f'ALTER TABLE code_projects ADD COLUMN {col} {ddl}')
     if not _recovered:
         _recovered = True
         _recover()
@@ -170,6 +202,37 @@ def event(sid: int, kind: str, **data) -> int:
         cur = db.execute('INSERT INTO code_events (session_id, ts, kind, data) VALUES (?,?,?,?)',
                          (sid, time.time(), kind, json.dumps(data)))
         return cur.lastrowid
+
+
+def _last_kind(sid: int) -> str:
+    rows = _rows('SELECT kind FROM code_events WHERE session_id=? ORDER BY id DESC LIMIT 1', (sid,))
+    return rows[0]['kind'] if rows else ''
+
+
+def tell_sessions(note: str, project_id: int | None = None) -> int:
+    """Something the owner decided outside a session (a new rule) that its plan
+    must hear: added to the note sent ahead of the next message of every open
+    session (of one project, or of all). How many sessions will hear it."""
+    where, args = ("status='ready'", ()) if project_id is None else ("status='ready' AND project_id=?", (project_id,))
+    init_db()
+    return _add_note(where, args, note)
+
+
+def _add_note(where: str, args: tuple, note: str) -> int:
+    """Add a line to the note of the sessions `where` picks; never replace what is waiting there."""
+    with longterm._conn() as db:
+        cur = db.execute("UPDATE code_sessions SET pending_note = CASE WHEN pending_note = '' THEN ? "
+                         f"ELSE pending_note || char(10) || ? END WHERE {where}", (note, note, *args))
+        return cur.rowcount
+
+
+def _note_sent(sid: int, used: str) -> None:
+    """The note went with this message: clear it, keeping anything added since it was read."""
+    if not used:
+        return
+    with longterm._conn() as db:
+        db.execute('UPDATE code_sessions SET pending_note = ltrim(substr(pending_note, ?), char(10)) '
+                   'WHERE id=? AND substr(pending_note, 1, ?) = ?', (len(used) + 1, sid, len(used), used))
 
 
 def events(sid: int, after: int = 0, limit: int = 500) -> list[dict]:
@@ -269,9 +332,15 @@ def add_project(path: str, name: str = '') -> dict:
     return project(pid)
 
 
-def update_project(pid: int, name=None, checks=None) -> dict:
+def update_project(pid: int, name=None, checks=None, exit_ok=None) -> dict:
+    """exit_ok: count a test run that exits 0 without printing a count as passed
+    (for a runner that never prints one); otherwise that is 'unknown'."""
     project(pid)
     fields = {}
+    if exit_ok is not None:
+        if not isinstance(exit_ok, bool):
+            raise CodeError('"Exit 0 counts as a pass" is on or off.')
+        fields['checks_exit_ok'] = int(exit_ok)
     if name is not None:
         if not str(name).strip() or len(str(name)) > 60:
             raise CodeError('A project name is 1 to 60 characters.')
@@ -386,21 +455,70 @@ def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'saf
     return send(sid, prompt, engine, mode, _notes=notes, model=model, effort=effort, plan=plan)
 
 
-def _brief(s: dict, prompt: str) -> str:
+def _brief(s: dict, prompt: str, about: str = '', memory: bool = False) -> str:
+    """The first message of a session. `about`: what Apex knows about the owner,
+    for Codex, which has no system prompt flag (Claude gets it as a file).
+    `memory`: the session can ask Apex's memory server."""
     import config
     owner = getattr(config, 'OWNER_NAME', '') or 'the owner'
+    ask = (f"- Apex's memory is open to you (the apex tools: context, recall, lessons, search_files): ask it what "
+           f"{owner} decided or prefers rather than guessing. `remember` only suggests a memory; {owner} approves it.\n"
+           if memory else '')
     return (f"You are Apex's coding agent, working for {owner} on the project '{s['project']}'. You are in a git "
             f"worktree made for this session (branch {s['branch']}); {owner}'s own copy stays untouched until they "
             "keep your work.\n"
             "- Do what is asked below, and keep the change focused on it.\n"
             "- Run the relevant tests if the project has them, and fix what you break.\n"
             "- Do not commit, push, switch branches or change git settings: Apex records your work after each message.\n"
+            + ask +
             "- Finish with a short summary: what you changed, how you checked it, and anything "
             f"{owner} must decide.\n\n"
+            + (f"{about}\n\n" if about else '') +
             f"{owner}'s request:\n{prompt}")
 
 
-def _recap(s: dict, new_prompt: str) -> str:
+def _brain(s: dict, prompt: str) -> dict | None:
+    """What Apex knows about the owner, for a new conversation (agent/code_brain.py).
+    It never stops a message: if it can't be gathered, the session starts without it."""
+    try:
+        block = code_brain.brief_block(s['project_id'], prompt)
+    except Exception as exc:
+        print(f'[Code] could not gather what Apex knows about you: {type(exc).__name__}: {exc}')
+        return None
+    return block if block['text'] else None
+
+
+def _memory_server(s: dict) -> str:
+    """Apex's memory server for this session (agent/code_brain.mcp_file), written
+    afresh each time: '' when it is turned off (CODE_APEX_MCP=false) or the file
+    can't be written. A session never fails for want of it."""
+    import config
+    if not getattr(config, 'CODE_APEX_MCP', True):
+        return ''
+    try:
+        return str(code_brain.mcp_file(s['id'], s['project_id']))
+    except OSError as exc:
+        print(f"[Code] could not set up Apex's memory server for session {s['id']}: {exc}")
+        return ''
+
+
+def _system_file(sid: int, block: dict | None, fresh: bool) -> str:
+    """The brief file Claude reads, the same one on every turn of the conversation
+    (Claude keeps the system prompt it first saw until it compacts). A new
+    conversation writes it afresh. '' when there is none."""
+    path = code_brain.brief_path(sid)
+    try:
+        if fresh and block:
+            code_brain.brief_file(sid, block['text'])
+        elif fresh:
+            path.unlink(missing_ok=True)
+        return str(path) if path.is_file() else ''
+    except OSError as exc:
+        print(f'[Code] could not write the brief file: {exc}')
+        return ''
+
+
+def _recap(s: dict, new_prompt: str, about: str = '') -> str:
     asks = [e['text'] for e in events(s['id']) if e['kind'] == 'you'][-6:]
     stat = ''
     if s['worktree'] and Path(s['worktree']).is_dir():
@@ -410,6 +528,7 @@ def _recap(s: dict, new_prompt: str) -> str:
             [f"Last summary: {s['summary'][:1500] or '(none)'}",
              'Changes so far (git diff --stat against where the session started):', stat or '(none yet)',
              '', 'Do not commit, push or switch branches: Apex records your work after each message.',
+             *(['', about] if about else []),
              '', 'New request:', new_prompt]
     return '\n'.join(lines)
 
@@ -432,6 +551,8 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
     model/effort stay with the session; plan and allow are for this message only."""
     prompt = _clean_prompt(prompt)
     s = session(sid)
+    engine = engine or s['engine']
+    mode = mode or s['mode']
     model = s['model'] if model is None else str(model).strip()
     effort = s['effort'] if effort is None else str(effort).strip()
     try:
@@ -441,8 +562,6 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
         raise CodeError(str(exc)) from exc
     if s['status'] != 'ready':
         raise CodeError('This session is finished (kept or thrown away). Start a new one.')
-    engine = engine or s['engine']
-    mode = mode or s['mode']
     if engine not in ENGINES:
         raise CodeError('Choose your Claude plan or your ChatGPT plan.')
     if mode not in MODES:
@@ -458,11 +577,23 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
         _turns[sid] = run_id
     try:
         first = not any(e['kind'] == 'you' for e in events(sid))
+        # A reply to a finished turn that starts like a correction: the page offers to keep it as a rule.
+        correction = not first and _last_kind(sid) == 'done' and bool(CORRECTION.match(prompt))
         switched = engine != s['engine']
+        # A new conversation (the first message, the other plan taking over, or one
+        # that never got going) starts with what Apex knows about the owner. Claude
+        # gets it as a system prompt file on every turn; Codex has no such flag, so
+        # it goes in the message, ahead of the request.
+        fresh = first or switched or not s['engine_session']
+        block = _brain(s, prompt) if fresh else None
+        about = block['text'] if block and engine == 'chatgpt' else ''
+        if engine == 'claude':
+            options['system_file'] = _system_file(sid, block, fresh)
+        options['mcp_file'] = _memory_server(s)
         if first:
-            text = _brief(s, prompt)
+            text = _brief(s, prompt, about, memory=bool(options['mcp_file']))
         elif switched or not s['engine_session']:
-            text = _recap(s, prompt)
+            text = _recap(s, prompt, about)
         else:
             text = prompt
         if s['pending_note'] and not first:
@@ -471,17 +602,19 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
         if pointed:
             text = f"Files the owner pointed at (read these first): {', '.join(pointed)}\n\n{text}"
         event(sid, 'you', text=prompt, engine=engine, mode=mode, model=model, effort=effort, plan=bool(plan),
-              files=pointed, allow=list(allow or []))
+              files=pointed, allow=list(allow or []), **({'correction': True} if correction else {}),
+              **({'brief': {'chars': block['chars'], 'sources': block['sources']}} if block else {}))
         for note in _notes:
             event(sid, 'note', text=note)
         if switched and not first:
             event(sid, 'note', text=f'Switched to your {we.NAMES[engine]}. It gets a recap of the session so far.')
         resume = None if (switched or first) else s['engine_session']
-        _set(sid, engine=engine, mode=mode, model=model, effort=effort, turn_state='working', pending_note='',
+        _set(sid, engine=engine, mode=mode, model=model, effort=effort, turn_state='working',
              **({'engine_session': None} if switched else {}))
+        _note_sent(sid, s['pending_note'])
         with _lock:
             _live[sid] = {'v': next(_live_seq), 'text': '', 'thinking': '', 'outputs': {}}
-        threading.Thread(target=_run_turn, args=(sid, run_id, engine, mode, text, resume, prompt, options),
+        threading.Thread(target=_run_turn, args=(sid, run_id, engine, mode, text, resume, prompt, options, about),
                          daemon=True, name=f'ApexCode-{sid}').start()
     except Exception:
         with _lock:
@@ -490,12 +623,13 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
     return session(sid)
 
 
-def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None) -> None:
+def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, about='') -> None:
     started = time.time()
     s = session(sid)
     folder = Path(s['worktree'])
     result = {'status': 'failed', 'summary': 'It did not start.'}
     files = 0
+    asks: dict[str, str] = {}                             # blocked command -> the link your phone answers it with
     try:
         start_sha = _git(folder, 'rev-parse', 'HEAD').strip()
 
@@ -505,6 +639,9 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None) -> 
             elif _feed_live(sid, e):
                 return
             elif e['kind'] != 'done':                    # the turn's end is recorded below, with its numbers
+                if e['kind'] == 'blocked' and e.get('command'):
+                    token = _allow_token(sid, e['command'], asks)
+                    e = {**e, 'allow_id': token} if token else e
                 # A tool's own id (to pair a command with its result) is kept as `ref`.
                 event(sid, e['kind'], **{('ref' if k == 'id' else k): v for k, v in e.items() if k != 'kind'})
 
@@ -512,8 +649,10 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None) -> 
         result = code_engines.turn(engine, text, folder, mode, resume, on_event, run_id, env_extra=extra, options=options)
         if result['status'] == 'failed' and resume and code_engines.RESUME_LOST.search(result.get('summary') or ''):
             event(sid, 'note', text='The plan had lost this conversation, so Apex started it fresh with a recap.')
-            result = code_engines.turn(engine, _recap(session(sid), prompt), folder, mode, None, on_event, run_id,
-                                       env_extra=extra, options=options)
+            if engine == 'chatgpt' and not about:     # a new Codex thread: tell it about the owner again
+                about = (_brain(session(sid), prompt) or {}).get('text', '')
+            result = code_engines.turn(engine, _recap(session(sid), prompt, about), folder, mode, None, on_event,
+                                       run_id, env_extra=extra, options=options)
         if result.get('session'):
             _set(sid, engine_session=result['session'])
         locked = _wait_readable(folder)
@@ -547,19 +686,151 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None) -> 
             except Exception as exc:
                 print(f'[Code] could not rest the plan: {exc}')
         if took >= 60 and result['status'] != 'stopped':
-            _notify(s['title'], result['status'], total)
+            _notify(sid, s['title'], result['status'], total)
+        if asks:
+            _ask_phone(sid, s['title'], engine, asks)
         with _lock:                                       # last: "not working" means everything above is done
             _turns.pop(sid, None)
 
 
-def _notify(title, status, files) -> None:
-    body = (f'"{title}" is ready: {files} file{"s" if files != 1 else ""} changed. Review it in Apex Code.'
-            if status == 'done' else f'"{title}" stopped ({status}). Open Apex Code to see why.')
+def _notify(sid: int, title: str, status: str, files: int) -> None:
+    """A turn that took a while has ended: tell your devices, with what the proof
+    says. Normal priority, so Apex's restraint can hold a 1 a.m. finish until you're
+    around; tapping it opens the session. One per turn (the key counts the turns)."""
+    body = (f'"{title}" is ready: {files} file{"s" if files != 1 else ""} changed; {_verdict_line(sid)}. '
+            'Review it in Apex Code.' if status == 'done' else f'"{title}" stopped ({status}). Open Apex Code to see why.')
     try:
+        turns = _rows("SELECT COUNT(*) AS n FROM code_events WHERE session_id=? AND kind='done'", (sid,))[0]['n']
         from agent import notify
-        notify.notify('Apex · Code', body)
+        notify.notify('Apex · Code', body, kind='code', priority='normal', url=f'/code#s={sid}',
+                      dedup_key=f'code:{sid}:done:{turns}')
     except Exception as exc:
         print(f'[Code] could not notify: {exc}')
+
+
+def _verdict_line(sid: int) -> str:
+    """The proof in a few words, for a notification: 'checks passed: 212 passed', or 'not verified yet'."""
+    try:
+        p = proof(sid)
+    except Exception as exc:                              # a notification never fails over the proof
+        print(f'[Code] could not read the proof for the notification: {exc}')
+        return 'not verified yet'
+    if p['verdict'] == 'proved':
+        return f"checks passed: {p['checks']['why']}" if p['checks']['why'] else 'checks passed'
+    if p['verdict'] == 'contradicted':
+        return 'it says it works, but Apex saw it fail'
+    return 'not verified yet'
+
+
+# ---------------------------------------------------------------- away mode: answer from your phone
+
+class NoSuchAllow(CodeError):
+    """No blocked command has that link."""
+
+
+def _allow_token(sid: int, command: str, asks: dict) -> str | None:
+    """A command Safe mode stopped gets a secret link your phone can answer, once,
+    for two hours (one per command, MAX_ASKS commands a turn). None for a command
+    that could never be allowed (allow() would refuse it), one past the limit (the
+    page still has Allow once), or if it can't be stored."""
+    command = str(command).strip()
+    if not code_engines.ALLOWED_COMMAND.match(command):
+        return None
+    if command not in asks:
+        if len(asks) >= MAX_ASKS:
+            return None
+        token, now = secrets.token_urlsafe(16), time.time()
+        try:
+            with longterm._conn() as db:
+                db.execute('INSERT INTO code_pending_allows (id, session_id, command, created, expires) VALUES (?,?,?,?,?)',
+                           (token, sid, command, now, now + ALLOW_TTL))
+        except Exception as exc:                          # the step still shows, with Allow once on the page
+            print(f'[Code] could not keep the request for your phone: {exc}')
+            return None
+        asks[command] = token
+    return asks[command]
+
+
+def _ask_phone(sid: int, title: str, engine: str, asks: dict) -> None:
+    """Safe mode stopped a command: ask on every device (high priority, so it is never
+    held), at most MAX_ASKS a turn. The link opens a one-tap Allow once / Don't allow."""
+    try:
+        from agent import notify
+    except Exception as exc:
+        print(f'[Code] could not ask your phone: {exc}')
+        return
+    for command, token in list(asks.items())[:MAX_ASKS]:
+        shown = command if len(command) <= 120 else command[:119] + '…'
+        try:
+            notify.notify('Apex · Code needs you',
+                          f'"{title}": your {we.NAMES.get(engine, engine)} wants to run `{shown}`. Allow it once?',
+                          kind='code', priority='high', url=f'/code#allow={token}', dedup_key=f'code:{sid}:blocked:{command}')
+        except Exception as exc:
+            print(f'[Code] could not ask your phone: {exc}')
+
+
+def pending_allow(token: str) -> dict:
+    """What a phone link asks: the command, the session's title and project, its plan,
+    until when, and whether it was answered. Nothing else about the session (no copy,
+    no summary): any signed-in device with the link can read this."""
+    rows = _rows('SELECT a.command, a.expires, a.answered, a.choice, s.title, s.engine, p.name AS project '
+                 'FROM code_pending_allows a JOIN code_sessions s ON s.id = a.session_id '
+                 'JOIN code_projects p ON p.id = s.project_id WHERE a.id = ?', (str(token),))
+    if not rows:
+        raise NoSuchAllow("Apex doesn't know that request. It may be from before a reinstall.")
+    r = rows[0]
+    return {'command': r['command'], 'title': r['title'], 'project': r['project'], 'engine': r['engine'],
+            'expires': r['expires'], 'answered': r['answered'], 'choice': r['choice']}
+
+
+def answer_allow(token: str, choice: str, who: str = '') -> dict:
+    """Your answer from your phone, once. 'once' runs the command now (Allow once);
+    'no' tells the plan, ahead of your next message, to find another way. Always
+    allow is never offered here: a tap on a phone can't widen Safe mode for good.
+    `who` (the device's address and browser) is kept for the audit."""
+    if choice not in ('once', 'no'):
+        raise CodeError("Answer 'once' or 'no'. Always allow is only on the Code page at your PC.")
+    asked = pending_allow(token)
+    if asked['answered'] or asked['expires'] <= time.time():
+        raise CodeError('Already answered or expired.')
+    row = _rows('SELECT session_id, command FROM code_pending_allows WHERE id=?', (token,))[0]
+    sid, command = row['session_id'], row['command']
+    s = session(sid)
+    if s['status'] != 'ready':
+        raise CodeError('This session is finished (kept or thrown away): there is nothing to allow.')
+    if choice == 'once' and s['engine'] != 'claude':
+        # Codex can't allow one command: it would get full access for the whole message.
+        raise CodeError(f"This session is on your {we.NAMES.get(s['engine'], s['engine'])} now, which can't be allowed "
+                        'just one command. Answer it on the Code page at your PC.')
+    now = time.time()
+    with longterm._conn() as db:                          # one answer only, even from two devices at once
+        claimed = db.execute('UPDATE code_pending_allows SET answered=?, choice=?, who=? '
+                             'WHERE id=? AND answered IS NULL AND expires>?',
+                             (now, choice, str(who or '')[:200], token, now)).rowcount
+    if claimed != 1:
+        raise CodeError('Already answered or expired.')
+    try:
+        if choice == 'once':
+            allow(sid, command, phone=str(who or 'your phone'))
+        else:
+            event(sid, 'note', text=f'You said no to `{command}` from your phone.')
+            _add_note('id=?', (sid,), f'The owner declined `{command}`; find another way, or stop and explain.')
+    except Exception:
+        with longterm._conn() as db:                      # it didn't happen (say, still working): the link still works
+            db.execute("UPDATE code_pending_allows SET answered=NULL, choice='', who='' WHERE id=? AND answered=?",
+                       (token, now))
+        raise
+    return pending_allow(token)
+
+
+def _settle_asks(sid: int, command: str, before: float, choice: str, who: str) -> None:
+    """The command was allowed: any other link for it in this session (asked before
+    now; the turn just started may ask again) is answered too, so a later tap on an
+    old notification can't run it a second time."""
+    with longterm._conn() as db:
+        db.execute('UPDATE code_pending_allows SET answered=?, choice=?, who=? '
+                   'WHERE session_id=? AND command=? AND answered IS NULL AND created<=?',
+                   (time.time(), choice, who[:200], sid, command, before))
 
 
 def _merging(folder) -> bool:
@@ -742,8 +1013,8 @@ def undo(sid: int) -> dict:
         _git(s['worktree'], 'merge', '--abort', check=False)
     _git(s['worktree'], 'reset', '-q', '--hard', last['prev'])
     event(sid, 'undo', sha=last['sha'], to=last['prev'], files=last['files'])
-    _set(sid, conflict=0, files_changed=_count_changed(sid),
-         pending_note='Note: the owner undid your last step, so the files are back to how they were before it.')
+    _set(sid, conflict=0, files_changed=_count_changed(sid))
+    _add_note('id=?', (sid,), 'Note: the owner undid your last step, so the files are back to how they were before it.')
     return session(sid)
 
 
@@ -777,10 +1048,20 @@ def catch_up(sid: int) -> dict:
     return {**session(sid), 'caught_up': 'merged'}
 
 
-def keep(sid: int, push: bool = False) -> dict:
-    """Merge the session into the project, then tidy away its working copy."""
+def keep(sid: int, push: bool = False, require_proof: bool = False) -> dict:
+    """Merge the session into the project, then tidy away its working copy. With
+    require_proof, only when Apex's own checks passed on what is there now
+    (proof): otherwise NotProved says why, and you can keep it anyway."""
     s = session(sid)
     _idle(s)
+    try:
+        verdict = proof(sid)
+    except CodeError:
+        raise
+    except Exception as exc:                              # never a crash at the last step: unproved
+        verdict = {'verdict': 'unverified', 'reasons': [f'Apex could not read the proof ({type(exc).__name__}: {exc}).']}
+    if require_proof and verdict['verdict'] != 'proved':
+        raise NotProved(verdict)
     folder = s['worktree']
     _checkpoint(sid, _git(folder, 'rev-parse', 'HEAD').strip(), 'kept')
     s = session(sid)
@@ -816,8 +1097,12 @@ def keep(sid: int, push: bool = False) -> dict:
         raise CodeError(said[-600:] or 'The merge failed.')
     merged = _git(repo, 'rev-parse', 'HEAD').strip()
     _set(sid, status='kept', kept_commit=merged, files_changed=total)
+    code_brain.forget_file(sid)
+    # What was kept, for the rest of Apex (agent/code_brain.py); before the event, so 'kept' stays the last one.
+    learned = code_brain.write_back(s, 'kept', commit=merged, files=total, proof=verdict['verdict'])
     event(sid, 'kept', commit=merged[:12], into=target, files=total,
-          restart=Path(repo).resolve() == APEX_ROOT)
+          restart=Path(repo).resolve() == APEX_ROOT, proof=verdict['verdict'], unverified=verdict['verdict'] != 'proved',
+          learned=learned)
     _remove_copy(repo, folder)
     _git(repo, 'branch', '-d', s['branch'], check=False)
     if push:
@@ -839,8 +1124,16 @@ def _remove_copy(repo, folder) -> None:
         _git(repo, 'worktree', 'prune', check=False)
 
 
-def discard(sid: int) -> dict:
-    """Throw the session away: its working copy and branch are deleted."""
+DISCARD_REASONS = ('', *code_brain.REASONS)            # '' is "no reason given"
+
+
+def discard(sid: int, reason: str = '') -> dict:
+    """Throw the session away: its working copy and branch are deleted. `reason`
+    (changed_mind, wrong, poor, superseded, or none) goes on the 'discarded'
+    event and into Apex's memory with what the proof said."""
+    reason = '' if reason is None else reason
+    if not isinstance(reason, str) or reason not in DISCARD_REASONS:
+        raise CodeError('Why throw it away: changed my mind, it was wrong, poor quality, something better came along, or no reason.')
     s = session(sid)
     if s['status'] != 'ready':
         raise CodeError('This session is already finished.')
@@ -850,12 +1143,19 @@ def discard(sid: int) -> dict:
                 if sid not in _turns and sid not in _side:
                     break
             time.sleep(0.1)
+    try:                                                  # read before the copy goes: the proof looks at it
+        verdict = proof(sid)['verdict']
+    except Exception as exc:
+        print(f'[Code] could not read the proof of session {sid} before throwing it away: {type(exc).__name__}: {exc}')
+        verdict = 'unverified'
     repo = s['project_path']
     _remove_copy(repo, s['worktree'])
     if s['branch']:
         _git(repo, 'branch', '-D', s['branch'], check=False)
     _set(sid, status='discarded')
-    event(sid, 'discarded')
+    code_brain.forget_file(sid)
+    learned = code_brain.write_back(session(sid), 'discarded', reason=reason, proof=verdict)
+    event(sid, 'discarded', reason=reason, learned=learned)
     return session(sid)
 
 
@@ -868,7 +1168,7 @@ tests or checks if that helps you judge it. Do not change any file.
 
 What {owner} asked for:
 {asks}
-
+{rules}
 The change (git diff against where the session started{cut}):
 ```diff
 {patch}
@@ -886,6 +1186,25 @@ Good:
 def parse_rating(text: str) -> int | None:
     m = RATING.search(text or '') or ANY_RATING.search(text or '')
     return max(0, min(10, int(m.group(1)))) if m else None
+
+
+def _review_rules(s: dict, owner: str) -> str:
+    """The rules for the second opinion to check (this project's active ones, and
+    those for all code), and nothing else Apex knows about the owner: the
+    reviewer stays independent."""
+    from agent.working_context import redact
+    out = ''
+    for title, read in (('for this project', lambda: [r['text'] for r in code_brain.active_rules(s['project_id'])]),
+                        ('for all code', lambda: [r['text'] for r in code_brain.global_rules()])):
+        try:
+            found = read()
+        except Exception as exc:
+            print(f'[Code] could not read the rules {title}: {type(exc).__name__}: {exc}')
+            continue
+        if found:
+            lines = '\n'.join(f'- {redact(t)}' for t in found)
+            out += f'\nRules {owner} gave {title} (flag any rule the change breaks):\n{lines}\n'
+    return out
 
 
 def review(sid: int, engine: str | None = None) -> dict:
@@ -907,7 +1226,8 @@ def review(sid: int, engine: str | None = None) -> dict:
     owner = getattr(config, 'OWNER_NAME', '') or 'the owner'
     asks = '\n'.join(f'- {e["text"][:800]}' for e in events(sid) if e['kind'] == 'you') or '- (not recorded)'
     cut = f', cut to the first {REVIEW_DIFF_LIMIT:,} characters: read the files for the rest' if len(patch) > REVIEW_DIFF_LIMIT else ''
-    prompt = REVIEW.format(owner=owner, asks=asks, cut=cut, patch=patch[:REVIEW_DIFF_LIMIT])
+    prompt = REVIEW.format(owner=owner, asks=asks, rules=_review_rules(s, owner), cut=cut,
+                           patch=patch[:REVIEW_DIFF_LIMIT])
     run_id = f'review-{sid}-{int(time.time() * 1000)}'
     with _lock:
         if sid in _turns or sid in _side:
@@ -924,7 +1244,7 @@ def review(sid: int, engine: str | None = None) -> dict:
                     event(sid, 'review_step', title=e.get('title') or f"Read {e.get('path')}")
             result = code_engines.turn(engine, prompt, Path(folder), 'review', None, on_event, run_id,
                                        timeout=1200, env_extra=_venv(s['project_path']),
-                                       options={'always': _project_allow(s)})
+                                       options={'always': _project_allow(s), 'mcp_file': _memory_server(s)})
         except Exception as exc:
             result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
         finally:
@@ -957,7 +1277,12 @@ def _argv(command: str, env: dict) -> list[str]:
 
 
 def run_checks(sid: int) -> dict:
-    """The project's test command, in the session's copy."""
+    """The project's test command, in the session's copy. The answer has three
+    states, never two (agent/observed.py's rule): passed, failed, or unknown when
+    it couldn't run, was stopped, or a test runner printed nothing Apex can read
+    as a pass. Each says why, and which commit it ran on, so a later change
+    makes it stale (see proof)."""
+    from agent import observed
     s = session(sid)
     _idle(s)
     proj = project(s['project_id'])
@@ -971,16 +1296,25 @@ def run_checks(sid: int) -> dict:
         if sid in _turns or sid in _side:
             raise CodeError('Apex is still working in this session. Wait, or press Stop.')
         _side[sid] = run_id
-    _set(sid, check_state='running', check_output='')
+    folder = s['worktree']
+    try:                                                  # what they run on is a commit, so a later change shows
+        _checkpoint(sid, _git(folder, 'rev-parse', 'HEAD').strip(), 'before the checks')
+        sha = _git(folder, 'rev-parse', 'HEAD').strip()
+    except Exception:
+        with _lock:
+            _side.pop(sid, None)
+        raise
+    _set(sid, check_state='running', check_output='', check_sha=sha, check_evidence='')
     event(sid, 'checks_started', command=proj['checks'])
 
     def go():
-        started, out, passed = time.time(), '', False
+        started, out, state, why = time.time(), '', 'unknown', 'The checks stopped with an error.'
+        timed_out = threading.Event()
         try:
-            proc = subprocess.Popen(argv, cwd=s['worktree'], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            proc = subprocess.Popen(argv, cwd=folder, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', **we._hidden())
             we.track(run_id, proc)
-            timer = threading.Timer(CHECK_TIMEOUT, lambda: we._kill_tree(proc))
+            timer = threading.Timer(CHECK_TIMEOUT, lambda: (timed_out.set(), we._kill_tree(proc)))
             timer.daemon = True
             timer.start()
             chunks = []
@@ -992,19 +1326,427 @@ def run_checks(sid: int) -> dict:
             timer.cancel()
             stopped = we.untrack(run_id)
             out = ''.join(chunks)[-8000:]
-            passed = proc.returncode == 0 and not stopped
             if stopped:
                 out += '\n(stopped)'
+            state, why = _check_result(proj, proc.returncode, out, stopped, timed_out.is_set())
         except (OSError, ValueError) as exc:
-            out = f'Could not run {proj["checks"]!r}: {exc}'
+            out = why = f'Could not run {proj["checks"]!r}: {exc}'
+        except Exception as exc:
+            out = why = f'The checks stopped with an error: {type(exc).__name__}: {exc}'
         finally:
             took = round(time.time() - started)
-            event(sid, 'checks', passed=passed, seconds=took, output=out[-4000:], command=proj['checks'])
-            _set(sid, check_state='passed' if passed else 'failed', check_output=out)
+            event(sid, 'checks', passed=state == 'passed', state=state, why=why, sha=sha, seconds=took,
+                  output=out[-4000:], command=proj['checks'], left=_left_behind(folder))
+            # The domain in lower case, as outcomes.record() files it: one project, one domain.
+            observed.record(f"ran the checks of Apex Code session {sid} ({proj['checks'][:80]})", f'checks {state}: {why}',
+                            {'passed': True, 'failed': False}.get(state), f"code:{proj['name']}".lower())
+            # Last: once the session no longer says "running", everything above is done.
+            _set(sid, check_state=state, check_output=out, check_sha=sha, check_evidence=why)
             with _lock:
                 _side.pop(sid, None)
     threading.Thread(target=go, daemon=True, name=f'ApexCodeChecks-{sid}').start()
     return session(sid)
+
+
+def _check_result(proj: dict, code: int, out: str, stopped: bool, timed_out: bool) -> tuple[str, str]:
+    """(passed, failed or unknown; the evidence in a few words). A test runner that
+    exits 0 but prints no count may have run nothing: that is unknown, not a pass,
+    unless the project says exit 0 counts."""
+    from agent import observed
+    if stopped:
+        return 'unknown', 'You stopped the checks before they finished.'
+    if timed_out:
+        took = f'{CHECK_TIMEOUT // 60} minutes' if CHECK_TIMEOUT >= 120 else f'{CHECK_TIMEOUT} seconds'
+        return 'unknown', f'Still running after {took}, so Apex stopped them.'
+    verdict, evidence = observed.test_verdict(out)
+    if code != 0:
+        return 'failed', f'exit {code}' + (f': {evidence}' if evidence else '')
+    if verdict is False:
+        return 'failed', evidence
+    if verdict:
+        return 'passed', evidence
+    if not _runs_tests(proj['checks']):
+        return 'passed', 'exit 0'
+    if proj.get('checks_exit_ok'):
+        return 'passed', 'exit 0 (this project counts exit 0 as a pass)'
+    return 'unknown', 'Exit 0, but no test count in the output: maybe no tests ran.'
+
+
+# A shell wrapper and the flag after which comes the command it runs.
+SHELL_FLAG = {'bash': r'-[a-z]*c[a-z]*', 'sh': r'-[a-z]*c[a-z]*', 'zsh': r'-[a-z]*c[a-z]*', 'dash': r'-[a-z]*c[a-z]*',
+              'powershell': r'-c(ommand)?', 'pwsh': r'-c(ommand)?', 'cmd': r'/c'}
+
+
+def _program(command: str) -> tuple[str, str]:
+    """(the program's bare name, the rest): '/usr/bin/python3' is 'python3' and
+    '"C:\\Program Files\\Python\\python.exe"' is 'python'."""
+    command = command.strip()
+    if command[:1] in ('"', "'"):
+        end = command.find(command[0], 1)
+        prog, rest = (command[1:end], command[end + 1:]) if end > 0 else (command[1:], '')
+    else:
+        prog, _, rest = command.partition(' ')
+    return re.sub(r'\.exe$', '', re.split(r'[\\/]', prog)[-1], flags=re.I), rest.strip()
+
+
+def _wrapped(shell: str, rest: str) -> str | None:
+    """The command a shell wrapper runs: bash -lc '<it>', powershell -Command <it>, cmd /c <it>."""
+    try:
+        words = shlex.split(rest, posix=shell not in ('powershell', 'pwsh', 'cmd'))
+    except ValueError:
+        return None
+    for i, w in enumerate(words):
+        if re.fullmatch(SHELL_FLAG[shell], w, re.I):
+            inner = ' '.join(words[i + 1:]).strip()
+            return inner[1:-1] if len(inner) > 1 and inner[0] == inner[-1] and inner[0] in '"\'' else inner
+    return None
+
+
+def _runs_tests(command: str, depth: int = 0) -> bool:
+    """Is this command a test run? agent/observed.py decides, once each program is
+    called by its bare name: its rule wants 'python -m pytest', so
+    '/usr/bin/python3 -m pytest' or 'C:\\…\\python.exe -m pytest' wouldn't count.
+    In a shell wrapper ('bash -lc "pytest -q"', how Codex runs every command),
+    the command inside is what counts."""
+    from agent import observed
+    name, rest = _program(str(command or ''))
+    if name.lower() in SHELL_FLAG and depth < 2:
+        inner = _wrapped(name.lower(), rest)
+        return inner is not None and _runs_tests(inner, depth + 1)
+    named = [' '.join(x for x in _program(part) if x) for part in re.split(r'&&|\|\||;', str(command or ''))]
+    return observed.looks_like_tests(' && '.join(named))
+
+
+LEFT_LIMIT = 200                      # files the checks may leave behind and still be told apart
+
+
+def _loose(folder) -> list[str]:
+    """Files changed in the copy and not committed yet, new ones one by one. Without
+    git's optional index lock: a turn's checkpoint may be adding files right then."""
+    out = _git(folder, '--no-optional-locks', 'status', '--porcelain', '-uall', '--no-renames', check=False).stdout
+    return [line[3:].strip().strip('"') for line in out.splitlines() if line[3:].strip()]
+
+
+def _fingerprint(folder, paths: list[str]) -> dict:
+    """path -> the hash of what is in it now ('' when it is gone)."""
+    present = [p for p in paths if (Path(folder) / p).is_file()]
+    hashes = []
+    if present:
+        hashes = _git(folder, 'hash-object', '--stdin-paths', input='\n'.join(present) + '\n', check=False).stdout.split()
+    found = dict(zip(present, hashes)) if len(hashes) == len(present) else {}
+    return {p: found.get(p, '') for p in paths}
+
+
+def _left_behind(folder) -> dict:
+    """What the checks left changed in the copy (a cache, a report), as it was when
+    they finished: their result already includes it, so it doesn't make it stale.
+    Too many to tell apart: none, and every change counts."""
+    try:
+        loose = _loose(folder)
+        return _fingerprint(folder, loose) if len(loose) <= LEFT_LIMIT else {}
+    except Exception as exc:
+        print(f'[Code] could not see what the checks left behind: {exc}')
+        return {}
+
+
+def _changed_since(folder, sha: str, left: dict | None = None) -> list[str] | None:
+    """Files whose content differs from what was checked at `sha`, committed or not.
+    What the checks left behind doesn't count while it is unchanged. None when
+    that commit can't be read."""
+    r = _git(folder, 'diff', '--name-only', '--no-renames', sha, 'HEAD', check=False)
+    if r.returncode != 0:
+        return None
+    paths = list(dict.fromkeys([p for p in r.stdout.splitlines() if p] + _loose(folder)))
+    kept = {p: h for p, h in (left or {}).items() if p in paths}
+    same = {p for p, h in _fingerprint(folder, list(kept)).items() if h == kept[p]} if kept else set()
+    return [p for p in paths if p not in same]
+
+
+# ---------------------------------------------------------------- proof: what the agent said vs what Apex saw
+
+# What an agent says when it claims it checked its work. Only what it says is
+# matched, word for word: Apex never puts a claim in its mouth.
+CLAIMS = [re.compile(p, re.I) for p in (
+    r'\b(all )?(the )?tests? (now )?pass(es|ed|ing)?\b',
+    r'\b\d+ (tests? )?passed\b',
+    r'\bran (the )?(tests|test suite|pytest|npm test|checks)\b',
+    r'\b(verified|confirmed) (it|that|this|the fix)\b',
+    r'\bbuild (passes|succeeded)\b')]
+PASS_CLAIMS = (0, 1, 4)               # the ones that say it passed, not only that it ran
+FAILS = re.compile(r'\bfail', re.I)    # "3 passed, 1 failed" reports a failure: no pass claim
+# A test file: a change that edits tests and then passes them may have moved the goalposts.
+TEST_FILE = re.compile(r'(^|/)(tests?/|test_[^/]+\.py$|[^/]+_test\.(py|go)$|[^/]+\.(test|spec)\.[jt]sx?$)')
+# file:line in a review. Not after :// (a web address) or inside a longer word.
+CITE = re.compile(r'(?<![\w/:.\\-])((?:[A-Za-z]:[\\/])?[\w./\\-]+\.\w+):(\d+)')
+MAX_EVIDENCE = 100_000
+PROOF_KINDS = ('you', 'text', 'tool', 'result', 'term', 'term_done', 'file', 'undo', 'checkpoint', 'checks',
+               'owner_evidence', 'kept')
+
+
+class NotProved(CodeError):
+    """Keep was asked for proof and there is none: the proof says why."""
+    def __init__(self, proof: dict):
+        super().__init__('Not proved: ' + ' '.join(proof.get('reasons') or ['Apex has no proof it works.']))
+        self.proof = proof
+
+
+def _proof_events(sid: int) -> list[dict]:
+    """Every event the proof reads, all of them (events() stops at 500)."""
+    rows = _rows(f"SELECT id, ts, kind, data FROM code_events WHERE session_id=? AND kind IN "
+                 f"({','.join('?' * len(PROOF_KINDS))}) ORDER BY id", (sid, *PROOF_KINDS))
+    return [{**json.loads(r['data']), 'id': r['id'], 'ts': r['ts'], 'kind': r['kind']} for r in rows]
+
+
+def _sentences(text: str) -> list[str]:
+    out = []
+    for line in str(text or '').splitlines():
+        line = re.sub(r'^\s*(?:[-*•]|\d+[.)])\s+', '', line).strip()
+        out += [x.strip() for x in re.split(r'(?<=[.!?])\s+', line) if x.strip()]
+    return out
+
+
+def _claims(texts: list[str]) -> list[dict]:
+    """The sentences where the agent says it tested or verified its work, exactly as it said them."""
+    out, seen = [], set()
+    for text in texts:
+        for sentence in _sentences(text):
+            hits = [i for i, rx in enumerate(CLAIMS) if rx.search(sentence)]
+            if hits and sentence not in seen:
+                seen.add(sentence)
+                out.append({'sentence': sentence[:400],
+                            'pass_claim': any(i in PASS_CLAIMS for i in hits) and not FAILS.search(sentence)})
+    return out[:8]
+
+
+def _test_runs(evs: list[dict]) -> tuple[list[dict], list[dict], dict]:
+    """The test runs Apex saw in the feed: the agent's own (a command and its result)
+    and yours (the terminal). Each with what its output says, the checkpoint its
+    step made, and whether files changed after it. Also checkpoint sha -> number."""
+    from agent import observed
+    agent, mine, waiting, numbers, engine = [], [], {}, {}, ''
+
+    def finish(run, output, ok, code=None):
+        verdict, evidence = observed.test_verdict(output or '')
+        run.update(ok=ok, verdict=verdict,
+                   evidence=evidence or (f'exit {code}' if code not in (None, 0) else 'no test count' if ok else 'failed'))
+
+    for e in evs:
+        k = e['kind']
+        if k == 'you':
+            engine = e.get('engine') or engine
+        if k in ('file', 'undo') or (k == 'checkpoint' and e.get('catch_up')):
+            for r in agent + mine:
+                r['stale'] = True
+        if k == 'checkpoint':
+            numbers[e.get('sha', '')] = len(numbers) + 1
+            for r in agent + mine:
+                r['checkpoint'] = r['checkpoint'] or len(numbers)
+        elif k == 'tool' and e.get('tool') == 'command' and _runs_tests(e.get('title') or ''):
+            run = {'by': 'agent', 'engine': engine, 'command': e.get('title') or '', 'ok': None, 'verdict': None,
+                   'evidence': 'no result', 'checkpoint': None, 'stale': False, 'ts': e['ts']}
+            agent.append(run)
+            waiting[('agent', e.get('ref'))] = run
+        elif k == 'result' and ('agent', e.get('ref')) in waiting:
+            finish(waiting.pop(('agent', e.get('ref'))), e.get('output'), bool(e.get('ok')), e.get('exit_code'))
+        elif k == 'term' and _runs_tests(e.get('command') or ''):
+            run = {'by': 'you', 'engine': '', 'command': e.get('command') or '', 'ok': None, 'verdict': None,
+                   'evidence': 'still running', 'checkpoint': None, 'stale': False, 'ts': e['ts']}
+            mine.append(run)
+            waiting[('you', e.get('ref'))] = run
+        elif k == 'term_done' and ('you', e.get('ref')) in waiting:
+            finish(waiting.pop(('you', e.get('ref'))), e.get('output'), e.get('exit_code') == 0, e.get('exit_code'))
+    return agent[-6:], mine[-4:], numbers
+
+
+def _live_head(s: dict) -> str:
+    """The session's commit now, while its working copy exists; '' after Keep or Throw away."""
+    if s['status'] != 'ready' or not s['worktree'] or not Path(s['worktree']).is_dir():
+        return ''
+    r = _git(s['worktree'], 'rev-parse', 'HEAD', check=False)
+    return r.stdout.strip() if r.returncode == 0 else ''
+
+
+def _plan_ready(engine: str) -> bool:
+    try:
+        from agent import work_agent
+        return work_agent.available().get(engine) is None
+    except Exception as exc:
+        print(f'[Code] could not tell whether your {we.NAMES.get(engine, engine)} is ready: {exc}')
+        return False
+
+
+def _citations(s: dict, text: str, changed: set) -> list[dict]:
+    """Each file:line the second opinion cites, labelled: in the change, elsewhere in
+    the project, or not there at all (possibly invented)."""
+    found = list(CITE.finditer(text or ''))
+    if not found:
+        return []
+    try:
+        files = set(tree(s['id'])['files'])
+        folder = _folder_of(s['id'], None)
+    except CodeError:
+        files, folder = set(), None
+    root = (s['worktree'] or '').replace('\\', '/').rstrip('/').lower()
+    out, seen = [], set()
+    for m in found:
+        path, line = m.group(1).replace('\\', '/'), int(m.group(2))
+        if root and path.lower().startswith(root + '/'):
+            path = path[len(root) + 1:]
+        path = re.sub(r'^\./', '', path)
+        if path[:2] in ('a/', 'b/') and path not in files | changed and path[2:] in files | changed:
+            path = path[2:]                                # git diff's a/ and b/
+        if (path, line) in seen:
+            continue
+        seen.add((path, line))
+        kind, label = (('in', 'in the change') if path in changed else ('out', 'outside the change') if path in files
+                       else ('invented', 'file not found: possibly invented'))
+        f = folder / path if folder and kind != 'invented' else None
+        if f is not None and f.is_file():
+            try:
+                lines = len(f.read_text(encoding='utf-8', errors='replace').splitlines())
+            except OSError:
+                lines = line
+            if line > max(lines, 1):
+                kind, label = 'invented', f'no line {line} there ({lines} lines): possibly invented'
+        out.append({'cite': f'{path}:{line}', 'file': path, 'line': line, 'kind': kind, 'label': label})
+        if len(out) >= 30:
+            break
+    return out
+
+
+def _review_proof(s: dict, evs: list[dict], changed: set, checks: dict) -> dict | None:
+    """How far to trust the second opinion. Like genesis.check_critique, a plan
+    reviewing work it did itself shares its blind spots; read on its own here,
+    because that gate fails on a FATAL objection whatever the independence."""
+    if s['review_state'] != 'done' or not s['review_engine']:
+        return None
+    authors = {e['engine'] for e in evs if e['kind'] == 'you' and e.get('engine')} or {s['engine']}
+    other = next(e for e in ENGINES if e != s['review_engine'])
+    if s['review_engine'] not in authors:
+        independence, label = 'independent', 'independent: other plan'
+    elif _plan_ready(other):
+        independence, label = 'correlated', 'correlated: same plan reviewed itself'
+    else:
+        independence, label = 'weaker', 'weaker: only one plan signed in'
+    rating, disagreement = s['review_rating'], ''
+    if rating is not None and rating >= 8 and checks['state'] == 'failed':
+        disagreement = f"The second opinion rates it {rating}/10, but Apex's checks failed ({checks['why']})."
+    elif rating is not None and rating <= 5 and checks['state'] == 'passed':
+        disagreement = f"Apex's checks passed, but the second opinion rates it {rating}/10: read what it found."
+    return {'engine': s['review_engine'], 'rating': rating, 'independence': independence, 'label': label,
+            'citations': _citations(s, s['review_text'], changed), 'disagreement': disagreement}
+
+
+def proof(sid: int) -> dict:
+    """What the agent said it did to check its work, next to what Apex saw for
+    itself: the agent's own test runs, yours, and Apex's checks on a known
+    commit. Observed evidence beats what anyone says (agent/observed.py): the
+    verdict is 'proved' only when Apex's own checks passed on what is there now,
+    'contradicted' when the agent says it passes and Apex saw it fail, and
+    'unverified' otherwise, with the reasons in plain words."""
+    s = session(sid)
+    evs = _proof_events(sid)
+    texts = [e['text'] for e in evs if e['kind'] == 'text' and e.get('text')]
+    claims = _claims([s['summary']] + texts[-1:])
+    agent, mine, numbers = _test_runs(evs)
+    head = _live_head(s)
+    folder = s['worktree'] if head else None
+    last = next((e for e in reversed(evs) if e['kind'] == 'checks'), None)
+    try:
+        proj_checks = project(s['project_id'])['checks']
+    except CodeError:
+        proj_checks = ''
+    state, sha = s['check_state'] or 'none', s['check_sha']
+    stale, since = None, []
+    if state in ('passed', 'failed', 'unknown'):
+        if not sha:
+            stale = True                                  # run before Apex noted which commit: can't say what it covered
+        elif folder:
+            since = _changed_since(folder, sha, (last or {}).get('left'))
+            stale, since = (True, []) if since is None else (bool(since), since)
+    checks = {'state': state, 'why': s['check_evidence'], 'sha': sha, 'checkpoint': numbers.get(sha),
+              'command': (last or {}).get('command') or proj_checks, 'stale': stale, 'changed_since': since,
+              'seconds': (last or {}).get('seconds'), 'ts': (last or {}).get('ts')}
+    reported = next((e for e in reversed(evs) if e['kind'] == 'owner_evidence'), None)
+    owner = None
+    if reported:
+        moved = _changed_since(folder, reported['sha']) if folder and reported.get('sha') else None
+        owner = {'source': 'owner-reported', 'verdict': reported.get('verdict'), 'evidence': reported.get('evidence', ''),
+                 'sha': reported.get('sha', ''), 'stale': None if moved is None else bool(moved), 'ts': reported['ts']}
+    try:
+        changed = {f['path'] for f in changes(sid)['files']}
+    except CodeError:
+        changed = set()
+    goalpost = sorted(p for p in changed if TEST_FILE.search(p)) if state == 'passed' else []
+    review = _review_proof(s, evs, changed, checks)
+    verdict, reasons = _verdict(s, claims, agent, checks, owner, evs)
+    return {'verdict': verdict, 'reasons': reasons, 'claims': claims, 'saw_agent': agent, 'saw_you': mine,
+            'checks': checks, 'owner_evidence': owner, 'goalpost': goalpost, 'review': review,
+            'engine': s['engine'], 'head': head}
+
+
+def _verdict(s, claims, agent, checks, owner, evs) -> tuple[str, list[str]]:
+    said = next((c['sentence'] for c in claims if c['pass_claim']), '')
+    who = f"Your {we.NAMES.get(s['engine'], s['engine'])}"
+    where = f"checkpoint {checks['checkpoint']}" if checks['checkpoint'] else f"commit {checks['sha'][:8]}"
+    last = agent[-1] if agent else None
+    kept = next((e for e in reversed(evs) if e['kind'] == 'kept'), None)
+    if kept and s['status'] == 'kept':                 # its copy is gone: what was known when it was kept
+        verdict = kept.get('proof') or 'unverified'
+        return verdict, ['Kept with proof: Apex\'s checks had passed on what was kept.' if verdict == 'proved'
+                         else 'Kept without proof: nothing Apex saw showed it works.']
+    if said and checks['state'] == 'failed' and checks['stale'] is False:
+        return 'contradicted', [f'{who} said "{said}", but Apex\'s checks failed on {where}: {checks["why"]}.']
+    if said and last and last['verdict'] is False and not last['stale']:
+        return 'contradicted', [f'{who} said "{said}", but its own last test run failed: {last["evidence"]}.']
+    if checks['state'] == 'passed' and checks['stale'] is False:
+        return 'proved', [f"Apex ran {checks['command']} on {where}: {checks['why']}."]
+    reasons = []
+    n = len(checks['changed_since'])
+    names = ', '.join(checks['changed_since'][:5]) + (' …' if n > 5 else '')
+    did = {'passed': 'passed', 'failed': 'failed', 'unknown': "couldn't decide"}.get(checks['state'], '')
+    if checks['state'] == 'none':
+        reasons.append("Apex hasn't run the checks on this change yet." if checks['command']
+                       else 'This project has no checks command yet: set one, then run the checks.')
+    elif checks['state'] == 'running':
+        reasons.append('The checks are still running.')
+    elif checks['stale'] is None:
+        reasons.append(f"The checks {did} ({checks['why'] or 'no detail'}), and this session's copy is gone, so Apex can't compare.")
+    elif checks['stale'] and n:
+        reasons.append(f"The checks {did} on {where}, but {n} file{'s' if n != 1 else ''} changed since: {names}. "
+                       'That result is stale: run them again.')
+    elif checks['stale']:
+        reasons.append(f"The checks {did} on an earlier version Apex can't compare: run them again.")
+    elif checks['state'] == 'failed':
+        reasons.append(f"Apex's checks failed on {where}: {checks['why']}.")
+    else:
+        reasons.append(f"The checks couldn't decide: {checks['why']}")
+    if last and last['verdict'] is not None:
+        reasons.append(f"Its own test run showed {last['evidence']}"
+                       + (', and it changed files after.' if last['stale'] else ": its run, not Apex's checks."))
+    elif claims:
+        reasons.append(f'{who} said "{said or claims[0]["sentence"]}", and Apex saw no test run that shows it.')
+    if owner:
+        reasons.append(f"You reported {owner['evidence'] or 'output without a test count'}: noted, but Apex didn't see it run.")
+    return 'unverified', reasons
+
+
+def owner_evidence(sid: int, output: str) -> dict:
+    """You ran the checks yourself and pasted what they printed. Kept as
+    owner-reported: never relabelled observed, and never enough for 'proved'."""
+    from agent import observed
+    output = str(output or '').strip()
+    if not output:
+        raise CodeError('Paste what the command printed.')
+    if len(output) > MAX_EVIDENCE:
+        raise CodeError(f'That is more than {MAX_EVIDENCE:,} characters: paste the end of it, with the summary line.')
+    s = session(sid)
+    if s['status'] != 'ready':
+        raise CodeError('This session is finished (kept or thrown away).')
+    verdict, evidence = observed.test_verdict(output)
+    event(sid, 'owner_evidence', source='owner-reported', verdict=verdict, evidence=evidence, sha=_live_head(s),
+          output=output[-4000:])
+    return proof(sid)
 
 
 # ---------------------------------------------------------------- allow, files, terminal, history
@@ -1016,21 +1758,25 @@ def _project_allow(s: dict) -> list[str]:
         return []
 
 
-def allow(sid: int, command: str, always: bool = False) -> dict:
+def allow(sid: int, command: str, always: bool = False, phone: str = '') -> dict:
     """Safe mode blocked a command: run it now (Allow once), or let this project's
-    sessions run it, with any arguments, from now on (Always allow)."""
+    sessions run it, with any arguments, from now on (Always allow). `phone` is the
+    device that answered from a notification (answer_allow), which only allows once."""
     command = str(command or '').strip()
     if not code_engines.ALLOWED_COMMAND.match(command):
         raise CodeError('That command can\'t be allowed: one line, without brackets, at most 300 characters.')
     s = session(sid)
-    if always:
+    if always and not phone:
         rules = _project_allow(s)
         if command not in rules:
             rules.append(command)
             with longterm._conn() as db:
                 db.execute('UPDATE code_projects SET allow=? WHERE id=?', (json.dumps(rules[-50:]), s['project_id']))
-    return send(sid, f'I allowed `{command}`. Run it now, then carry on with what you were doing.',
-                allow=[command])
+    asked_before = time.time()
+    done = send(sid, f'I allowed `{command}`. Run it now, then carry on with what you were doing.',
+                allow=[command], _notes=[f'You allowed `{command}` once from your phone.'] if phone else ())
+    _settle_asks(sid, command, asked_before, 'once' if phone else 'pc', phone or 'the Code page')
+    return done
 
 
 def forget_allowed(pid: int, command: str) -> dict:
@@ -1162,8 +1908,20 @@ def commit_diff(sid: int, sha: str) -> str:
 
 # ---------------------------------------------------------------- the page's overview
 
+def _record(pid: int) -> dict:
+    """The home page's lines for one project (agent/code_brain.track_record): the
+    top few, each plan's own line for the composer, and the note when there are none."""
+    try:
+        r = code_brain.track_record(pid)
+    except Exception as exc:
+        print(f'[Code] could not count the sessions of project {pid}: {type(exc).__name__}: {exc}')
+        return {'lines': [], 'engines': {}, 'decided': 0, 'note': "Apex couldn't count this project's sessions just now."}
+    return {'lines': r['lines'][:code_brain.RECORD_LINES], 'engines': r['engines'], 'decided': r['decided'], 'note': r['note']}
+
+
 def overview() -> dict:
-    """Projects, recent sessions, your plans and this week's numbers."""
+    """Projects, recent sessions, your plans, this week's numbers and what tends
+    to happen on each project."""
     import config
     from agent import work_agent
     free = work_agent.available()
@@ -1174,17 +1932,22 @@ def overview() -> dict:
     rated = [r['review_rating'] for r in recent if r['review_rating'] is not None]
     turns = _rows("SELECT data FROM code_events WHERE kind='done' AND ts >= ?", (week,))
     minutes = sum(json.loads(t['data']).get('seconds', 0) for t in turns) / 60
+    # Kept with proof (the 'kept' event's proof), matched as event() writes it.
+    proved = _rows("SELECT COUNT(*) AS n FROM code_events e JOIN code_sessions s ON s.id = e.session_id "
+                   "WHERE e.kind = 'kept' AND s.created >= ? AND e.data LIKE ?", (week, '%"proof": "proved"%'))[0]['n']
     with _lock:
         working = len(_turns)
+    found = projects()
     return {
         'owner': getattr(config, 'OWNER_NAME', '') or '',
-        'projects': projects(),
+        'projects': found,
         'sessions': sessions(),
         'plans': [{'id': e, 'name': we.NAMES[e], 'ready': not free.get(e), 'why': free.get(e) or '',
                    'how': we.check(e)['how'] if free.get(e) else ''} for e in ENGINES],
         'default_engine': default,
-        'week': {'sessions': len(recent), 'kept': sum(1 for r in recent if r['status'] == 'kept'),
+        'week': {'sessions': len(recent), 'kept': sum(1 for r in recent if r['status'] == 'kept'), 'proved': proved,
                  'rating': round(sum(rated) / len(rated), 1) if rated else None,
                  'minutes': round(minutes), 'credits': 0},
+        'record': {p['id']: _record(p['id']) for p in found},
         'working': working,
     }

@@ -54,7 +54,22 @@ git worktree under `ApexWork\code\`).
       path, with a link to open it in VS Code) and Throw away.
 - **Phone:** the same page, one column. The session list and the change panel
   slide in. When a step takes over a minute, you get a notification when it's
-  ready.
+  ready, with what the proof says ("checks passed: 212 passed" or "not
+  verified yet"). Tapping it opens the session. A finish at 1 a.m. can be held
+  until you're around (Apex's restraint).
+- **Away mode.** When Safe mode stops a command, Apex also asks on your phone:
+  "Fix login": your Claude plan wants to run `npm install sharp`. Allow it
+  once? The link opens one question, Allow once or Don't allow, for two hours.
+  - A phone paired with its own device token can answer it, even though it
+    can't open the rest of Apex Code. The answer is recorded with the device's
+    address and browser.
+  - Always allow is only on the Code page at your PC, so a tap on a phone can
+    never widen Safe mode for good.
+  - Don't allow tells the plan, ahead of your next message, to find another
+    way or stop and explain.
+  - Once you allow it at the PC, the phone's link is answered too, so it can't
+    run twice. A session that moved to Codex can't be allowed one command from
+    the phone (Codex would get full access): answer that one at the PC.
 - **Keys:** Ctrl+Enter sends. Esc stops Apex mid-step. `/` jumps to the brief.
 
 ## The power tools
@@ -105,7 +120,7 @@ It works like Claude Code or Codex, in a page.
 
 | | Claude plan (Claude Code) | ChatGPT plan (Codex) |
 |---|---|---|
-| **Safe** (default) | Reads, writes and edits files, searches the web. Runs only `git status/diff/log/show`, `ls`, tests (`python -m pytest`, `pytest`, `npm test`, `npm run test/lint`) and syntax checks (`python -m py_compile`, `node --check`, `node scripts/…`). Anything else is blocked, and the feed says what. No MCP servers or claude.ai connectors. | Its workspace-write sandbox: writes only inside the session's copy, no network. |
+| **Safe** (default) | Reads, writes and edits files, searches the web. Runs only `git status/diff/log/show`, `ls`, tests (`python -m pytest`, `pytest`, `npm test`, `npm run test/lint`) and syntax checks (`python -m py_compile`, `node --check`, `node scripts/…`). Anything else is blocked, and the feed says what. Only Apex's own memory server: read-only tools, plus remember, which waits for your approval. No other MCP servers or claude.ai connectors. | Its workspace-write sandbox: writes only inside the session's copy, no network. |
 | **Full** | Any command, in the session's copy. | Full access. |
 | **Second opinion** | Read-only: it can't change a thing. | Read-only sandbox. |
 

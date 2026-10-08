@@ -75,6 +75,92 @@ def test_every_call_is_logged(apex):
     assert entry['tool'] == 'recall' and entry['query'] == 'Jeep' and entry['chars'] > 0
 
 
+# ---------------------------------------------------------------- the project it describes, and Apex Code sessions
+
+HANDOFF = dict(brief='', decisions='', artifacts='', next_step='')
+
+
+def _code_project(name='Shop'):
+    """A code project row, as Apex Code (agent/code_studio.py) keeps them."""
+    import time
+    from agent import code_studio
+    code_studio.init_db()
+    with longterm._conn() as db:
+        return db.execute('INSERT INTO code_projects (name, path, created) VALUES (?, ?, ?)',
+                          (name, f'/tmp/{name}', time.time())).lastrowid
+
+
+def test_context_carries_the_board_handoff(apex):
+    """continuity.project() keeps the handoff under 'data': context() used to read the
+    top level and only ever said 'Project: <name>'."""
+    from agent import board_workspaces, continuity
+    board_workspaces.ensure_db()
+    continuity.save_project('default', dict(HANDOFF, decisions='Use SQLite', next_step='Ship the sync'), 0)
+    continuity.save_corrections('default', [{'text': 'No ORMs', 'active': True}, {'text': 'Old one', 'active': False}], 0)
+    text = mcp_server.context()
+    assert '## Current project\nProject: My workspace' in text
+    assert 'Decisions: Use SQLite' in text and 'Next step: Ship the sync' in text
+    assert 'Corrections the user asked for: No ORMs' in text and 'Old one' not in text
+
+
+def test_in_an_apex_code_session_context_is_that_code_project(apex, monkeypatch):
+    from agent import board_workspaces, code_brain, continuity
+    board_workspaces.ensure_db()
+    continuity.save_project('default', dict(HANDOFF, decisions='Use SQLite'), 0)
+    pid = _code_project('Shop')
+    continuity.save_code_project(pid, dict(HANDOFF, decisions='Cache by user id', next_step='Add the checkout'), 0)
+    continuity.save_code_corrections(pid, [{'text': 'Never touch the payments module', 'active': True},
+                                           {'text': 'An old rule', 'active': False}], 0)
+    code_brain.add_rule(pid, 'Always write type hints', 'all')
+    monkeypatch.setenv('APEX_CODE_PROJECT', str(pid))
+    text = mcp_server.context()
+    assert '## This code project (Apex Code)\nProject: Shop' in text
+    assert 'Decisions: Cache by user id' in text and 'Next step: Add the checkout' in text
+    assert 'Rules the user gave for this project: Never touch the payments module' in text
+    assert 'Rules the user gave for all their code: Always write type hints' in text
+    assert 'Use SQLite' not in text and 'An old rule' not in text            # not the board's, not a rule turned off
+
+
+def test_recall_matches_the_words_of_a_question(apex):
+    """An engine asks in a few words; the text search wanted all of them in one memory."""
+    longterm.remember('Uploads must retry 3 times', kind='decision')
+    assert longterm.recall('upload retry policy', semantic=False) == []
+    assert 'Uploads must retry 3 times' in mcp_server.recall('upload retry policy')
+    assert 'Nothing in memory' in mcp_server.recall('zebra migration patterns')
+
+
+def test_a_memory_an_apex_code_session_suggests_waits_for_the_owner_then_reaches_the_brief(apex, monkeypatch):
+    from agent import code_brain
+    pid = _code_project('Shop')
+    monkeypatch.setenv('APEX_CODE_PROJECT', str(pid))
+    monkeypatch.setenv('APEX_CODE_SESSION', '7')
+    reply = mcp_server.remember('Alex wants errors logged with structlog', kind='preference', why='said in the request')
+    assert 'STAGED' in reply and 'Waiting for your OK' in reply
+    pending = approvals.list_pending()[0]
+    assert pending['summary'].startswith(f'Apex Code session, project {pid} suggests remembering [preference]')
+    assert pending['payload']['source'] == f'Apex Code session, project {pid}'
+    assert (pending['payload']['project_id'], pending['payload']['session_id']) == (pid, 7)
+    assert not any('structlog' in m['content'] for m in longterm.recall(limit=50))    # nothing saved yet
+    # What the Code page lists: Apex Code's suggestions only, never another tool's.
+    monkeypatch.delenv('APEX_CODE_PROJECT')
+    mcp_server.remember('Alex likes the Futuristic look.', kind='preference')
+    waiting = code_brain.suggested()
+    assert [(w['content'], w['project_id'], w['session_id']) for w in waiting] == [('Alex wants errors logged with structlog', pid, 7)]
+    # Approved, it is a coding preference: the next session's brief brings it back.
+    approvals.approve(waiting[0]['id'])
+    saved = next(m for m in longterm.recall(limit=50) if 'structlog' in m['content'])
+    assert saved['kind'] == 'preference' and saved['tags'] == 'from-mcp,code'
+    assert {'kind': 'memory', 'ref': saved['id'], 'text': 'Alex wants errors logged with structlog'} in code_brain.brief_block(pid)['sources']
+    assert code_brain.suggested() == []
+
+
+def test_the_second_opinion_cannot_suggest_a_memory(apex, monkeypatch):
+    monkeypatch.setenv('APEX_CODE_PROJECT', '3')
+    monkeypatch.setenv('APEX_CODE_READ_ONLY', '1')
+    assert 'read-only' in mcp_server.remember('Alex wants errors logged with structlog', kind='preference')
+    assert approvals.list_pending() == []
+
+
 def test_real_stdio_server_under_a_real_client(tmp_path):
     """A real MCP client drives the real server: every tool answers, step by
     step, and a stall names its step and shows the server's own log."""

@@ -13,6 +13,7 @@ Recall strategy:
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import time
 import json
@@ -359,20 +360,7 @@ def recall(query: str = "", limit: int = 10, kind: str = "", semantic: bool = Tr
         if not isinstance(result, list) or not all(isinstance(r, dict) and isinstance(r.get('content'), str) for r in result):
             raise ValueError('Plugin memory recall() must return memory dictionaries with content strings.')
         return result[:max(0, limit)]
-    with _conn() as c:
-        if kind:
-            rows = c.execute(
-                "SELECT id, ts, kind, content, importance, tags, embedding FROM memories WHERE kind = ? "
-                "ORDER BY importance DESC, ts DESC LIMIT ?",
-                (kind.lower(), _RECALL_CANDIDATE_CAP)
-            ).fetchall()
-        else:
-            rows = c.execute(
-                "SELECT id, ts, kind, content, importance, tags, embedding FROM memories "
-                "ORDER BY importance DESC, ts DESC LIMIT ?",
-                (_RECALL_CANDIDATE_CAP,)
-            ).fetchall()
-
+    rows = _candidates(kind)
     if not rows:
         return []
 
@@ -399,6 +387,67 @@ def recall(query: str = "", limit: int = 10, kind: str = "", semantic: bool = Tr
         return _format_rows([r for r in rows if q in r[3].lower() or q in (r[5] or "").lower()][:int(limit)])
 
     return _format_rows(rows[:int(limit)])
+
+
+def _candidates(kind: str = "") -> list[tuple]:
+    """The most important, then newest, memories (of one kind, if given): the
+    bounded pool both recall() and match_terms() score."""
+    with _conn() as c:
+        if kind:
+            return c.execute(
+                "SELECT id, ts, kind, content, importance, tags, embedding FROM memories WHERE kind = ? "
+                "ORDER BY importance DESC, ts DESC LIMIT ?",
+                (kind.lower(), _RECALL_CANDIDATE_CAP)
+            ).fetchall()
+        return c.execute(
+            "SELECT id, ts, kind, content, importance, tags, embedding FROM memories "
+            "ORDER BY importance DESC, ts DESC LIMIT ?",
+            (_RECALL_CANDIDATE_CAP,)
+        ).fetchall()
+
+
+# Words too common to say what a request is about.
+_STOPWORDS = frozenset("""
+    about above after again also always another anything back because been before being below between both
+    could does doing done down each even ever every from have having here into just like make makes making
+    many more most much must need needs never only other over please really same should some such than that
+    their them then there these they thing things this those through very want wants were what when where
+    which while will with would your yours
+""".split())
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9_]+", (text or "").lower())
+
+
+def match_terms(query: str, limit: int = 8, kind: str = "") -> list[dict]:
+    """Memories that share words with a request, with no embeddings.
+
+    recall(q, semantic=False) only finds memories holding the whole query as one
+    substring, so a coding request never matches anything; semantic recall can
+    stall on the embedding model's first download. This takes the query's words
+    of 4 or more letters (common ones dropped), and scores each memory in the
+    same bounded pool recall() uses by how many of them start a word in its
+    content or tags. It keeps scores of 2 or more (1 or more when the query has
+    at most 2 such words); ties go to the more important memory.
+    """
+    terms = []
+    for w in _words(query):
+        if len(w) >= 4 and w not in _STOPWORDS:
+            w = w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w   # uploads -> upload
+            if w not in terms:
+                terms.append(w)
+    if not terms or limit <= 0:
+        return []
+    need = 1 if len(terms) <= 2 else 2
+    scored = []
+    for row in _candidates(kind):                    # already most important first
+        words = set(_words(row[3]) + _words(row[5] or ""))
+        score = sum(1 for t in terms if any(w.startswith(t) for w in words))
+        if score >= need:
+            scored.append((score, row))
+    scored.sort(key=lambda x: (-x[0], -x[1][4]))       # stable: newer first among equals
+    return _format_rows([row for _, row in scored[:int(limit)]])
 
 
 def _format_rows(rows) -> list[dict]:

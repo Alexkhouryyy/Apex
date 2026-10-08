@@ -682,6 +682,9 @@ SIMLI_MAX_IDLE = int(os.getenv("SIMLI_MAX_IDLE", "180"))          # seconds of s
 WORK_CODEX_WINDOWS_SANDBOX = os.getenv("WORK_CODEX_WINDOWS_SANDBOX", "").strip()
 # What Apex calls you on the Code page and in coding prompts.
 OWNER_NAME = os.getenv("OWNER_NAME", "Alex").strip()
+# Apex's own memory server (scripts/apex_mcp.py) inside every Apex Code session: the plan can
+# ask Apex's memory while it works, and `remember` only suggests a memory for your OK. false: off.
+CODE_APEX_MCP = os.getenv("CODE_APEX_MCP", "true").lower() in {"1", "true", "yes"}
 
 # Local Qwen speech via the Voicebox desktop application.
 VOICEBOX_URL = os.getenv("VOICEBOX_URL", "http://127.0.0.1:17493")

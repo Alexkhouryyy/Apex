@@ -201,6 +201,30 @@ def note_tool_result(tool: str, outcome: str, result: str,
         return None
 
 
+def record(recommendation: str, result: str, success: Optional[bool] = None,
+           domain: str = "") -> Optional[int]:
+    """Record an outcome Apex watched happen outside a tool call: Apex Code's
+    checks, run in a session's copy (agent/code_studio.py). Same rule as above:
+    success is None when the evidence didn't say, never a guess.
+
+    Returns the outcome id, or None. Never raises: a broken database must not
+    stop the work it was watching."""
+    try:
+        init_db()
+        with longterm._conn() as c:
+            cur = c.execute(
+                "INSERT INTO recommendation_outcomes "
+                "(ts, recommendation, action_taken, result, success, domain, source) "
+                "VALUES (?,?,?,?,?,?,'observed')",
+                (time.time(), str(recommendation)[:500], "observed", str(result)[:500],
+                 None if success is None else int(bool(success)), str(domain)[:120]))
+            return int(cur.lastrowid)
+    except Exception as exc:
+        # Unlike note_tool_result this runs once per checks run, so one line is no flood.
+        print(f"[Observed] could not record an outcome: {type(exc).__name__}: {exc}")
+        return None
+
+
 def split(days: int = 180) -> dict:
     """How much of the outcome record Apex saw versus was told.
 

@@ -1,7 +1,12 @@
 // Apex Code (dashboard/code.py, agent/code_studio.py): coding sessions on your
 // Claude and ChatGPT plans. Home: greeting, your plans, the brief, recent work.
 // Session: what you asked and what Apex did, live, step by step; the change,
-// a second opinion out of 10, checks, and Keep / Undo / Catch up / Throw away.
+// a second opinion out of 10, checks, the proof (what it said vs what Apex
+// saw), and Keep / Undo / Catch up / Throw away (with why). What every session
+// taught Apex shows on the home page, in counts, and in the Rules tab's decision log.
+// While it works, the plan can ask Apex's memory (a 🧠 step); a memory it suggests
+// waits in the side panel for your OK. Away mode: a command Safe mode stopped is
+// answered from your phone (/code#allow=…), and a finished session's ping opens it.
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -18,10 +23,11 @@
     if (r.status === 401) { $('login').showModal(); throw new Error('Enter your Apex token.'); }
     if (as === 'text' && r.ok) return r.text();
     const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.detail || `Request failed (${r.status})`);
+    if (!r.ok) { const err = new Error(typeof body.detail === 'string' ? body.detail : `Request failed (${r.status})`); err.status = r.status; err.body = body; throw err; }
     return body;
   }
   const post = (path, body = {}) => api(path, {method: 'POST', body: JSON.stringify(body)});
+  const put = (path, body = {}) => api(path, {method: 'PUT', body: JSON.stringify(body)});
   let toastTimer;
   function say(text, kind = '', link) {
     const t = $('toast'); t.replaceChildren(text); t.className = 'toast ' + kind; t.hidden = false;
@@ -98,6 +104,7 @@
   // ---------------------------------------------------------------- overview: plans, home, rail
   async function loadOverview() {
     ov = await api('/api/code');
+    loadWaiting();                                       // what a session suggested, polled with the overview
     lastOverview = Date.now();
     if (!ov.projects.some(p => p.id === project)) project = ov.projects[0] && ov.projects[0].id;
     if (!engine || !NAME[engine]) engine = ov.default_engine;
@@ -136,10 +143,11 @@
       : ready.length ? `Your ${down[0].name} ${down[0].why}. Your ${ready[0].name} has you covered. What are we building?`
       : `Neither plan is ready: ${down[0].how || 'run Setup-Apex-Work-Plans.cmd'}`;
     const w = ov.week, week = $('week'); week.replaceChildren();
-    for (const [v, label, cls] of [[w.sessions, 'sessions this week', ''], [w.kept, 'kept', ''],
+    for (const [v, label, cls] of [[w.sessions, 'sessions this week', ''], [w.kept, `kept · ${w.proved || 0} proved`, ''],
       [w.rating == null ? '–' : `${w.rating}/10`, 'average rating', ''], [`${w.minutes}m`, 'of AI work', ''], ['$0', 'API credits', 'good']]) {
       const s = el('div', 'stat ' + cls); s.append(el('b', '', String(v)), el('span', '', label)); week.append(s);
     }
+    renderRecord();
     const starts = $('starts'); starts.replaceChildren();
     for (const [icon, label, text] of STARTS) {
       const b = el('button', 'chip'); b.type = 'button'; b.append(el('i', '', icon), label);
@@ -185,7 +193,30 @@
       list.append(row);
     }
   }
-  $('project').onchange = e => { project = Number(e.target.value); store.set('apex.code.project', project); renderHome(); renderRail(); };
+  $('project').onchange = e => { project = Number(e.target.value); store.set('apex.code.project', project); renderHome(); renderRail(); renderEngine(); loadBrain(); };
+
+  // ---------------------------------------------------------------- what tends to happen here (agent/code_brain.track_record)
+  // Counted from this project's sessions every time, never stored: a line shows only with
+  // 5 sessions behind it and in at least 2 of every 5, always as "X of N", never a percentage.
+  const recordFor = pid => (ov && ov.record && ov.record[pid]) || null;
+  const capital = t => t ? t[0].toUpperCase() + t.slice(1) : '';
+  function renderRecord() {
+    const r = recordFor(project), p = ov.projects.find(x => x.id === project), box = $('record');
+    box.hidden = !r || !p;
+    if (box.hidden) return;
+    $('record-title').textContent = `On ${p.name}`;
+    $('record-lines').replaceChildren(...r.lines.map(x => {
+      const row = el('div', 'rl ' + (x.key.startsWith('engine:') ? 'k-plan' : 'k-pattern'));   // k-: .plan is the header's chip
+      row.title = `${x.hits} of ${x.n} sessions in the last 90 days, counted again every time`;
+      row.append(el('i', '', x.key.startsWith('engine:') ? '◆' : '▲'), capital(x.text));
+      return row;
+    }));
+    if (!r.lines.length) $('record-lines').append(el('p', 'fine', r.note));
+  }
+  function planLine() {                                   // the chosen plan's own line, for the hint
+    const r = recordFor(current && detail ? detail.project_id : project);
+    return r && r.engines ? r.engines[engine] || null : null;
+  }
 
   // ---------------------------------------------------------------- the brief: plan, mode, voice
   function renderEngine() {
@@ -209,6 +240,7 @@
     if (p && !p.ready) { text = `Your ${p.name} ${p.why}. ${p.how || 'Pick the other plan.'}`; warn = true; }
     else if (detail && detail.status === 'ready' && detail.engine !== engine) { text = `Next message goes to your ${NAME[engine]}, with a recap of this session.`; warn = true; }
     else if (mode === 'full') { text = 'Full: Apex may run any command, inside this session\'s own copy of the project.'; warn = true; }
+    else if (planLine()) text += ` ${capital(planLine().text)}.`;
     hint.textContent = text; hint.className = 'hint' + (warn ? ' warn' : '');
     const send = $('send'); send.classList.toggle('stop', busy());
     send.replaceChildren(busy() ? '■ Stop' : planFirst ? 'Plan it' : current ? 'Send' : 'Build it', ...(busy() ? [] : [el('kbd', '', 'Ctrl ⏎')]));
@@ -299,7 +331,7 @@
     (view === 'home' ? $('home-slot') : $('session-slot')).append($('brief-form'));
   }
   async function open(id) {
-    current = id; detail = null; lastId = 0; feed = {turn: null, root: $('feed')};
+    current = id; detail = null; lastId = 0; feed = {turn: null, root: $('feed')}; proof = null; proofDue = true;
     $('feed').replaceChildren(); show('session');
     if (location.hash !== `#s=${id}`) history.replaceState(null, '', `#s=${id}`);
     try {
@@ -309,6 +341,7 @@
       const mine = ov && ov.plans.find(p => p.id === engine), other = ov && ov.plans.find(p => p.id === OTHER[engine]);
       if (mine && !mine.ready && other && other.ready) engine = other.id;      // its plan is resting: offer the ready one
       renderEngine(); await pull();
+      if (!document.querySelector('[data-pane=rules]').hidden) renderRules();
     }
     catch (err) { say(err.message, 'error'); home(); return; }
     if (ov) renderRail();
@@ -318,10 +351,10 @@
     schedule(400);
   }
   function home() {
-    current = null; detail = null; files = null; show('home'); disconnect();
+    current = null; detail = null; files = null; proof = null; show('home'); disconnect();
     history.replaceState(null, '', location.pathname);
     engine = store.get('apex.code.engine') || (ov && ov.default_engine) || 'claude'; mode = store.get('apex.code.mode', 'safe');
-    if (ov) { renderHome(); renderRail(); } renderEngine();
+    if (ov) { renderHome(); renderRail(); } renderEngine(); loadBrain();
   }
   $('back').onclick = home;
   $('new-session').onclick = () => { home(); closeDrawers(); $('prompt').focus(); };
@@ -337,6 +370,8 @@
       who.append(el('span', '', ago(you.ts)));
       bubble.append(who, el('div', 'text', you.text));
       root.append(row);
+      if (you.correction && !ruled(you)) root.append(fixRow(you));
+      if (you.brief && (you.brief.sources || []).length) root.append(briefCard(you));
     }
     const tl = el('div', 'timeline'); root.append(tl);
     feed.root.append(root);
@@ -350,6 +385,337 @@
     turn().tl.append(s); return s;
   }
   const ic = t => el('span', 'ic', t);
+
+  // ---------------------------------------------------------------- what Apex knows about you (agent/code_brain.py)
+  // A new conversation starts with it: Claude as its system prompt, ChatGPT ahead of the
+  // first message. The card under that message lists exactly what went, by where it came
+  // from; a memory can be forgotten from there, and from the home page's chip.
+  const BRAIN = [['profile', 'About you'], ['standing', 'Standing rules'], ['rule', 'Your rules for this project'],
+    ['handoff', 'Project handoff'], ['record', 'Measured on this project'], ['memory', 'How you like your code'], ['session', 'Recent sessions here']];
+  const brainTag = x => x.kind === 'memory' || x.kind === 'session' ? `#${x.ref}` : x.kind === 'rule' ? `rule ${x.ref}`
+    : x.kind === 'handoff' ? (x.ref === 'next_step' ? 'next step' : 'decisions') : '';
+  function brainList(sources, afterForget) {
+    const box = el('div', 'brain-list');
+    for (const [kind, label] of BRAIN) {
+      const items = sources.filter(x => x.kind === kind);
+      if (!items.length) continue;
+      const group = el('div', 'bg'), head = el('div', 'bh', label);
+      if (kind === 'rule') head.append(button('Edit rules', editRules, 'link'));
+      group.append(head);
+      for (const x of items) {
+        const row = el('div', 'bl k-' + kind), tag = brainTag(x);   // k-: .session is the page's own
+        if (tag) row.append(el('span', 'tag', tag));
+        row.append(el('span', 'bt', x.text));
+        if (kind === 'memory' && x.ref != null) {
+          row.dataset.ref = String(x.ref);
+          row.append(button('Forget', () => forgetMemory(x.ref, afterForget), 'small forget'));
+        }
+        group.append(row);
+      }
+      box.append(group);
+    }
+    return box;
+  }
+  function briefCard(you) {
+    const n = you.brief.sources.length, d = el('details', 'more brain');
+    d.append(el('summary', '', `🧠 What Apex told your ${NAME[you.engine] || you.engine} about you · ${n} thing${n === 1 ? '' : 's'}`),
+      brainList(you.brief.sources));
+    return d;
+  }
+  async function forgetMemory(id, after) {
+    try {
+      await api(`/api/memories/${encodeURIComponent(id)}`, {method: 'DELETE'});
+      for (const row of document.querySelectorAll(`.bl.k-memory[data-ref="${CSS.escape(String(id))}"]`)) {   // in the feed and the dialog
+        row.classList.add('gone'); const b = row.querySelector('.forget'); if (b) b.disabled = true;
+      }
+      say('Forgotten. Later sessions won\'t hear it.', 'good');
+      if (after) after();
+    } catch (err) { say(err.message, 'error'); }
+  }
+  function editRules() {                                  // the Rules tab of a session, where there is one
+    const t = document.querySelector('[data-tab=rules]');
+    if (!t || !current) { say('Open a session in this project to edit its rules.'); return; }
+    if ($('brain-dialog').open) $('brain-dialog').close();
+    t.click();
+  }
+  let brain = null;                                       // what a new session in the chosen project would hear
+  async function loadBrain() {
+    const pid = project;
+    if (!pid) { $('brain-chip').hidden = true; return; }
+    try { const b = await api(`/api/code/projects/${pid}/brain`); if (pid === project) { brain = b; renderBrainChip(); } }
+    catch (err) { $('brain-chip').hidden = true; console.warn('[Code] what Apex knows did not load:', err.message); }
+  }
+  function renderBrainChip() {
+    const p = ov && ov.projects.find(x => x.id === project), n = brain ? brain.sources.length : 0, name = p ? p.name : 'this project';
+    $('brain-chip').replaceChildren(el('i', '', '🧠'), n ? `Apex knows ${n} thing${n === 1 ? '' : 's'} for ${name}` : `Apex knows nothing yet for ${name}`);
+    $('brain-chip').hidden = false;
+  }
+  async function openBrain() {
+    const pid = current && detail ? detail.project_id : project, p = ov && ov.projects.find(x => x.id === pid);
+    $('brain-sub').textContent = `What a new session in ${p ? p.name : 'this project'} starts out knowing: your Claude plan gets it as its system prompt, `
+      + 'your ChatGPT plan ahead of your first message. Keys and passwords are taken out first.';
+    $('brain-body').replaceChildren(el('p', 'fine', 'Loading…'));
+    if (!$('brain-dialog').open) $('brain-dialog').showModal();
+    if (!pid) { $('brain-body').replaceChildren(el('p', 'fine', 'Add a project first.')); return; }
+    try {
+      const b = await api(`/api/code/projects/${pid}/brain`);
+      if (pid === project) { brain = b; renderBrainChip(); }
+      $('brain-body').replaceChildren(b.sources.length ? brainList(b.sources, loadBrain)
+        : el('p', 'empty', 'Tell Celine or Apex chat how you like your code; it shows up here.'));
+    } catch (err) { $('brain-body').replaceChildren(el('p', 'fine', err.message)); }
+  }
+  $('brain-chip').onclick = openBrain;
+  $('brain-close').onclick = () => $('brain-dialog').close();
+
+  // ---------------------------------------------------------------- waiting for your OK (agent/code_brain.suggested)
+  // A plan can suggest a memory through Apex's memory server (remember). It is only staged:
+  // it shows here, for this project, until you approve it, reject it, or save your own
+  // wording of it. Once approved, the next session's brief can bring it back.
+  let waiting = [];
+  const WAIT_KIND = {fact: 'fact', preference: 'preference', project: 'project', decision: 'decision', note: 'note'};
+  async function loadWaiting() {
+    try { waiting = (await api('/api/code/approvals')).items || []; }
+    catch (err) { console.warn('[Code] the memories waiting for your OK did not load:', err.message); return; }
+    renderWaiting();
+  }
+  function renderWaiting() {
+    const box = $('box-waiting'), list = $('wait-list');
+    const mine = detail ? waiting.filter(x => x.project_id === detail.project_id) : [];
+    box.hidden = !mine.length;
+    $('wait-count').textContent = mine.length ? String(mine.length) : '';
+    if (list.querySelector('.wm.editing')) return;              // never wipe what you are typing
+    list.replaceChildren(...mine.map(waitRow));
+  }
+  function waitRow(x) {
+    const row = el('div', 'wm'), head = el('div', 'wh');
+    row.dataset.id = String(x.id);
+    head.append(el('span', 'wk', WAIT_KIND[x.kind] || 'note'),
+      el('span', 'muted', x.session_id === current ? 'from this session' : x.session_id ? `from session ${x.session_id}` : 'from a session'));
+    row.append(head, el('p', 'wt', x.content));
+    if (x.why) row.append(el('p', 'fine why', `Why: ${x.why}`));
+    const acts = el('div', 'acts');
+    acts.append(button('Approve', () => decideWaiting(x, 'approve'), 'small primary'), button('Reject', () => decideWaiting(x, 'reject'), 'small'),
+      button('Edit', () => editWaiting(row, x), 'small'));
+    row.append(acts);
+    return row;
+  }
+  async function decideWaiting(x, how) {
+    try {
+      const r = await post(`/api/staged-writes/${encodeURIComponent(x.id)}/${how}`);
+      if (how === 'approve' && !/^Approved/.test(r.result || '')) throw new Error(r.result || r.error || 'It was not saved.');
+      say(how === 'approve' ? 'Saved to Apex\'s memory. The next session here hears it.' : 'Rejected. Nothing was saved.', how === 'approve' ? 'good' : '');
+      if (how === 'approve') loadBrain();
+    } catch (err) { say(err.message, 'error'); }
+    await loadWaiting();
+  }
+  function editWaiting(row, x) {                              // your wording: the suggestion is rejected, yours is saved
+    row.classList.add('editing'); row.replaceChildren();
+    const area = el('textarea'); area.value = x.content; area.maxLength = 1000; area.rows = 3; area.setAttribute('aria-label', 'Your wording of this memory');
+    const save = button('Save my version', async () => {
+      const text = area.value.trim();
+      if (text.length < 5) { say('A memory is 5 to 1000 characters.', 'error'); return; }
+      save.disabled = true;
+      try {
+        await post(`/api/staged-writes/${encodeURIComponent(x.id)}/reject`);
+        await post('/api/memories', {content: text, kind: x.kind || 'note', tags: x.tags || 'from-mcp,code'});
+        say('Saved your version. The next session here hears it.', 'good');
+        row.classList.remove('editing'); loadBrain(); await loadWaiting();
+      } catch (err) { save.disabled = false; say(err.message, 'error'); }
+    }, 'small primary');
+    const cancel = button('Cancel', () => { row.classList.remove('editing'); renderWaiting(); }, 'small');
+    const bar = el('div', 'acts'); bar.append(save, cancel);
+    row.append(area, bar); area.focus();
+  }
+
+  // ---------------------------------------------------------------- rules: say it once (agent/code_brain.py)
+  // A reply that corrects the agent ("no, never…") gets two chips under it: keep it as a
+  // rule for this project, or for all your code. Every later session, the second opinion
+  // and Celine follow it, and the session you're in hears it ahead of its next message.
+  // The Rules tab lists them, with on/off, edit, delete and earlier versions.
+  const RULE_MAX = 500;
+  const RULE_SAVED = {project: 'Rule saved. Every session here follows it; this one hears it on its next turn.',
+    all: 'Rule saved for all your code. Every session follows it; this one hears it on its next turn.'};
+  const ruledKey = 'apex.code.ruled';                     // corrections already answered, on this browser
+  const ruledList = () => { try { return JSON.parse(store.get(ruledKey, '[]')); } catch (_) { return []; } };
+  const ruled = you => current != null && ruledList().includes(`${current}:${you.id}`);
+  function markRuled(you) { if (current != null) store.set(ruledKey, JSON.stringify([...ruledList(), `${current}:${you.id}`].slice(-200))); }
+  const rulesPid = () => (current && detail ? detail.project_id : project);
+  const rulesUrl = pid => `/api/code/projects/${pid}/rules`;
+  async function addRule(pid, text, scope) {                 // the revision is read just before, so a tap rarely clashes
+    const {revision} = await api(rulesUrl(pid));
+    const r = await post(rulesUrl(pid), {text, scope, revision});
+    if (rules && rules.pid === pid) { rules = {pid, ...r}; drawRules(); }
+    loadBrain();
+    return r;
+  }
+  function counter(area, out) { const n = () => { out.textContent = `${area.value.length}/${RULE_MAX}`; out.classList.toggle('over', area.value.length > RULE_MAX); }; area.addEventListener('input', n); n(); }
+  function fixRow(you) {
+    const box = el('div', 'fix'), chips = el('div', 'fix-chips');
+    const name = (detail && detail.project) || 'this project';
+    chips.append(el('span', 'fix-q', 'Say it once?'),
+      button(`Make this a rule for ${name}`, () => draft('project'), 'chip'),
+      button('Remember for all my code', () => draft('all'), 'chip'),
+      button('✕', () => { markRuled(you); box.remove(); }, 'chip x'));
+    chips.lastChild.setAttribute('aria-label', 'Not a rule');
+    box.append(chips);
+    function draft(scope) {
+      const area = el('textarea'), count = el('span', 'count'), save = button('Save rule', go, 'primary small');
+      area.rows = 2; area.maxLength = RULE_MAX; area.value = you.text.slice(0, RULE_MAX); area.setAttribute('aria-label', 'The rule');
+      counter(area, count);
+      const bar = el('div', 'fix-bar');
+      bar.append(el('span', 'fine', scope === 'all' ? 'For all your code' : `For ${name}`), count, el('span', 'grow'), button('Cancel', () => { form.remove(); chips.hidden = false; }, 'small'), save);
+      const form = el('div', 'fix-draft'); form.append(area, bar);
+      chips.hidden = true; box.append(form); area.focus();
+      async function go() {
+        const text = area.value.trim();
+        if (!text) { say('Write the rule first.', 'error'); return; }
+        const pid = detail ? detail.project_id : project;
+        save.disabled = true;
+        try {
+          await addRule(pid, text, scope);
+          markRuled(you); box.replaceChildren(el('p', 'fine saved', '✓ ' + RULE_SAVED[scope])); say(RULE_SAVED[scope], 'good');
+        } catch (err) { say(err.message, 'error'); save.disabled = false; }      // the text stays in the box
+      }
+    }
+    return box;
+  }
+
+  let rules = null;                                       // {pid, items, revision, global}: the Rules tab
+  async function renderRules() {
+    const pid = rulesPid();
+    renderLog();
+    if (!pid) { $('rules-list').replaceChildren(el('p', 'fine', 'Add a project first.')); return; }
+    try { rules = {pid, ...await api(rulesUrl(pid))}; } catch (err) { $('rules-list').replaceChildren(el('p', 'fine', err.message)); return; }
+    drawRules(); if ($('rules-history').open) loadVersions();
+  }
+  function drawRules(reopen) {                            // reopen: {was, text} an edit to keep after a reload
+    const name = (detail && detail.project_id === rules.pid && detail.project) || (ov && (ov.projects.find(p => p.id === rules.pid) || {}).name) || 'this project';
+    $('rules-sub').textContent = `Every new session in ${name} follows these, and the second opinion checks them. A session already open hears a change ahead of its next message.`;
+    const list = $('rules-list');
+    list.replaceChildren(...rules.items.map((r, i) => ruleRow(r, i)));
+    if (!rules.items.length) list.append(el('p', 'empty', 'No rules yet. Correct Apex in a session ("No, never…") and keep it as a rule, or add one here.'));
+    $('rules-count').textContent = rules.items.length ? `${rules.items.filter(r => r.active).length} on · ${rules.items.length}/20` : '';
+    if (reopen) {
+      const i = rules.items.findIndex(r => r.text === reopen.was);
+      if (i >= 0) editRule(i, reopen.text); else { $('rules-new').value = reopen.text; }
+    }
+    const g = $('rules-global');
+    g.replaceChildren(...rules.global.map(x => {
+      const row = el('div', 'rule global'); row.dataset.ref = String(x.id);
+      row.append(el('span', 'rt', x.text), button('Forget', () => forgetRule(x.id), 'small forget'));
+      return row;
+    }));
+    if (!rules.global.length) g.append(el('p', 'fine', 'None yet. "Remember for all my code" under a correction puts one here.'));
+  }
+  function ruleRow(r, i) {
+    const row = el('div', 'rule' + (r.active ? '' : ' off')), on = el('input');
+    on.type = 'checkbox'; on.checked = r.active; on.setAttribute('aria-label', r.active ? 'On: turn this rule off' : 'Off: turn this rule on');
+    on.onchange = () => saveRules(rules.items.map((x, j) => j === i ? {...x, active: on.checked} : x), on.checked ? 'Rule on.' : 'Rule off. Sessions stop hearing it.');
+    row.append(on, el('span', 'rt', r.text), button('Edit', () => editRule(i), 'small'),
+      button('Delete', () => saveRules(rules.items.filter((_, j) => j !== i), 'Rule deleted. Earlier versions can bring it back.'), 'small danger'));
+    return row;
+  }
+  function editRule(i, text) {
+    const row = $('rules-list').children[i], r = rules.items[i];
+    const area = el('textarea'), count = el('span', 'count'), bar = el('div', 'fix-bar');
+    area.rows = 2; area.maxLength = RULE_MAX; area.value = text ?? r.text; area.setAttribute('aria-label', 'Edit the rule');
+    counter(area, count);
+    bar.append(count, el('span', 'grow'), button('Cancel', () => drawRules(), 'small'),
+      button('Save', () => { const t = area.value.trim(); if (!t) { say('A rule needs words. Delete it instead.', 'error'); return; }
+        saveRules(rules.items.map((x, j) => j === i ? {...x, text: t} : x), 'Rule saved.', {was: r.text, text: area.value}); }, 'primary small'));
+    row.className = 'rule editing'; row.replaceChildren(area, bar); area.focus();
+  }
+  async function saveRules(items, okText, keep) {
+    const pid = rules.pid;
+    try { rules = {pid, ...await put(rulesUrl(pid), {items, revision: rules.revision})}; drawRules(); say(okText, 'good'); loadBrain(); if ($('rules-history').open) loadVersions(); }
+    catch (err) {
+      say(err.message, 'error');
+      if (err.status === 409) { try { rules = {pid, ...await api(rulesUrl(pid))}; } catch (_) {} drawRules(keep); }      // reloaded; your text is kept
+      else if (!keep) drawRules();
+    }
+  }
+  $('rules-add').onsubmit = async e => {
+    e.preventDefault();
+    const text = $('rules-new').value.trim();
+    if (!text || !rules) return;
+    const pid = rules.pid;
+    try {
+      rules = {pid, ...await post(rulesUrl(pid), {text, scope: 'project', revision: rules.revision})};
+      $('rules-new').value = ''; drawRules(); say(RULE_SAVED.project, 'good'); loadBrain(); if ($('rules-history').open) loadVersions();
+    } catch (err) {
+      say(err.message, 'error');                                                    // the text stays in the box
+      if (err.status === 409) { try { rules = {pid, ...await api(rulesUrl(pid))}; drawRules(); } catch (_) {} }
+    }
+  };
+  async function forgetRule(id) {
+    try { await api(`/api/memories/${encodeURIComponent(id)}`, {method: 'DELETE'}); say('Forgotten. Later sessions won\'t hear it.', 'good'); await renderRules(); loadBrain(); }
+    catch (err) { say(err.message, 'error'); }
+  }
+  async function loadVersions() {
+    const box = $('rules-versions');
+    if (!rules) return;
+    try {
+      const {versions} = await api(`${rulesUrl(rules.pid)}/history`);
+      const older = versions.filter(v => v.revision !== rules.revision);
+      box.replaceChildren(...older.map(v => {
+        const row = el('div', 'version'), on = v.items.filter(x => x.active).length, head = el('div', 'vh');
+        head.append(el('b', '', `Version ${v.revision}`), el('span', 'muted', `${ago(v.updated)} · ${v.items.length} rule${v.items.length === 1 ? '' : 's'}, ${on} on`),
+          el('span', 'grow'), button('Restore', () => restoreRules(v.revision), 'small'));
+        const ul = el('ul');
+        for (const x of v.items) ul.append(el('li', x.active ? '' : 'off', x.text));
+        row.append(head, ul); return row;
+      }));
+      if (!older.length) box.append(el('p', 'fine', 'No earlier versions yet: each save keeps one.'));
+    } catch (err) { box.replaceChildren(el('p', 'fine', err.message)); }
+  }
+  $('rules-history').addEventListener('toggle', () => { if ($('rules-history').open) loadVersions(); });
+
+  // The project's decision log: a line for every session kept or thrown away (agent/code_brain.write_back),
+  // which every later session here reads in its brief. Read-only; History brings back an earlier version.
+  const logUrl = pid => `/api/code/projects/${pid}/decisions`;
+  const logLines = text => String(text || '').split('\n').filter(l => l.trim());
+  let decisionLog = null;                                 // {pid, decisions, revision}
+  async function renderLog() {
+    const pid = rulesPid();
+    if (!pid) { $('log-lines').replaceChildren(); return; }
+    try { decisionLog = {pid, ...await api(logUrl(pid))}; } catch (err) { $('log-lines').replaceChildren(el('p', 'fine', err.message)); return; }
+    drawLog(); if ($('log-history').open) loadLogVersions();
+  }
+  function drawLog() {
+    const lines = logLines(decisionLog.decisions).reverse();                       // newest first
+    $('log-lines').replaceChildren(...lines.map(l => el('div', 'log-line', l)));
+    if (!lines.length) $('log-lines').append(el('p', 'fine', 'Nothing yet. Keep or throw away a session and Apex writes a line here, for every later session to read.'));
+  }
+  async function loadLogVersions() {
+    const box = $('log-versions');
+    if (!decisionLog) return;
+    try {
+      const {versions} = await api(`${logUrl(decisionLog.pid)}/history`);
+      const older = versions.filter(v => v.revision !== decisionLog.revision);
+      box.replaceChildren(...older.map(v => {
+        const row = el('div', 'version'), head = el('div', 'vh'), lines = logLines(v.decisions);
+        head.append(el('b', '', `Version ${v.revision}`), el('span', 'muted', `${ago(v.updated)} · ${lines.length} line${lines.length === 1 ? '' : 's'}`),
+          el('span', 'grow'), button('Restore', () => restoreLog(v.revision), 'small'));
+        const ul = el('ul');
+        for (const l of lines.slice(-3).reverse()) ul.append(el('li', '', l));
+        row.append(head, ul); return row;
+      }));
+      if (!older.length) box.append(el('p', 'fine', 'No earlier versions yet: each session that ends keeps one.'));
+    } catch (err) { box.replaceChildren(el('p', 'fine', err.message)); }
+  }
+  $('log-history').addEventListener('toggle', () => { if ($('log-history').open) loadLogVersions(); });
+  async function restoreLog(revision) {
+    const pid = decisionLog.pid;
+    try {
+      decisionLog = {pid, ...await post(`${logUrl(pid)}/restore`, {revision, current_revision: decisionLog.revision})};
+      drawLog(); loadLogVersions(); loadBrain(); say(`Version ${revision} of the decision log is back.`, 'good');
+    } catch (err) { say(err.message, 'error'); if (err.status === 409) renderLog(); }
+  }
+  async function restoreRules(revision) {
+    const pid = rules.pid;
+    try { rules = {pid, ...await post(`${rulesUrl(pid)}/restore`, {revision, current_revision: rules.revision})}; drawRules(); loadVersions(); loadBrain(); say(`Version ${revision} is back.`, 'good'); }
+    catch (err) { say(err.message, 'error'); if (err.status === 409) renderRules(); }
+  }
 
   function render(e) {
     const t = e.kind === 'you' ? null : turn();
@@ -373,6 +739,10 @@
           line.append(el('span', 'sym', '$'), el('span', 'c', e.title), el('span', 'st muted', '…'));
           line.title = e.detail || e.title; s.dataset.label = `Running ${e.title}`;
           copyLine(line, e.title); s.append(line); if (e.ref) { t.tools[e.ref] = s; s.dataset.ref = e.ref; }
+        } else if (e.tool === 'memory') {                 // it asked Apex's memory, or suggested a memory
+          t.reads = null;
+          const s = step('memory', ic('🧠'), el('span', 'mt', e.title), el('span', 'st muted', '…'));
+          if (e.ref) { t.tools[e.ref] = s; s.dataset.ref = e.ref; }
         } else { t.reads = null; step('', ic(e.tool === 'web' ? '◌' : '·'), e.title); }
         break;
       case 'result': {
@@ -408,6 +778,8 @@
           const acts = el('div', 'acts');
           acts.append(button('Allow once', () => allowCmd(e.command, false), 'primary'),
             button('Always allow in this project', () => allowCmd(e.command, true)));
+          // Away mode: Apex also asked on your phone, where one tap allows it once (or says no).
+          if (e.allow_id) acts.append(el('span', 'sent-phone', '📱 Sent to your phone'));
           s.append(acts);
         }
         break;
@@ -433,6 +805,7 @@
       case 'error': step('error', ic('✗'), e.text); break;
       case 'checkpoint': step('mark', e.catch_up ? 'Caught up with your latest work' : `Checkpoint · ${e.files} file${e.files === 1 ? '' : 's'} saved on the session's branch`); break;
       case 'undo': step('mark', `↶ Undid a step (${e.files} file${e.files === 1 ? '' : 's'})`); break;
+      case 'owner_evidence': step('mark', `You reported: ${e.evidence || 'output without a test count'} (pasted; Apex didn't see it run)`); break;
       case 'conflict': {
         const c = el('div', 'card2 warnish'), h = el('div', 'h');
         h.append('⚠ Your latest work clashes with this session');
@@ -453,22 +826,41 @@
         line.append(el('span', 'sym', '▶'), el('span', 'c', `Checks: ${e.command}`), el('span', 'st muted', '…'));
         t.checks = step('cmd', line); copyLine(line, e.command); break;
       }
-      case 'checks': {
-        const s = t.checks || step('cmd');
+      case 'checks': {                                   // passed, failed, or unknown: it couldn't say
+        const s = t.checks || step('cmd'), state = e.state || (e.passed ? 'passed' : 'failed');
         if (!t.checks) { const line = el('div', 'line'); line.append(el('span', 'sym', '▶'), el('span', 'c', `Checks: ${e.command}`), el('span', 'st')); copyLine(line, e.command); s.append(line); }
-        const st = s.querySelector('.st'); st.className = 'st ' + (e.passed ? 'ok' : 'bad'); st.textContent = `${e.passed ? '✓ passed' : '✗ failed'} · ${clock(e.seconds)}`;
-        if (e.output) { const d = el('details', 'more'); if (!e.passed) d.open = true; d.append(el('summary', '', 'Output'), withCopy(el('pre', 'out', e.output), () => e.output)); s.append(d); }
+        const st = s.querySelector('.st'); st.className = 'st ' + (CHECK_LOOK[state] || CHECK_LOOK.unknown)[1];
+        st.textContent = `${(CHECK_LOOK[state] || CHECK_LOOK.unknown)[0]} · ${clock(e.seconds)}`;
+        if (e.why) s.append(el('div', 'why', e.why));
+        if (e.output) { const d = el('details', 'more'); if (state !== 'passed') d.open = true; d.append(el('summary', '', 'Output'), withCopy(el('pre', 'out', e.output), () => e.output)); s.append(d); }
         t.checks = null; feed.turn = null; break;
       }
       case 'kept': {
         const c = el('div', 'card2 kept'), h = el('div', 'h');
         h.append(`✓ Kept: merged into ${e.into} (${e.files} file${e.files === 1 ? '' : 's'})`);
         c.append(h, el('p', 'muted', e.restart ? 'Your Apex has it now. Restart Apex to run it.' : 'It\'s in your project now.'));
+        if (e.unverified) c.append(el('p', 'muted unproved', `Kept without proof (${e.proof || 'unverified'}): you chose Keep anyway.`));
+        else if (e.proof === 'proved') c.append(el('p', 'muted', '✓ Proved: Apex\'s own checks passed on what was kept.'));
+        if (e.learned) c.append(learnedLine(e.learned));
         t.tl.append(c); break;
       }
-      case 'discarded': step('mark', 'Thrown away: the session\'s branch and copy are gone. Your project never changed.'); break;
+      case 'discarded': {
+        const why = REASONS[e.reason], s = step('mark', `Thrown away${why ? ` (${why.toLowerCase()})` : ''}: the session's branch and copy are gone. Your project never changed.`);
+        if (e.learned) s.append(learnedLine(e.learned));
+        break;
+      }
       default: break;
     }
+  }
+  const CHECK_LOOK = {passed: ['✓ passed', 'ok'], failed: ['✗ failed', 'bad'], unknown: ['? unknown', 'warn']};
+  // What a finished session wrote into Apex (agent/code_brain.write_back): each place, or why not.
+  const REASONS = {changed_mind: 'Changed my mind', wrong: 'It was wrong', poor: 'Poor quality', superseded: 'Something better came along'};
+  const LEARNED = [['decision', 'decision log', 'couldn\'t write the decision log'], ['daily', 'today\'s note', 'couldn\'t write today\'s note'],
+    ['outcome', 'outcome', 'couldn\'t record the outcome']];
+  function learnedLine(learned) {
+    const p = el('div', 'learned'); p.append('Saved to Apex: ');
+    LEARNED.forEach(([key, ok, bad], i) => { if (i) p.append(' · '); p.append(el('span', learned[key] ? 'ok' : 'bad', learned[key] ? `${ok} ✓` : bad)); });
+    return p;
   }
   const DONE = {done: ['✓ Done', 'done-ok'], stopped: ['■ Stopped', ''], limited: ['⚠ Plan limit reached', 'warnish'],
     signed_out: ['⚠ Plan not signed in', 'warnish'], missing: ['⚠ Plan not set up', 'warnish'], failed: ['✗ Stopped with an error', 'done-bad'],
@@ -568,7 +960,10 @@
     } catch (err) { console.warn('[Code] update failed, retrying:', err); }   // offline for a moment, or a bug: never silent
     schedule(document.hidden ? 10000 : stream.on ? 5000 : busy() ? 1000 : 4000);
   }
-  const REFRESH = new Set(['done', 'checkpoint', 'review', 'checks', 'kept', 'discarded', 'conflict', 'undo', 'file', 'review_started', 'checks_started', 'you', 'term_done', 'pushed']);
+  const REFRESH = new Set(['done', 'checkpoint', 'review', 'checks', 'kept', 'discarded', 'conflict', 'undo', 'file', 'review_started', 'checks_started', 'you', 'term_done', 'pushed', 'owner_evidence']);
+  // The proof costs Apex some git work too: read again only after what can change it, not every edit.
+  let waitingDue = false;
+  const PROOF_AFTER = new Set(['done', 'checkpoint', 'review', 'checks', 'kept', 'discarded', 'undo', 'term_done', 'owner_evidence']);
   async function pull() {
     const id = current;
     const {events} = await api(`/api/code/sessions/${id}/events?after=${lastId}`);
@@ -588,12 +983,20 @@
       lastId = e.id;
       render(e);
       if (REFRESH.has(e.kind)) refresh = true;
+      if (PROOF_AFTER.has(e.kind)) proofDue = true;
+      if (e.kind === 'done' || (e.kind === 'tool' && e.tool === 'memory')) waitingDue = true;
     }
+    if (waitingDue) { waitingDue = false; loadWaiting(); }   // a memory it suggested shows without waiting for the next poll
     if (events.length) { placeLive(); if (nearBottom) $('feed').scrollTop = $('feed').scrollHeight; }
     return refresh;
   }
   async function refreshDetail() {
-    detail = await api(`/api/code/sessions/${current}`);
+    const id = current, withProof = proofDue;
+    proofDue = false;
+    const [d, p] = await Promise.all([api(`/api/code/sessions/${id}`),
+      withProof ? api(`/api/code/sessions/${id}/proof`).catch(err => { console.warn('[Code] the proof did not load:', err.message); return undefined; }) : undefined]);
+    if (id !== current) return;
+    detail = d; if (p !== undefined) proof = p;
     renderDetail(); renderEngine();
   }
 
@@ -627,7 +1030,15 @@
       const verdict = (s.review_text.match(/verdict:\s*(.+)/i) || [, s.review_text.split('\n').find(l => l.trim() && !/rating/i.test(l)) || ''])[1];
       const w = el('div'); w.append(el('b', '', `${NAME[s.review_engine]} says`), el('p', 'verdict', verdict.replace(/\*\*/g, '')));
       score.append(w); r.append(score);
-      const d = el('details', 'more full'); d.append(el('summary', '', 'Full review')); const p = el('div', 'prose'); p.append(md(s.review_text)); d.append(p); r.append(d);
+      const rv = proof && proof.review && proof.review.engine === s.review_engine ? proof.review : null;
+      if (rv) r.append(el('p', 'indep ' + rv.independence, rv.label));
+      const d = el('details', 'more full'); d.append(el('summary', '', 'Full review')); const p = el('div', 'prose'); p.append(md(s.review_text)); d.append(p);
+      if (rv && rv.citations.length) {                     // each file:line it cites, checked against the copy
+        const ul = el('ul', 'cites');
+        for (const c of rv.citations) { const li = el('li', 'cite ' + c.kind); li.append(el('code', '', c.cite), el('span', '', c.label)); ul.append(li); }
+        d.append(ul);
+      }
+      r.append(d);
     } else if (s.review_state === 'failed') r.append(el('p', 'verdict', 'The last review did not finish. ' + (s.review_text || '').slice(0, 200)));
     else r.append(el('p', 'verdict', `Your ${NAME[other]} reads the change, rates it out of 10, and tells you what's wrong.`));
     $('r-go').textContent = s.review_state === 'done' ? `Ask again (${NAME[other]})` : `Get a second opinion (${NAME[other]})`;
@@ -635,9 +1046,13 @@
     const proj = ov && ov.projects.find(p => p.id === s.project_id);
     if (document.activeElement !== $('k-cmd')) $('k-cmd').value = proj ? proj.checks : '';
     $('k-save').hidden = !proj || $('k-cmd').value === proj.checks;
-    const ks = $('k-state');
-    ks.className = 'k-state' + (s.check_state === 'passed' ? ' ok' : s.check_state === 'failed' ? ' bad' : '');
-    ks.textContent = {running: 'Running…', passed: '✓ Passed', failed: '✗ Failed'}[s.check_state] || 'Not run yet.';
+    $('k-exit').checked = !!(proj && proj.checks_exit_ok);
+    $('k-exit').disabled = !proj;
+    const ks = $('k-state'), why = s.check_evidence || '';
+    const older = s.check_state === 'passed' && proof && proof.checks && proof.checks.stale;
+    ks.className = 'k-state' + (older ? ' warn' : {passed: ' ok', failed: ' bad', unknown: ' warn'}[s.check_state] || '');
+    ks.textContent = s.check_state === 'unknown' ? `? Unknown: ${why}` : older ? '✓ Passed on an older checkpoint'
+      : ({running: 'Running…', passed: '✓ Passed', failed: '✗ Failed'}[s.check_state] || 'Not run yet.') + (why && /^(passed|failed)$/.test(s.check_state) ? ` · ${why}` : '');
     $('k-out').hidden = !s.check_output; $('k-out').textContent = s.check_output || '';
     // Actions
     const ready = s.status === 'ready', idle = ready && !busy();
@@ -651,10 +1066,85 @@
     $('r-go').disabled = !idle || !changed.length; $('k-go').disabled = !idle || !ready;
     $('a-folder').disabled = !ready;
     $('a-where').textContent = ready ? `Working copy: ${s.worktree}` : s.status === 'kept' ? `Merged as ${s.kept_commit.slice(0, 10)}.` : '';
+    renderWaiting();
+    renderProof();
   }
+
+  // ---------------------------------------------------------------- proof: what it said vs what Apex saw (code_studio.proof)
+  // Before Keep: the sentences where the agent says it tested its work, word for word, next
+  // to what Apex saw for itself. Only Apex's own checks, passed on what is there now, prove
+  // it; a check that couldn't decide is "unknown", never a tick. Output you paste is yours.
+  let proof = null, proofDue = true;
+  const VERDICT = {proved: ['✓ Proved', 'ok'], unverified: ['? Unverified', 'warn'], contradicted: ['✗ Contradicted', 'bad']};
+  const SAW = {true: ['✓', 'ok'], false: ['✗', 'bad'], null: ['?', 'warn']}, mark = v => SAW[v] || SAW.null;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  function sawRow(who, [sign, cls], command, evidence, where, old) {   // who; the command on its own line; what it showed
+    const row = el('div', 'saw' + (old ? ' old' : '')), res = el('div', 'res');
+    row.append(el('span', 'who', who));
+    if (command) { const c = el('code', '', command); c.title = command; row.append(c); }
+    res.append(el('span', 'mark ' + cls, sign), ' ', el('span', 'ev', evidence));
+    if (where) res.append(el('span', 'where', ` · ${where}`));
+    row.append(res);
+    return row;
+  }
+  function renderProof() {
+    const p = proof, box = $('box-proof');
+    box.hidden = !p || !detail;
+    if (box.hidden) return;
+    const [label, cls] = VERDICT[p.verdict] || VERDICT.unverified;
+    $('p-badge').textContent = label; $('p-badge').className = 'p-badge ' + cls;
+    $('p-reasons').replaceChildren(...p.reasons.map(r => el('li', '', r)));
+    const said = $('p-said');                                       // exactly what it said, never paraphrased
+    said.replaceChildren(...p.claims.map(c => el('q', 'claim' + (c.pass_claim ? ' pass' : ''), c.sentence)));
+    if (!p.claims.length) said.append(el('p', 'fine', 'Nothing about tests or checks.'));
+    const saw = $('p-saw'), k = p.checks; saw.replaceChildren();
+    if (k.state !== 'none') {
+      saw.append(sawRow('Apex ran', k.state === 'running' ? ['…', ''] : mark({passed: true, failed: false}[k.state] ?? null), k.command, k.state === 'running' ? 'running' : k.why || k.state,
+        `${k.checkpoint ? `checkpoint ${k.checkpoint}` : k.sha ? `commit ${k.sha.slice(0, 8)}` : ''}${k.stale ? ' (older)' : ''}`, k.stale));
+    }
+    for (const r of p.saw_agent) saw.append(sawRow(`It ran${r.engine ? ` (${NAME[r.engine] || r.engine})` : ''}`, mark(r.verdict), r.command, r.evidence,
+      `${r.checkpoint ? `step ${r.checkpoint}` : 'this step'}${r.stale ? ', files changed after' : ''}`, r.stale));
+    for (const r of p.saw_you) saw.append(sawRow('You ran', mark(r.verdict), r.command, r.evidence, r.stale ? 'files changed after' : '', r.stale));
+    const o = p.owner_evidence;
+    if (o) saw.append(sawRow('You reported', mark(o.verdict), '', o.evidence || 'no test count', `pasted, ${o.stale ? 'files changed since' : 'not seen by Apex'}`, true));
+    if (!saw.childNodes.length) saw.append(el('p', 'fine', 'Nothing yet: run the checks.'));
+    const n = k.changed_since.length;
+    $('p-stale').hidden = !(k.stale && n);
+    $('p-stale').textContent = `${plural(n, 'file')} changed since: ${k.changed_since.slice(0, 6).join(', ')}${n > 6 ? ' …' : ''}`;
+    $('p-goalpost').hidden = !p.goalpost.length;
+    $('p-goalpost').textContent = `⚠ The checks passed, and the change edits tests (${p.goalpost.slice(0, 4).join(', ')}${p.goalpost.length > 4 ? ' …' : ''}): `
+      + 'a pass can come from changing what is tested. Read those diffs.';
+    const dis = p.review && p.review.disagreement;
+    $('p-disagree').hidden = !dis; $('p-disagree').textContent = dis ? `⚖ ${dis}` : '';
+    const prove = k.state === 'unknown' && detail.status === 'ready' && !!k.command;
+    $('p-prove').hidden = !prove;
+    if (prove && $('p-cmd').dataset.cmd !== k.command) {
+      $('p-cmd').dataset.cmd = k.command;
+      $('p-cmd').replaceChildren(withCopy(el('pre', 'out', k.command), () => k.command));
+    }
+    $('p-where').textContent = prove ? `Apex couldn't tell. Run this yourself in ${detail.worktree}, then paste what it printed: it counts as what you reported, not as Apex's check.` : '';
+  }
+  $('p-send').onclick = async () => {
+    const output = $('p-paste').value.trim();
+    if (!output) { say('Paste what the command printed first.', 'error'); $('p-paste').focus(); return; }
+    $('p-send').disabled = true;
+    try {
+      proof = await post(`/api/code/sessions/${current}/evidence`, {output});
+      $('p-paste').value = ''; renderDetail();
+      say('Added as what you reported. Only Apex\'s own checks can prove it.', 'good'); schedule(200);
+    } catch (err) { say(err.message, 'error'); }                          // the paste stays in the box
+    $('p-send').disabled = false;
+  };
   $('r-go').onclick = () => review();
   $('k-go').onclick = () => runChecks();
   $('k-cmd').oninput = () => { const proj = ov && detail && ov.projects.find(p => p.id === detail.project_id); $('k-save').hidden = !proj || $('k-cmd').value === proj.checks; };
+  $('k-exit').onchange = async () => {
+    const on = $('k-exit').checked;
+    try {
+      await api(`/api/code/projects/${detail.project_id}`, {method: 'PATCH', body: JSON.stringify({exit_ok: on})}); await loadOverview(); renderDetail();
+      say(on ? 'Exit 0 now counts as a pass for this project, even without a test count.' : 'Exit 0 without a test count is Unknown again.', 'good');
+    } catch (err) { $('k-exit').checked = !on; say(err.message, 'error'); }
+  };
   $('k-save').onclick = async () => {
     try { await api(`/api/code/projects/${detail.project_id}`, {method: 'PATCH', body: JSON.stringify({checks: $('k-cmd').value})}); await loadOverview(); renderDetail(); say('Checks command saved.', 'good'); }
     catch (err) { say(err.message, 'error'); }
@@ -669,16 +1159,53 @@
     try { detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, engine, mode, model, effort, plan: false}); renderEngine(); schedule(200); }
     catch (err) { say(err.message, 'error'); }
   }
-  $('a-keep').onclick = async () => {
+  // Keep reads the proof first. Proved: the usual question, with what proves it. Otherwise
+  // it says so plainly, and keeps it only on "Keep anyway" (the server asks the same).
+  const unproved = (p, base) => confirmBox('Keep it unproved?',
+    `${(VERDICT[p.verdict] || VERDICT.unverified)[0]}. ${p.reasons.join(' ')}\n\n${base}`, 'Keep anyway');
+  async function keepIt(push) {
     const proj = ov.projects.find(p => p.id === detail.project_id), n = detail.changes.files.length;
-    const apex = proj && proj.name === 'Apex';
-    if (!await confirmBox('Keep it?', `This merges ${n} file${n === 1 ? '' : 's'} into ${proj && proj.branch ? proj.branch : 'your branch'} of ${detail.project}.${apex ? ' Restart Apex afterwards to run it.' : ''}`, 'Keep it')) return;
-    const r = await act('keep', apex ? 'Kept. Restart Apex to run it.' : 'Kept. It\'s in your project now.');
-    if (r) { await loadOverview(); await refreshDetail(); }
-  };
+    const apex = proj && proj.name === 'Apex', branch = proj && proj.branch ? proj.branch : 'your branch';
+    const base = push ? `This merges the session into ${branch} of ${detail.project}, then runs git push.`
+      : `This merges ${n} file${n === 1 ? '' : 's'} into ${branch} of ${detail.project}.${apex ? ' Restart Apex afterwards to run it.' : ''}`;
+    try { proof = await api(`/api/code/sessions/${current}/proof`); renderDetail(); } catch (err) { say(err.message, 'error'); return; }
+    let body = push ? {push: true} : {};
+    if (proof.verdict === 'proved') {
+      if (!await confirmBox(push ? 'Keep and push?' : 'Keep it?', `${base}\n\n✓ Proved: ${proof.reasons[0]}`, push ? 'Keep & push' : 'Keep it')) return;
+    } else {
+      if (!await unproved(proof, base)) return;
+      body = {...body, unverified_ok: true};
+    }
+    try { await post(`/api/code/sessions/${current}/keep`, body); }
+    catch (err) {
+      if (err.status !== 409 || !err.body || !err.body.proof) { say(err.message, 'error'); return; }
+      proof = err.body.proof; renderDetail();                         // something changed after it was read
+      if (!await unproved(proof, base)) return;
+      try { await post(`/api/code/sessions/${current}/keep`, {...body, unverified_ok: true}); } catch (err2) { say(err2.message, 'error'); return; }
+    }
+    say(push ? 'Kept. Pushing…' : apex ? 'Kept. Restart Apex to run it.' : 'Kept. It\'s in your project now.', 'good');
+    proofDue = true; await loadOverview(); await refreshDetail(); schedule(200);
+  }
+  $('a-keep').onclick = () => keepIt(false);
+  // Throw away asks why (or nothing): the reason goes into the project's decision log and the
+  // outcomes ledger, and "changed my mind" is left out of what the track record counts.
+  function discardBox() {
+    const dlg = $('discard-dialog'), chips = [...$('discard-reasons').querySelectorAll('[data-reason]')];
+    let reason = '';
+    for (const b of chips) {
+      b.setAttribute('aria-checked', 'false');
+      b.onclick = () => { reason = reason === b.dataset.reason ? '' : b.dataset.reason; for (const x of chips) x.setAttribute('aria-checked', String(x.dataset.reason === reason)); };
+    }
+    dlg.returnValue = '';                                // Esc must never count as the last "Throw away"
+    dlg.showModal();
+    return new Promise(res => dlg.addEventListener('close', () => res(dlg.returnValue === 'ok' ? reason : null), {once: true}));
+  }
   $('a-discard').onclick = async () => {
-    if (!await confirmBox('Throw it away?', 'The session\'s branch and its copy are deleted. Your project never changed, so nothing else is lost.', 'Throw away')) return;
-    if (await act('discard', 'Thrown away.')) { await loadOverview(); await refreshDetail(); }
+    const reason = await discardBox();
+    if (reason === null) return;
+    try { await post(`/api/code/sessions/${current}/discard`, {reason}); say(reason ? 'Thrown away. Apex noted why.' : 'Thrown away.', 'good'); schedule(200); }
+    catch (err) { say(err.message, 'error'); return; }
+    await loadOverview(); await refreshDetail();
   };
   $('a-undo').onclick = async () => {
     if (!await confirmBox('Undo the last step?', 'The files go back to how they were before Apex\'s last step. Apex is told, so it won\'t assume its work is still there.', 'Undo it')) return;
@@ -835,6 +1362,53 @@
       renderEngine(); schedule(200);
     } catch (err) { say(err.message, 'error'); }
   }
+  // ---------------------------------------------------------------- away mode: answer from your phone
+  // A notification's link (/code#allow=…): Safe mode stopped a command while you were
+  // away. Allow it once or say no, from any signed-in device, even one whose own token
+  // can't open the rest of Apex Code. Always allow stays on this page, at your PC.
+  let asking = '';
+  const hhmm = ts => new Date(ts * 1000).toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit'});
+  function allowResult(text, cls = '') { const r = $('allow-result'); r.textContent = text; r.className = 'allow-result ' + cls; r.hidden = !text; }
+  function renderAsk(r) {
+    const code = el('code', '', r.command);
+    $('allow-text').replaceChildren(`Your ${NAME[r.engine] || 'plan'} wants to run `, code, ` in "${r.title}" (${r.project}).`);
+    const open = !r.answered && r.expires > Date.now() / 1000;
+    const said = {once: 'Already answered: you allowed it once.', no: 'Already answered: you said no.',
+      pc: 'Already answered on the Code page at your PC.'};
+    $('allow-when').textContent = r.answered ? (said[r.choice] || 'Already answered.')
+      : open ? `Answer by ${hhmm(r.expires)}. Always allow is only on the Code page at your PC.`
+      : `This request expired at ${hhmm(r.expires)}. Answer it on the Code page at your PC.`;
+    $('allow-acts').hidden = !open; $('allow-done').hidden = open;
+  }
+  async function askAllow(token) {
+    asking = token; allowResult('');
+    $('allow-text').replaceChildren('Reading the request…'); $('allow-when').textContent = '';
+    $('allow-acts').hidden = true; $('allow-done').hidden = true;
+    if (!$('allow-dialog').open) $('allow-dialog').showModal();
+    try { renderAsk(await api(`/api/code/allow/${encodeURIComponent(token)}`)); }
+    catch (err) {
+      $('allow-text').replaceChildren(err.status === 404 ? "Apex doesn't know this request. Open Apex Code at your PC to see the session." : err.message);
+      $('allow-done').hidden = false;
+    }
+  }
+  async function answerAllow(choice) {
+    $('allow-acts').hidden = true;
+    try {
+      await post(`/api/code/allow/${encodeURIComponent(asking)}`, {choice});
+      allowResult(choice === 'once' ? 'Done: it carries on.' : 'Done: it will find another way, or stop and explain.', 'good');
+      $('allow-when').textContent = ''; $('allow-done').hidden = false;
+      if (current) schedule(200);
+    } catch (err) {
+      allowResult(err.message, 'bad');                       // say, still working at your PC: the link still works
+      try { renderAsk(await api(`/api/code/allow/${encodeURIComponent(asking)}`)); } catch (_) { $('allow-done').hidden = false; }
+    }
+  }
+  $('allow-once').onclick = () => answerAllow('once');
+  $('allow-no').onclick = () => answerAllow('no');
+  $('allow-close').onclick = () => $('allow-dialog').close();
+  $('allow-dialog').addEventListener('close', () => {
+    if (/^#allow=/.test(location.hash)) history.replaceState(null, '', location.pathname + (current ? `#s=${current}` : ''));
+  });
   async function runTerminal(command) {
     if (!command) return;
     try { await post(`/api/code/sessions/${current}/terminal`, {command}); termHistory.unshift(command); termAt = -1; schedule(200); }
@@ -874,6 +1448,7 @@
     ['/claude', 'Next messages on your Claude plan'],
     ['/chatgpt', 'Next messages on your ChatGPT plan'],
     ['/safe', 'Safe mode'], ['/full', 'Full mode'],
+    ['/rule', 'Make a rule for this project: every session follows it', 'text'],
     ['/files', 'Browse the project files'], ['/history', 'Checkpoints of this session'],
     ['/terminal', 'Open the terminal (or type !command)'],
     ['/new', 'Start a new session'], ['/look', 'Switch the Terminal / Studio look'], ['/sound', 'Chime on or off'],
@@ -894,6 +1469,13 @@
       case '/effort': if (['', 'low', 'medium', 'high', 'max'].includes(arg)) { effort = arg; renderEngine(); say(`Effort: ${arg || 'default'}`, 'good'); } else say('Effort is low, medium, high or max.', 'error'); break;
       case '/claude': case '/chatgpt': engine = cmd.slice(1); store.set('apex.code.engine', engine); renderEngine(); break;
       case '/safe': case '/full': mode = cmd.slice(1); store.set('apex.code.mode', mode); renderEngine(); break;
+      case '/rule':
+        if (!arg) { if (need()) tab('rules'); break; }
+        if (!rulesPid()) { say('Add a project first.', 'error'); break; }
+        if (arg.length > RULE_MAX) { say(`A rule is at most ${RULE_MAX} characters.`, 'error'); $('prompt').value = text; break; }
+        try { await addRule(rulesPid(), arg, 'project'); say(RULE_SAVED.project, 'good'); }
+        catch (err) { say(err.message, 'error'); $('prompt').value = text; }                    // your text is kept
+        break;
       case '/files': if (need()) tab('files'); break;
       case '/history': if (need()) tab('history'); break;
       case '/terminal': if (need()) { tab('terminal'); $('t-cmd').focus(); } break;
@@ -969,6 +1551,7 @@
     if (innerWidth <= 1100) { $('side').classList.add('open'); $('scrim').hidden = false; }
     if (name === 'files') renderFiles();
     if (name === 'history') renderHistory();
+    if (name === 'rules') renderRules();
   }
   for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => tab(b.dataset.tab);
   async function renderFiles() {
@@ -1058,8 +1641,10 @@
         ['❯ Terminal', () => { tab('terminal'); $('t-cmd').focus(); }], ['◆ History', () => tab('history')], ['🗂 Files', () => tab('files')],
         ['✕ Throw away', () => $('a-discard').click()]);
     }
+    if (current && detail) items.push(['📏 Rules for this project', () => tab('rules')]);
     items.push(['＋ New session', () => { home(); $('prompt').focus(); }], ['📋 Plan first', () => { planFirst = true; renderEngine(); $('prompt').focus(); }],
-      ['◐ Switch look', toggleLook], [`Use your ${NAME[OTHER[engine]]}`, () => { engine = OTHER[engine]; renderEngine(); }]);
+      ['◐ Switch look', toggleLook], [`Use your ${NAME[OTHER[engine]]}`, () => { engine = OTHER[engine]; renderEngine(); }],
+      ['🧠 What Apex knows about me', openBrain]);
     for (const s of (ov ? ov.sessions : []).slice(0, 30)) items.push([`Session: ${s.title}`, () => open(s.id)]);
     for (const f of (files || []).slice(0, 4000)) items.push([`File: ${f}`, () => openFile(f)]);
     return items;
@@ -1092,12 +1677,7 @@
   }
   function toggleLook() { store.set('apex.code.look', store.get('apex.code.look', 'term') === 'term' ? 'studio' : 'term'); applyLook(); }
   $('look-btn').onclick = toggleLook;
-  $('a-push').onclick = async () => {
-    const proj = ov.projects.find(p => p.id === detail.project_id);
-    if (!await confirmBox('Keep and push?', `This merges the session into ${proj && proj.branch ? proj.branch : 'your branch'} of ${detail.project}, then runs git push.`, 'Keep & push')) return;
-    try { await post(`/api/code/sessions/${current}/keep`, {push: true}); say('Kept. Pushing…', 'good'); await loadOverview(); await refreshDetail(); schedule(200); }
-    catch (err) { say(err.message, 'error'); }
-  };
+  $('a-push').onclick = () => keepIt(true);
 
   // ---------------------------------------------------------------- dialogs, voice out, drawers, keys
   function confirmBox(title, text, ok) {
@@ -1120,7 +1700,7 @@
     if ($('add-dialog').returnValue !== 'ok') return;
     try {
       const p = await post('/api/code/projects', {path: $('add-path').value, name: $('add-name').value});
-      project = p.id; store.set('apex.code.project', project); await loadOverview(); say(`Added ${p.name}.`, 'good');
+      project = p.id; store.set('apex.code.project', project); await loadOverview(); loadBrain(); say(`Added ${p.name}.`, 'good');
     } catch (err) { say(err.message, 'error'); }
   });
   $('token-save').onclick = () => { store.set('apex_token', $('token').value.trim()); boot(); };
@@ -1136,12 +1716,23 @@
     if (e.key === 'Escape' && busy() && !dialog) { e.preventDefault(); stop(); }
     else if (e.key === '/' && !typing && !dialog) { e.preventDefault(); $('prompt').focus(); }
   });
-  addEventListener('hashchange', () => { const m = location.hash.match(/^#s=(\d+)/); if (m && Number(m[1]) !== current) open(Number(m[1])); else if (!m && current) home(); });
+  addEventListener('hashchange', () => {
+    const ask = location.hash.match(/^#allow=([\w-]+)/);
+    if (ask) { askAllow(ask[1]); return; }                  // a notification tapped while this page was open
+    const m = location.hash.match(/^#s=(\d+)/); if (m && Number(m[1]) !== current) open(Number(m[1])); else if (!m && current) home();
+  });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(100); });
 
   async function boot() {
+    // A phone's link to answer a stopped command comes first: a device token can answer
+    // it, but can't read the rest (403), and that owner-only message isn't for this.
+    const ask = location.hash.match(/^#allow=([\w-]+)/);
+    if (ask) await askAllow(ask[1]);
     try { await loadOverview(); }
-    catch (err) { say(/owner only/i.test(err.message) ? 'Apex Code is for the owner: open Apex with your master token.' : err.message, 'error'); return; }
+    catch (err) {
+      if (ask && err.status === 403) return;
+      say(/owner only/i.test(err.message) ? 'Apex Code is for the owner: open Apex with your master token.' : err.message, 'error'); return;
+    }
     const m = location.hash.match(/^#s=(\d+)/);
     if (m) await open(Number(m[1])); else home();
     schedule(1000);

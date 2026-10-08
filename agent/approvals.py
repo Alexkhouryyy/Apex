@@ -156,8 +156,9 @@ def _apply(kind: str, payload: dict) -> str:
     if kind == "remember":
         # Suggested by an outside AI tool through Apex's MCP server
         # (agent/mcp_server.py). Applied only here, when the user approves.
+        # The server sets the tags (an Apex Code session's add "code"), never the tool.
         return longterm.remember(payload["content"], kind=payload.get("kind", "note"),
-                                 tags="from-mcp")
+                                 tags=payload.get("tags") or "from-mcp")
     if kind == "goal_proposal":
         # THE gate for agent-originated goals. agent/initiative.py only ever
         # stages; this line is the sole path from a proposal to a real goal, and
