@@ -13,6 +13,8 @@ into, not a chat log that forgets you between sessions.
 
 **Something not working?** `python -m tools.doctor` — it checks what is actually running on your machine and every failure says what to run next.
 
+**Use all of it:** one prompt that walks you through every part of Apex, station by station: **[docs/USE_ALL_OF_APEX.md](docs/USE_ALL_OF_APEX.md)**.
+
 Full write-up, feature map and honest state: **[docs/APEX_OVERVIEW.md](docs/APEX_OVERVIEW.md)**.
 Where it stands against its own roadmap, judged by success checks rather than
 by whether code exists: **[docs/APEX_BLUEPRINT_STATUS.md](docs/APEX_BLUEPRINT_STATUS.md)**.
