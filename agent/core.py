@@ -2220,15 +2220,28 @@ _tool_observer = None
 # only then can it reach a coding agent's brief. The value names who suggested it.
 # {'who', 'project_id', 'session_id'}; the Code page lists it under that project.
 _STAGE_REMEMBER: contextvars.ContextVar[dict | None] = contextvars.ContextVar("apex_stage_remember", default=None)
+_TURN_OWNER: contextvars.ContextVar[bool] = contextvars.ContextVar("apex_turn_owner", default=False)
 
 
 @contextlib.contextmanager
 def _staging_memories(stage: dict | None):
-    token = _STAGE_REMEMBER.set(stage or None)
+    # The SDK dispatches each tool in a separate asyncio.to_thread call. All
+    # workers inherit this same mutable turn state, rather than replacing a
+    # ContextVar in one worker and losing it on the next call.
+    token = _STAGE_REMEMBER.set(dict(stage or {}))
     try:
         yield
     finally:
         _STAGE_REMEMBER.reset(token)
+
+
+@contextlib.contextmanager
+def _owner_turn(by_owner: bool):
+    token = _TURN_OWNER.set(by_owner is True)
+    try:
+        yield
+    finally:
+        _TURN_OWNER.reset(token)
 
 
 def _code_stage(name: str, inputs: dict) -> dict:
@@ -2360,6 +2373,13 @@ def _execute_tool(name: str, inputs: dict) -> str:
     from agent import apocalypse
     if apocalypse.enabled() and name not in apocalypse.LOCAL_TOOLS:
         return '[PAUSED in Apocalypse] This tool needs the normal Apex session.'
+    from agent import companion
+    stage = _STAGE_REMEMBER.get()
+    if name in companion.CODE_TOOLS and stage is not None and not stage:
+        # Mark before dispatch: concurrent SDK calls cannot save memory while
+        # the Code read is in flight. Both API and subscription use this path.
+        stage.update({'who': f'Apex, after {name}', 'project_id': None, 'session_id': None})
+        stage.update(_code_stage(name, inputs))
     import time as _t
     _started = _t.perf_counter()
     _observe({"phase": "start", "name": name, "subject": tool_subject(inputs)})
@@ -3064,7 +3084,7 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
 
         elif name == "work":
             from agent import work as _work
-            return _work.tool(inputs)
+            return _work.tool(inputs, by_owner=_TURN_OWNER.get())
         elif name == "set_goal":
             return goals.set_goal(
                 inputs["title"],
@@ -3823,7 +3843,7 @@ class AgentCore:
                  if cost else "."))
         return text
 
-    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None, persona: str | None = None, screen_origin: str = "browser", withhold: frozenset | None = None, stage_memories: dict | None = None) -> str:
+    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None, persona: str | None = None, screen_origin: str = "browser", withhold: frozenset | None = None, stage_memories: dict | None = None, by_owner: bool = False) -> str:
         """Run a full agent turn. Returns the final text response.
 
         `withhold`: tool names this turn may neither see nor run, whatever its
@@ -3835,6 +3855,10 @@ class AgentCore:
         carries an Apex Code session; its `remember` then waits for the owner's
         OK instead of saving. A turn that runs code_status or code_act stages
         from then on too.
+
+        `by_owner` comes only from authenticated dashboard paths or local
+        voice/TUI, never from model inputs. It protects Work's coding prompts
+        even when the ordinary work tool is available to paired devices.
 
         If `streamer` is provided (a StreamingSpeaker), text deltas are fed to it
         as they arrive so the user hears the first sentence before generation finishes.
@@ -3852,7 +3876,7 @@ class AgentCore:
         screen_b64 = companion.validate_screen_image(screen_image)
         memory, lock = self._get_channel(channel_id)
         from agent import continuity
-        with lock, continuity.turn(channel_id), _staging_memories(stage_memories), \
+        with lock, continuity.turn(channel_id), _staging_memories(stage_memories), _owner_turn(by_owner), \
                 continuity.conversation(channel_id, self, memory, user_text) as memory:
             if cancel_event is not None and cancel_event.is_set():
                 return "[turn interrupted]"
@@ -4094,8 +4118,6 @@ class AgentCore:
                         if callable(getattr(streamer, "tool", None)):
                             streamer.tool({"phase": "start", "name": block.name})
                         result_str = _execute_tool(block.name, block.input)
-                        if block.name in companion.CODE_TOOLS and not _STAGE_REMEMBER.get():
-                            _STAGE_REMEMBER.set(_code_stage(block.name, block.input))   # undone when the turn ends
                         if callable(getattr(streamer, "tool", None)):
                             streamer.tool({"phase": "result", "name": block.name,
                                            "result": result_str[:2000]})

@@ -49,7 +49,7 @@
   let model = '', effort = '', planFirst = false, files = null, filesFor = null, live = null, liveSeen = -1, initial = true;
   const MODELS = {claude: [['', 'Model: default'], ['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']],
     chatgpt: [['', 'Model: default'], ['__other', 'Type a model…']]};
-  const busy = () => !!(detail && (detail.working || detail.side));
+  const busy = () => !!(detail && (detail.working || detail.side || detail.terminal || detail.operation));
 
   // ---------------------------------------------------------------- small pieces
   function ago(ts) {
@@ -1017,7 +1017,8 @@
     const evs = [...$('feed').querySelectorAll('.step')];
     const lastStep = evs.length ? (evs[evs.length - 1].dataset.label || '') : '';
     const words = w.querySelector('.words'); words.replaceChildren();
-    const who = detail.side === 'review' ? 'The second opinion is reading' : detail.side === 'checks' ? 'Running the checks' : `Apex is working · ${NAME[detail.engine]}`;
+    const who = detail.side === 'review' ? 'The second opinion is reading' : detail.side === 'checks' ? 'Running the checks'
+      : detail.terminal ? 'Your command is running' : detail.operation ? 'Completing the session operation' : `Apex is working · ${NAME[detail.engine]}`;
     words.append(el('b', '', who), el('span', 'clock'));
     if (lastStep) words.append(el('div', 'last', lastStep));
     tickClock();
@@ -1141,7 +1142,7 @@
     $('a-push').disabled = $('a-keep').disabled;
     $('s-tokens').textContent = s.tokens ? `${tokens(s.tokens)} tokens` : '';
     $('t-where').textContent = s.worktree || '';
-    $('t-cmd').disabled = !ready;
+    $('t-cmd').disabled = !idle;
     $('a-keep').textContent = s.status === 'kept' ? '✓ Kept' : `✓ Keep it${proj && proj.branch ? ` → ${proj.branch}` : ''}`;
     $('a-undo').disabled = !idle; $('a-catchup').disabled = !idle; $('a-discard').disabled = !ready;
     $('r-go').disabled = !idle || !changed.length; $('k-go').disabled = !idle || !ready;

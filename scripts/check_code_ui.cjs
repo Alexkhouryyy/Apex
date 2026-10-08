@@ -750,6 +750,19 @@ async function phone() {
   $('diff-next').click(); await tick(); assert.equal($('diff-path').textContent, 'new.css');
   $('diff').close();
   // !command runs in the terminal; its output lands in the feed and the Terminal tab.
+  for (const active of [{terminal: true}, {operation: 'keep'}]) {
+    session = {...session, terminal: false, operation: '', ...active};
+    $('back').click(); await tick();
+    w.location.hash = '#s=7'; await tick(300); await tick(300);
+    assert.equal($('send').textContent, '■ Stop');
+    for (const id of ['a-keep', 'a-push', 'a-undo', 'a-catchup', 'r-go', 'k-go', 't-cmd']) {
+      assert.equal($(id).disabled, true, `${id} waits for the terminal or session operation`);
+    }
+  }
+  session = {...session, terminal: false, operation: ''};
+  $('back').click(); await tick();
+  w.location.hash = '#s=7'; await tick(300); await tick(300);
+  assert.equal($('a-keep').disabled, false, 'controls recover when the operation finishes');
   type('!ls -la'); key('Enter', {ctrlKey: true}); await tick();
   assert.deepEqual(last(/\/terminal$/).body, {command: 'ls -la'});
   feed.push(E(20, 'term', {command: 'ls -la', ref: 't1'}), E(21, 'term_done', {ref: 't1', exit_code: 0, output: 'total 0', seconds: 1}),

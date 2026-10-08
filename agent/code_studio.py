@@ -43,6 +43,7 @@ Coding never uses API credits: only the two plans, signed in on this PC.
 from __future__ import annotations
 
 import hashlib
+import functools
 import itertools
 import json
 import os
@@ -88,8 +89,33 @@ _lock = threading.Lock()
 _turns: dict[int, str] = {}           # session id -> run id of its running turn
 _side: dict[int, str] = {}            # session id -> run id of a running review or checks
 _terms: dict[int, str] = {}           # session id -> run id of your terminal command
+_operations: dict[int, str] = {}      # preparing an async run, or a full synchronous mutation
 _live: dict[int, dict] = {}           # session id -> what's being written right now (not stored)
 _live_seq = itertools.count(1)        # live versions only ever go up, across steps, so the page can't go back
+
+
+def _busy_locked(sid: int) -> bool:
+    return sid in _turns or sid in _side or sid in _terms or sid in _operations
+
+
+def _exclusive(call):
+    """Reserve before reading files/proof, until a mutation or async start ends.
+
+    Async workers retain their existing run reservation after this one is
+    released. The lock protects claims only, so other sessions keep working.
+    """
+    @functools.wraps(call)
+    def reserved(sid, *args, **kwargs):
+        with _lock:
+            if _busy_locked(sid):
+                raise CodeError('This session is busy. Wait for its operation to finish, or press Stop.')
+            _operations[sid] = call.__name__
+        try:
+            return call(sid, *args, **kwargs)
+        finally:
+            with _lock:
+                _operations.pop(sid, None)
+    return reserved
 
 
 def _live_for(sid: int) -> dict:
@@ -385,6 +411,7 @@ def session(sid: int) -> dict:
         s['working'] = sid in _turns
         s['side'] = 'review' if s['review_state'] == 'working' else ('checks' if s['check_state'] == 'running' else '')
         s['terminal'] = sid in _terms
+        s['operation'] = _operations.get(sid, '')
     s['engine_name'] = we.NAMES.get(s['engine'], s['engine'])
     s['task'] = _task_of(s.get('task_id'))
     s['since'] = None                                     # when the work now running began, for the page's clock
@@ -527,7 +554,7 @@ def _brain(s: dict, prompt: str) -> dict | None:
     return block if block['text'] else None
 
 
-def _memory_server(s: dict) -> str:
+def _memory_server(s: dict, *, read_only=False) -> str:
     """Apex's memory server for this session (agent/code_brain.mcp_file), written
     afresh each time: '' when it is turned off (CODE_APEX_MCP=false) or the file
     can't be written. A session never fails for want of it."""
@@ -535,7 +562,7 @@ def _memory_server(s: dict) -> str:
     if not getattr(config, 'CODE_APEX_MCP', True):
         return ''
     try:
-        return str(code_brain.mcp_file(s['id'], s['project_id']))
+        return str(code_brain.mcp_file(s['id'], s['project_id'], read_only=read_only))
     except OSError as exc:
         print(f"[Code] could not set up Apex's memory server for session {s['id']}: {exc}")
         return ''
@@ -584,6 +611,7 @@ def mentions(sid: int, prompt: str) -> list[str]:
     return [f.replace('\\', '/') for f in dict.fromkeys(found) if f.replace('\\', '/') in files]
 
 
+@_exclusive
 def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = None, _notes=(),
          model: str | None = None, effort: str | None = None, plan: bool = False, allow=None, always=None) -> dict:
     """One message: Apex works on it in the background; the feed shows each step.
@@ -1047,6 +1075,7 @@ def _idle(s: dict) -> None:
             raise CodeError('Your command is still running. Wait, or press Stop.')
 
 
+@_exclusive
 def undo(sid: int) -> dict:
     """Put the session's files back to before its last step."""
     s = session(sid)
@@ -1065,6 +1094,7 @@ def undo(sid: int) -> dict:
     return session(sid)
 
 
+@_exclusive
 def catch_up(sid: int) -> dict:
     """Bring the project's latest work into this session (a merge on its branch)."""
     s = session(sid)
@@ -1095,6 +1125,7 @@ def catch_up(sid: int) -> dict:
     return {**session(sid), 'caught_up': 'merged'}
 
 
+@_exclusive
 def keep(sid: int, push: bool = False, require_proof: bool = False) -> dict:
     """Merge the session into the project, then tidy away its working copy. With
     require_proof, only when Apex's own checks passed on what is there now
@@ -1187,9 +1218,16 @@ def discard(sid: int, reason: str = '') -> dict:
     if stop(sid):
         for _ in range(50):
             with _lock:
-                if sid not in _turns and sid not in _side:
+                if not _busy_locked(sid):
                     break
             time.sleep(0.1)
+    return _discard_idle(sid, reason)
+
+
+@_exclusive
+def _discard_idle(sid: int, reason: str) -> dict:
+    s = session(sid)
+    _idle(s)
     try:                                                  # read before the copy goes: the proof looks at it
         verdict = proof(sid)['verdict']
     except Exception as exc:
@@ -1210,8 +1248,8 @@ def discard(sid: int, reason: str = '') -> dict:
 
 REVIEW = """You are giving a second opinion on a code change another AI made in this git repository, for {owner}.
 Be brutally honest: {owner} wants the truth, not flattery. Look for bugs, things that don't do what was asked,
-missing or weak tests, security problems and needless complexity. Read any file you need, and run the project's
-tests or checks if that helps you judge it. Do not change any file.
+missing or weak tests, security problems and needless complexity. Read any file you need.
+Apex runs tests separately: this review has no shell or editing tools. Do not change any file.
 
 What {owner} asked for:
 {asks}
@@ -1254,6 +1292,7 @@ def _review_rules(s: dict, owner: str) -> str:
     return out
 
 
+@_exclusive
 def review(sid: int, engine: str | None = None) -> dict:
     """The other plan reviews the session's change, read-only, and rates it."""
     import config
@@ -1291,7 +1330,7 @@ def review(sid: int, engine: str | None = None) -> dict:
                     event(sid, 'review_step', title=e.get('title') or f"Read {e.get('path')}")
             result = code_engines.turn(engine, prompt, Path(folder), 'review', None, on_event, run_id,
                                        timeout=1200, env_extra=_venv(s['project_path']),
-                                       options={'always': _project_allow(s), 'mcp_file': _memory_server(s)})
+                                       options={'mcp_file': _memory_server(s, read_only=True)})
         except Exception as exc:
             result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
         finally:
@@ -1323,6 +1362,7 @@ def _argv(command: str, env: dict) -> list[str]:
     return [found or argv[0]] + argv[1:]
 
 
+@_exclusive
 def run_checks(sid: int) -> dict:
     """The project's test command, in the session's copy. The answer has three
     states, never two (agent/observed.py's rule): passed, failed, or unknown when
@@ -1974,6 +2014,7 @@ def read_file(path: str, sid: int | None = None, pid: int | None = None) -> dict
 TERMINAL_TIMEOUT = 900
 
 
+@_exclusive
 def terminal(sid: int, command: str) -> dict:
     """Run your own command in the session's copy, like a terminal there. Output
     streams into the feed. One at a time per session."""
@@ -2090,7 +2131,7 @@ def autopilot(sid: int) -> str:
             run_checks(sid)
         except CodeError as exc:
             with _lock:
-                if sid in _turns or sid in _side:         # something else started a moment ago
+                if _busy_locked(sid):                    # something else started a moment ago
                     return ''
             why = f"The night shift couldn't start the checks: {exc}"
             event(sid, 'checks', passed=False, state='unknown', why=why, sha='', seconds=0, output='', command=command)
@@ -2110,7 +2151,7 @@ def autopilot(sid: int) -> str:
             return 'review'
         except CodeError as exc:
             with _lock:
-                if sid in _turns or sid in _side:
+                if _busy_locked(sid):
                     return ''
             why = str(exc)
     note = ('No independent review: the other plan is resting.' if 'resting' in why or 'limit' in why

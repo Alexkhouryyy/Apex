@@ -47,11 +47,11 @@ FILE_TOOLS = ['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Glob', 'Gre
 CLAUDE_TOOLS = {
     'safe': FILE_TOOLS + [f'Bash({c}:*)' for c in SAFE_COMMANDS],
     'full': FILE_TOOLS + ['Bash', 'PowerShell'],
-    # The second opinion reads and may run the checks (tests, git diff, syntax checks), never edit:
-    # three real reviews of Apex Code's own change all said "I couldn't run the tests".
-    'review': ['Read', 'Glob', 'Grep'] + [f'Bash({c}:*)' for c in SAFE_COMMANDS],
+    # Checks can write files or run arbitrary project scripts. Apex runs them
+    # separately; a Claude reviewer only gets readers.
+    'review': ['Read', 'Glob', 'Grep'],
 }
-REVIEW_DENIED = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'PowerShell']
+REVIEW_DENIED = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell', 'Agent', 'Task']
 QUIET_TOOLS = ('ExitPlanMode',)          # Plan first stops it on purpose: not an error to show
 CODEX_SANDBOX = {'safe': 'workspace-write', 'full': 'danger-full-access', 'review': 'read-only'}
 SESSION_ID = re.compile(r'^[A-Za-z0-9_-]{6,80}$')   # what may be put on a command line
@@ -119,11 +119,11 @@ def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None =
         tools = list(CLAUDE_TOOLS[mode])
         if mode != 'review':                 # Allow once: exactly that command. Always: it, with any arguments.
             tools += [f'Bash({c})' for c in o['allow']]
-        tools += [f'Bash({c}:*)' for c in o['always']]      # what you always allow, the reviewer may run too
+            tools += [f'Bash({c}:*)' for c in o['always']]
         if o['mcp_file']:                    # Apex's memory: reading always; suggesting a memory, not in a review
             tools += APEX_MCP_READ + (APEX_MCP_WRITE if mode != 'review' else [])
         cmd = [exe, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-               '--permission-mode', 'plan' if o['plan'] else 'acceptEdits', '--allowedTools', *tools, '--strict-mcp-config']
+               '--permission-mode', 'plan' if o['plan'] or mode == 'review' else 'acceptEdits', '--allowedTools', *tools, '--strict-mcp-config']
         if o['mcp_file']:
             cmd += ['--mcp-config', o['mcp_file']]          # the only MCP server it loads
         if o['system_file']:
@@ -131,7 +131,7 @@ def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None =
             # on the command line would go through cmd.exe on Windows (claude.cmd).
             cmd += ['--append-system-prompt-file', o['system_file']]
         if mode == 'review':
-            cmd += ['--disallowedTools', *REVIEW_DENIED]
+            cmd += ['--tools', 'Read,Glob,Grep', '--disallowedTools', *REVIEW_DENIED]
         if o.get('model'):
             cmd += ['--model', o['model']]
         if o.get('effort'):

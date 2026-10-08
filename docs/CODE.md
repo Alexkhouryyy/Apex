@@ -192,6 +192,11 @@ protection as Work tasks).
 The other plan reads the change, read-only, and answers in a fixed shape:
 `Rating: N/10`, a one-line verdict, problems (most serious first, with
 file:line), and what's good. It's told to be brutally honest.
+Claude reviews get only Read, Glob and Grep, plus Apex's reading MCP tools;
+project command permissions are never inherited. Run **Checks** separately
+for test evidence, since test scripts can write files. Codex reviews use its
+read-only sandbox. Keep, Undo, Catch up, reviews, checks, messages and terminal
+commands reserve the session so Apex cannot run them on top of each other.
 **Fix what it found** sends its findings back to the session's plan, which
 fixes the real problems and says why it skips any it disagrees with.
 

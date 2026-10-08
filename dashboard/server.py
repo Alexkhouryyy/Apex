@@ -1520,7 +1520,8 @@ async def chat_endpoint(request: Request):
     # Apex Code is the owner's (dashboard/code.py): a device token's turn can't read
     # it, nor continue a thread (and its memory) that did.
     from agent import companion as _companion
-    code_tools = frozenset() if _owner(request) else _companion.CODE_TOOLS
+    owner = _owner(request)
+    code_tools = frozenset() if owner else _companion.CODE_TOOLS
     if code_tools and conversations.owner_only(thread_id):
         return JSONResponse({"error": "This conversation is the owner's (master dashboard token)."}, status_code=403)
 
@@ -1561,7 +1562,7 @@ async def chat_endpoint(request: Request):
             response = await loop.run_in_executor(
                 None,
                 lambda: _agent_ref.run(agent_text, include_screenshot=False, streamer=streamer, channel_id=channel_id,
-                                       withhold=code_tools),
+                                       withhold=code_tools, by_owner=owner),
             )
         except Exception as e:
             ws_manager.broadcast_threadsafe({"type": "chat_error", "error": str(e), "chat_id": chat_id})
