@@ -7,6 +7,12 @@
 // While it works, the plan can ask Apex's memory (a 🧠 step); a memory it suggests
 // waits in the side panel for your OK. Away mode: a command Safe mode stopped is
 // answered from your phone (/code#allow=…), and a finished session's ping opens it.
+// Celine on the build: ask her out loud (🎙, Ctrl+Shift+Space) or typed (/celine) about
+// the session; she answers in her card and in your Voicebox voice, and may draft a message
+// that only you send. Milestones (or play-by-play) are said out loud as they happen.
+// Night shift: a +apex software task from your Work list, built overnight on a plan
+// (🌙). The morning brief's link (/code#overnight) opens "While you slept": each one
+// with what Apex saw, its rating, and Keep / Throw away / Open. Nothing is kept for you.
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -169,11 +175,16 @@
   function sessionCard(s) {
     const c = el('button', 'card'); c.type = 'button';
     const body = el('div', 'grow');
-    body.append(el('div', 't', s.title), el('div', 'm', `${stateText(s)} · ${NAME[s.engine] || s.engine} · ${s.files_changed} file${s.files_changed === 1 ? '' : 's'} · ${ago(s.updated)}`));
+    const t = el('div', 't', s.title);
+    if (s.origin === 'night') t.append(nightBadge());
+    body.append(t, el('div', 'm', `${stateText(s)} · ${NAME[s.engine] || s.engine} · ${s.files_changed} file${s.files_changed === 1 ? '' : 's'} · ${ago(s.updated)}`));
     c.append(el('i', 'state ' + sessionState(s)), body);
     if (s.review_rating != null) c.append(ring10(s.review_rating, 38));
     c.onclick = () => open(s.id);
     return c;
+  }
+  function nightBadge() {
+    const b = el('span', 'badge night', '🌙 night'); b.title = 'Built by the night shift from your Work list'; return b;
   }
   function renderRail() {
     const sel = $('project'); sel.replaceChildren();
@@ -186,7 +197,7 @@
       const row = el('div', `srow ${s.status}`); row.setAttribute('role', 'button'); row.tabIndex = 0;
       row.setAttribute('aria-current', String(s.id === current));
       const body = el('div', 'grow');
-      body.append(el('span', 't', s.title), el('span', 'm', `${NAME[s.engine] || s.engine} · ${ago(s.updated)}${s.review_rating != null ? ` · ${s.review_rating}/10` : ''}`));
+      body.append(el('span', 't', (s.origin === 'night' ? '🌙 ' : '') + s.title), el('span', 'm', `${NAME[s.engine] || s.engine} · ${ago(s.updated)}${s.review_rating != null ? ` · ${s.review_rating}/10` : ''}`));
       row.append(el('i', 'state ' + sessionState(s)), body);
       row.onclick = () => { open(s.id); closeDrawers(); };
       row.onkeydown = e => { if (e.key === 'Enter') row.click(); };
@@ -295,33 +306,44 @@
   }
 
   // Talk instead of typing: recorded here, transcribed by Apex on this PC (no API credits).
+  // One recording at a time, for the mic or for Celine; pressing its button again ends it.
   let rec = null;
+  async function recordOnce(btn, hint) {                  // the recording, or null (nothing said, or no microphone)
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { say('This browser can\'t record here. Type instead.', 'error'); return null; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); } catch (_) { say('The microphone is blocked for this page. Allow it, then try again.', 'error'); return null; }
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+    const chunks = [], mine = new MediaRecorder(stream, type ? {mimeType: type} : undefined);
+    rec = mine;
+    return new Promise(resolve => {
+      mine.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
+      mine.onstop = () => {
+        stream.getTracks().forEach(t => t.stop()); btn.classList.remove('rec');
+        if (rec === mine) rec = null;
+        const blob = new Blob(chunks, {type: mine.mimeType || type || 'audio/webm'});
+        resolve(blob.size < 1500 ? null : blob);
+      };
+      mine.start(); btn.classList.add('rec'); say(hint);
+      setTimeout(() => { if (mine.state === 'recording') mine.stop(); }, 90000);
+    });
+  }
+  async function transcribe(blob) {
+    const r = await fetch('/api/companion/transcribe?engine=local', {method: 'POST', body: blob, headers: {'Content-Type': blob.type, ...auth()}});
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || `failed (${r.status})`);
+    return (body.text || '').trim();
+  }
   $('mic').onclick = async () => {
     if (rec) { rec.stop(); return; }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { say('This browser can\'t record here. Type instead.', 'error'); return; }
-    let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); } catch (_) { say('The microphone is blocked for this page. Allow it, then try again.', 'error'); return; }
-    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t)) || '';
-    const chunks = [];
-    rec = new MediaRecorder(stream, type ? {mimeType: type} : undefined);
-    rec.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
-    rec.onstop = async () => {
-      stream.getTracks().forEach(t => t.stop()); $('mic').classList.remove('rec');
-      const blob = new Blob(chunks, {type: rec.mimeType || type || 'audio/webm'}); rec = null;
-      if (blob.size < 1500) return;
-      say('Listening back…');
-      try {
-        const r = await fetch('/api/companion/transcribe?engine=local', {method: 'POST', body: blob, headers: {'Content-Type': blob.type, ...auth()}});
-        const body = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(body.detail || `failed (${r.status})`);
-        const p = $('prompt'), text = (body.text || '').trim();
-        if (!text) { say('I didn\'t catch that. Try again, a little closer.'); return; }
-        p.value = (p.value.trim() ? p.value.trimEnd() + ' ' : '') + text; autosize(); p.focus();
-        say('Got it. Check it, then send.', 'good');
-      } catch (err) { say('Could not transcribe: ' + err.message, 'error'); }
-    };
-    rec.start(); $('mic').classList.add('rec'); say('Listening… tap the mic again when you\'re done.');
-    setTimeout(() => { if (rec && rec.state === 'recording') rec.stop(); }, 90000);
+    const blob = await recordOnce($('mic'), 'Listening… tap the mic again when you\'re done.');
+    if (!blob) return;
+    say('Listening back…');
+    try {
+      const p = $('prompt'), text = await transcribe(blob);
+      if (!text) { say('I didn\'t catch that. Try again, a little closer.'); return; }
+      p.value = (p.value.trim() ? p.value.trimEnd() + ' ' : '') + text; autosize(); p.focus();
+      say('Got it. Check it, then send.', 'good');
+    } catch (err) { say('Could not transcribe: ' + err.message, 'error'); }
   };
 
   // ---------------------------------------------------------------- views
@@ -331,7 +353,7 @@
     (view === 'home' ? $('home-slot') : $('session-slot')).append($('brief-form'));
   }
   async function open(id) {
-    current = id; detail = null; lastId = 0; feed = {turn: null, root: $('feed')}; proof = null; proofDue = true;
+    current = id; detail = null; lastId = 0; feed = {turn: null, root: $('feed'), yous: 0}; proof = null; proofDue = true; $('celine-card').hidden = true;
     $('feed').replaceChildren(); show('session');
     if (location.hash !== `#s=${id}`) history.replaceState(null, '', `#s=${id}`);
     try {
@@ -351,10 +373,11 @@
     schedule(400);
   }
   function home() {
-    current = null; detail = null; files = null; proof = null; show('home'); disconnect();
+    current = null; detail = null; files = null; proof = null; show('home'); disconnect(); $('celine-card').hidden = true;
     history.replaceState(null, '', location.pathname);
     engine = store.get('apex.code.engine') || (ov && ov.default_engine) || 'claude'; mode = store.get('apex.code.mode', 'safe');
     if (ov) { renderHome(); renderRail(); } renderEngine(); loadBrain();
+    if (night && night.length) loadOvernight(false);       // the morning's strip stays, kept up to date
   }
   $('back').onclick = home;
   $('new-session').onclick = () => { home(); closeDrawers(); $('prompt').focus(); };
@@ -369,6 +392,10 @@
       if (you.mode === 'full') who.append(el('span', 'badge full', 'FULL'));
       who.append(el('span', '', ago(you.ts)));
       bubble.append(who, el('div', 'text', you.text));
+      if (!feed.yous++ && detail && detail.origin === 'night' && detail.task) {     // the night shift's first message
+        const from = el('p', 'from-work'), a = el('a', '', detail.task.title || `task ${detail.task.id}`);
+        a.href = '/work'; from.append('🌙 From your Work list: ', a); bubble.append(from);
+      }
       root.append(row);
       if (you.correction && !ruled(you)) root.append(fixRow(you));
       if (you.brief && (you.brief.sources || []).length) root.append(briefCard(you));
@@ -844,6 +871,7 @@
         if (e.learned) c.append(learnedLine(e.learned));
         t.tl.append(c); break;
       }
+      case 'draft': renderDraft(e, t); break;
       case 'discarded': {
         const why = REASONS[e.reason], s = step('mark', `Thrown away${why ? ` (${why.toLowerCase()})` : ''}: the session's branch and copy are gone. Your project never changed.`);
         if (e.learned) s.append(learnedLine(e.learned));
@@ -851,6 +879,28 @@
       }
       default: break;
     }
+  }
+  // A message Celine drafted for the plan: only ever sent by you (Send), or put in the box to change (Edit).
+  const drafts = () => { try { return JSON.parse(store.get('apex.code.drafts', '{}')) || {}; } catch (_) { return {}; } };
+  function markDraft(id, how) { const d = drafts(), keys = Object.keys(d); if (keys.length > 300) delete d[keys[0]]; d[id] = how; store.set('apex.code.drafts', JSON.stringify(d)); }
+  function renderDraft(e, t) {
+    const how = drafts()[e.id];
+    if (how === 'dismissed') return;
+    const c = el('div', 'card2 draft'), h = el('div', 'h');
+    h.append(`🎙 ${e.by || 'Celine'} drafted a message`, el('span', 'st', how === 'sent' ? 'sent' : 'not sent'));
+    c.append(h, el('div', 'dtext', e.text));
+    if (how !== 'sent') {
+      const acts = el('div', 'acts');
+      acts.append(button('Send', async () => {
+        if (busy()) { say('Apex is still working in this session. Wait, or press Stop.', 'error'); return; }
+        if (await sendText(e.text)) { markDraft(e.id, 'sent'); acts.remove(); h.querySelector('.st').textContent = 'sent'; }
+      }, 'primary'),
+      button('Edit', () => { $('prompt').value = e.text; autosize(); $('prompt').focus(); say('In the box: change it, then send.'); }),
+      button('✕', () => { markDraft(e.id, 'dismissed'); c.remove(); }, 'ghost'));
+      acts.lastChild.title = 'Dismiss: nothing is sent'; acts.lastChild.setAttribute('aria-label', 'Dismiss the draft');
+      c.append(acts);
+    }
+    t.tl.append(c);
   }
   const CHECK_LOOK = {passed: ['✓ passed', 'ok'], failed: ['✗ failed', 'bad'], unknown: ['? unknown', 'warn']};
   // What a finished session wrote into Apex (agent/code_brain.write_back): each place, or why not.
@@ -982,6 +1032,7 @@
       if (e.id <= lastId) continue;
       lastId = e.id;
       render(e);
+      if (!initial) narrateStep(e);                      // said out loud as it happens, never the history
       if (REFRESH.has(e.kind)) refresh = true;
       if (PROOF_AFTER.has(e.kind)) proofDue = true;
       if (e.kind === 'done' || (e.kind === 'tool' && e.tool === 'memory')) waitingDue = true;
@@ -1007,6 +1058,7 @@
     const meta = $('s-meta'); meta.replaceChildren();
     meta.append(el('span', '', s.project), el('code', '', s.branch || ''), el('span', 'badge ' + s.engine, NAME[s.engine]));
     if (s.mode === 'full') meta.append(el('span', 'badge full', 'FULL'));
+    if (s.origin === 'night') meta.append(nightBadge());
     if (s.status !== 'ready') meta.append(el('span', 'badge ' + (s.status === 'kept' ? 'kept' : ''), s.status === 'kept' ? 'KEPT' : 'THROWN AWAY'));
     const changed = s.changes.files;
     $('c-count').textContent = changed.length ? `${changed.length} · +${s.changes.plus} −${s.changes.minus}` : '';
@@ -1040,6 +1092,7 @@
       }
       r.append(d);
     } else if (s.review_state === 'failed') r.append(el('p', 'verdict', 'The last review did not finish. ' + (s.review_text || '').slice(0, 200)));
+    else if (s.review_state === 'skipped') r.append(el('p', 'verdict', (s.review_text || 'No independent review overnight.') + ' Ask for one now if you want it.'));
     else r.append(el('p', 'verdict', `Your ${NAME[other]} reads the change, rates it out of 10, and tells you what's wrong.`));
     $('r-go').textContent = s.review_state === 'done' ? `Ask again (${NAME[other]})` : `Get a second opinion (${NAME[other]})`;
     // Checks
@@ -1156,34 +1209,42 @@
   async function review() { try { detail = await post(`/api/code/sessions/${current}/review`, {}); renderDetail(); renderEngine(); schedule(200); } catch (err) { say(err.message, 'error'); } }
   const runChecks = () => act('checks');
   async function sendText(text) {
-    try { detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, engine, mode, model, effort, plan: false}); renderEngine(); schedule(200); }
-    catch (err) { say(err.message, 'error'); }
+    try { detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, engine, mode, model, effort, plan: false}); renderEngine(); schedule(200); return true; }
+    catch (err) { say(err.message, 'error'); return false; }
   }
   // Keep reads the proof first. Proved: the usual question, with what proves it. Otherwise
   // it says so plainly, and keeps it only on "Keep anyway" (the server asks the same).
   const unproved = (p, base) => confirmBox('Keep it unproved?',
     `${(VERDICT[p.verdict] || VERDICT.unverified)[0]}. ${p.reasons.join(' ')}\n\n${base}`, 'Keep anyway');
-  async function keepIt(push) {
-    const proj = ov.projects.find(p => p.id === detail.project_id), n = detail.changes.files.length;
+  // `info`: the session's project_id, project name and how many files it changes. Also
+  // used by the morning's "While you slept" strip, for a session that isn't open.
+  async function keepFlow(sid, push, info) {
+    const proj = ov.projects.find(p => p.id === info.project_id), n = info.files;
     const apex = proj && proj.name === 'Apex', branch = proj && proj.branch ? proj.branch : 'your branch';
-    const base = push ? `This merges the session into ${branch} of ${detail.project}, then runs git push.`
-      : `This merges ${n} file${n === 1 ? '' : 's'} into ${branch} of ${detail.project}.${apex ? ' Restart Apex afterwards to run it.' : ''}`;
-    try { proof = await api(`/api/code/sessions/${current}/proof`); renderDetail(); } catch (err) { say(err.message, 'error'); return; }
+    const base = push ? `This merges the session into ${branch} of ${info.project}, then runs git push.`
+      : `This merges ${n} file${n === 1 ? '' : 's'} into ${branch} of ${info.project}.${apex ? ' Restart Apex afterwards to run it.' : ''}`;
+    const shown = p => { if (sid === current) { proof = p; renderDetail(); } return p; };
+    let p;
+    try { p = shown(await api(`/api/code/sessions/${sid}/proof`)); } catch (err) { say(err.message, 'error'); return false; }
     let body = push ? {push: true} : {};
-    if (proof.verdict === 'proved') {
-      if (!await confirmBox(push ? 'Keep and push?' : 'Keep it?', `${base}\n\n✓ Proved: ${proof.reasons[0]}`, push ? 'Keep & push' : 'Keep it')) return;
+    if (p.verdict === 'proved') {
+      if (!await confirmBox(push ? 'Keep and push?' : 'Keep it?', `${base}\n\n✓ Proved: ${p.reasons[0]}`, push ? 'Keep & push' : 'Keep it')) return false;
     } else {
-      if (!await unproved(proof, base)) return;
+      if (!await unproved(p, base)) return false;
       body = {...body, unverified_ok: true};
     }
-    try { await post(`/api/code/sessions/${current}/keep`, body); }
+    try { await post(`/api/code/sessions/${sid}/keep`, body); }
     catch (err) {
-      if (err.status !== 409 || !err.body || !err.body.proof) { say(err.message, 'error'); return; }
-      proof = err.body.proof; renderDetail();                         // something changed after it was read
-      if (!await unproved(proof, base)) return;
-      try { await post(`/api/code/sessions/${current}/keep`, {...body, unverified_ok: true}); } catch (err2) { say(err2.message, 'error'); return; }
+      if (err.status !== 409 || !err.body || !err.body.proof) { say(err.message, 'error'); return false; }
+      p = shown(err.body.proof);                                       // something changed after it was read
+      if (!await unproved(p, base)) return false;
+      try { await post(`/api/code/sessions/${sid}/keep`, {...body, unverified_ok: true}); } catch (err2) { say(err2.message, 'error'); return false; }
     }
     say(push ? 'Kept. Pushing…' : apex ? 'Kept. Restart Apex to run it.' : 'Kept. It\'s in your project now.', 'good');
+    return true;
+  }
+  async function keepIt(push) {
+    if (!await keepFlow(current, push, {project_id: detail.project_id, project: detail.project, files: detail.changes.files.length})) return;
     proofDue = true; await loadOverview(); await refreshDetail(); schedule(200);
   }
   $('a-keep').onclick = () => keepIt(false);
@@ -1200,6 +1261,59 @@
     dlg.showModal();
     return new Promise(res => dlg.addEventListener('close', () => res(dlg.returnValue === 'ok' ? reason : null), {once: true}));
   }
+  // ---------------------------------------------------------------- while you slept (agent/code_studio.overnight)
+  // The morning brief's link opens this strip: what the night shift built, each with what
+  // Apex saw (the proof's badge), the second opinion's rating, and Keep / Throw away / Open.
+  let night = null;
+  const NIGHT_WHY = {none: 'no checks ran', unknown: "checks couldn't run", failed: 'checks failed', passed: 'checks are out of date', running: 'checks still running'};
+  function nightLine(r) {
+    if (r.working) return 'Still working on it.';
+    if (r.last_status !== 'done') return `Stopped: ${STOP_TEXT[r.last_status] || r.last_status || 'it did not start'}.`;
+    if (!r.files_changed) return 'Nothing changed.';
+    if (r.verdict === 'proved') return `Ready to Keep: checks passed${r.why ? ` (${r.why.replace(/\.$/, '')})` : ''}.`;
+    if (r.verdict === 'contradicted') return `It says it works, but Apex saw it fail${r.why ? ` (${r.why.replace(/\.$/, '')})` : ''}.`;
+    return `Not verified: ${NIGHT_WHY[r.checks] || 'no checks ran'}${r.claimed ? '; it claimed the tests pass, Apex didn\'t see it' : ''}.`;
+  }
+  async function loadOvernight(sayIt) {
+    try { night = (await api('/api/code/overnight')).sessions; }
+    catch (err) { say(err.message, 'error'); return; }
+    renderOvernight();
+    // Milestones read the morning out loud in counts only: a title could be private.
+    if (sayIt && narrate !== 'off' && N && N.overnight) { const line = N.overnight(night); if (line) speakNow(line, () => chime('done')); }
+  }
+  function renderOvernight() {
+    const box = $('overnight'), rows = night || [];
+    box.hidden = !rows.length;
+    $('overnight-rows').replaceChildren(...rows.map(r => {
+      const row = el('div', 'nrow' + (r.working ? ' working' : '')), body = el('div', 'grow');
+      const v = VERDICT[r.verdict] || VERDICT.unverified;
+      const head = el('div', 't'); head.append(el('span', 'p-badge ' + (r.working ? 'warn' : v[1]), r.working ? '… Working' : v[0]), r.title);
+      const meta = [r.project, r.task && r.task.title && r.task.title !== r.title ? `task: ${r.task.title}` : '', `${r.files_changed} file${r.files_changed === 1 ? '' : 's'}`,
+        r.rating != null ? `${r.rating}/10 by ${NAME[r.review_engine] || r.review_engine}` : r.review_state === 'skipped' ? 'no independent review' : ''].filter(Boolean).join(' · ');
+      body.append(head, el('div', 'why', nightLine(r)), el('div', 'm', meta));
+      row.append(body);
+      if (r.rating != null) row.append(ring10(r.rating, 38));
+      const acts = el('div', 'acts');
+      if (!r.working && r.files_changed && r.last_status === 'done') {
+        acts.append(button('Keep', () => nightKeep(r), 'primary'), button('Throw away', () => nightDiscard(r), 'danger'));
+      } else if (!r.working) acts.append(button('Throw away', () => nightDiscard(r), 'danger'));
+      acts.append(button('Open', () => open(r.id)));
+      row.append(acts);
+      return row;
+    }));
+  }
+  async function nightKeep(r) {
+    if (!await keepFlow(r.id, false, {project_id: r.project_id, project: r.project, files: r.files_changed})) return;
+    night = night.filter(x => x.id !== r.id); renderOvernight(); loadOverview().catch(() => {});
+  }
+  async function nightDiscard(r) {
+    const reason = await discardBox();
+    if (reason === null) return;
+    try { await post(`/api/code/sessions/${r.id}/discard`, {reason}); say(reason ? 'Thrown away. Apex noted why.' : 'Thrown away.', 'good'); }
+    catch (err) { say(err.message, 'error'); return; }
+    night = night.filter(x => x.id !== r.id); renderOvernight(); loadOverview().catch(() => {});
+  }
+
   $('a-discard').onclick = async () => {
     const reason = await discardBox();
     if (reason === null) return;
@@ -1449,6 +1563,7 @@
     ['/chatgpt', 'Next messages on your ChatGPT plan'],
     ['/safe', 'Safe mode'], ['/full', 'Full mode'],
     ['/rule', 'Make a rule for this project: every session follows it', 'text'],
+    ['/celine', 'Ask Celine about this session (out loud: 🎙 or Ctrl+Shift+Space)', 'question'],
     ['/files', 'Browse the project files'], ['/history', 'Checkpoints of this session'],
     ['/terminal', 'Open the terminal (or type !command)'],
     ['/new', 'Start a new session'], ['/look', 'Switch the Terminal / Studio look'], ['/sound', 'Chime on or off'],
@@ -1476,6 +1591,7 @@
         try { await addRule(rulesPid(), arg, 'project'); say(RULE_SAVED.project, 'good'); }
         catch (err) { say(err.message, 'error'); $('prompt').value = text; }                    // your text is kept
         break;
+      case '/celine': if (need()) askCeline(arg); break;
       case '/files': if (need()) tab('files'); break;
       case '/history': if (need()) tab('history'); break;
       case '/terminal': if (need()) { tab('terminal'); $('t-cmd').focus(); } break;
@@ -1641,7 +1757,7 @@
         ['❯ Terminal', () => { tab('terminal'); $('t-cmd').focus(); }], ['◆ History', () => tab('history')], ['🗂 Files', () => tab('files')],
         ['✕ Throw away', () => $('a-discard').click()]);
     }
-    if (current && detail) items.push(['📏 Rules for this project', () => tab('rules')]);
+    if (current && detail) items.push(['📏 Rules for this project', () => tab('rules')], ['🎙 Ask Celine about this session', () => askCeline()]);
     items.push(['＋ New session', () => { home(); $('prompt').focus(); }], ['📋 Plan first', () => { planFirst = true; renderEngine(); $('prompt').focus(); }],
       ['◐ Switch look', toggleLook], [`Use your ${NAME[OTHER[engine]]}`, () => { engine = OTHER[engine]; renderEngine(); }],
       ['🧠 What Apex knows about me', openBrain]);
@@ -1686,15 +1802,146 @@
     $('confirm').showModal();
     return new Promise(res => $('confirm').addEventListener('close', () => res($('confirm').returnValue === 'ok'), {once: true}));
   }
-  async function speak(text) {
-    const words = plain(text).slice(0, 3900);
-    if (!words) return;
-    try {
-      const r = await fetch('/api/speak', {method: 'POST', headers: {'Content-Type': 'application/json', ...auth()}, body: JSON.stringify({text: words})});
-      if (!r.ok || !(r.headers.get('content-type') || '').startsWith('audio')) throw new Error('voice is not available');
-      const audio = new Audio(URL.createObjectURL(await r.blob())); await audio.play();
-    } catch (err) { say('Could not read it out: ' + err.message, 'error'); }
+  // ---------------------------------------------------------------- voice: narration and Celine
+  // One queue for the page: a milestone, "Read it to me" and Celine's answer each wait their
+  // turn. Said by your Voicebox voice (/api/speak), sentence by sentence (speech_queue.js);
+  // Voicebox makes one reply at a time for all of Apex, so "already generating" waits for
+  // this queue, tries once more, then falls back to the chime.
+  const Q = window.ApexSpeechQueue, N = window.ApexNarration;
+  const RETRY_MS = 2500;
+  const voice = {tail: Promise.resolve(), pending: 0, epoch: 0, audio: null, pace: N ? N.pacer() : null};
+  let narrate = ['off', 'milestones', 'play'].includes(store.get('apex.code.narrate')) ? store.get('apex.code.narrate') : 'milestones';
+  $('narrate').value = narrate;
+  $('narrate').onchange = () => { narrate = $('narrate').value; store.set('apex.code.narrate', narrate); if (narrate === 'off') hush(); };
+  async function makeSpeech(text) {
+    const r = await fetch('/api/speak', {method: 'POST', headers: {'Content-Type': 'application/json', ...auth()},
+      body: JSON.stringify({text, engine: 'voicebox', profile: store.get('apex.voicebox.profile')})});
+    if (!r.ok) {
+      const b = await r.json().catch(() => ({})), err = new Error(b.error || b.detail || `voice failed (${r.status})`);
+      err.busy = r.status === 503 && /already generating/i.test(err.message); throw err;
+    }
+    if (!(r.headers.get('content-type') || '').startsWith('audio')) throw new Error('voice is not available');
+    return r.blob();
   }
+  function playSpeech(blob) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob), a = new Audio(url);
+      const end = () => { URL.revokeObjectURL(url); if (voice.audio === a) voice.audio = null; resolve(); };
+      voice.audio = a; a.onended = end; a.onerror = end;
+      Promise.resolve(a.play()).catch(err => { URL.revokeObjectURL(url); voice.audio = null; reject(err); });
+    });
+  }
+  // Say `text` after whatever is already being said. `onFail(err)` if it can't be said.
+  function speakNow(text, onFail) {
+    const parts = Q ? Q.chunks(plain(text).slice(0, 3900)) : [plain(text).slice(0, 3900)].filter(Boolean);
+    if (!parts.length) return voice.tail;
+    const epoch = voice.epoch;
+    let done = 0;
+    const play = (blob, i) => playSpeech(blob).then(() => { done = i + 1; });
+    const sayFrom = from => {
+      const rest = parts.slice(from), stop = () => voice.epoch !== epoch, base = from;
+      if (Q) return Q.run(rest, makeSpeech, (blob, i) => play(blob, base + i), stop);
+      return makeSpeech(rest[0]).then(blob => stop() ? null : play(blob, base));
+    };
+    voice.pending++;
+    const job = voice.tail.then(async () => {
+      if (voice.epoch !== epoch) return;
+      try { await sayFrom(0); }
+      catch (err) {
+        if (!err.busy) throw err;                         // Voicebox is busy with another reply: wait, then once more
+        await new Promise(r => setTimeout(r, RETRY_MS));
+        if (voice.epoch === epoch) await sayFrom(done);
+      }
+    }).catch(err => { if (onFail) onFail(err); }).finally(() => { voice.pending--; });
+    voice.tail = job;
+    return job;
+  }
+  function hush() {                                       // stop talking now, and drop what was waiting
+    voice.epoch++;
+    if (voice.audio) { try { voice.audio.pause(); } catch (_) {} voice.audio = null; }
+  }
+  const speak = text => speakNow(text, err => say('Could not read it out: ' + err.message, 'error'));
+  // A step as it arrives (never the ones already there when the session opened).
+  function narrateStep(e) {
+    if (narrate === 'off' || !N) return;
+    const m = N.milestone(e);
+    if (m) { speakNow(m, () => chime(e.kind === 'done' ? e.status : e.kind === 'checks' && e.state === 'failed' ? 'failed' : 'done')); return; }
+    if (narrate !== 'play') return;
+    const phrase = voice.pace.offer(N.playByPlay(e), Date.now(), voice.pending > 0 || !!voice.audio);
+    if (phrase) speakNow(phrase);                         // a missed phrase is just skipped
+  }
+
+  // Celine: ask out loud (🎙 or Ctrl+Shift+Space) or typed (/celine …) about the open session.
+  // Her answer comes from the companion turn engine (/api/companion/chat, workspace 'code'),
+  // shows in her card, and is said in the voice you chose for her.
+  const celine = {busy: false, ctrl: null};
+  const celineKey = sid => `apex.code.celine.${sid}`;
+  const turnId = () => 'code-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+  function celineCard(question, answer, state) {
+    $('celine-card').hidden = false;
+    if (question != null) $('celine-q').textContent = question;
+    if (answer != null) { $('celine-a').replaceChildren(md(answer, state === 'thinking')); }
+    $('celine-state').textContent = state === 'listening' ? 'listening…' : state === 'thinking' ? 'thinking…' : state === 'error' ? 'could not answer' : '';
+    $('celine-card').dataset.state = state || '';
+  }
+  async function askCeline(typed) {
+    if (rec) { if ($('celine-btn').classList.contains('rec')) rec.stop(); else say('Finish the recording you started first.'); return; }
+    if (!current) { say('Open a session first: Celine answers about one session.', 'error'); return; }
+    if (celine.busy) { say('Celine is still answering.'); return; }
+    const sid = current;
+    let question = String(typed || '').trim();
+    if (!question) {
+      const blob = await recordOnce($('celine-btn'), 'Celine is listening… press 🎙 again (or Ctrl+Shift+Space) when you\'re done.');
+      if (!blob) return;
+      celineCard('…', '', 'listening');
+      try { question = await transcribe(blob); } catch (err) { celineCard('', 'Could not transcribe: ' + err.message, 'error'); return; }
+      if (!question) { celineCard('', 'I didn\'t catch that. Try again, a little closer.', 'error'); return; }
+    }
+    celine.busy = true; $('celine-btn').disabled = true;
+    celineCard(question, '', 'thinking');
+    try {
+      const answer = await celineChat(sid, question, true);
+      if (current === sid) celineCard(question, answer, '');
+      if (answer.trim()) speakNow(answer, err => say('Celine\'s answer is on screen; she couldn\'t say it: ' + err.message, 'error'));
+    } catch (err) { if (current === sid) celineCard(question, err.message, 'error'); }
+    finally { celine.busy = false; $('celine-btn').disabled = false; }
+  }
+  async function celineChat(sid, question, retry) {
+    const thread = Number(store.get(celineKey(sid))) || null;
+    const body = {message: question, turn_id: turnId(), mode: 'discuss', workspace: 'code', code_session: sid,
+      voice: 'voicebox', voice_profile: store.get('apex.voicebox.profile'), ...(thread ? {thread_id: thread} : {})};
+    const r = await fetch('/api/companion/chat', {method: 'POST', headers: {'Content-Type': 'application/json', ...auth()}, body: JSON.stringify(body)});
+    if (r.status === 401) { $('login').showModal(); throw new Error('Enter your Apex token.'); }
+    if (!r.ok) {
+      const b = await r.json().catch(() => ({})), why = typeof b.detail === 'string' ? b.detail : `Celine couldn't answer (${r.status})`;
+      if (retry && thread && /no longer exists/i.test(why)) { store.set(celineKey(sid), ''); return celineChat(sid, question, false); }
+      throw new Error(why);
+    }
+    let text = '', buffer = '', final = null;
+    const take = line => {
+      if (!line.trim()) return;
+      let ev; try { ev = JSON.parse(line); } catch (_) { return; }
+      if (ev.type === 'start' && ev.thread_id) store.set(celineKey(sid), String(ev.thread_id));
+      else if (ev.type === 'token') { text += ev.text || ''; if (current === sid) celineCard(null, text, 'thinking'); }
+      else if (ev.type === 'done') final = ev.text != null ? ev.text : text;
+      else if (ev.type === 'error') throw new Error(ev.text || 'Celine stopped with an error.');
+    };
+    if (r.body && r.body.getReader) {
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      for (;;) {
+        const {value, done} = await reader.read();
+        if (done) break;
+        buffer += dec.decode(value, {stream: true});
+        const lines = buffer.split('\n'); buffer = lines.pop();
+        lines.forEach(take);
+      }
+      take(buffer);
+    } else (await r.text()).split('\n').forEach(take);
+    return String(final != null ? final : text);
+  }
+  $('celine-btn').onclick = () => askCeline();
+  $('celine-quiet').onclick = hush;
+  $('celine-close').onclick = () => { hush(); $('celine-card').hidden = true; };
   $('add-project').onclick = () => { $('add-form').reset(); $('add-dialog').returnValue = ''; $('add-dialog').showModal(); };
   $('add-dialog').addEventListener('close', async () => {
     if ($('add-dialog').returnValue !== 'ok') return;
@@ -1712,6 +1959,7 @@
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
     const dialog = [...document.querySelectorAll('dialog')].some(d => d.open);
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (!$('palette').open) openPalette(); return; }
+    if (e.ctrlKey && e.shiftKey && (e.code === 'Space' || e.key === ' ')) { e.preventDefault(); if (current && !dialog) askCeline(); return; }
     if (e.ctrlKey && e.key === '`' && current) { e.preventDefault(); tab('terminal'); $('t-cmd').focus(); return; }
     if (e.key === 'Escape' && busy() && !dialog) { e.preventDefault(); stop(); }
     else if (e.key === '/' && !typing && !dialog) { e.preventDefault(); $('prompt').focus(); }
@@ -1719,6 +1967,9 @@
   addEventListener('hashchange', () => {
     const ask = location.hash.match(/^#allow=([\w-]+)/);
     if (ask) { askAllow(ask[1]); return; }                  // a notification tapped while this page was open
+    if (location.hash === '#overnight') {                 // the morning brief, tapped while this page was open
+      home(); loadOverview().catch(err => say(err.message, 'error')); loadOvernight(true); return;
+    }
     const m = location.hash.match(/^#s=(\d+)/); if (m && Number(m[1]) !== current) open(Number(m[1])); else if (!m && current) home();
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(100); });
@@ -1733,8 +1984,9 @@
       if (ask && err.status === 403) return;
       say(/owner only/i.test(err.message) ? 'Apex Code is for the owner: open Apex with your master token.' : err.message, 'error'); return;
     }
-    const m = location.hash.match(/^#s=(\d+)/);
+    const m = location.hash.match(/^#s=(\d+)/), morning = location.hash === '#overnight';
     if (m) await open(Number(m[1])); else home();
+    if (morning) await loadOvernight(true);                // the morning brief's link: what was built overnight
     schedule(1000);
   }
   applyLook(); show('home'); boot();

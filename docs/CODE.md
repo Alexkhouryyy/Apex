@@ -70,6 +70,39 @@ git worktree under `ApexWork\code\`).
   - Once you allow it at the PC, the phone's link is answered too, so it can't
     run twice. A session that moved to Codex can't be allowed one command from
     the phone (Codex would get full access): answer that one at the PC.
+- **Ask Celine.** 🎙 Ask Celine (or Ctrl+Shift+Space, or `/celine <question>`)
+  asks about the open session: "what did Claude just change, and is it safe
+  to keep?" Her answer shows in her card and is said in the voice you chose
+  for the companion.
+  - She reads what Apex saw: the proof verdict and Apex's own checks, the
+    second opinion, which files changed (counts, never the diff), the last
+    steps and your rules. All of it is treated as untrusted data.
+  - She can't keep, throw away, allow a command or send a message. In a
+    Work-mode companion turn she can run the checks, ask for a second opinion,
+    stop, or draft a message; a draft shows in the feed with Send, Edit and ✕,
+    and only you send it.
+  - Apex Code is the owner's: a device token can't ask her about a session.
+- **Narration.** The selector in the session head says milestones out loud
+  (Done, the checks, the second opinion's score, a draft from Celine) in your
+  Voicebox voice; Play-by-play adds "running pytest" or "editing upload.py", at
+  most one phrase every 6 seconds. It never reads code. Without Voicebox it
+  chimes instead: it never uses OpenAI's paid voice.
+- **Night shift.** Link a software project in Work (Projects, "Code project")
+  to an Apex Code project, and mark a task `+apex`. With Always on and Work on
+  its own switched on, Apex takes one such task at a time, from your evening
+  check until "Night shift until" (06:30 by default), as a real session here
+  (🌙 night), in Safe mode, on a plan (never API credits). Then it runs your
+  checks and asks the other plan for a second opinion (skipped, and said so,
+  if that plan is resting). It never keeps anything.
+  - At the evening check: "Tonight I'll take: Fix login, Retry uploads." Untick
+    "Apex can take this" on a task to skip it.
+  - The morning brief adds "Built overnight", from what Apex saw: "Fix login:
+    ready to Keep, checks passed (212 passed), 8/10 by ChatGPT", "Retry
+    uploads: not verified (checks couldn't run)". Its link opens "While you
+    slept" here, with Keep, Throw away and Open on each. With narration on, the
+    page says only the counts out loud, never the titles.
+  - A command Safe mode stops at night asks your phone at normal priority, so
+    it can wait until you're up; that link lasts 12 hours.
 - **Keys:** Ctrl+Enter sends. Esc stops Apex mid-step. `/` jumps to the brief.
 
 ## The power tools
@@ -137,6 +170,74 @@ The other plan reads the change, read-only, and answers in a fixed shape:
 file:line), and what's good. It's told to be brutally honest.
 **Fix what it found** sends its findings back to the session's plan, which
 fixes the real problems and says why it skips any it disagrees with.
+
+## What only Apex adds
+
+Claude Code and Codex on their own forget you between sessions and take the
+agent's word for what it did. These features use what Apex already knows and
+what it sees for itself. Every one of them is tested against fake `claude`
+and `codex` programs; none has yet been run in a real session on your plans.
+
+1. **A brief about you in every session** (`agent/code_brain.py`). A new
+   conversation starts with at most 4000 characters, each line tagged with
+   its source: `APEX_USER.md`, your standing rules, this project's rules, its
+   handoff, up to 8 memories (coding preferences first, then ones that share
+   words with the request), what was measured on this project, and the last
+   3 sessions. Secrets are redacted. Claude gets it as a system-prompt file
+   (`--append-system-prompt-file`, kept beside the working copies, deleted on
+   Keep or Throw away); Codex gets it ahead of the message. The card under
+   your first message shows what was sent, with **Forget** on each memory; the
+   home chip "🧠 Apex knows N things" and Ctrl+K open the same list.
+2. **Say it once: rules.** A message that corrects a finished step ("no,
+   don't…") offers "Make this a rule for {project}" or "Remember for all my
+   code". The **Rules** tab (and `/rule <text>`) turns rules on and off, edits
+   them, and restores earlier versions. A change reaches new sessions through
+   the brief, open sessions on their next message, and the second opinion,
+   which is asked to flag any rule the change breaks.
+3. **The proof card.** Checks end as passed, failed or **unknown** (could not
+   run, stopped, timed out, or a test runner that printed no count); "Exit 0
+   counts as a pass" is a project setting. The card puts what the agent said
+   ("ran the tests, all pass") beside what Apex saw: its own checks, the
+   agent's test runs, your terminal runs, and output you paste (marked as
+   yours; it can never make the verdict Proved). It flags a pass on files that
+   changed since, edited test files, a second opinion from the same plan that
+   did the work, and file:line citations that don't exist. **Keep** asks again
+   when the verdict isn't Proved.
+4. **Every session teaches Apex.** Keep and Throw away (which now asks why)
+   add a line to the project's decision log, today's vault note and an
+   outcome row. From those sessions Apex counts what happens on each project
+   ("thrown away 5 of 5 when no checks ran", "Claude plan: kept 7 of 9, 6
+   with proof"), only once there are 5 sessions, always as counts. The counts
+   show on the home page and in the composer hint, and reach the next brief.
+5. **Apex's memory inside the session.** Each session runs Apex's own MCP
+   server (`scripts/apex_mcp.py`, turned off with `CODE_APEX_MCP=false`), so
+   the agent can look up memories and this project's rules mid-task. A memory
+   it suggests waits in **Waiting for your OK** (Approve, Edit, Reject); the
+   second opinion can't suggest any.
+6. **Away mode, Ask Celine, Narration and the Night shift**: see the page
+   section above.
+
+Not done or not seen yet:
+- No real session on your plans has run any of these. Codex's
+  `-c mcp_servers.apex.*` options were only checked as valid TOML, not
+  against a real `codex exec`; Claude Code 2.1.294 accepted
+  `--append-system-prompt-file` and `--mcp-config` without running a prompt.
+- An open Claude conversation hears a new rule only on your next message; its
+  system prompt is the brief it started with.
+- Rules are edited only inside a session (the Rules tab), not from home.
+- The project handoff's "next step" is not written by Apex; only the decision
+  log is.
+- Telegram, the fallback for phone notifications, gets no link, so a blocked
+  command can't be answered from it.
+- From the Code page Celine answers in Discuss mode; she can run checks or
+  draft only in a Work-mode companion turn. No wake word, no barge-in, and
+  nothing was tried against a real Voicebox or Whisper here.
+- The night shift takes one task at a time, and keeping the PC awake and
+  holding a 3 a.m. ask until morning were only exercised in tests, not on a
+  real Windows PC overnight. "While you slept" shows only from the morning
+  link (`/code#overnight`).
+- At most 50 pending approvals of any kind are listed, so a crowded queue can
+  hide a suggested memory from the box.
 
 ## When things go sideways
 
@@ -229,6 +330,14 @@ fixes the real problems and says why it skips any it disagrees with.
   - Esc stops a running step;
   - the second opinion ring, the side panel, and the diff with line numbers;
   - Keep only on a real "yes": Esc or Cancel never keeps;
-  - a resting plan is never offered by default.
+  - a resting plan is never offered by default;
+  - the brief card, rules, proof card, track record, memory box, away mode,
+    Celine and the night shift.
+- `scripts/check_code_narration.cjs`: spoken phrases never carry code or
+  titles, and play-by-play is paced.
+- `tests/test_code_studio.py` also covers the brief, rules, proof, write-back
+  and track record, the memory server, away mode, Celine's tools and the
+  night shift; `tests/test_mcp_server.py`, `tests/test_companion.py` and
+  `tests/test_continuity.py` cover their halves.
 - Real Chromium: the whole page against the real backend, with demo tools, on
   desktop and phone, with no horizontal overflow and no console errors.

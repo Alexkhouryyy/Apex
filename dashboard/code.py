@@ -66,6 +66,14 @@ async def overview(request: Request):
     return await _do(code_studio.overview)
 
 
+@router.get('/api/code/overnight')
+async def overnight(request: Request):
+    """What the night shift built, for the morning (agent/code_studio.overnight): each
+    session waiting for you, with the proof's verdict, the second opinion and the files."""
+    _owner(request)
+    return {'sessions': await _do(code_studio.overnight)}
+
+
 @router.get('/api/code/approvals')
 async def approvals_waiting(request: Request):
     """Memories a session suggested through Apex's memory server, waiting for your OK

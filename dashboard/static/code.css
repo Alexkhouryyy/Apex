@@ -510,3 +510,56 @@ body.term .allow-text,body.term .allow-result{font-family:var(--mono);font-size:
 body.term .allow-result,body.term .allow-text code{border-radius:6px}
 @media (max-width:640px){#allow-acts>button{flex:1 1 0}}
 @media (hover:none){#allow-acts button,#allow-done button{min-height:48px}}
+
+/* ---------------------------------------------------------------- Celine on the build: ask out loud, hear it */
+.session-head .narrate{width:auto;min-height:32px;padding:4px 8px;font-size:12.5px;flex:none}
+.celine-btn.rec{background:#3a1416;color:#ffb3aa;border-color:var(--bad);animation:pulse 1s ease-in-out infinite}
+.celine-card{margin:10px 22px 0;padding:12px 14px;border-radius:14px;border:1px solid color-mix(in srgb,var(--b) 50%,transparent);
+  background:color-mix(in srgb,var(--b) 8%,var(--panel2));max-height:38vh;overflow:auto}
+.celine-card .ch{display:flex;align-items:center;gap:10px}
+.celine-card .ch .cs{font:11.5px var(--mono)}
+.celine-card .ch button{min-height:30px;font-size:12px}
+.celine-card .cq{margin:8px 0 4px;color:var(--soft);font-style:italic;overflow-wrap:anywhere}
+.celine-card .cq:empty{display:none}
+.celine-card .ca{font-size:14px;line-height:1.55;overflow-wrap:anywhere}
+.celine-card .ca p{margin:0 0 6px}
+.celine-card[data-state=error] .ca{color:#ffd0c9}
+.celine-card .fine{margin:8px 0 0}
+.card2.draft{border-color:color-mix(in srgb,var(--b) 50%,transparent);background:color-mix(in srgb,var(--b) 7%,var(--panel2))}
+.card2.draft .dtext{margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.5}
+body.term .celine-card{border-radius:8px;font-family:var(--mono)}
+body.term .celine-card .ca,body.term .card2.draft .dtext{font-family:var(--mono);font-size:13px}
+@media (max-width:640px){
+  .celine-card{margin:8px 10px 0;max-height:46vh}
+  .session-head .narrate{max-width:42px;padding:4px 2px}
+  .celine-btn{padding:4px 8px}.celine-btn .wide{display:none}
+}
+@media (hover:none){.card2.draft .acts button,.celine-card .ch button{min-height:40px}}
+
+/* ---------------------------------------------------------------- night shift: what Apex built while you slept */
+.badge.night{color:#b9b4ff;border-color:color-mix(in srgb,#b9b4ff 40%,transparent);margin-left:6px;white-space:nowrap;vertical-align:1px}
+.overnight{border:1px solid color-mix(in srgb,#b9b4ff 38%,transparent);background:color-mix(in srgb,#b9b4ff 5%,var(--panel));
+  border-radius:14px;padding:12px 14px;margin-bottom:18px}
+.overnight-title{font:600 10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#cfcbff;margin:0 0 4px}
+.overnight>.fine{margin:0 0 8px}
+.overnight-rows{display:flex;flex-direction:column;gap:8px}
+.nrow{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:9px 12px}
+.nrow .grow{min-width:0}
+.nrow .t{display:flex;align-items:center;gap:8px;font-weight:550;overflow-wrap:anywhere}
+.nrow .t .p-badge{font:600 11px var(--mono);border:1px solid var(--line2);border-radius:6px;padding:1px 7px;white-space:nowrap;flex:none}
+.nrow .why{font-size:13px;color:var(--soft);margin-top:3px;overflow-wrap:anywhere}
+.nrow .m{font:11.5px var(--mono);color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
+.nrow .acts{display:flex;gap:6px;flex:none}
+.nrow .acts button{min-height:32px;padding:4px 12px;font-size:12.5px}
+.nrow.working{opacity:.85}
+.from-work{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
+.from-work a{color:#cfcbff}
+body.term .overnight,body.term .nrow,body.term .nrow .t .p-badge{border-radius:6px}
+body.term .nrow .why{font-family:var(--mono);font-size:12px}
+@media (max-width:640px){
+  .overnight{padding:10px 12px}
+  .nrow{flex-wrap:wrap;gap:8px}
+  .nrow .grow{flex:1 1 calc(100% - 52px)}
+  .nrow .acts{flex:1 1 100%}.nrow .acts button{flex:1 1 0}
+}
+@media (hover:none){.nrow .acts button{min-height:40px}}

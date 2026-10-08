@@ -25,7 +25,13 @@
 // OK (this project's only), with Approve, Reject and Edit (your wording is saved, never
 // wiped by a poll while you type); and away mode: a stopped command sent to your phone,
 // answered there (Allow once or Don't allow) with a device token that can't read the
-// rest, expired, answered or unknown links said plainly, and the same link at the PC.
+// rest, expired, answered or unknown links said plainly, and the same link at the PC;
+// and Celine on the build: milestones said in your Voicebox voice (never code; Voicebox
+// busy waits and tries once more, then the chime), play-by-play paced, a message she
+// drafted (Send, Edit, ✕), and asking her typed (/celine) or out loud (🎙, Ctrl+Shift+Space);
+// and the night shift: the morning brief's link (/code#overnight) shows "While you slept"
+// (the proof's badge, the rating, Keep through the proof's question, Throw away with why,
+// Open), its counts said out loud without titles, the 🌙 badge, and "From your Work list".
 const {JSDOM} = require('jsdom'), fs = require('fs'), path = require('path'), assert = require('node:assert/strict');
 const base = path.join(__dirname, '..', 'dashboard', 'static');
 const dom = new JSDOM(fs.readFileSync(path.join(base, 'code.html'), 'utf8'), {url: 'http://localhost:7860/code', runScripts: 'outside-only', pretendToBeVisual: true});
@@ -38,14 +44,20 @@ w.ReadableStream = ReadableStream; w.TextDecoder = TextDecoder; w.AbortControlle
 w.CSS = w.CSS || {escape: x => String(x).replace(/["\\]/g, '\\$&')};
 const now = Date.now() / 1000;
 let plans = [{id: 'claude', name: 'Claude plan', ready: true, why: '', how: ''}, {id: 'chatgpt', name: 'ChatGPT plan', ready: true, why: '', how: ''}];
-let exitOk = 0;
+let exitOk = 0, extraSessions = [];
+// What the night shift built (agent/code_studio.overnight), for the morning's strip.
+const NIGHT = (id, title, extra = {}) => ({id, title, project: 'Apex', project_id: 1, origin: 'night', task: {id: id - 20, title}, engine: 'claude',
+  engine_name: 'Claude plan', last_status: 'done', working: false, verdict: 'unverified', reasons: [], checks: 'none', why: '', claimed: false,
+  rating: null, review_state: '', review_engine: '', review_engine_name: '', files_changed: 2, branch: `apex/${id}-x`, updated: now - 3600, ...extra});
+let nightDoc = [];
 // What tends to happen on the project (agent/code_brain.track_record), as the overview carries it.
 const CLAUDE_LINE = {key: 'engine:claude', text: 'Claude plan here: kept 7 of 9, 6 with proof', n: 9, hits: 7, rate: 0.778};
 let recordDoc = {lines: [{key: 'no_checks', text: 'thrown away 4 of 6 when no checks ran', n: 6, hits: 4, rate: 0.667}, CLAUDE_LINE],
   engines: {claude: CLAUDE_LINE}, decided: 15, note: 'Counted from 15 finished sessions in the last 90 days.'};
 const overview = () => ({owner: 'Alex', projects: [{id: 1, name: 'Apex', path: 'C:\\Apex', checks: 'python -m pytest -q', branch: 'main', checks_exit_ok: exitOk}],
   sessions: [{id: 7, project_id: 1, title: 'Add Focus mode', engine: 'claude', mode: 'safe', status: 'ready', last_status: 'done', files_changed: 2, review_rating: 8, updated: now - 120, working: false},
-             {id: 3, project_id: 1, title: 'Old try', engine: 'chatgpt', mode: 'safe', status: 'discarded', last_status: 'done', files_changed: 0, review_rating: null, updated: now - 9000, working: false}],
+             {id: 3, project_id: 1, title: 'Old try', engine: 'chatgpt', mode: 'safe', status: 'discarded', last_status: 'done', files_changed: 0, review_rating: null, updated: now - 9000, working: false},
+             ...extraSessions],
   plans, default_engine: 'claude', week: {sessions: 2, kept: 0, proved: 1, rating: 8, minutes: 3, credits: 0}, working: 0, record: {1: recordDoc}});
 let session = {id: 7, project_id: 1, project: 'Apex', title: 'Add Focus mode', engine: 'claude', mode: 'safe', branch: 'apex/7-add-focus-mode', worktree: 'C:\\ApexWork\\code\\apex-7',
   status: 'ready', working: true, side: '', since: now - 75, summary: '', review_state: 'done', review_engine: 'chatgpt', review_rating: 8, review_text: 'Rating: 8/10\nVerdict: Clean.\nProblems:\n- None found',
@@ -132,6 +144,20 @@ function askApi(asks, token, opts) {
   Object.assign(a, {answered: now, choice});
   return Response.json(a);
 }
+// Voice (dashboard/server.py /api/speak) and Celine (/api/companion/chat, workspace 'code').
+let speakBusy = 0, heard = 'what changed?', celineThreads = new Set([5]);
+const spoken = () => calls.filter(c => c.url === '/api/speak').map(c => c.body.text);
+function speakApi(body) {
+  if (speakBusy) { speakBusy--; return Response.json({error: 'Voicebox is already generating an Apex reply. Try again when it finishes.'}, {status: 503}); }
+  return new Response(new Uint8Array([82, 73, 70, 70]), {headers: {'content-type': 'audio/wav'}});
+}
+function celineApi(body) {
+  if (body.thread_id && !celineThreads.has(body.thread_id)) return Response.json({detail: 'Conversation no longer exists. Start a new conversation.'}, {status: 400});
+  const tid = body.thread_id || 5; celineThreads.add(tid);
+  const answer = /safe/.test(body.message) ? 'Not yet. It is unverified: Apex has not run the checks.' : 'It added the retry in two files.';
+  const lines = [{type: 'start', thread_id: tid}, {type: 'token', text: answer.slice(0, 8)}, {type: 'token', text: answer.slice(8)}, {type: 'done', text: answer}];
+  return new Response(lines.map(x => JSON.stringify(x)).join('\n') + '\n', {headers: {'content-type': 'application/x-ndjson'}});
+}
 const pcAsks = {'tok-pc-0123456789abcdef': ASK({command: 'rm -rf build', title: 'Add Focus mode'})};
 const calls = [];
 let streamOn = false, streamLive = null;
@@ -143,6 +169,10 @@ w.fetch = async (url, opts = {}) => {
   if (url.startsWith('/api/code/projects/1/rules')) return rulesApi(url, opts);
   if (url.startsWith('/api/code/projects/1/decisions')) return logApi(url, opts);
   if (url === '/api/code/approvals') return Response.json({items: suggestions});
+  if (url === '/api/code/overnight') return Response.json({sessions: nightDoc});
+  if (url === '/api/speak') return speakApi(JSON.parse(opts.body));
+  if (url === '/api/companion/chat') return celineApi(JSON.parse(opts.body));
+  if (url === '/api/companion/transcribe?engine=local') return Response.json({text: heard});
   const ask = url.match(/^\/api\/code\/allow\/([\w-]+)$/);
   if (ask) return askApi(pcAsks, ask[1], opts);
   const sw = url.match(/^\/api\/staged-writes\/(\d+)\/(approve|reject)$/);
@@ -198,7 +228,18 @@ w.fetch = async (url, opts = {}) => {
   throw Error('unexpected ' + url);
 };
 w.Response = Response;
+// Audio and the chime, as far as the page can tell (the microphone only for Celine's part, below).
+const played = [], chimes = [];
+w.Audio = class { constructor(src) { this.src = src; } play() { played.push(this.src); setTimeout(() => this.onended && this.onended(), 5); return Promise.resolve(); } pause() {} };
+w.URL.createObjectURL = () => 'blob:speech'; w.URL.revokeObjectURL = () => {};
+w.AudioContext = class { constructor() { this.currentTime = 0; this.destination = {}; }
+  createOscillator() { chimes.push(1); return {frequency: {}, connect: g => g, start() {}, stop() {}}; }
+  createGain() { return {gain: {setValueAtTime() {}, exponentialRampToValueAtTime() {}}, connect: x => x}; } };
+w.localStorage.setItem('apex.code.narrate', 'off');            // the flow below is quiet; Celine's part turns it on
+w.localStorage.setItem('apex.voicebox.profile', 'celine');
 w.eval(fs.readFileSync(path.join(base, 'theme.js'), 'utf8'));
+w.eval(fs.readFileSync(path.join(base, 'speech_queue.js'), 'utf8'));
+w.eval(fs.readFileSync(path.join(base, 'code_narration.js'), 'utf8'));
 w.eval(fs.readFileSync(path.join(base, 'code.js'), 'utf8'));
 const tick = (ms = 40) => new Promise(r => setTimeout(r, ms));
 const type = (text) => { const p = $('prompt'); p.focus(); p.value = text; p.setSelectionRange(text.length, text.length); p.dispatchEvent(new w.Event('input')); };
@@ -206,6 +247,174 @@ const key = (k, extra = {}) => $('prompt').dispatchEvent(new w.KeyboardEvent('ke
 const last = (re) => calls.filter(c => re.test(c.url) && c.method === 'POST').at(-1);
 const lastPut = () => calls.filter(c => c.url === '/api/code/projects/1/rules' && c.method === 'PUT').at(-1);
 const current9 = () => w.location.hash === '#allow=tok-pc-0123456789abcdef' && d.body.classList.contains('view-session');
+
+// Celine on the build: what the page says out loud, and asking her about the session.
+async function celine() {
+  w.navigator.mediaDevices = {getUserMedia: async () => ({getTracks: () => [{stop() {}}]})};
+  w.MediaRecorder = class { static isTypeSupported(t) { return t === 'audio/webm'; }
+    constructor(stream, o) { this.mimeType = (o || {}).mimeType || ''; this.state = 'inactive'; }
+    start() { this.state = 'recording'; }
+    stop() { this.state = 'inactive'; this.ondataavailable({data: new w.Blob([new Uint8Array(2000)])}); this.onstop(); } };
+  session = {...session, id: 7, status: 'ready', working: false, side: ''};
+  if (!d.body.classList.contains('view-session') || !w.location.hash.startsWith('#s=7')) { w.location.hash = '#s=7'; await tick(300); }
+  feed.push(E(50, 'note', {text: 'ready'})); await tick(900);
+  assert.equal($('narrate').value, 'off', 'the choice is remembered');
+  assert.deepEqual([...$('narrate').options].map(o => o.value), ['off', 'milestones', 'play']);
+  assert.match($('narrate').title, /Voicebox/); assert.match($('narrate').title, /tts-1/);
+  assert.equal(spoken().length, 0, 'nothing is said with narration off');
+  $('narrate').value = 'milestones'; $('narrate').dispatchEvent(new w.Event('change'));
+  assert.equal(w.localStorage.getItem('apex.code.narrate'), 'milestones');
+  // Milestones, in order, in your Voicebox voice; never the code in the summary.
+  feed.push(E(51, 'done', {status: 'done', summary: 'Added a retry to `upload.py`. ```py\nsecret_code()\n``` More.', seconds: 70, files: 2, total: 3, engine: 'claude'}),
+    E(52, 'checks', {passed: true, state: 'passed', why: '212 passed', seconds: 9, command: 'python -m pytest -q', output: '212 passed'}),
+    E(53, 'review', {engine: 'chatgpt', status: 'done', rating: 8, text: 'Rating: 8/10\nVerdict: fine.'}));
+  await tick(900);
+  assert.deepEqual(spoken(), ['Done.', '3 files changed.', 'Added a retry to upload.py.', 'Checks passed: 212 passed.', 'ChatGPT rates it 8 out of 10.'],
+    'one sentence at a time (speech_queue.js)');
+  const asked = calls.filter(c => c.url === '/api/speak');
+  assert.ok(asked.every(c => c.body.engine === 'voicebox' && c.body.profile === 'celine'), 'your Voicebox voice, never the paid one');
+  assert.ok(!spoken().join(' ').includes('secret') && !spoken().join(' ').includes('```'), 'never code');
+  assert.equal(played.length, 5);
+  // Voicebox busy with another reply: wait, try once more; busy again: the chime instead.
+  speakBusy = 1; feed.push(E(54, 'checks', {passed: false, state: 'unknown', why: 'no test count', seconds: 2, command: 'npm test', output: ''}));
+  await tick(900); assert.equal(spoken().filter(t => t === 'Checks unknown: no test count.').length, 1, 'it waits before trying again');
+  await tick(2400); assert.equal(spoken().filter(t => t === 'Checks unknown: no test count.').length, 2, 'then tries once more');
+  assert.equal(played.length, 6);
+  const before = chimes.length; speakBusy = 2;
+  feed.push(E(55, 'checks', {passed: false, state: 'failed', why: '1 failed', seconds: 2, command: 'npm test', output: '1 failed'}));
+  await tick(3600);
+  assert.equal(spoken().filter(t => t === 'Checks failed.').length, 2, 'once more, no more');
+  assert.ok(chimes.length > before, 'then the chime'); assert.equal(played.length, 6);
+  // Play-by-play: one phrase at most every 6 seconds, and none while something is said.
+  $('narrate').value = 'play'; $('narrate').dispatchEvent(new w.Event('change'));
+  const n0 = spoken().length;
+  feed.push(E(56, 'tool', {tool: 'command', title: 'python -m pytest -q tests/test_upload.py', ref: 'pp1'}),
+    E(57, 'file', {path: 'agent/upload.py', change: 'update', plus: 2, minus: 1, ref: 'pp2', diff: '@@ -1 +1 @@\n-a\n+b'}),
+    E(58, 'tool', {tool: 'read', title: 'Read agent/upload.py', path: 'agent/upload.py', ref: 'pp3'}));
+  await tick(900);
+  assert.deepEqual(spoken().slice(n0), ['running pytest'], 'the rest within 6 seconds is dropped, not queued');
+  $('narrate').value = 'milestones'; $('narrate').dispatchEvent(new w.Event('change'));
+  // A message Celine drafted: shown with Send, Edit and ✕; only you send it.
+  feed.push(E(59, 'draft', {text: 'Please add a test for the retry in upload.py.', by: 'Celine'})); await tick(900);
+  assert.equal(spoken().at(-1), 'Celine drafted a message for you.');
+  let card = [...d.querySelectorAll('.card2.draft')].at(-1);
+  assert.equal(card.querySelector('.h').firstChild.textContent, '🎙 Celine drafted a message');
+  assert.equal(card.querySelector('.dtext').textContent, 'Please add a test for the retry in upload.py.');
+  assert.deepEqual([...card.querySelectorAll('.acts button')].map(b => b.textContent), ['Send', 'Edit', '✕']);
+  assert.ok(!calls.some(c => c.url === '/api/code/sessions/7/messages' && c.body && c.body.prompt === 'Please add a test for the retry in upload.py.'), 'not sent on its own');
+  [...card.querySelectorAll('.acts button')].find(b => b.textContent === 'Edit').click();
+  assert.equal($('prompt').value, 'Please add a test for the retry in upload.py.'); $('prompt').value = '';
+  [...card.querySelectorAll('.acts button')].find(b => b.textContent === 'Send').click(); await tick(); await tick();
+  assert.equal(last(/\/api\/code\/sessions\/7\/messages$/).body.prompt, 'Please add a test for the retry in upload.py.');
+  assert.equal(card.querySelector('.h .st').textContent, 'sent'); assert.equal(card.querySelector('.acts'), null);
+  feed.push(E(60, 'draft', {text: 'Rename it.', by: 'Celine'})); await tick(900);
+  card = [...d.querySelectorAll('.card2.draft')].at(-1);
+  [...card.querySelectorAll('.acts button')].find(b => b.textContent === '✕').click();
+  assert.equal(card.isConnected, false);
+  assert.deepEqual(JSON.parse(w.localStorage.getItem('apex.code.drafts')), {59: 'sent', 60: 'dismissed'});
+  // Ask her, typed: /celine. Her answer shows in her card and is said; one conversation per session.
+  type('/celine is it safe to keep?'); $('brief-form').requestSubmit(); await tick(); await tick(); await tick(200);
+  let chat = calls.filter(c => c.url === '/api/companion/chat');
+  assert.equal(chat.length, 1);
+  const {turn_id, ...sent} = chat[0].body;
+  assert.match(turn_id, /^[a-zA-Z0-9_-]{16,80}$/);
+  assert.deepEqual(sent, {message: 'is it safe to keep?', mode: 'discuss', workspace: 'code', code_session: 7, voice: 'voicebox', voice_profile: 'celine'});
+  assert.equal($('celine-card').hidden, false);
+  assert.equal($('celine-q').textContent, 'is it safe to keep?');
+  assert.equal($('celine-a').textContent, 'Not yet. It is unverified: Apex has not run the checks.');
+  assert.equal(w.localStorage.getItem('apex.code.celine.7'), '5');
+  await tick(300); assert.equal(spoken().at(-1), 'It is unverified: Apex has not run the checks.', 'said, sentence by sentence');
+  // Out loud: 🎙 starts listening, Ctrl+Shift+Space ends it; the words go to Celine in the same thread.
+  $('celine-btn').click(); await tick();
+  assert.ok($('celine-btn').classList.contains('rec'));
+  d.dispatchEvent(new w.KeyboardEvent('keydown', {key: ' ', code: 'Space', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true}));
+  await tick(); await tick(); await tick(200);
+  assert.ok(!$('celine-btn').classList.contains('rec'));
+  chat = calls.filter(c => c.url === '/api/companion/chat');
+  assert.equal(chat.length, 2); assert.equal(chat[1].body.message, 'what changed?'); assert.equal(chat[1].body.thread_id, 5);
+  assert.equal($('celine-q').textContent, 'what changed?'); assert.equal($('celine-a').textContent, 'It added the retry in two files.');
+  // Her old conversation is gone (deleted elsewhere): a new one, once.
+  celineThreads = new Set(); type('/celine what changed?'); $('brief-form').requestSubmit(); await tick(); await tick(); await tick(200);
+  chat = calls.filter(c => c.url === '/api/companion/chat');
+  assert.equal(chat.length, 4); assert.equal(chat[2].body.thread_id, 5); assert.equal(chat[3].body.thread_id, undefined);
+  assert.equal($('celine-a').textContent, 'It added the retry in two files.');
+  // The mic still fills the box (the same recording, factored out).
+  $('mic').click(); await tick(); assert.ok($('mic').classList.contains('rec'));
+  heard = 'add a test'; $('mic').click(); await tick(); await tick(); await tick();
+  assert.equal($('prompt').value, 'add a test'); $('prompt').value = '';
+  // Ctrl+K offers her too; ✕ closes her card.
+  $('palette-btn').click(); $('palette-q').value = 'celine'; $('palette-q').dispatchEvent(new w.Event('input'));
+  assert.ok([...$('palette-list').children].some(r => r.textContent === '🎙 Ask Celine about this session')); $('palette').close();
+  $('celine-close').click(); assert.equal($('celine-card').hidden, true);
+  $('narrate').value = 'off'; $('narrate').dispatchEvent(new w.Event('change'));
+  delete w.navigator.mediaDevices; delete w.MediaRecorder;
+}
+
+// The night shift: the morning brief's link opens "While you slept" (/code#overnight).
+async function nightShift() {
+  nightDoc = [NIGHT(21, 'Fix login', {verdict: 'proved', checks: 'passed', why: '212 passed', rating: 8, review_state: 'done', review_engine: 'chatgpt', review_engine_name: 'ChatGPT plan'}),
+    NIGHT(22, 'Retry uploads', {checks: 'unknown', why: "Could not run 'npm test'", claimed: true, review_state: 'skipped'}),
+    NIGHT(23, 'Tidy the logs', {working: true, files_changed: 0})];
+  extraSessions = [{id: 21, project_id: 1, title: 'Fix login', engine: 'claude', mode: 'safe', status: 'ready', last_status: 'done', files_changed: 2,
+    review_rating: 8, origin: 'night', task_id: 1, updated: now - 60, working: false}];
+  $('narrate').value = 'milestones'; $('narrate').dispatchEvent(new w.Event('change'));
+  const said = spoken().length;
+  w.location.hash = '#overnight'; await tick(300); await tick(300);
+  assert.ok(d.body.classList.contains('view-home')); assert.equal($('overnight').hidden, false);
+  const rows = () => [...$('overnight-rows').querySelectorAll('.nrow')];
+  assert.equal(rows().length, 3);
+  const [good, unsure, busyRow] = rows();
+  assert.equal(good.querySelector('.p-badge').textContent, '✓ Proved'); assert.ok(good.querySelector('.p-badge').classList.contains('ok'));
+  assert.equal(good.querySelector('.why').textContent, 'Ready to Keep: checks passed (212 passed).');
+  assert.ok(good.querySelector('.ring10'), 'the rating ring'); assert.match(good.querySelector('.m').textContent, /8\/10 by ChatGPT plan/);
+  assert.equal(unsure.querySelector('.p-badge').textContent, '? Unverified');
+  assert.equal(unsure.querySelector('.why').textContent, "Not verified: checks couldn't run; it claimed the tests pass, Apex didn't see it.");
+  assert.match(unsure.querySelector('.m').textContent, /no independent review/);
+  assert.equal(busyRow.querySelector('.p-badge').textContent, '… Working');
+  assert.deepEqual([...busyRow.querySelectorAll('.acts button')].map(b => b.textContent), ['Open'], 'nothing to decide while it works');
+  assert.deepEqual([...good.querySelectorAll('.acts button')].map(b => b.textContent), ['Keep', 'Throw away', 'Open']);
+  // Said out loud in counts only: a title could be private.
+  await tick(300);
+  assert.deepEqual(spoken().slice(said), ["Two sessions are ready; one isn't verified.", 'One is still working.']);
+  assert.ok(!spoken().slice(said).join(' ').match(/Fix login|Retry uploads|Tidy/));
+  // The 🌙 badge on its card.
+  const card = [...$('cards').children].find(c => c.textContent.includes('Fix login'));
+  assert.equal(card.querySelector('.badge.night').textContent, '🌙 night');
+  // Keep goes through the proof's question first.
+  proofDoc = PROOF({verdict: 'proved', reasons: ['Apex ran python -m pytest -q on checkpoint 2: 212 passed.']});
+  [...good.querySelectorAll('.acts button')].find(b => b.textContent === 'Keep').click(); await tick();
+  assert.equal($('confirm').open, true); assert.equal($('confirm-title').textContent, 'Keep it?');
+  assert.match($('confirm-text').textContent, /This merges 2 files into main of Apex\.[\s\S]*✓ Proved: Apex ran/);
+  $('confirm').close('ok'); await tick(); await tick();
+  assert.deepEqual(last(/\/api\/code\/sessions\/21\/keep$/).body, {});
+  assert.equal(rows().length, 2, 'kept: off the strip');
+  // Unproved: "Keep it unproved?", and Esc keeps nothing.
+  proofDoc = PROOF();
+  [...rows()[0].querySelectorAll('.acts button')].find(b => b.textContent === 'Keep').click(); await tick();
+  assert.equal($('confirm-title').textContent, 'Keep it unproved?'); $('confirm').close(); await tick();
+  assert.ok(!calls.some(c => /\/sessions\/22\/keep$/.test(c.url)));
+  // Throw away asks why.
+  [...rows()[0].querySelectorAll('.acts button')].find(b => b.textContent === 'Throw away').click(); await tick();
+  assert.equal($('discard-dialog').open, true);
+  [...$('discard-reasons').querySelectorAll('[data-reason]')].find(b => b.dataset.reason === 'wrong').click();
+  $('discard-dialog').close('ok'); await tick(); await tick();
+  assert.deepEqual(last(/\/api\/code\/sessions\/22\/discard$/).body, {reason: 'wrong'});
+  assert.equal(rows().length, 1);
+  // Open: the session, with where it came from under the first message, and the skipped review said plainly.
+  session = {...session, id: 23, title: 'Tidy the logs', origin: 'night', task_id: 3, task: {id: 3, title: 'Tidy the logs'}, status: 'ready',
+    working: false, side: '', review_state: 'skipped', review_rating: null, review_text: 'No independent review: the other plan is resting.'};
+  [...rows()[0].querySelectorAll('.acts button')].find(b => b.textContent === 'Open').click(); await tick(300); await tick(300);
+  assert.ok(d.body.classList.contains('view-session'));
+  const from = d.querySelectorAll('.from-work');
+  assert.equal(from.length, 1, 'only under the first message');
+  assert.equal(from[0].textContent, '🌙 From your Work list: Tidy the logs'); assert.equal(from[0].querySelector('a').getAttribute('href'), '/work');
+  assert.ok([...$('s-meta').children].some(x => x.textContent === '🌙 night'));
+  assert.equal($('r-body').textContent, 'No independent review: the other plan is resting. Ask for one now if you want it.');
+  $('narrate').value = 'off'; $('narrate').dispatchEvent(new w.Event('change'));
+  nightDoc = []; extraSessions = [];
+  $('back').click(); await tick(300);
+  assert.equal($('overnight').hidden, true, 'nothing left: the strip goes');
+}
 
 // Away mode on a phone (/code#allow=…): its own device token can't read Apex Code (403),
 // yet the link in a notification asks, and answers, the one question.
@@ -228,6 +437,8 @@ async function phone() {
   };
   pw.Response = Response;
   pw.eval(fs.readFileSync(path.join(base, 'theme.js'), 'utf8'));
+  pw.eval(fs.readFileSync(path.join(base, 'speech_queue.js'), 'utf8'));
+  pw.eval(fs.readFileSync(path.join(base, 'code_narration.js'), 'utf8'));
   pw.eval(fs.readFileSync(path.join(base, 'code.js'), 'utf8'));
   await tick(); await tick(); await tick();
   assert.equal(seen[0].url, '/api/code/allow/tok-phone-0123456789abc', 'the question is read before the overview');
@@ -783,6 +994,8 @@ async function phone() {
   assert.ok(last(/\/api\/staged-writes\/54\/reject$/)); assert.equal($('toast').textContent, 'Rejected. Nothing was saved.');
   assert.equal(calls.filter(c => c.url === '/api/memories' && c.method === 'POST').length, memories, 'Reject saves nothing');
   assert.equal($('box-waiting').hidden, true);
+  await celine();
+  await nightShift();
   await phone();
   console.log('PASS: greeting and plans, @ and / as you type, starting with a model and effort, polling then the live stream (typing as it writes), '
     + 'every feed step (agent text never HTML, plan in place, reads grouped, failed command open, edits with their diff inline), Copy buttons (and their fallback), Allow once, Esc stops, '
@@ -796,6 +1009,10 @@ async function phone() {
     + 'Throw away asking why, what Keep and Throw away wrote, the decision log with History and Restore), '
     + 'and Apex\'s memory on tap (the 🧠 step, memories waiting for your OK with Approve, Reject and Edit), '
     + 'and away mode (📱 sent to your phone; a phone with its own token answers Allow once or Don\'t allow, never sees the owner-only message, '
-    + 'and is told when a request expired, was answered, or is unknown; a link tapped at the PC asks the same question).');
+    + 'and is told when a request expired, was answered, or is unknown; a link tapped at the PC asks the same question), '
+    + 'and Celine on the build (milestones in your Voicebox voice with no code, a busy voice tried once more then the chime, play-by-play paced, '
+    + 'a draft with Send, Edit and ✕, and asking her typed or out loud with her answer shown and said, in one thread per session), '
+    + 'and the night shift (While you slept from the morning link: proof badges, the rating, Keep through the proof\'s question, Throw away with why, Open; '
+    + 'its counts said without titles; the 🌙 badge; From your Work list under the first message; a skipped review said plainly).');
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

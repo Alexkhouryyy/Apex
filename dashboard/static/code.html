@@ -5,8 +5,10 @@
   <title>Apex · Code</title>
   <link rel="icon" href="/static/icons/apex-refined.svg">
   <link rel="stylesheet" href="/static/brand.css?v=brand40">
-  <link rel="stylesheet" href="/static/code.css?v=code-8">
-  <script src="/static/code.js?v=code-8" defer></script>
+  <link rel="stylesheet" href="/static/code.css?v=code-10">
+  <script src="/static/speech_queue.js?v=code-10" defer></script>
+  <script src="/static/code_narration.js?v=code-10" defer></script>
+  <script src="/static/code.js?v=code-10" defer></script>
   <link rel="stylesheet" href="/static/theme.css">
 </head>
 <body class="view-home term">
@@ -36,6 +38,11 @@
         <p class="eyebrow" id="today">APEX CODE</p>
         <h1 id="greeting">Good evening.</h1>
         <p class="sub" id="greet-sub">Two plans. Zero API credits. What are we building?</p>
+        <section class="overnight" id="overnight" aria-labelledby="overnight-title" hidden>
+          <h2 class="overnight-title" id="overnight-title">🌙 While you slept</h2>
+          <p class="fine" id="overnight-sub">Apex built these from your Work list. Nothing is kept until you say so.</p>
+          <div class="overnight-rows" id="overnight-rows"></div>
+        </section>
         <div class="week" id="week" aria-label="This week"></div>
         <section class="record" id="record" aria-labelledby="record-title" hidden>
           <h2 class="record-title" id="record-title"></h2>
@@ -56,10 +63,22 @@
             <p class="meta" id="s-meta"></p>
           </div>
           <span class="tokens" id="s-tokens" title="Tokens this session (your plan's usage, never API credits)"></span>
+          <button type="button" class="small celine-btn" id="celine-btn" title="Ask Celine about this session, out loud (Ctrl+Shift+Space). Press again when you're done." aria-label="Ask Celine">🎙<span class="wide"> Ask Celine</span></button>
+          <select id="narrate" class="narrate" aria-label="Narration" title="Said out loud in your Voicebox voice, free on this PC. Without Voicebox running, Apex chimes instead; it never uses OpenAI's paid voice (tts-1) for this.">
+            <option value="off">🔈 Off</option><option value="milestones">🔊 Milestones</option><option value="play">🔊 Play-by-play</option>
+          </select>
           <button type="button" class="small" id="look-btn" title="Terminal or Studio look">Studio look</button>
           <button type="button" class="small" id="palette-btn" title="Everything you can do (Ctrl+K)">⌘ Ctrl K</button>
           <button type="button" class="only-narrow" id="open-side" aria-controls="side">Changes <em id="side-count"></em></button>
         </div>
+        <aside id="celine-card" class="celine-card" hidden aria-live="polite" aria-label="Celine's answer">
+          <div class="ch"><b>🎙 Celine</b><span class="cs muted" id="celine-state"></span><span class="grow"></span>
+            <button type="button" class="small" id="celine-quiet" title="Stop speaking">■ Quiet</button>
+            <button type="button" class="icon" id="celine-close" aria-label="Close Celine's answer">✕</button></div>
+          <p class="cq" id="celine-q"></p>
+          <div class="ca" id="celine-a"></div>
+          <p class="fine">She reads what Apex saw of this session. She can't keep, allow or send: you do.</p>
+        </aside>
         <div class="feed" id="feed" aria-live="polite"></div>
         <div id="session-slot"></div>
       </section>

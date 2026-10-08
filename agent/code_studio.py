@@ -35,6 +35,8 @@ Around that:
   away mode       a command Safe mode stopped reaches your phone, and one tap
                   allows it once (or says no); a finished session pings you, and
                   Apex's restraint holds a 1 a.m. finish until you're around
+  Celine          ask out loud about a session: she reads what Apex saw
+                  (for_voice) and may draft a message, which only you send
 
 Coding never uses API credits: only the two plans, signed in on this PC.
 """
@@ -64,6 +66,7 @@ CHECK_TIMEOUT = 1800
 REVIEW_DIFF_LIMIT = 60000             # characters of diff the second opinion gets
 DIFF_LIMIT = 400_000                  # characters of one file's diff shown
 ALLOW_TTL = 7200                      # seconds a blocked command can be answered from your phone
+NIGHT_ALLOW_TTL = 12 * 3600           # ... from a night-shift session: you answer in the morning
 MAX_ASKS = 3                          # phone asks for blocked commands, at most, per turn
 APEX_CHECKS = 'python -m pytest -q -x -p no:cacheprovider'
 CONFLICT_MARK = re.compile(r'^(<{7}|>{7})( |$)', re.M)
@@ -157,7 +160,9 @@ def init_db() -> None:
         have = {r[1] for r in db.execute('PRAGMA table_info(code_sessions)')}
         for col, ddl in (('model', "TEXT NOT NULL DEFAULT ''"), ('effort', "TEXT NOT NULL DEFAULT ''"),
                          ('tokens', 'INTEGER NOT NULL DEFAULT 0'), ('check_sha', "TEXT NOT NULL DEFAULT ''"),
-                         ('check_evidence', "TEXT NOT NULL DEFAULT ''")):
+                         ('check_evidence', "TEXT NOT NULL DEFAULT ''"),
+                         # origin: 'you', or 'night' for a Work task Apex took on its own overnight (task_id).
+                         ('origin', "TEXT NOT NULL DEFAULT 'you'"), ('task_id', 'INTEGER')):
             if col not in have:
                 db.execute(f'ALTER TABLE code_sessions ADD COLUMN {col} {ddl}')
         # checks_exit_ok: this project's test runner prints no count, so exit 0 is taken as a pass.
@@ -174,7 +179,8 @@ def _recover() -> None:
     """Apex restarted: nothing can still be running from before."""
     with longterm._conn() as db:
         stuck = [r[0] for r in db.execute("SELECT id FROM code_sessions WHERE turn_state != 'idle'")]
-        db.execute("UPDATE code_sessions SET turn_state='idle' WHERE turn_state != 'idle'")
+        # last_status too: the night shift reads it to tell its Work task the turn ended.
+        db.execute("UPDATE code_sessions SET turn_state='idle', last_status='interrupted' WHERE turn_state != 'idle'")
         db.execute("UPDATE code_sessions SET review_state='failed', review_text='Apex restarted during the review.' "
                    "WHERE review_state='working'")
         db.execute("UPDATE code_sessions SET check_state='' WHERE check_state='running'")
@@ -205,7 +211,8 @@ def event(sid: int, kind: str, **data) -> int:
 
 
 def _last_kind(sid: int) -> str:
-    rows = _rows('SELECT kind FROM code_events WHERE session_id=? ORDER BY id DESC LIMIT 1', (sid,))
+    """The last step of the session. A message Celine drafted is a side note, not a step."""
+    rows = _rows("SELECT kind FROM code_events WHERE session_id=? AND kind != 'draft' ORDER BY id DESC LIMIT 1", (sid,))
     return rows[0]['kind'] if rows else ''
 
 
@@ -377,6 +384,7 @@ def session(sid: int) -> dict:
         s['side'] = 'review' if s['review_state'] == 'working' else ('checks' if s['check_state'] == 'running' else '')
         s['terminal'] = sid in _terms
     s['engine_name'] = we.NAMES.get(s['engine'], s['engine'])
+    s['task'] = _task_of(s.get('task_id'))
     s['since'] = None                                     # when the work now running began, for the page's clock
     if s['working'] or s['side']:
         kinds = ('you',) if s['working'] else ('review_started', 'checks_started')
@@ -386,10 +394,21 @@ def session(sid: int) -> dict:
     return s
 
 
+def _task_of(tid) -> dict | None:
+    """The Work task a night-shift session works on: its id and title (agent/work.py)."""
+    if not tid:
+        return None
+    try:
+        rows = _rows('SELECT id, title FROM work_tasks WHERE id=?', (tid,))
+    except Exception:                                     # Work's tables not made yet
+        rows = []
+    return rows[0] if rows else {'id': tid, 'title': ''}
+
+
 def sessions(project_id: int | None = None, limit: int = 100) -> list[dict]:
     where, args = ('WHERE s.project_id=?', (project_id,)) if project_id else ('', ())
     rows = _rows('SELECT s.id, s.project_id, p.name AS project, s.title, s.engine, s.mode, s.status, s.turn_state, '
-                 's.last_status, s.files_changed, s.review_rating, s.review_engine, s.created, s.updated '
+                 's.last_status, s.files_changed, s.review_rating, s.review_engine, s.origin, s.task_id, s.created, s.updated '
                  f'FROM code_sessions s JOIN code_projects p ON p.id = s.project_id {where} '
                  'ORDER BY s.updated DESC LIMIT ?', (*args, limit))
     with _lock:
@@ -412,10 +431,16 @@ def _title(prompt: str) -> str:
     return first if len(first) <= 70 else first[:69].rstrip() + '…'
 
 
+ORIGINS = ('you', 'night')
+
+
 def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'safe', model: str = '',
-          effort: str = '', plan: bool = False) -> dict:
-    """A new session: its own branch and working copy, then the first message."""
+          effort: str = '', plan: bool = False, origin: str = 'you', task_id: int | None = None) -> dict:
+    """A new session: its own branch and working copy, then the first message.
+    origin 'night' is a Work task (task_id) the night shift took (agent/work_agent.py)."""
     prompt = _clean_prompt(prompt)
+    if origin not in ORIGINS:
+        raise CodeError('A session comes from you or from the night shift.')
     if engine not in ENGINES:
         raise CodeError('Choose your Claude plan or your ChatGPT plan.')
     if mode not in MODES:
@@ -432,8 +457,9 @@ def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'saf
     dirty = [l for l in _git(repo, 'status', '--porcelain').splitlines() if l.strip()]
     now = time.time()
     with longterm._conn() as db:
-        cur = db.execute('INSERT INTO code_sessions (project_id, title, engine, mode, base_ref, base_commit, created, updated) '
-                         'VALUES (?,?,?,?,?,?,?,?)', (project_id, _title(prompt), engine, mode, base_ref, base_commit, now, now))
+        cur = db.execute('INSERT INTO code_sessions (project_id, title, engine, mode, base_ref, base_commit, origin, task_id, '
+                         'created, updated) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                         (project_id, _title(prompt), engine, mode, base_ref, base_commit, origin, task_id, now, now))
         sid = cur.lastrowid
     slug = _slug(_title(prompt))
     branch = f'apex/{sid}-{slug}'
@@ -640,7 +666,7 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
                 return
             elif e['kind'] != 'done':                    # the turn's end is recorded below, with its numbers
                 if e['kind'] == 'blocked' and e.get('command'):
-                    token = _allow_token(sid, e['command'], asks)
+                    token = _allow_token(sid, e['command'], asks, night=s['origin'] == 'night')
                     e = {**e, 'allow_id': token} if token else e
                 # A tool's own id (to pair a command with its result) is kept as `ref`.
                 event(sid, e['kind'], **{('ref' if k == 'id' else k): v for k, v in e.items() if k != 'kind'})
@@ -688,7 +714,7 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
         if took >= 60 and result['status'] != 'stopped':
             _notify(sid, s['title'], result['status'], total)
         if asks:
-            _ask_phone(sid, s['title'], engine, asks)
+            _ask_phone(sid, s['title'], engine, asks, night=s['origin'] == 'night')
         with _lock:                                       # last: "not working" means everything above is done
             _turns.pop(sid, None)
 
@@ -728,7 +754,7 @@ class NoSuchAllow(CodeError):
     """No blocked command has that link."""
 
 
-def _allow_token(sid: int, command: str, asks: dict) -> str | None:
+def _allow_token(sid: int, command: str, asks: dict, night: bool = False) -> str | None:
     """A command Safe mode stopped gets a secret link your phone can answer, once,
     for two hours (one per command, MAX_ASKS commands a turn). None for a command
     that could never be allowed (allow() would refuse it), one past the limit (the
@@ -743,7 +769,7 @@ def _allow_token(sid: int, command: str, asks: dict) -> str | None:
         try:
             with longterm._conn() as db:
                 db.execute('INSERT INTO code_pending_allows (id, session_id, command, created, expires) VALUES (?,?,?,?,?)',
-                           (token, sid, command, now, now + ALLOW_TTL))
+                           (token, sid, command, now, now + (NIGHT_ALLOW_TTL if night else ALLOW_TTL)))
         except Exception as exc:                          # the step still shows, with Allow once on the page
             print(f'[Code] could not keep the request for your phone: {exc}')
             return None
@@ -751,9 +777,11 @@ def _allow_token(sid: int, command: str, asks: dict) -> str | None:
     return asks[command]
 
 
-def _ask_phone(sid: int, title: str, engine: str, asks: dict) -> None:
+def _ask_phone(sid: int, title: str, engine: str, asks: dict, night: bool = False) -> None:
     """Safe mode stopped a command: ask on every device (high priority, so it is never
-    held), at most MAX_ASKS a turn. The link opens a one-tap Allow once / Don't allow."""
+    held), at most MAX_ASKS a turn. The link opens a one-tap Allow once / Don't allow.
+    A night-shift session asks at normal priority, so restraint holds a 3 a.m. ask
+    until you're up; its link lasts until the morning."""
     try:
         from agent import notify
     except Exception as exc:
@@ -764,7 +792,8 @@ def _ask_phone(sid: int, title: str, engine: str, asks: dict) -> None:
         try:
             notify.notify('Apex · Code needs you',
                           f'"{title}": your {we.NAMES.get(engine, engine)} wants to run `{shown}`. Allow it once?',
-                          kind='code', priority='high', url=f'/code#allow={token}', dedup_key=f'code:{sid}:blocked:{command}')
+                          kind='code', priority='normal' if night else 'high', url=f'/code#allow={token}',
+                          dedup_key=f'code:{sid}:blocked:{command}')
         except Exception as exc:
             print(f'[Code] could not ask your phone: {exc}')
 
@@ -1749,6 +1778,98 @@ def owner_evidence(sid: int, output: str) -> dict:
     return proof(sid)
 
 
+# ---------------------------------------------------------------- Celine on the build
+# Ask Celine about a session, out loud or typed (dashboard/companion.py with
+# workspace 'code', and core's code_status / code_act tools). She gets what Apex
+# saw, never the diff's text: everything here was written by a coding agent or a
+# repository, so it is data for her to read, not instructions to follow. She can
+# draft a message; only the owner sends it.
+
+VOICE_KINDS = ('done', 'checks', 'review', 'blocked', 'kept', 'discarded')
+VOICE_EVENTS = 12                     # the last steps she hears about
+VOICE_CUT = 600                       # characters of any one text in them
+VOICE_LIVE = 1500                     # characters of what the plan is typing right now
+MAX_DRAFT = 4000
+
+
+def _cut(value, n: int = VOICE_CUT):
+    if isinstance(value, str):
+        return value if len(value) <= n else value[:n] + '…'
+    return value
+
+
+def for_voice(sid: int) -> dict:
+    """One session as Celine hears it: the session, the proof, which files changed
+    (counts only, no hunks), its last milestones, what the plan is typing now and
+    the owner's rules. Raises CodeError (a ValueError) for an unknown session."""
+    s = session(sid)
+    out = {'session': {k: s.get(k) for k in ('id', 'title', 'project', 'branch', 'engine', 'engine_name', 'status',
+                                               'turn_state', 'working', 'files_changed', 'review_rating',
+                                               'review_engine')},
+           'summary': _cut(s.get('summary') or '')}
+    try:
+        p = proof(sid)
+        c = p['checks']
+        out['proof'] = {'verdict': p['verdict'], 'reasons': p['reasons'],
+                        'checks': {'state': c['state'], 'why': _cut(c['why'] or ''), 'stale': c['stale'],
+                                   'changed_since': (c['changed_since'] or [])[:20]},
+                        'claims': [x['sentence'] for x in p['claims']],
+                        'review': p['review'] and {k: p['review'][k] for k in ('engine', 'rating', 'independence',
+                                                                                'label', 'disagreement')}}
+    except Exception as exc:                              # a gone copy or a git hiccup: say so, never guess
+        out['proof'] = {'verdict': 'unknown', 'reasons': [f'Apex could not read the proof: {type(exc).__name__}']}
+    try:
+        ch = changes(sid)
+        out['changes'] = {'files': [{k: f[k] for k in ('path', 'plus', 'minus', 'change')} for f in ch['files'][:60]],
+                          'count': len(ch['files']), 'plus': ch['plus'], 'minus': ch['minus']}
+    except Exception:
+        out['changes'] = {'files': [], 'count': s.get('files_changed') or 0, 'note': "the session's copy is gone"}
+    rows = _rows(f"SELECT id, ts, kind, data FROM code_events WHERE session_id=? AND kind IN "
+                 f"({','.join('?' * len(VOICE_KINDS))}) ORDER BY id DESC LIMIT ?", (sid, *VOICE_KINDS, VOICE_EVENTS))
+    steps = []
+    for r in reversed(rows):
+        data = json.loads(r['data'])
+        data.pop('left', None)                            # the checks' file fingerprints: noise to her
+        data.pop('allow_id', None)                        # a phone link's secret: never hers
+        out_tail = data.pop('output', None)
+        step = {'kind': r['kind'], 'ts': round(r['ts']), **{k: _cut(v) for k, v in data.items()}}
+        if isinstance(out_tail, str):                     # the end of the output says what happened
+            step['output'] = '…' + out_tail[-VOICE_CUT:] if len(out_tail) > VOICE_CUT else out_tail
+        steps.append(step)
+    out['steps'] = steps
+    out['typing_now'] = live(sid)['text'][-VOICE_LIVE:] if s.get('working') else ''
+    try:
+        out['rules'] = {'project': [x['text'] for x in code_brain.rules(s['project_id'])['items'] if x.get('active')],
+                        'all_code': [x['text'] for x in code_brain.global_rules()]}
+    except Exception:
+        out['rules'] = {'project': [], 'all_code': []}
+    return out
+
+
+def voice_list(limit: int = 12) -> list[dict]:
+    """Recent sessions, one line each, for "how's the build going?"."""
+    rows = _rows('SELECT s.id, s.title, p.name AS project, s.status, s.check_state, s.review_rating, s.updated '
+                 'FROM code_sessions s JOIN code_projects p ON p.id = s.project_id ORDER BY s.updated DESC LIMIT ?',
+                 (limit,))
+    with _lock:
+        for r in rows:
+            r['working'] = r['id'] in _turns
+    return rows
+
+
+def draft(sid: int, text: str, by: str = 'Celine') -> dict:
+    """A message for the plan, written by Celine and shown to the owner with Send,
+    Edit and ✕. Recorded only: it never reaches the plan unless the owner sends it."""
+    text = str(text or '').strip()
+    if not text:
+        raise CodeError('A draft needs some text.')
+    s = session(sid)
+    if s['status'] != 'ready':
+        raise CodeError('This session is finished (kept or thrown away).')
+    eid = event(sid, 'draft', text=text[:MAX_DRAFT], by=str(by or 'Celine')[:40])
+    return {'id': eid, 'session_id': sid, 'text': text[:MAX_DRAFT], 'sent': False}
+
+
 # ---------------------------------------------------------------- allow, files, terminal, history
 
 def _project_allow(s: dict) -> list[str]:
@@ -1904,6 +2025,137 @@ def commit_diff(sid: int, sha: str) -> str:
     folder = s['worktree'] if s['worktree'] and Path(s['worktree']).is_dir() else s['project_path']
     text = _git(folder, 'show', '--no-renames', '--format=%s%n', sha, check=False).stdout
     return text[:DIFF_LIMIT] + (f'\n… (cut: {len(text):,} characters)' if len(text) > DIFF_LIMIT else '')
+
+
+# ---------------------------------------------------------------- the night shift (agent/work_agent.py)
+# A Work task marked +apex, in a software project linked to an Apex Code project,
+# is taken overnight as a real session (origin 'night'). After its turn, Apex runs
+# the checks and has the other plan review it, one step per Work tick, read from the
+# database so a restart carries on. It never keeps anything: the morning brief says
+# what Apex saw, and the owner decides.
+
+def _checks_command(s: dict) -> str:
+    rows = _rows('SELECT checks FROM code_projects WHERE id=?', (s['project_id'],))
+    return rows[0]['checks'] if rows else ''
+
+
+def settled(s: dict) -> bool:
+    """After a finished turn: nothing left for the night shift to do (the checks ran,
+    or there are none; the second opinion came back, failed or was skipped)."""
+    if not s['files_changed']:
+        return True                                       # nothing changed: nothing to check or review
+    if s['check_state'] in ('', 'running') and _checks_command(s):
+        return False
+    return s['review_state'] in ('done', 'failed', 'skipped')
+
+
+def _other_plan(engine: str) -> str:
+    return 'chatgpt' if engine == 'claude' else 'claude'
+
+
+def autopilot(sid: int) -> str:
+    """One step of a night session after its turn: run the checks once, then ask
+    the other plan for a second opinion if it is free (otherwise note that and skip
+    it). Never Keep. What it did: 'checks', 'review', 'skipped', or '' (nothing to do now)."""
+    s = session(sid)
+    if s['status'] != 'ready' or s['origin'] != 'night' or s['working'] or s['side'] or s['turn_state'] != 'idle' \
+            or s['last_status'] != 'done' or settled(s):
+        return ''
+    command = _checks_command(s)
+    if s['check_state'] == '' and command:
+        try:
+            run_checks(sid)
+        except CodeError as exc:
+            with _lock:
+                if sid in _turns or sid in _side:         # something else started a moment ago
+                    return ''
+            why = f"The night shift couldn't start the checks: {exc}"
+            event(sid, 'checks', passed=False, state='unknown', why=why, sha='', seconds=0, output='', command=command)
+            _set(sid, check_state='unknown', check_evidence=why)
+        return 'checks'
+    if s['check_state'] == 'running' or s['review_state'] not in ('', None):
+        return ''
+    other = _other_plan(s['engine'])
+    try:
+        from agent import work_agent
+        why = work_agent.available().get(other)
+    except Exception as exc:
+        why = f'could not be checked ({type(exc).__name__})'
+    if not why:
+        try:
+            review(sid, other)
+            return 'review'
+        except CodeError as exc:
+            with _lock:
+                if sid in _turns or sid in _side:
+                    return ''
+            why = str(exc)
+    note = ('No independent review: the other plan is resting.' if 'resting' in why or 'limit' in why
+            else f'No independent review: your {we.NAMES[other]} {why.rstrip(".")}.')
+    event(sid, 'note', text=note)
+    _set(sid, review_state='skipped', review_text=note)
+    return 'skipped'
+
+
+def outcome_text(sid: int) -> str:
+    """What a night session came to, for its Work task: the plan's summary, the
+    proof and the second opinion."""
+    s = session(sid)
+    try:
+        p = proof(sid)
+    except Exception as exc:
+        p = {'verdict': 'unverified', 'reasons': [f'Apex could not read the proof ({type(exc).__name__}).'],
+             'checks': {'state': 'none', 'why': ''}}
+    c = p['checks']
+    why = c['why'] if c['state'] in ('passed', 'failed', 'unknown') and c['why'] else (p['reasons'] or [''])[0]
+    if s['review_rating'] is not None:
+        rated = f"review {s['review_rating']}/10 by your {we.NAMES.get(s['review_engine'], s['review_engine'])}"
+    else:
+        rated = 'no independent review' if s['review_state'] == 'skipped' else 'no second opinion'
+    if not s['files_changed']:
+        rated = 'nothing changed'
+    return f"{(s['summary'] or '').strip()[:600]}\nProof: {p['verdict']} ({why.rstrip('.')}); {rated}".strip()
+
+
+def _since_last_brief(now: float) -> float:
+    """When the last morning brief before today went out (agent/work_agent.py), else a day ago."""
+    day = time.localtime(now)
+    today = time.mktime((day.tm_year, day.tm_mon, day.tm_mday, 0, 0, 0, 0, 0, -1))
+    try:
+        rows = _rows("SELECT MAX(ts) AS ts FROM work_events WHERE kind='brief' AND ts < ?", (today,))
+    except Exception:                                     # Work's tables not made yet
+        rows = []
+    return rows[0]['ts'] if rows and rows[0]['ts'] else now - 86400
+
+
+def overnight(since: float | None = None, now: float | None = None) -> list[dict]:
+    """What the night shift built, for the morning: every night session still
+    waiting for your decision, and any other open session that moved since the
+    last brief. Each with the proof's verdict and why, the second opinion, the
+    files and branch, and whether it is still working."""
+    now = now or time.time()
+    since = _since_last_brief(now) if since is None else since
+    ids = [r['id'] for r in _rows("SELECT id FROM code_sessions WHERE status='ready' AND (origin='night' OR updated >= ?) "
+                                  'ORDER BY created', (since,))]
+    out = []
+    for sid in ids:
+        s = session(sid)
+        working = bool(s['working'] or s['side'] or s['turn_state'] != 'idle' or not s['last_status']
+                       or (s['origin'] == 'night' and s['last_status'] == 'done' and not settled(s)))
+        try:
+            p = proof(sid)
+        except Exception as exc:
+            print(f'[Code] could not read the proof of session {sid} for the morning: {type(exc).__name__}: {exc}')
+            p = {'verdict': 'unverified', 'reasons': [], 'claims': [], 'checks': {'state': 'none', 'why': ''}}
+        out.append({'id': sid, 'title': s['title'], 'project': s['project'], 'project_id': s['project_id'],
+                    'origin': s['origin'], 'task': s['task'], 'engine': s['engine'], 'engine_name': s['engine_name'],
+                    'last_status': s['last_status'], 'working': working, 'verdict': p['verdict'],
+                    'reasons': p['reasons'][:3], 'checks': p['checks']['state'], 'why': p['checks']['why'] or '',
+                    'claimed': any(c.get('pass_claim') for c in p.get('claims', [])),
+                    'rating': s['review_rating'], 'review_state': s['review_state'], 'review_engine': s['review_engine'],
+                    'review_engine_name': we.NAMES.get(s['review_engine'], s['review_engine']) if s['review_engine'] else '',
+                    'files_changed': s['files_changed'], 'branch': s['branch'], 'updated': s['updated']})
+    return out
 
 
 # ---------------------------------------------------------------- the page's overview

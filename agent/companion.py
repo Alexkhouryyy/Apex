@@ -27,7 +27,15 @@ DISCUSS_TOOLS = frozenset({
     # Inspect references and draft reusable tools during conversation. These
     # routes stage generated code; they never activate it on the host.
     "list_skills", "repository_inspect", "develop_skill",
+    # Apex Code, read-only: what a coding session did and what Apex saw of it.
+    "code_status",
 })
+# Offered only in a companion turn in Work mode, never in plain chat, SMS or
+# Telegram: code_act runs checks, a second opinion, Stop, or drafts a message
+# the owner sends himself (agent/core._code_act).
+WORK_ONLY_TOOLS = frozenset({"code_act"})
+# Apex Code is the owner's (dashboard/code.py): a turn from a device token gets neither.
+CODE_TOOLS = frozenset({"code_status", "code_act"})
 
 
 def validate_screen_image(value: str | None) -> str | None:

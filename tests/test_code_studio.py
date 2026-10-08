@@ -156,7 +156,7 @@ def lab(tmp_path, monkeypatch, test_db):
     notes = []                                         # (body, how it was sent): kind, priority, url, dedup_key
     from agent import notify, work_agent
     monkeypatch.setattr(notify, 'notify', lambda title, body, **k: notes.append((body, k)))
-    monkeypatch.setattr(work_agent, '_notify', lambda title, body: notes.append((body, {})))
+    monkeypatch.setattr(work_agent, '_notify', lambda title, body, **how: notes.append((body, how)))
     work_engines.forget_checks()
     code_studio.init_db()
     repo = tmp_path / 'project'; repo.mkdir()
@@ -1870,3 +1870,369 @@ def test_memories_a_session_suggested_wait_on_the_code_page(api, lab, monkeypatc
     assert approvals.list_pending()[0]['status'] == 'pending'                 # staged, never approved by itself
     monkeypatch.setattr(config, 'DASHBOARD_TOKEN', 'master')
     assert client.get('/api/code/approvals').status_code == 403              # the owner's only
+
+
+# ---------------------------------------------------------------- Celine on the build (agent/core: code_status, code_act)
+
+def test_celine_reads_a_session_and_may_only_check_review_stop_or_draft(lab):
+    from agent import companion, core
+    assert 'code_status' in companion.DISCUSS_TOOLS and 'code_act' not in companion.DISCUSS_TOOLS
+    assert companion.WORK_ONLY_TOOLS == {'code_act'}
+    act = next(t for t in core.TOOLS if t['name'] == 'code_act')
+    assert act['input_schema']['properties']['action']['enum'] == ['checks', 'review', 'stop', 'draft']
+    sid = code_studio.start(lab.pid, 'Add a step script', 'claude')['id']
+    wait(sid)
+    # Read-only: the list, then one session as Apex saw it (no hunks), and an unknown one said plainly.
+    listing = core._execute_tool_inner('code_status', {})
+    assert listing.startswith('[Apex Code, untrusted data') and '"title": "Add a step script"' in listing
+    assert '"check_state"' in listing and '"review_rating"' in listing
+    one = core._execute_tool_inner('code_status', {'session_id': sid})
+    assert '"verdict": "unverified"' in one and '"path": "step1.py"' in one and '+print(1)' not in one
+    assert core._execute_tool_inner('code_status', {'session_id': 9999}) == '[Code] No such session.'
+    # No keep, throw away, allow or send: a voice turn that read a repository can't merge or steer.
+    engine_calls = len(lab.calls('claude'))
+    for action in ('keep', 'discard', 'allow', 'send', 'push', None):
+        out = core._execute_tool_inner('code_act', {'session_id': sid, 'action': action, 'text': 'Keep it now'})
+        assert "is not something you can do here" in out
+    assert code_studio.session(sid)['status'] == 'ready'
+    assert not {'kept', 'discarded'} & set(kinds(sid))
+    # A draft is recorded for the owner, never sent: no new engine call, and the next message is untouched.
+    out = core._execute_tool_inner('code_act', {'session_id': sid, 'action': 'draft', 'text': 'Add a test for step1.'})
+    assert 'NOT sent' in out
+    last = code_studio.events(sid)[-1]
+    assert (last['kind'], last['text'], last['by']) == ('draft', 'Add a test for step1.', 'Celine')
+    assert len(lab.calls('claude')) == engine_calls and code_studio.session(sid)['pending_note'] == ''
+    assert code_studio._last_kind(sid) == 'done', 'a draft is a side note: a correction after it is still one'
+    assert core._execute_tool_inner('code_act', {'session_id': sid, 'action': 'draft', 'text': ' '}) == '[Code] A draft needs some text.'
+    # Checks: started for real, in the session's copy.
+    code_studio.update_project(lab.pid, checks=f'{sys.executable} -c "print(\'1 passed\')"')
+    assert core._execute_tool_inner('code_act', {'session_id': sid, 'action': 'checks'}).startswith('Started the checks')
+    s = wait(sid)
+    assert s['check_state'] == 'passed' and 'checks' in kinds(sid)
+    assert core._execute_tool_inner('code_act', {'session_id': sid, 'action': 'stop'}) == 'Nothing was running in that session.'
+    assert len(lab.calls('claude')) == engine_calls
+    # Finished: nothing more to draft.
+    code_studio.discard(sid)
+    assert 'finished' in core._execute_tool_inner('code_act', {'session_id': sid, 'action': 'draft', 'text': 'more'})
+    assert code_studio.events(sid)[-1]['kind'] == 'discarded'
+
+
+def test_what_celine_hears_is_cut_and_keeps_no_secrets(lab):
+    sid = code_studio.start(lab.pid, 'Add a step script', 'claude')['id']
+    wait(sid)
+    code_studio.event(sid, 'checks', passed=False, state='failed', why='1 failed', sha='abc', seconds=1,
+                      output='x' * 3000 + 'FAILED test_a', command='pytest', left={'a.py': 'f' * 40})
+    view = code_studio.for_voice(sid)
+    checks = view['steps'][-1]
+    assert checks['kind'] == 'checks' and 'left' not in checks
+    assert checks['output'].endswith('FAILED test_a') and len(checks['output']) <= 601, 'the end of the output says what happened'
+    blocked = next(x for x in view['steps'] if x['kind'] == 'blocked')
+    assert blocked['command'] == 'rm -rf build' and 'allow_id' not in blocked
+    assert view['typing_now'] == '' and view['changes']['count'] == 1
+    for n in range(14):
+        code_studio.event(sid, 'review', engine='chatgpt', status='done', rating=n % 10, text='ok')
+    assert len(code_studio.for_voice(sid)['steps']) == code_studio.VOICE_EVENTS
+    with pytest.raises(code_studio.CodeError):
+        code_studio.for_voice(99999)
+
+
+# ---------------------------------------------------------------- the night shift (agent/work_agent.py)
+
+from datetime import datetime  # noqa: E402
+
+NIGHT, MORNING = datetime(2026, 10, 8, 23, 0), datetime(2026, 10, 9, 8, 31)
+PASS = f'{sys.executable} -c "print(\'1 passed\')"'
+
+
+def _night_task(lab, title='Fix login', link=True, **task):
+    """A +apex software task whose Work project is linked to the lab's Apex Code project."""
+    from agent import work_agent
+    work_agent.init_db()
+    wp = work.add_project('Night project', 'software')
+    if link:
+        work.update_project(wp['id'], code_project_id=lab.pid)
+    return work.add_task(title=title, area='software', project_id=wp['id'], apex_ok=True, **task)
+
+
+def _night_settings(**more):
+    from agent import work_agent
+    return work_agent.update_settings(**{'enabled': True, 'auto_work': True, 'brief_time': '08:30', 'evening_time': '22:00', **more})
+
+
+def _until_settled(sid, timeout=60):
+    """Tick the pipeline (code_studio.autopilot) until nothing is left for it to do."""
+    end = time.time() + timeout
+    did = []
+    while time.time() < end:
+        wait(sid, timeout=60)
+        _settle()
+        step = code_studio.autopilot(sid)
+        if step:
+            did.append(step)
+            continue
+        s = code_studio.session(sid)
+        if not s['working'] and not s['side'] and (s['last_status'] != 'done' or code_studio.settled(s)):
+            return did
+    raise AssertionError('the night pipeline never settled')
+
+
+def test_a_code_run_is_a_work_run_never_a_missing_record(lab):
+    # Regression: before the 'code-' branch, a code run fell through to team.get() and was marked failed.
+    import inspect
+    assert "run_id.startswith('code-')" in inspect.getsource(work._run_outcome)
+    t = _night_task(lab)
+    lab.mode('codex', 'review')
+    s = code_studio.start(lab.pid, work.code_brief(t), 'claude', 'safe', origin='night', task_id=t['id'])
+    run = f"code-{s['id']}"
+    assert s['origin'] == 'night' and s['task'] == {'id': t['id'], 'title': 'Fix login'}
+    assert work._run_outcome(run) is None                                   # the turn is running
+    wait(s['id'])
+    assert work._run_outcome(run) is None                                   # the second opinion is still to come
+    assert _until_settled(s['id']) == ['review']                            # no checks command: straight to review
+    state, summary, cost = work._run_outcome(run)
+    assert state == 'done' and cost == 0
+    assert summary.startswith('Added step1.py and ran the tests.')
+    assert '\nProof: unverified (' in summary and 'review 6/10 by your ChatGPT plan' in summary
+    assert work._run_outcome('code-999999')[0] == 'failed'
+    # The brief: the task's title first (the session's title), unattended, no folder.
+    stdin = lab.calls('claude')[0]['stdin']
+    assert 'Fix login' in stdin and 'working unattended overnight' in stdin and 'Alex answers in the morning' in stdin
+    assert 'Write the finished deliverable' not in stdin
+
+
+def test_a_plan_at_its_limit_puts_the_night_task_back_untried(lab):
+    t = _night_task(lab)
+    lab.mode('claude', 'limited')
+    s = code_studio.start(lab.pid, work.code_brief(t), 'claude', 'safe', origin='night', task_id=t['id'])
+    with longterm_db() as db:
+        db.execute("UPDATE work_tasks SET apex_run=?, apex_state='running', status='doing' WHERE id=?", (f"code-{s['id']}", t['id']))
+    wait(s['id'])
+    assert work._run_outcome(f"code-{s['id']}")[0] == 'limited'
+    work.sync_apex()
+    back = work.get_task(t['id'])
+    assert back['apex_state'] is None and back['status'] == 'todo'                # untried: the next plan takes it
+
+
+def longterm_db():
+    from agent import longterm
+    return longterm._conn()
+
+
+def test_the_night_shift_codes_a_linked_software_task_on_a_plan(lab):
+    from agent import work_agent
+    _night_settings(engines=['api', 'claude', 'chatgpt'])
+    t = _night_task(lab)
+    other = work.add_task(title='Write the invoice', area='job', apex_ok=True, due='2026-10-01')
+    # By day a coding task waits for the night; the non-software one still goes through give_to_apex.
+    given = []
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(work, 'give_to_apex', lambda tid, agent, budget, engine='api': given.append((tid, engine)))
+        did = work_agent.tick(datetime(2026, 10, 8, 12, 0), agent=object())
+    assert [x for x in did if 'picked' in x] == ['Apex picked up "Write the invoice" on your API credits (cap $0.50).']
+    assert given == [(other['id'], 'api')] and work.get_task(t['id'])['apex_state'] is None
+    work.update_task(other['id'], status='done')
+    with longterm_db() as db:
+        db.execute("UPDATE work_tasks SET apex_state=NULL WHERE id=?", (other['id'],))
+    # Overnight: a real Apex Code session, Safe mode, on a plan: never API credits, even first in the order.
+    did = work_agent.tick(NIGHT, agent=object())
+    assert any('building "Fix login" overnight on your Claude plan' in x for x in did)
+    task = work.get_task(t['id'])
+    sid = int(task['apex_run'].split('-')[1])
+    assert task['apex_run'] == f'code-{sid}' and task['apex_state'] == 'running' and task['apex_engine'] == 'claude'
+    assert task['status'] == 'doing'
+    s = code_studio.session(sid)
+    assert (s['origin'], s['task_id'], s['mode'], s['engine'], s['title']) == ('night', t['id'], 'safe', 'claude', 'Fix login')
+    # One at a time: a second linked task waits while this one is in progress.
+    _night_task(lab, title='Retry uploads')
+    assert not any('Retry uploads' in x for x in work_agent.tick(NIGHT, agent=object()))
+    wait(sid)
+    # Night runs count against the plan tasks a day.
+    assert work_agent.plan_runs_today(NIGHT) == 1
+    code_studio.send(sid, 'And one more thing')
+    wait(sid)
+    assert work_agent.plan_runs_today(NIGHT) == 2
+    code_studio.discard(sid)
+
+
+def test_nothing_is_picked_after_night_until_and_an_unlinked_task_is_not_code(lab):
+    from agent import work_agent
+    _night_settings(night_until='06:30')
+    t = _night_task(lab)
+    assert work_agent.tick(datetime(2026, 10, 9, 6, 45), agent=object()) == []
+    assert work.get_task(t['id'])['apex_state'] is None
+    assert work_agent._night(work_agent.settings(), datetime(2026, 10, 9, 6, 29))
+    assert not work_agent._night(work_agent.settings(), datetime(2026, 10, 9, 21, 59))
+    with pytest.raises(work.WorkError):
+        work_agent.update_settings(night_until='6h')
+    unlinked = _night_task(lab, title='Unlinked', link=False)
+    assert work_agent.code_project_for(unlinked) is None
+    # ... unless an Apex Code project has the Work project's name.
+    with longterm_db() as db:
+        db.execute("UPDATE code_projects SET name='Night project' WHERE id=?", (lab.pid,))
+    assert work_agent.code_project_for(unlinked) == lab.pid
+    with pytest.raises(work.WorkError):
+        work.update_project(unlinked['project_id'], code_project_id=999999)
+    assert work.update_project(unlinked['project_id'], code_project_id=None)['code_project_id'] is None
+
+
+def test_autopilot_checks_once_reviews_on_the_other_plan_and_never_keeps(lab, monkeypatch):
+    t = _night_task(lab)
+    lab.mode('codex', 'review')
+    code_studio.update_project(lab.pid, checks=PASS)
+    monkeypatch.setattr(code_studio, 'keep', lambda *a, **k: (_ for _ in ()).throw(AssertionError('never Keep')))
+    s = wait(code_studio.start(lab.pid, work.code_brief(t), 'claude', 'safe', origin='night', task_id=t['id'])['id'])
+    mine = wait(code_studio.start(lab.pid, 'My own session', 'claude')['id'])
+    assert code_studio.autopilot(mine['id']) == ''                           # only the night shift's sessions
+    assert _until_settled(s['id']) == ['checks', 'review']
+    s = code_studio.session(s['id'])
+    assert s['check_state'] == 'passed' and s['review_state'] == 'done' and s['review_engine'] == 'chatgpt'
+    assert s['status'] == 'ready'
+    assert kinds(s['id']).count('checks_started') == 1 and code_studio.autopilot(s['id']) == ''
+    assert code_studio.proof(s['id'])['verdict'] == 'proved'
+
+
+def test_autopilot_skips_the_review_when_the_other_plan_is_resting(lab):
+    from agent import work_agent
+    t = _night_task(lab)
+    s = wait(code_studio.start(lab.pid, work.code_brief(t), 'claude', 'safe', origin='night', task_id=t['id'])['id'])
+    work_agent.mark_unavailable('chatgpt', 'limited')
+    try:
+        assert _until_settled(s['id']) == ['skipped']
+    finally:
+        work_agent.clear_limits()
+    s = code_studio.session(s['id'])
+    assert s['review_state'] == 'skipped' and lab.calls('codex') == []
+    assert code_studio.events(s['id'])[-1]['text'] == 'No independent review: the other plan is resting.'
+    state, summary, _ = work._run_outcome(f"code-{s['id']}")
+    assert state == 'done' and 'no independent review' in summary
+
+
+def test_the_morning_brief_says_what_apex_saw_built_overnight(lab):
+    from agent import work_agent
+    _night_settings()
+    lab.mode('codex', 'review')
+    good = _night_task(lab, title='Fix login')
+    sid = wait(code_studio.start(lab.pid, work.code_brief(good), 'claude', 'safe', origin='night', task_id=good['id'])['id'])['id']
+    code_studio.update_project(lab.pid, checks=PASS)
+    _until_settled(sid)
+    bad = _night_task(lab, title='Retry uploads')
+    other = wait(code_studio.start(lab.pid, work.code_brief(bad), 'claude', 'safe', origin='night', task_id=bad['id'])['id'])['id']
+    code_studio.update_project(lab.pid, checks='no-such-checker-apex')
+    _until_settled(other)
+    rows = code_studio.overnight(now=MORNING.timestamp())
+    assert [r['id'] for r in rows] == [sid, other]
+    assert rows[0]['verdict'] == 'proved' and rows[1]['verdict'] == 'unverified' and rows[1]['checks'] == 'unknown'
+    view = work.today_view(MORNING.date())
+    text = work_agent._brief_text(view, rows, MORNING)
+    assert 'Built overnight:' in text
+    assert 'Fix login: ready to Keep, checks passed (1 passed), 6/10 by ChatGPT' in text
+    assert "Retry uploads: not verified (checks couldn't run)" in text
+    # Sent once a day, opening the overnight strip.
+    lab.sent.clear()
+    assert 'brief' in work_agent.tick(MORNING)
+    body, how = next((b, h) for b, h in lab.sent if 'Built overnight' in b)
+    assert how == {'url': '/code#overnight', 'dedup_key': 'code-brief:2026-10-09'}
+    assert 'brief' not in work_agent.tick(MORNING.replace(minute=45))
+    # Still working, and the plan line.
+    assert work_agent._built_line({**rows[0], 'working': True}) == 'still working on Fix login'
+    work_agent.mark_unavailable('claude', 'limited', now=MORNING.timestamp(), until=MORNING.timestamp() + 3600)
+    try:
+        line = work_agent._plan_line(MORNING)
+    finally:
+        work_agent.clear_limits()
+    assert line.startswith('Claude rests until ') and line.endswith('so today starts on ChatGPT.')
+
+
+def test_tonight_i_ll_take_lists_the_coding_tasks_at_evening(lab):
+    from agent import work_agent
+    _night_settings(brief_time='23:59')
+    _night_task(lab, title='Fix login', due='2026-10-09')
+    _night_task(lab, title='Retry uploads', due='2026-10-12')
+    skipped = _night_task(lab, title='Not tonight')
+    work.update_task(skipped['id'], apex_ok=False)
+    lab.sent.clear()
+    assert 'evening' in work_agent.tick(datetime(2026, 10, 8, 22, 1))
+    assert any("Tonight I'll take: Fix login, Retry uploads." in b for b, _ in lab.sent)
+    assert not any('Not tonight' in b for b, _ in lab.sent)
+    for sid in [s['id'] for s in code_studio.sessions()]:
+        wait(sid)
+
+
+def test_overnight_over_http_and_the_work_link(api, lab):
+    client, config = api
+    t = _night_task(lab)
+    sid = wait(code_studio.start(lab.pid, work.code_brief(t), 'claude', 'safe', origin='night', task_id=t['id'])['id'])['id']
+    rows = client.get('/api/code/overnight').json()['sessions']
+    assert [r['id'] for r in rows] == [sid] and rows[0]['task']['title'] == 'Fix login' and rows[0]['origin'] == 'night'
+    assert client.get('/api/code').json()['sessions'][0]['origin'] == 'night'
+    from dashboard import work as work_route
+    app = FastAPI(); app.include_router(work_route.router)
+    w = TestClient(app)
+    pid = t['project_id']
+    assert w.patch(f'/api/work/projects/{pid}', json={'code_project_id': None}).json()['code_project_id'] is None
+    assert w.patch(f'/api/work/projects/{pid}', json={'code_project_id': 999999}).status_code == 400
+    assert w.patch(f'/api/work/projects/{pid}', json={'code_project_id': lab.pid}).json()['code_project_id'] == lab.pid
+    config.DASHBOARD_TOKEN = 'master'                                    # a device token can't link code
+    try:
+        assert w.patch(f'/api/work/projects/{pid}', json={'code_project_id': None}).status_code == 403
+        assert client.get('/api/code/overnight').status_code == 403
+    finally:
+        config.DASHBOARD_TOKEN = ''
+
+
+def test_a_blocked_command_at_night_waits_for_the_morning(lab):
+    t = _night_task(lab)
+    lab.sent.clear()
+    s = wait(code_studio.start(lab.pid, work.code_brief(t), 'claude', 'safe', origin='night', task_id=t['id'])['id'])
+    asked = [h for b, h in lab.sent if 'wants to run' in b]
+    assert asked and asked[0]['priority'] == 'normal'                    # restraint may hold it until you're up
+    ask = code_studio._rows('SELECT created, expires FROM code_pending_allows WHERE session_id=?', (s['id'],))[0]
+    assert ask['expires'] - ask['created'] == code_studio.NIGHT_ALLOW_TTL
+
+
+def test_the_next_plan_carries_on_in_the_session_a_limit_stopped(lab):
+    from agent import work_agent
+    _night_settings()
+    t = _night_task(lab)
+    lab.mode('claude', 'limited')
+    work_agent.tick(NIGHT, agent=object())
+    sid = int(work.get_task(t['id'])['apex_run'].split('-')[1])
+    wait(sid)
+    work_agent.mark_unavailable('claude', 'limited', now=NIGHT.timestamp())     # its rest, from tonight's clock
+    did = work_agent.tick(NIGHT, agent=object())        # back untried, Claude rests: ChatGPT carries on, same session
+    assert any('overnight on your ChatGPT plan' in x for x in did)
+    assert work.get_task(t['id'])['apex_run'] == f'code-{sid}' and code_studio.session(sid)['engine'] == 'chatgpt'
+    assert len(code_studio.sessions()) == 1
+    wait(sid)
+    work_agent.clear_limits()
+
+
+def test_stopping_a_night_task_from_work_ends_its_night(lab):
+    from agent import work_agent
+    lab.mode('claude', 'hang')
+    _night_settings()
+    t = _night_task(lab)
+    work_agent.tick(NIGHT, agent=object())
+    sid = int(work.get_task(t['id'])['apex_run'].split('-')[1])
+    work.stop_apex(t['id'])
+    task = work.get_task(t['id'])
+    assert task['apex_state'] == 'stopped' and task['status'] == 'todo' and 'stays in Apex Code' in task['apex_summary']
+    assert wait(sid)['last_status'] == 'stopped'
+    assert work_agent._night_shift() == [] and work.get_task(t['id'])['apex_state'] == 'stopped'
+    assert code_studio.session(sid)['status'] == 'ready'                   # the session itself is yours to decide
+
+
+def test_a_restart_mid_turn_tells_the_night_task_and_a_full_studio_waits(lab, monkeypatch):
+    t = _night_task(lab)
+    s = wait(code_studio.start(lab.pid, work.code_brief(t), 'claude', 'safe', origin='night', task_id=t['id'])['id'])
+    code_studio._set(s['id'], turn_state='working', last_status='')        # as if Apex stopped mid-turn
+    monkeypatch.setattr(code_studio, '_recovered', False)
+    code_studio.init_db()
+    assert work._run_outcome(f"code-{s['id']}")[0] == 'interrupted'
+    # All of Apex Code's slots busy with your own sessions: the night shift waits, starting nothing.
+    from agent import work_agent
+    _night_settings()
+    other = _night_task(lab, title='Later')
+    monkeypatch.setattr(code_studio, 'MAX_PARALLEL', 0)
+    assert work_agent._night_work(work_agent.settings(), NIGHT, other, lab.pid) is None
+    assert len(code_studio.sessions()) == 1

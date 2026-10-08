@@ -59,7 +59,10 @@ async def new_project(request: Request):
 @router.patch('/api/work/projects/{pid}')
 async def edit_project(pid: int, request: Request):
     body = await _json(request)
-    return _guard(work.update_project, pid, **{k: v for k, v in body.items() if k in ('name', 'area', 'client', 'notes', 'status')})
+    if 'code_project_id' in body:                  # lets the night shift code in that project: the owner's call
+        _owner(request, 'link a project to Apex Code')
+    return _guard(work.update_project, pid, **{k: v for k, v in body.items()
+                                               if k in ('name', 'area', 'client', 'notes', 'status', 'code_project_id')})
 
 
 @router.post('/api/work/tasks')
