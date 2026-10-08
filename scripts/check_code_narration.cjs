@@ -41,6 +41,21 @@ assert.equal(N.milestone({kind: 'review', status: 'failed', engine: 'claude'}), 
 assert.equal(N.milestone({kind: 'draft', text: '```secret_code()```'}), 'Celine drafted a message for you.', 'a draft is announced, never read out');
 for (const kind of ['tool', 'file', 'text', 'thinking', 'result', 'blocked', 'you']) assert.equal(N.milestone({kind, text: 'x'}), '', `${kind} is no milestone`);
 
+// ---------------------------------------------------------------- never a key or a token out loud
+const ghp = 'ghp_' + 'abcdef0123456789'.repeat(2) + 'abcd';
+assert.equal(N.milestone({kind: 'done', status: 'done', total: 1, summary: 'Set `AKIAIOSFODNN7EXAMPLE` as the AWS key in .env. Tests pass.'}),
+  'Done. 1 file changed. Set as the AWS key in .env.', 'a key id in backticks is no name to say');
+for (const summary of [`Used \`${ghp}\` to push.`, `Used ${ghp} to push.`, 'Set AKIAIOSFODNN7EXAMPLE in .env.',
+  'The token is hunter2-secret now.', 'curl -H "Authorization: Bearer abcdefghijklmnop1234" works.',
+  'Pushed with c2stYW50LWFwaTAzLXNlY3JldA0123456789abc.']) {
+  const phrase = N.milestone({kind: 'done', status: 'done', total: 1, summary});
+  for (const bit of [ghp, 'abcdef0123456789', 'AKIAIOSFODNN7EXAMPLE', 'hunter2', 'abcdefghijklmnop1234', 'c2stYW50LWFwaTAz'])
+    assert.ok(!phrase.includes(bit), `no secret in: ${phrase}`);
+}
+assert.equal(N.redact(`Celine: the key ${ghp} is in .env`), 'Celine: the key [redacted key] is in .env', 'what Celine says, too');
+assert.equal(N.redact('Edited upload.py and ran pytest: 212 passed.'), 'Edited upload.py and ran pytest: 212 passed.', 'plain words stay');
+assert.equal(N.milestone({kind: 'done', status: 'done', total: 2, summary: 'Renamed `upload-retry.py`. Done.'}), 'Done. 2 files changed. Renamed upload-retry.py.');
+
 // ---------------------------------------------------------------- play-by-play phrases: names, never code
 const pbp = [
   [{kind: 'tool', tool: 'command', title: 'python -m pytest -q tests/test_upload.py'}, 'running pytest'],
@@ -87,5 +102,5 @@ assert.equal(N.overnight([{verdict: 'proved'}, {verdict: 'proved'}, {verdict: 'u
 assert.equal(N.overnight([]), '');
 assert.doesNotMatch(N.overnight(night), /Fix login|Retry uploads/);
 
-console.log('PASS: the morning\'s overnight line is counts only, never a title; milestone phrases (done with the first sentence, checks passed/failed/unknown, the second opinion out of 10, a draft) never carry code; '
+console.log('PASS: the morning\'s overnight line is counts only, never a title; nothing said carries a key or a token; milestone phrases (done with the first sentence, checks passed/failed/unknown, the second opinion out of 10, a draft) never carry code; '
   + 'play-by-play names a program or a file, never code, at most one phrase every 6 s and none while audio plays.');

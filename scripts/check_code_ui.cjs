@@ -66,7 +66,7 @@ const E = (id, kind, extra = {}) => ({id, ts: now - 60 + id, kind, ...extra});
 const BRAIN = [{kind: 'profile', ref: 'APEX_USER.md', text: 'Alex builds Apex, on Windows.'},
   {kind: 'rule', ref: 1, text: 'Never touch the voice files'}, {kind: 'memory', ref: 12, text: 'Alex wants type hints everywhere'},
   {kind: 'memory', ref: 15, text: 'Small functions, plain names'}];
-let brainSources = BRAIN.slice(), forgotten = [];
+let brainSources = BRAIN.slice(), forgotten = [], unvouched = [];
 let feed = [
   E(1, 'you', {text: 'Add Focus mode', engine: 'claude', mode: 'safe', brief: {chars: 240, sources: BRAIN}}),
   E(2, 'thinking', {text: 'Plan it'}),
@@ -165,7 +165,9 @@ const FILES = ['README.md', 'dashboard/static/work.js', 'dashboard/static/work.c
 w.fetch = async (url, opts = {}) => {
   calls.push({url, method: opts.method || 'GET', body: opts.body && typeof opts.body === 'string' ? JSON.parse(opts.body) : null});
   if (url === '/api/code') return Response.json(overview());
-  if (url === '/api/code/projects/1/brain') { const sources = brainSources.filter(x => !forgotten.includes(x.ref)); return Response.json({text: sources.length ? 'What Apex knows…' : '', sources, chars: 99}); }
+  if (url === '/api/code/projects/1/brain') { const sources = brainSources.filter(x => !forgotten.includes(x.ref)); return Response.json({text: sources.length ? 'What Apex knows…' : '', sources, chars: 99, unvouched}); }
+  const vm = url.match(/^\/api\/code\/memories\/(\d+)\/vouch$/);
+  if (vm && opts.method === 'POST') { const x = unvouched.find(u => u.ref === +vm[1]); unvouched = unvouched.filter(u => u !== x); brainSources.push(x); return Response.json({ok: true, id: +vm[1]}); }
   if (url.startsWith('/api/code/projects/1/rules')) return rulesApi(url, opts);
   if (url.startsWith('/api/code/projects/1/decisions')) return logApi(url, opts);
   if (url === '/api/code/approvals') return Response.json({items: suggestions});
@@ -350,6 +352,69 @@ async function celine() {
   delete w.navigator.mediaDevices; delete w.MediaRecorder;
 }
 
+// Switching sessions while the old one streams, and dismissing Celine while she answers:
+// nothing from the old session or the dismissed answer lands, moves the feed, or is said.
+async function switching() {
+  const realFetch = w.fetch, enc = new TextEncoder(), asked8 = [], celineSignals = [];
+  const slow = (lines, ms, signal) => new Response(new ReadableStream({start(c) {
+    const timer = setTimeout(() => { try { lines.forEach(x => c.enqueue(enc.encode(JSON.stringify(x) + '\n'))); c.close(); } catch (_) {} }, ms);
+    if (signal) signal.addEventListener('abort', () => { clearTimeout(timer); try { c.error(new w.DOMException('aborted', 'AbortError')); } catch (_) {} });
+  }}));
+  let celineReply = null;
+  w.fetch = async (url, opts = {}) => {
+    if (url.startsWith('/api/code/sessions/7/stream')) {          // session 7's next step is on its way
+      calls.push({url, method: 'GET', body: null});
+      return slow([{t: 'event', ...E(500, 'done', {status: 'done', summary: 'Old session finished.', total: 1, engine: 'claude'})},
+        {t: 'live', v: 999, text: 'old session typing', thinking: '', outputs: {}}], 250, opts.signal);
+    }
+    if (url === '/api/code/sessions/8') {                         // slow, like the proof's git work: the old step arrives meanwhile
+      await new Promise(r => setTimeout(r, 300));
+      return Response.json({...session, id: 8, title: 'Other one', working: false, side: ''});
+    }
+    const m8 = url.match(/^\/api\/code\/sessions\/8\/events\?after=(\d+)$/);
+    if (m8) { asked8.push(Number(m8[1])); return Response.json({events: [E(2, 'you', {text: 'The other request'}), E(3, 'note', {text: 'other note'})].filter(e => e.id > Number(m8[1]))}); }
+    if (url.startsWith('/api/code/sessions/8/stream')) return new Response('', {status: 503});
+    if (url === '/api/companion/chat' && celineReply) {
+      calls.push({url, method: 'POST', body: JSON.parse(opts.body)}); celineSignals.push(opts.signal);
+      const lines = [{type: 'start', thread_id: 5}, {type: 'token', text: 'Partly '}];
+      return new Response(new ReadableStream({start(c) {
+        c.enqueue(enc.encode(lines.map(x => JSON.stringify(x)).join('\n') + '\n'));
+        const timer = setTimeout(() => { try { c.enqueue(enc.encode(JSON.stringify({type: 'token', text: 'dismissed answer'}) + '\n'
+          + JSON.stringify({type: 'done', text: celineReply}) + '\n')); c.close(); } catch (_) {} }, 250);
+        if (opts.signal) opts.signal.addEventListener('abort', () => { clearTimeout(timer); try { c.error(new w.DOMException('aborted', 'AbortError')); } catch (_) {} });
+      }}));
+    }
+    return realFetch(url, opts);
+  };
+  $('narrate').value = 'milestones'; $('narrate').dispatchEvent(new w.Event('change'));
+  $('back').click(); await tick();
+  w.location.hash = '#s=7'; await tick(150);                       // open, and its stream is reading
+  assert.ok(calls.some(c => c.url.startsWith('/api/code/sessions/7/stream')));
+  w.location.hash = '#s=8'; await tick(900);                       // switch before session 7's step arrives
+  assert.deepEqual(asked8.slice(0, 1), [0], 'the new session\'s history is asked for from the start');
+  assert.ok($('feed').textContent.includes('The other request'), 'its history is shown');
+  assert.ok(!$('feed').textContent.includes('Old session finished') && !$('feed').textContent.includes('old session typing'),
+    'nothing from the old session lands in the new feed');
+  assert.ok(!spoken().some(t => /Old session finished/.test(t)), 'nor is said');
+  // Celine: ✕ while she answers stops it; her card stays closed and the answer is never said.
+  celineReply = 'Partly dismissed answer';
+  type('/celine is it ok?'); $('brief-form').requestSubmit(); await tick(); await tick(80);
+  assert.equal($('celine-card').hidden, false); assert.match($('celine-a').textContent, /Partly/);
+  $('celine-close').click(); await tick(500);
+  assert.equal($('celine-card').hidden, true, '✕ is not undone by her next words');
+  assert.ok(celineSignals.at(-1) && celineSignals.at(-1).aborted, 'the answer stops streaming');
+  assert.ok(!spoken().some(t => /dismissed answer/.test(t)), 'a dismissed answer is never said');
+  assert.equal($('celine-btn').disabled, false);
+  // …and switching sessions while she answers: the answer about the old one is never said.
+  type('/celine is it ok?'); $('brief-form').requestSubmit(); await tick(); await tick(80);
+  w.location.hash = '#s=7'; await tick(600);
+  assert.ok(celineSignals.at(-1).aborted && !spoken().some(t => /dismissed answer/.test(t)));
+  assert.equal($('celine-card').hidden, true);
+  celineReply = null; w.fetch = realFetch;
+  $('narrate').value = 'off'; $('narrate').dispatchEvent(new w.Event('change'));
+  w.location.hash = '#s=7'; await tick(300);
+}
+
 // The night shift: the morning brief's link opens "While you slept" (/code#overnight).
 async function nightShift() {
   nightDoc = [NIGHT(21, 'Fix login', {verdict: 'proved', checks: 'passed', why: '212 passed', rating: 8, review_state: 'done', review_engine: 'chatgpt', review_engine_name: 'ChatGPT plan'}),
@@ -516,6 +581,18 @@ async function phone() {
   brainSources = []; $('brain-chip').click(); await tick(); await tick();
   assert.equal($('brain-body').textContent, 'Tell Celine or Apex chat how you like your code; it shows up here.');
   $('brain-dialog').close(); brainSources = BRAIN.slice(); forgotten = [];
+  // An older coding memory (no record of who saved it) waits until Alex says it's his.
+  unvouched = [{kind: 'memory', ref: 40, text: 'Alex wants <b>small</b> functions'}];
+  $('brain-chip').click(); await tick(); await tick();
+  const waitRow = $('brain-body').querySelector('.unvouched .bl');
+  assert.equal(waitRow.querySelector('.bt').textContent, 'Alex wants <b>small</b> functions', 'memory text never becomes HTML');
+  assert.equal($('brain-body').querySelector('.unvouched .bh').textContent, 'Not told until you OK it');
+  waitRow.querySelector('.vouch').click(); await tick(); await tick(); await tick();
+  assert.ok(calls.some(c => c.url === '/api/code/memories/40/vouch' && c.method === 'POST'), 'It\'s mine vouches for it');
+  assert.equal($('toast').textContent, 'Later sessions will hear it.');
+  assert.equal($('brain-body').querySelector('.unvouched'), null, 'nothing left to vouch for');
+  assert.ok([...$('brain-body').querySelectorAll('.bl.k-memory .tag')].some(t => t.textContent === '#40'), 'it is in the brief now');
+  $('brain-dialog').close(); brainSources = BRAIN.slice(); forgotten = []; unvouched = [];
   [...d.querySelectorAll('.chip')].find(b => b.textContent.includes('Fix a bug')).click();
   assert.equal($('prompt').value, 'Fix this bug in Apex: ');
   // @ files and / commands as you type.
@@ -995,6 +1072,7 @@ async function phone() {
   assert.equal(calls.filter(c => c.url === '/api/memories' && c.method === 'POST').length, memories, 'Reject saves nothing');
   assert.equal($('box-waiting').hidden, true);
   await celine();
+  await switching();
   await nightShift();
   await phone();
   console.log('PASS: greeting and plans, @ and / as you type, starting with a model and effort, polling then the live stream (typing as it writes), '
@@ -1011,7 +1089,8 @@ async function phone() {
     + 'and away mode (📱 sent to your phone; a phone with its own token answers Allow once or Don\'t allow, never sees the owner-only message, '
     + 'and is told when a request expired, was answered, or is unknown; a link tapped at the PC asks the same question), '
     + 'and Celine on the build (milestones in your Voicebox voice with no code, a busy voice tried once more then the chime, play-by-play paced, '
-    + 'a draft with Send, Edit and ✕, and asking her typed or out loud with her answer shown and said, in one thread per session), '
+    + 'a draft with Send, Edit and ✕, and asking her typed or out loud with her answer shown and said, in one thread per session; '
+    + 'switching sessions mid-stream keeps the old one\'s steps out of the new feed, and ✕ or another session stops her answer, unsaid), '
     + 'and the night shift (While you slept from the morning link: proof badges, the rating, Keep through the proof\'s question, Throw away with why, Open; '
     + 'its counts said without titles; the 🌙 badge; From your Work list under the first message; a skipped review said plainly).');
   process.exit(0);

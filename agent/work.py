@@ -541,7 +541,8 @@ def sync_apex():
             changes = {'apex_state': 'running'}
         else:
             state, summary, cost = outcome
-            changes = {'apex_summary': (summary or '')[:2000], 'apex_cost': round(cost, 4),
+            from agent.working_context import redact      # a task is readable by any signed-in device
+            changes = {'apex_summary': redact(summary or '')[:2000], 'apex_cost': round(cost, 4),
                        'apex_state': None if state in UNAVAILABLE else state,
                        'status': 'review' if state == 'done' else 'todo'}
         changes['updated'] = time.time()

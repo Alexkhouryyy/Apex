@@ -702,6 +702,7 @@ def main():
                     user_input,
                     include_screenshot=not args.no_screenshot,
                     use_thinking=think,
+                    withhold=frozenset(),          # the owner, at the PC: Apex Code included
                 )
                 speak(response)
             else:
@@ -717,6 +718,7 @@ def main():
                         use_thinking=think,
                         streamer=streamer,
                         cancel_event=cancel,
+                        withhold=frozenset(),
                     )
                     streamer.finish()
                 finally:

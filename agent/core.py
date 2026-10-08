@@ -1,4 +1,6 @@
 """Core Claude agent with tool use, extended thinking, and screen vision."""
+import contextlib
+import contextvars
 import json
 import threading
 import anthropic
@@ -2212,6 +2214,52 @@ def _broadcast_live_event(source: str, content: str) -> None:
 _tool_observer = None
 
 
+# A turn that read an Apex Code session (a coding agent's own words, a repo's
+# text) is not where a lasting memory is written unchecked: its `remember` waits
+# for the owner's OK on the Code page instead (agent/code_brain.suggested), and
+# only then can it reach a coding agent's brief. The value names who suggested it.
+# {'who', 'project_id', 'session_id'}; the Code page lists it under that project.
+_STAGE_REMEMBER: contextvars.ContextVar[dict | None] = contextvars.ContextVar("apex_stage_remember", default=None)
+
+
+@contextlib.contextmanager
+def _staging_memories(stage: dict | None):
+    token = _STAGE_REMEMBER.set(stage or None)
+    try:
+        yield
+    finally:
+        _STAGE_REMEMBER.reset(token)
+
+
+def _code_stage(name: str, inputs: dict) -> dict:
+    """After code_status or code_act ran in a turn: stage under that session's project."""
+    sid = inputs.get("session_id") if isinstance(inputs, dict) else None
+    pid = None
+    if type(sid) is int:
+        try:
+            from agent import code_studio
+            pid = code_studio.session(sid)["project_id"]
+        except Exception:
+            sid = None
+    return {"who": f"Apex, after {name}", "project_id": pid, "session_id": sid}
+
+
+def _stage_remember(inputs: dict, stage: dict) -> str:
+    from agent import approvals, code_brain
+    content = " ".join(str(inputs.get("content") or "").split())
+    if not 5 <= len(content) <= 1000:
+        return "A memory must be 5 to 1000 characters."
+    kind = inputs.get("kind") if inputs.get("kind") in {"fact", "preference", "project", "decision", "note"} else "note"
+    # 'rule' is never the model's to give (code_brain.global_rules trusts only add_rule).
+    tags = [t.strip() for t in str(inputs.get("tags") or "").split(",") if t.strip() and t.strip().lower() != "rule"]
+    if "code" not in {t.lower() for t in tags}:
+        tags.insert(0, "code")
+    payload = {"content": content, "kind": kind, "why": "", "source": f"{code_brain.SUGGESTED_BY} ({stage.get('who') or 'Apex'})",
+               "tags": ",".join(tags), "project_id": stage.get("project_id"), "session_id": stage.get("session_id")}
+    note = approvals.stage("remember", payload)
+    return note + " Tell the user it is waiting for their OK in Apex Code (Waiting for your OK)."
+
+
 def set_tool_observer(fn) -> None:
     """Watch every tool call as it happens.
 
@@ -2856,6 +2904,9 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return f"Recorded outcome #{rid}. This feeds recommendation accuracy."
 
         elif name == "remember":
+            staged = _STAGE_REMEMBER.get()
+            if staged:
+                return _stage_remember(inputs, staged)
             _broadcast_live_event("memory", f"Stored: {inputs['content'][:120]}")
             return longterm.remember(
                 inputs["content"],
@@ -3708,7 +3759,7 @@ class AgentCore:
 
         threading.Thread(target=_worker, daemon=True, name="SkillAutoCreate").start()
 
-    def _try_subscription(self, user_text: str, memory, *, streamer=None):
+    def _try_subscription(self, user_text: str, memory, *, streamer=None, withhold: frozenset = frozenset()):
         """Run this turn on the Claude subscription, or return None to use the API.
 
         Returns the reply text on success and None on every other outcome, so
@@ -3737,8 +3788,10 @@ class AgentCore:
             result = _sub.run_turn(
                 self._effective_system_prompt(),
                 _sub.transcript_prompt(memory.get_messages(), user_text),
-                # Never a companion turn (those skip this path), so never Work-only tools.
-                [t for t in self._all_tools() if t["name"] not in companion.WORK_ONLY_TOOLS],
+                # Never a companion turn (those skip this path), so never Work-only tools;
+                # and never what this turn withholds (Apex Code, unless it is the owner's).
+                [t for t in self._all_tools() if t["name"] not in companion.WORK_ONLY_TOOLS
+                 and t["name"] not in withhold],
                 _execute_tool,
                 model=self._model,
                 confirm=lambda name, inputs: safety.check(name, inputs)[0],
@@ -3770,12 +3823,18 @@ class AgentCore:
                  if cost else "."))
         return text
 
-    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None, persona: str | None = None, screen_origin: str = "browser", withhold: frozenset = frozenset()) -> str:
+    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None, persona: str | None = None, screen_origin: str = "browser", withhold: frozenset | None = None, stage_memories: dict | None = None) -> str:
         """Run a full agent turn. Returns the final text response.
 
         `withhold`: tool names this turn may neither see nor run, whatever its
-        mode (a device token's companion turn never reads Apex Code, which is
-        the owner's: companion.CODE_TOOLS).
+        mode. Apex Code is the owner's, so by default (None) a turn gets no
+        companion.CODE_TOOLS; only the owner's own paths (local voice and TUI,
+        a master-token chat or companion turn) pass frozenset() to opt in.
+
+        `stage_memories`: {'who', 'project_id', 'session_id'} when this turn
+        carries an Apex Code session; its `remember` then waits for the owner's
+        OK instead of saving. A turn that runs code_status or code_act stages
+        from then on too.
 
         If `streamer` is provided (a StreamingSpeaker), text deltas are fed to it
         as they arrive so the user hears the first sentence before generation finishes.
@@ -3786,12 +3845,15 @@ class AgentCore:
         Pass channel_id=None (default) for the main voice/text conversation.
         """
         from agent import companion
+        if withhold is None:
+            withhold = companion.CODE_TOOLS
         if companion_mode is not None and companion_mode not in {"discuss", "work", "observe"}:
             raise ValueError("Companion mode must be discuss or work.")
         screen_b64 = companion.validate_screen_image(screen_image)
         memory, lock = self._get_channel(channel_id)
         from agent import continuity
-        with lock, continuity.turn(channel_id), continuity.conversation(channel_id, self, memory, user_text) as memory:
+        with lock, continuity.turn(channel_id), _staging_memories(stage_memories), \
+                continuity.conversation(channel_id, self, memory, user_text) as memory:
             if cancel_event is not None and cancel_event.is_set():
                 return "[turn interrupted]"
             from agent import apocalypse
@@ -3912,7 +3974,7 @@ class AgentCore:
                 # The CLI subscription adapter only accepts text and owns its
                 # own tools. It cannot preserve screen data or Discuss limits.
                 _sub_text = None if (companion_mode or screen_b64) else self._try_subscription(
-                    user_text, memory, streamer=streamer)
+                    user_text, memory, streamer=streamer, withhold=withhold)
                 if _sub_text is not None:
                     return _sub_text
 
@@ -4032,6 +4094,8 @@ class AgentCore:
                         if callable(getattr(streamer, "tool", None)):
                             streamer.tool({"phase": "start", "name": block.name})
                         result_str = _execute_tool(block.name, block.input)
+                        if block.name in companion.CODE_TOOLS and not _STAGE_REMEMBER.get():
+                            _STAGE_REMEMBER.set(_code_stage(block.name, block.input))   # undone when the turn ends
                         if callable(getattr(streamer, "tool", None)):
                             streamer.tool({"phase": "result", "name": block.name,
                                            "result": result_str[:2000]})

@@ -320,8 +320,9 @@ def _due(now: datetime, hhmm: str, state: dict, key: str) -> bool:
 
 
 def code_project_for(task) -> int | None:
-    """The Apex Code project a software task's code lives in: its Work project's
-    link, or an Apex Code project with the same name. None for anything else."""
+    """The Apex Code project a software task's code lives in: the link the owner
+    set on its Work project (an owner-only PATCH). None for anything else; a
+    matching name is not a link, since any signed-in device can name a project."""
     if task.get('area') != 'software' or not task.get('project_id'):
         return None
     p = work.get_project(task['project_id'])
@@ -333,9 +334,7 @@ def code_project_for(task) -> int | None:
     except Exception as exc:
         print(f'[Work] could not read the Apex Code projects: {exc}')
         return None
-    if p.get('code_project_id') in ids:
-        return p['code_project_id']
-    return next((i for i, name in ids.items() if name.strip().lower() == p['name'].strip().lower()), None)
+    return p['code_project_id'] if p.get('code_project_id') in ids else None
 
 
 def _night(s: dict, now: datetime) -> bool:
@@ -370,7 +369,8 @@ def tick(now: datetime | None = None, agent=None) -> list[str]:
         if apex_state == 'done':
             text = f'Apex finished "{title}". Review it in Work.'
         else:
-            text = f'Apex stopped on "{title}" ({apex_state}): {(summary or "")[:160]}'
+            from agent.working_context import redact      # goes to every device, and Telegram
+            text = f'Apex stopped on "{title}" ({apex_state}): {redact(summary or "")[:160]}'
         if apex_state == 'stopped':           # you stopped it yourself: no need to tell you
             log('stopped', f'You stopped Apex on "{title}".', tid, key=f'back:{run_id}', now=now.timestamp())
         elif log('finished' if apex_state == 'done' else 'stopped', text, tid, key=f'back:{run_id}', now=now.timestamp()):
@@ -546,6 +546,10 @@ def _night_work(s: dict, now: datetime, task: dict, cpid: int) -> str | None:
     except code_studio.CodeError as exc:
         log('skipped', f'Could not start "{task["title"]}" in Apex Code: {exc}', task['id'],
             key=f"skip:{task['id']}:code:{now.date().isoformat()}", now=now.timestamp())
+        # Tried: pick() moves on to the next task instead of retrying this one all night.
+        with longterm._conn() as db:
+            db.execute("UPDATE work_tasks SET apex_state='failed', apex_summary=?, updated=? WHERE id=?",
+                       (f'Could not start it in Apex Code: {exc}'[:2000], time.time(), task['id']))
         return None
     with longterm._conn() as db:
         db.execute("UPDATE work_tasks SET apex_run=?, apex_state='running', apex_folder='', apex_summary='', apex_engine=?, "

@@ -358,7 +358,9 @@ details.brain[open]{padding-bottom:10px}
 .brain-list .bl .tag{font:11px var(--mono);color:var(--a);flex:0 0 auto}
 .brain-list .bl .bt{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .brain-list .bl.gone .bt{text-decoration:line-through;color:var(--muted)}
-.brain-list .forget{min-height:0;padding:1px 8px;font-size:11px;flex:0 0 auto}
+.brain-list .forget,.brain-list .vouch{min-height:0;padding:1px 8px;font-size:11px;flex:0 0 auto}
+.brain-list .unvouched{border-top:1px dashed var(--line);padding-top:10px}
+.brain-list .unvouched .fine{margin:0 0 4px}
 .brain-list .link{background:none;border:0;min-height:0;padding:0;color:var(--a);font:11px var(--mono);letter-spacing:0;text-transform:none;text-decoration:underline}
 .brain-line{margin-top:10px}
 .brain-chip{border-color:color-mix(in srgb,var(--a) 35%,transparent)}
@@ -368,7 +370,8 @@ body.term details.brain{margin-left:0;border-radius:6px;font-family:var(--mono)}
 body.term details.brain>summary{font-size:12px}
 body.term .brain-list .bl{font-size:12.5px}
 @media (max-width:640px){details.brain{margin-left:0}}
-@media (hover:none){.brain-list .forget{min-height:32px;padding:4px 12px}}
+@media (hover:none){.brain-list .forget,.brain-list .vouch{min-height:32px;padding:4px 12px}}
+@media (max-width:640px){.brain-list .unvouched .bl{flex-wrap:wrap}}
 
 /* ---------------------------------------------------------------- rules: a correction, said once */
 .fix{margin:8px 0 0 44px}

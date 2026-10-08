@@ -42,6 +42,7 @@ Coding never uses API credits: only the two plans, signed in on this PC.
 """
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import os
@@ -56,6 +57,7 @@ import time
 from pathlib import Path
 
 from agent import code_brain, code_engines, longterm, work, work_engines as we
+from agent.working_context import redact
 
 APEX_ROOT = Path(__file__).resolve().parents[1]
 ENGINES = ('claude', 'chatgpt')
@@ -478,7 +480,18 @@ def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'saf
     _set(sid, branch=branch, worktree=str(folder))
     notes = [f"Your {len(dirty)} unsaved change{'s' if len(dirty) != 1 else ''} in {proj['name']} "
              f"{'are' if len(dirty) != 1 else 'is'} not in this session: it starts from your last commit."] if dirty else []
-    return send(sid, prompt, engine, mode, _notes=notes, model=model, effort=effort, plan=plan)
+    try:
+        return send(sid, prompt, engine, mode, _notes=notes, model=model, effort=effort, plan=plan)
+    except CodeError:
+        # Never started (say, every slot filled in between): leave no session, copy or
+        # branch behind, or the night shift would count it as working and start another.
+        _remove_copy(repo, str(folder))
+        _git(repo, 'branch', '-D', branch, check=False)
+        code_brain.forget_file(sid)
+        with longterm._conn() as db:
+            db.execute('DELETE FROM code_events WHERE session_id=?', (sid,))
+            db.execute('DELETE FROM code_sessions WHERE id=?', (sid,))
+        raise
 
 
 def _brief(s: dict, prompt: str, about: str = '', memory: bool = False) -> str:
@@ -788,12 +801,14 @@ def _ask_phone(sid: int, title: str, engine: str, asks: dict, night: bool = Fals
         print(f'[Code] could not ask your phone: {exc}')
         return
     for command, token in list(asks.items())[:MAX_ASKS]:
-        shown = command if len(command) <= 120 else command[:119] + '…'
+        # Every device, web push and Telegram get this: never a token in the command.
+        shown = redact(command)
+        shown = shown if len(shown) <= 120 else shown[:119] + '…'
         try:
             notify.notify('Apex · Code needs you',
-                          f'"{title}": your {we.NAMES.get(engine, engine)} wants to run `{shown}`. Allow it once?',
+                          f'"{redact(title)}": your {we.NAMES.get(engine, engine)} wants to run `{shown}`. Allow it once?',
                           kind='code', priority='normal' if night else 'high', url=f'/code#allow={token}',
-                          dedup_key=f'code:{sid}:blocked:{command}')
+                          dedup_key=f'code:{sid}:blocked:{hashlib.sha256(command.encode()).hexdigest()[:16]}')
         except Exception as exc:
             print(f'[Code] could not ask your phone: {exc}')
 
@@ -808,7 +823,8 @@ def pending_allow(token: str) -> dict:
     if not rows:
         raise NoSuchAllow("Apex doesn't know that request. It may be from before a reinstall.")
     r = rows[0]
-    return {'command': r['command'], 'title': r['title'], 'project': r['project'], 'engine': r['engine'],
+    # Shown redacted; Allow once still runs exactly the stored command.
+    return {'command': redact(r['command']), 'title': r['title'], 'project': r['project'], 'engine': r['engine'],
             'expires': r['expires'], 'answered': r['answered'], 'choice': r['choice']}
 
 
@@ -1027,6 +1043,8 @@ def _idle(s: dict) -> None:
     with _lock:
         if s['id'] in _turns or s['id'] in _side:
             raise CodeError('Apex is still working in this session. Wait, or press Stop.')
+        if s['id'] in _terms:                  # it may still be changing the files: no Keep, no checks
+            raise CodeError('Your command is still running. Wait, or press Stop.')
 
 
 def undo(sid: int) -> dict:
@@ -1324,6 +1342,8 @@ def run_checks(sid: int) -> dict:
     with _lock:
         if sid in _turns or sid in _side:
             raise CodeError('Apex is still working in this session. Wait, or press Stop.')
+        if sid in _terms:
+            raise CodeError('Your command is still running. Wait, or press Stop.')
         _side[sid] = run_id
     folder = s['worktree']
     try:                                                  # what they run on is a commit, so a later change shows
@@ -1967,6 +1987,9 @@ def terminal(sid: int, command: str) -> dict:
     with _lock:
         if sid in _terms:
             raise CodeError('Your last command is still running. Wait, or press Stop.')
+        # A change made while the checks run would count as checked, and Keep would take it.
+        if sid in _turns or sid in _side:
+            raise CodeError('Apex is still working in this session. Wait, or press Stop.')
         _terms[sid] = run_id
     ref = run_id
     event(sid, 'term', command=command, ref=ref)
@@ -2114,7 +2137,8 @@ def outcome_text(sid: int) -> str:
         rated = 'no independent review' if s['review_state'] == 'skipped' else 'no second opinion'
     if not s['files_changed']:
         rated = 'nothing changed'
-    return f"{(s['summary'] or '').strip()[:600]}\nProof: {p['verdict']} ({why.rstrip('.')}); {rated}".strip()
+    # Leaves Apex Code for a Work task any device can read, and its notification.
+    return redact(f"{(s['summary'] or '').strip()[:600]}\nProof: {p['verdict']} ({why.rstrip('.')}); {rated}".strip())
 
 
 def _since_last_brief(now: float) -> float:
@@ -2126,6 +2150,17 @@ def _since_last_brief(now: float) -> float:
     except Exception:                                     # Work's tables not made yet
         rows = []
     return rows[0]['ts'] if rows and rows[0]['ts'] else now - 86400
+
+
+def _night_in_progress(s: dict) -> bool:
+    """The night shift still means to finish this session (its checks and second
+    opinion): its Work task is still on it. Not once you stopped it from Work."""
+    try:
+        rows = _rows("SELECT 1 FROM work_tasks WHERE id=? AND apex_run=? AND apex_state IN ('queued','running','verifying')",
+                     (s.get('task_id'), f"code-{s['id']}"))
+    except Exception:                                     # Work's tables not made yet
+        return False
+    return bool(rows)
 
 
 def overnight(since: float | None = None, now: float | None = None) -> list[dict]:
@@ -2141,7 +2176,8 @@ def overnight(since: float | None = None, now: float | None = None) -> list[dict
     for sid in ids:
         s = session(sid)
         working = bool(s['working'] or s['side'] or s['turn_state'] != 'idle' or not s['last_status']
-                       or (s['origin'] == 'night' and s['last_status'] == 'done' and not settled(s)))
+                       or (s['origin'] == 'night' and s['last_status'] == 'done' and not settled(s)
+                           and _night_in_progress(s)))
         try:
             p = proof(sid)
         except Exception as exc:

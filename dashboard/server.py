@@ -394,12 +394,14 @@ def list_memories(q: str = "", kind: str = "", limit: int = 50):
 
 
 @app.post("/api/memories")
-def add_memory(payload: dict):
+def add_memory(payload: dict, request: Request):
     return {"result": longterm.remember(
         payload["content"],
         kind=payload.get("kind", "fact"),
         importance=payload.get("importance", 5),
         tags=payload.get("tags", ""),
+        # Typed by the owner: a coding agent's brief may hear it (agent/code_brain).
+        source="approved" if _owner(request) else "",
     )}
 
 
@@ -1373,10 +1375,10 @@ def staged_writes_list():
 
 
 @app.post("/api/staged-writes/{write_id}/approve")
-def staged_writes_approve(write_id: str):
+def staged_writes_approve(write_id: str, request: Request):
     try:
         from agent import approvals as _appr
-        return {"ok": True, "result": _appr.approve(write_id)}
+        return {"ok": True, "result": _appr.approve(write_id, by_owner=_owner(request))}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -1515,6 +1517,13 @@ async def chat_endpoint(request: Request):
     if not _agent_ref:
         return JSONResponse({"error": "agent not ready"}, status_code=503)
 
+    # Apex Code is the owner's (dashboard/code.py): a device token's turn can't read
+    # it, nor continue a thread (and its memory) that did.
+    from agent import companion as _companion
+    code_tools = frozenset() if _owner(request) else _companion.CODE_TOOLS
+    if code_tools and conversations.owner_only(thread_id):
+        return JSONResponse({"error": "This conversation is the owner's (master dashboard token)."}, status_code=403)
+
     async with _chat_lock:
         # Use the durable thread ID, not the browser's ephemeral stream ID.
         channel_id = f"dashboard:{thread_id}"
@@ -1541,6 +1550,8 @@ async def chat_endpoint(request: Request):
         from agent import core as _core
 
         def _on_tool(event: dict):
+            if event.get("name") in _companion.CODE_TOOLS:
+                conversations.mark_owner_only(thread_id)
             ws_manager.broadcast_threadsafe(
                 {"type": "chat_tool", "chat_id": chat_id, **event})
 
@@ -1549,7 +1560,8 @@ async def chat_endpoint(request: Request):
             _core.set_tool_observer(_on_tool)
             response = await loop.run_in_executor(
                 None,
-                lambda: _agent_ref.run(agent_text, include_screenshot=False, streamer=streamer, channel_id=channel_id),
+                lambda: _agent_ref.run(agent_text, include_screenshot=False, streamer=streamer, channel_id=channel_id,
+                                       withhold=code_tools),
             )
         except Exception as e:
             ws_manager.broadcast_threadsafe({"type": "chat_error", "error": str(e), "chat_id": chat_id})
@@ -1640,15 +1652,21 @@ async def council_endpoint(request: Request):
 
 
 # --- Chat conversations: history that survives closing the tab ---
+def _owner(request: Request) -> bool:
+    return not config.DASHBOARD_TOKEN or _require_master(request)
+
+
 @app.get("/api/chat/threads")
-async def chat_threads():
+async def chat_threads(request: Request):
     from agent import conversations
-    return {"threads": conversations.list_threads()}
+    return {"threads": conversations.list_threads(owner=_owner(request))}
 
 
 @app.get("/api/chat/threads/{thread_id}")
-async def chat_thread(thread_id: int):
+async def chat_thread(thread_id: int, request: Request):
     from agent import conversations
+    if not _owner(request) and conversations.owner_only(thread_id):   # it read Apex Code
+        raise HTTPException(403, "This conversation is the owner's (master dashboard token).")
     return {"id": thread_id, "messages": conversations.messages(thread_id)}
 
 

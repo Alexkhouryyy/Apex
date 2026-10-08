@@ -91,7 +91,7 @@ def test_injection_filter_blocks_replace(test_db, tmp_path, monkeypatch):
 def test_approve_is_atomic(test_db, monkeypatch):
     approvals.init_db()
     applied = []
-    monkeypatch.setattr(approvals, "_apply", lambda kind, payload: applied.append(kind) or "ok")
+    monkeypatch.setattr(approvals, "_apply", lambda kind, payload, by_owner=True: applied.append(kind) or "ok")
     wid = None
     import json as _j
     with longterm._conn() as c:
@@ -114,7 +114,7 @@ def test_approve_is_atomic(test_db, monkeypatch):
 def test_approve_failure_returns_to_pending(test_db, monkeypatch):
     approvals.init_db()
     import json as _j
-    def boom(kind, payload):
+    def boom(kind, payload, by_owner=True):
         raise RuntimeError("apply exploded")
     monkeypatch.setattr(approvals, "_apply", boom)
     with longterm._conn() as c:

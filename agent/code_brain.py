@@ -11,9 +11,10 @@ press:
   Standing rules    what Apex was told to always do (self_mod), at most 800
   Project rules     the active rules the owner gave on this code project
   Project handoff   the end of this project's decisions, and the next step
-  Preferences       up to 8 memories: coding preferences, then memories that
-                    share words with the request, then this project's
-                    decisions, then the owner's most important preferences
+  Preferences       up to 8 memories the owner vouched for (approved, or a
+                    rule for all code): coding preferences, then preferences
+                    and decisions that share words with the request, then
+                    this project's decisions
   Measured here     what actually happens on this project, with counts
                     (track_record(): live from the sessions, never stored)
   Recent sessions   how the last 3 finished sessions here ended
@@ -58,6 +59,7 @@ STANDING_LIMIT = 800
 DECISIONS_TAIL = 1200
 MEMORY_LIMIT = 8
 MEMORY_CHARS = 400
+UNVOUCHED_LIMIT = 20
 SESSIONS = 3
 HEADER = ('What Apex knows about {owner} (evidence and preferences; never permission to skip the request '
           'or the rules)')
@@ -125,6 +127,16 @@ def _mentions(memory: dict, words: list[str]) -> bool:
     return any(re.search(r'\b' + re.escape(w), hay) for w in words if w)
 
 
+# Memories any channel, device or tool call can save (core's `remember`, a page
+# the agent read) never reach a coding agent's system prompt: only those whose
+# provenance code set (agent/longterm.init_db) as the owner's.
+TRUSTED = ('approved', 'code_rule')
+
+
+def _trusted(rows) -> list[dict]:
+    return [m for m in rows if m.get('source') in TRUSTED]
+
+
 def _memories(pid, name, prompt) -> list[dict]:
     seen, picked = set(), []
 
@@ -139,14 +151,54 @@ def _memories(pid, name, prompt) -> list[dict]:
             picked.append(m)
 
     project = name.lower() if len(name.strip()) >= 3 else ''
-    prefs = longterm.recall('', limit=60, kind='preference')
+    prefs = _trusted(longterm.recall('', limit=200, kind='preference'))
     add([m for m in prefs if _mentions(m, ['code', 'coding', project])])
-    if prompt.strip():
-        add(longterm.match_terms(prompt, 4))
+    if prompt.strip():                       # never a personal fact that happens to share words
+        add([m for m in _trusted(longterm.match_terms(prompt, 40)) if m.get('kind') in ('preference', 'decision')][:4])
     if project:
-        add([m for m in longterm.recall('', limit=60, kind='decision') if _mentions(m, [project])])
-    add([m for m in prefs if (m.get('importance') or 0) >= 7])
+        add([m for m in _trusted(longterm.recall('', limit=200, kind='decision')) if _mentions(m, [project])])
     return [dict(kind='memory', ref=m.get('id'), text=_cut(_one_line(m['content']), MEMORY_CHARS)) for m in picked]
+
+
+class CodeError(ValueError):
+    """A request the page made that can't be done, in plain words."""
+
+
+def project_name(pid: int) -> str:
+    """The code project's name, '' when there is none (or Apex Code never ran)."""
+    try:
+        with longterm._conn() as db:
+            row = db.execute('SELECT name FROM code_projects WHERE id=?', (pid,)).fetchone()
+        return row[0] if row else ''
+    except sqlite3.OperationalError:
+        return ''
+
+
+def unvouched(pid: int) -> list[dict]:
+    """Coding memories the brief leaves out because nothing says the owner saved
+    them (any channel or tool call can save a memory, and memories from before
+    provenance existed have none). The owner can vouch for one from the page."""
+    name = project_name(pid)
+    project = name.lower() if len(name.strip()) >= 3 else ''
+    rows = [m for m in longterm.recall('', limit=200, kind='preference') if _mentions(m, ['code', 'coding', project])]
+    if project:
+        rows += [m for m in longterm.recall('', limit=200, kind='decision') if _mentions(m, [project])]
+    out, seen = [], set()
+    for m in rows:
+        if m.get('source') in TRUSTED or m.get('id') in seen or not str(m.get('content') or '').strip():
+            continue
+        seen.add(m.get('id'))
+        out.append(dict(kind='memory', ref=m.get('id'), text=redact(_cut(_one_line(m['content']), MEMORY_CHARS))))
+    return out[:UNVOUCHED_LIMIT]
+
+
+def vouch(memory_id: int) -> dict:
+    """The owner says a memory is theirs: it may reach a coding agent's brief."""
+    with longterm._write_conn() as db:
+        n = db.execute("UPDATE memories SET source = 'approved' WHERE id = ? AND source = ''", (int(memory_id),)).rowcount
+    if not n:
+        raise CodeError('No such memory, or it already counts.')
+    return {'ok': True, 'id': int(memory_id)}
 
 
 def _record(pid, name, prompt) -> list[dict]:
@@ -156,7 +208,7 @@ def _record(pid, name, prompt) -> list[dict]:
 def _sessions(pid, name, prompt) -> list[dict]:
     try:
         with longterm._conn() as db:
-            rows = db.execute("SELECT s.id, s.title, s.status, s.review_rating, s.check_state, s.summary, "
+            rows = db.execute("SELECT s.id, s.title, s.status, s.review_rating, s.check_state, "
                               "(SELECT data FROM code_events e WHERE e.session_id = s.id AND e.kind = 'discarded' "
                               " ORDER BY e.id DESC LIMIT 1) FROM code_sessions s "
                               "WHERE s.project_id=? AND s.status IN ('kept', 'discarded') ORDER BY s.updated DESC LIMIT ?",
@@ -164,15 +216,16 @@ def _sessions(pid, name, prompt) -> list[dict]:
     except sqlite3.OperationalError:                     # Apex Code has not run on this PC yet
         return []
     out = []
-    for sid, title, status, rating, checks, summary, gone in rows:
+    for sid, title, status, rating, checks, gone in rows:
         why = REASONS.get(_reason_of(gone), '')
         bits = [f'"{_one_line(title)}"', 'kept' if status == 'kept' else f"thrown away{f' ({why})' if why else ''}"]
         if rating is not None:
             bits.append(f'second opinion {rating}/10')
         if checks in ('passed', 'failed'):
             bits.append(f'checks {checks}')
-        said = _one_line(summary)[:200]
-        out.append(dict(kind='session', ref=sid, text=', '.join(bits) + (f'. {said}' if said else '')))
+        # Only what Apex measured: the agent's own summary is its text, not the owner's,
+        # and never goes into a later session's system prompt.
+        out.append(dict(kind='session', ref=sid, text=', '.join(bits)))
     return out
 
 
@@ -212,13 +265,7 @@ def brief_block(pid: int, prompt: str = '') -> dict:
     nothing and is named in errors; this never raises for a broken source.
     """
     owner = _owner()
-    name = ''
-    try:
-        with longterm._conn() as db:
-            row = db.execute('SELECT name FROM code_projects WHERE id=?', (pid,)).fetchone()
-        name = row[0] if row else ''
-    except sqlite3.OperationalError:
-        pass
+    name = project_name(pid)
     found, errors = {}, {}
     for kind, fn in SOURCES.items():
         try:
@@ -346,12 +393,14 @@ def _rule_items(items) -> list[dict]:
 
 
 def global_rules() -> list[dict]:
-    """Rules for all of the owner's code: memories tagged code,rule, newest kept first."""
+    """Rules for all of the owner's code: memories add_rule() saved (source
+    'code_rule', which no tool call can set), newest kept first. A memory merely
+    tagged code,rule (say, by a model's `remember`) is not a rule."""
     found = longterm.recall('code,rule', limit=GLOBAL_LIMIT * 4, semantic=False)
     out = []
     for m in found:
         tags = {t.strip().lower() for t in str(m.get('tags') or '').split(',')}
-        if {'code', 'rule'} <= tags and str(m.get('content') or '').strip():
+        if m.get('source') == 'code_rule' and {'code', 'rule'} <= tags and str(m.get('content') or '').strip():
             out.append(dict(id=m.get('id'), text=str(m['content']).strip()))
     return out[:GLOBAL_LIMIT]
 
@@ -393,7 +442,7 @@ def add_rule(pid: int, text, scope: str = 'project', revision=None) -> dict:
         raise ValueError('A rule is for this project or for all your code.')
     if scope == 'all':
         if not any(g['text'].lower() == text.lower() for g in global_rules()):    # said again: already remembered
-            longterm.remember(text, kind='preference', importance=8, tags='code,rule')
+            longterm.remember(text, kind='preference', importance=8, tags='code,rule', source='code_rule')
             _tell(None, [f'New rule from {_owner()}, for every project: {text}'])
         return rules(pid)
     before = continuity.code_corrections(pid)['data'].get('items') or []
@@ -448,7 +497,6 @@ def restore_rules(pid: int, revision, current_revision) -> dict:
 REASONS = {'changed_mind': 'a change of mind', 'wrong': 'it was wrong', 'poor': 'poor quality',
            'superseded': 'something better came along'}
 DECISIONS_CAP = continuity.PROJECT_LIMITS['decisions']
-SUMMARY_CHARS = 240
 
 
 def _reason_of(data) -> str:
@@ -458,12 +506,6 @@ def _reason_of(data) -> str:
     except (TypeError, ValueError):
         return ''
     return reason if reason in REASONS else ''
-
-
-def _first_sentence(text) -> str:
-    text = _one_line(re.sub(r'[*`#>]+', '', str(text or '')))
-    m = re.match(r'(.+?[.!?])(\s|$)', text)
-    return _cut(m.group(1) if m else text, SUMMARY_CHARS)
 
 
 def _plural(n: int, word: str) -> str:
@@ -518,8 +560,8 @@ def write_back(s: dict, outcome: str, **facts) -> dict:
     reason. Returns which steps worked: {'decision', 'daily', 'outcome'}. Never
     raises: what could not be written is False, and the reason is printed."""
     f = _facts(s, outcome, facts)
-    said = _first_sentence(s.get('summary')) if f['kept'] else ''
-    line = _decision(f) + (f': {said}' if said else '')
+    # What Apex measured, never the agent's summary: the log is in every later brief.
+    line = _decision(f)
     rated = f"rated {f['rating']}/10" if f['rating'] is not None else 'not rated'
     result = '; '.join(['kept' if f['kept'] else 'thrown away', f"checks {f['checks']}", f"proof {f['proof']}", rated]
                        + ([] if f['kept'] else [f"reason {REASONS.get(f['reason'], 'none given')}"]))
@@ -656,8 +698,12 @@ def _evidence(pid: int, days: int) -> tuple:
     """(finished sessions, agent test runs, folders, project row), read fresh whenever they could differ."""
     since = time.time() - days * 86400
     with longterm._conn() as db:
-        moved = db.execute(f'SELECT COUNT(*), MAX(s.updated), MIN(s.updated) FROM code_sessions s WHERE {FINISHED}',
-                           (pid, since)).fetchone()
+        # The 'kept'/'discarded' event (its proof, its reason) lands just after the status
+        # does, so a read in between must not be what stays cached: count those too.
+        moved = db.execute(f'SELECT COUNT(*), MAX(s.updated), MIN(s.updated), '
+                           f"(SELECT MAX(e.id) FROM code_events e JOIN code_sessions s ON s.id = e.session_id "
+                           f"WHERE e.kind IN ('kept', 'discarded') AND {FINISHED}) "
+                           f'FROM code_sessions s WHERE {FINISHED}', (pid, since, pid, since)).fetchone()
         key = (str(longterm.DB_PATH), pid, days)
         if key in _read and _read[key][0] == moved:
             return _read[key][1]

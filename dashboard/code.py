@@ -51,7 +51,7 @@ async def _do(call, *args, **kwargs):
     """Run in a thread (git and the plan checks take a moment); errors in plain words."""
     try:
         return await asyncio.to_thread(call, *args, **kwargs)
-    except code_studio.CodeError as exc:
+    except (code_studio.CodeError, code_brain.CodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
@@ -248,7 +248,17 @@ async def project_brain(pid: int, request: Request, q: str = ''):
     (agent/code_brain.py). A memory is forgotten with DELETE /api/memories/{id}."""
     _owner(request)
     await _do(code_studio.project, pid)
-    return await asyncio.to_thread(code_brain.brief_block, pid, q[:code_studio.MAX_PROMPT])
+    out = await asyncio.to_thread(code_brain.brief_block, pid, q[:code_studio.MAX_PROMPT])
+    out['unvouched'] = await asyncio.to_thread(code_brain.unvouched, pid)
+    return out
+
+
+@router.post('/api/code/memories/{mid}/vouch')
+async def vouch_memory(mid: int, request: Request):
+    """You say a coding memory is yours, so later sessions hear it (agent/code_brain.vouch).
+    Owner-only: a device token or a model's tool call can save a memory, never vouch for one."""
+    _owner(request)
+    return await _do(code_brain.vouch, mid)
 
 
 # Rules: corrections said once (agent/code_brain.py), for this project or for all code.

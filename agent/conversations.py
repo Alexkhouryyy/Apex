@@ -69,6 +69,10 @@ def init_db() -> None:
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_thread "
                   "ON chat_messages(thread_id, ts)")
+        # A thread that read an Apex Code session (the owner's alone): a device
+        # token can neither list, read nor continue it.
+        if "owner_only" not in {r[1] for r in c.execute("PRAGMA table_info(chat_threads)")}:
+            c.execute("ALTER TABLE chat_threads ADD COLUMN owner_only INTEGER NOT NULL DEFAULT 0")
 
 
 def create(title: str = "") -> int:
@@ -113,14 +117,16 @@ def add_message(thread_id: int, role: str, text: str, *, strict: bool = False) -
         print(f"[Conversations] could not store message: {e}")
 
 
-def list_threads(limit: int = 30) -> list[dict]:
+def list_threads(limit: int = 30, *, owner: bool = True) -> list[dict]:
+    """Recent threads; `owner=False` (a device token) leaves out owner-only ones."""
     _ensure_db()
     try:
         with longterm._conn() as c:
             rows = c.execute(
                 "SELECT t.id, t.title, t.updated_at, COUNT(m.id) "
                 "FROM chat_threads t LEFT JOIN chat_messages m ON m.thread_id = t.id "
-                "GROUP BY t.id ORDER BY t.updated_at DESC LIMIT ?", (limit,)).fetchall()
+                + ("" if owner else "WHERE t.owner_only = 0 ")
+                + "GROUP BY t.id ORDER BY t.updated_at DESC LIMIT ?", (limit,)).fetchall()
     except Exception:
         return []
     # An empty thread is an accident of clicking New, not a conversation.
@@ -133,6 +139,23 @@ def exists(thread_id: int) -> bool:
     _ensure_db()
     with longterm._conn() as c:
         return c.execute("SELECT 1 FROM chat_threads WHERE id=?", (thread_id,)).fetchone() is not None
+
+
+def mark_owner_only(thread_id: int) -> None:
+    """This thread holds Apex Code data now; it stays the owner's for good."""
+    _ensure_db()
+    with longterm._conn() as c:
+        c.execute("UPDATE chat_threads SET owner_only = 1 WHERE id = ?", (int(thread_id),))
+
+
+def owner_only(thread_id) -> bool:
+    _ensure_db()
+    try:
+        with longterm._conn() as c:
+            row = c.execute("SELECT owner_only FROM chat_threads WHERE id = ?", (int(thread_id),)).fetchone()
+    except (TypeError, ValueError):
+        return False
+    return bool(row and row[0])
 
 
 def messages(thread_id: int, limit: int = 500, *, newest: bool = False, strict: bool = False) -> list[dict]:

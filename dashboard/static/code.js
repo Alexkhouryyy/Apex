@@ -353,6 +353,9 @@
     (view === 'home' ? $('home-slot') : $('session-slot')).append($('brief-form'));
   }
   async function open(id) {
+    // The old session's stream, typing and voice end here, before anything is awaited:
+    // its next step must never land in this feed (or move lastId), nor be said out loud.
+    disconnect(); celineStop(); initial = true; liveSeen = -1; live = null;
     current = id; detail = null; lastId = 0; feed = {turn: null, root: $('feed'), yous: 0}; proof = null; proofDue = true; $('celine-card').hidden = true;
     $('feed').replaceChildren(); show('session');
     if (location.hash !== `#s=${id}`) history.replaceState(null, '', `#s=${id}`);
@@ -373,7 +376,7 @@
     schedule(400);
   }
   function home() {
-    current = null; detail = null; files = null; proof = null; show('home'); disconnect(); $('celine-card').hidden = true;
+    current = null; detail = null; files = null; proof = null; show('home'); disconnect(); celineStop(); $('celine-card').hidden = true;
     history.replaceState(null, '', location.pathname);
     engine = store.get('apex.code.engine') || (ov && ov.default_engine) || 'claude'; mode = store.get('apex.code.mode', 'safe');
     if (ov) { renderHome(); renderRail(); } renderEngine(); loadBrain();
@@ -489,7 +492,32 @@
       if (pid === project) { brain = b; renderBrainChip(); }
       $('brain-body').replaceChildren(b.sources.length ? brainList(b.sources, loadBrain)
         : el('p', 'empty', 'Tell Celine or Apex chat how you like your code; it shows up here.'));
+      if ((b.unvouched || []).length) $('brain-body').append(unvouchedList(b.unvouched));
     } catch (err) { $('brain-body').replaceChildren(el('p', 'fine', err.message)); }
+  }
+  // Coding memories saved from a chat, a device or a tool call, or before Apex kept track of
+  // who saved what. A page or a paired phone can plant one, so none reaches your plan until
+  // you say it's yours here (agent/code_brain.unvouched, POST /api/code/memories/{id}/vouch).
+  function unvouchedList(items) {
+    const group = el('div', 'bg unvouched');
+    group.append(el('div', 'bh', 'Not told until you OK it'),
+      el('p', 'fine', 'Saved from a chat, a device or before Apex kept track. Apex only tells your plan what you vouch for.'));
+    for (const x of items) {
+      const row = el('div', 'bl k-memory'), use = button('It\'s mine, use it', async () => {
+        use.disabled = true;
+        try {
+          await api(`/api/code/memories/${encodeURIComponent(x.ref)}/vouch`, {method: 'POST'});
+          say('Later sessions will hear it.', 'good');
+          openBrain(); loadBrain();
+        } catch (err) { use.disabled = false; say(err.message, 'error'); }
+      }, 'small vouch');
+      row.dataset.ref = String(x.ref);
+      row.append(el('span', 'tag', `#${x.ref}`), el('span', 'bt', x.text), use,
+        button('Forget', () => forgetMemory(x.ref, openBrain), 'small forget'));
+      group.append(row);
+    }
+    const box = el('div', 'brain-list'); box.append(group);
+    return box;
   }
   $('brain-chip').onclick = openBrain;
   $('brain-close').onclick = () => $('brain-dialog').close();
@@ -1022,7 +1050,7 @@
     // The change list costs Apex some git work: fetch it when something changed, and now and then.
     if (refresh || (busy() && ++quiet % 5 === 0)) await refreshDetail();
     working();
-    if (!stream.on && busy()) { try { showLive(await api(`/api/code/sessions/${id}/live`)); } catch (_) {} }
+    if (!stream.on && busy()) { try { const lv = await api(`/api/code/sessions/${id}/live`); if (id === current) showLive(lv); } catch (_) {} }
   }
   // New steps, from the stream or a poll: drawn once each, in order.
   function take(events) {
@@ -1391,12 +1419,12 @@
         let buf = '';
         for (;;) {
           const {value, done} = await reader.read();
-          if (done || gen !== stream.gen) break;
+          if (done || gen !== stream.gen || current !== id) break;
           buf += dec.decode(value, {stream: true});
           let nl;
           while ((nl = buf.indexOf('\n')) >= 0) {
             const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
-            if (line.trim()) onStream(JSON.parse(line));
+            if (line.trim()) onStream(JSON.parse(line), id);
           }
         }
       } catch (err) { if (gen !== stream.gen) return; stream.fails++; console.warn('[Code] live stream dropped, retrying:', err && err.message); }
@@ -1406,7 +1434,8 @@
     }
   }
   let refreshSoon = null;
-  function onStream(m) {
+  function onStream(m, id) {
+    if (id !== current) return;                         // another session's stream, still draining
     if (m.t === 'event') {
       const {t, ...e} = m;
       if (take([e])) { clearTimeout(refreshSoon); refreshSoon = setTimeout(() => refreshDetail().then(working).catch(() => {}), 250); }
@@ -1833,6 +1862,7 @@
   }
   // Say `text` after whatever is already being said. `onFail(err)` if it can't be said.
   function speakNow(text, onFail) {
+    text = N ? N.redact(text) : String(text || '');          // never a key out loud, nor to be voiced
     const parts = Q ? Q.chunks(plain(text).slice(0, 3900)) : [plain(text).slice(0, 3900)].filter(Boolean);
     if (!parts.length) return voice.tail;
     const epoch = voice.epoch;
@@ -1874,7 +1904,14 @@
   // Celine: ask out loud (🎙 or Ctrl+Shift+Space) or typed (/celine …) about the open session.
   // Her answer comes from the companion turn engine (/api/companion/chat, workspace 'code'),
   // shows in her card, and is said in the voice you chose for her.
-  const celine = {busy: false, ctrl: null};
+  const celine = {busy: false, ctrl: null, dismissed: false};
+  // ✕, Quiet, another session or home: her answer stops streaming, never reopens her card
+  // and is never said.
+  function celineStop() {
+    celine.dismissed = true;
+    if (celine.ctrl) { try { celine.ctrl.abort(); } catch (_) {} }
+    celine.ctrl = null; hush();
+  }
   const celineKey = sid => `apex.code.celine.${sid}`;
   const turnId = () => 'code-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
   function celineCard(question, answer, state) {
@@ -1897,24 +1934,30 @@
       try { question = await transcribe(blob); } catch (err) { celineCard('', 'Could not transcribe: ' + err.message, 'error'); return; }
       if (!question) { celineCard('', 'I didn\'t catch that. Try again, a little closer.', 'error'); return; }
     }
-    celine.busy = true; $('celine-btn').disabled = true;
+    if (current !== sid) return;                          // you moved on while she listened
+    const ctrl = new AbortController();
+    celine.busy = true; celine.ctrl = ctrl; celine.dismissed = false; $('celine-btn').disabled = true;
+    const wanted = () => current === sid && !celine.dismissed && celine.ctrl === ctrl;
     celineCard(question, '', 'thinking');
     try {
-      const answer = await celineChat(sid, question, true);
-      if (current === sid) celineCard(question, answer, '');
-      if (answer.trim()) speakNow(answer, err => say('Celine\'s answer is on screen; she couldn\'t say it: ' + err.message, 'error'));
-    } catch (err) { if (current === sid) celineCard(question, err.message, 'error'); }
-    finally { celine.busy = false; $('celine-btn').disabled = false; }
+      const answer = await celineChat(sid, question, true, ctrl, wanted);
+      if (wanted()) {
+        celineCard(question, answer, '');
+        if (answer.trim()) speakNow(answer, err => say('Celine\'s answer is on screen; she couldn\'t say it: ' + err.message, 'error'));
+      }
+    } catch (err) { if (err.name !== 'AbortError' && wanted()) celineCard(question, err.message, 'error'); }
+    finally { if (celine.ctrl === ctrl) celine.ctrl = null; celine.busy = false; $('celine-btn').disabled = false; }
   }
-  async function celineChat(sid, question, retry) {
+  async function celineChat(sid, question, retry, ctrl, wanted) {
     const thread = Number(store.get(celineKey(sid))) || null;
     const body = {message: question, turn_id: turnId(), mode: 'discuss', workspace: 'code', code_session: sid,
       voice: 'voicebox', voice_profile: store.get('apex.voicebox.profile'), ...(thread ? {thread_id: thread} : {})};
-    const r = await fetch('/api/companion/chat', {method: 'POST', headers: {'Content-Type': 'application/json', ...auth()}, body: JSON.stringify(body)});
+    const r = await fetch('/api/companion/chat', {method: 'POST', headers: {'Content-Type': 'application/json', ...auth()}, body: JSON.stringify(body),
+      signal: ctrl && ctrl.signal});
     if (r.status === 401) { $('login').showModal(); throw new Error('Enter your Apex token.'); }
     if (!r.ok) {
       const b = await r.json().catch(() => ({})), why = typeof b.detail === 'string' ? b.detail : `Celine couldn't answer (${r.status})`;
-      if (retry && thread && /no longer exists/i.test(why)) { store.set(celineKey(sid), ''); return celineChat(sid, question, false); }
+      if (retry && thread && /no longer exists/i.test(why)) { store.set(celineKey(sid), ''); return celineChat(sid, question, false, ctrl, wanted); }
       throw new Error(why);
     }
     let text = '', buffer = '', final = null;
@@ -1922,7 +1965,7 @@
       if (!line.trim()) return;
       let ev; try { ev = JSON.parse(line); } catch (_) { return; }
       if (ev.type === 'start' && ev.thread_id) store.set(celineKey(sid), String(ev.thread_id));
-      else if (ev.type === 'token') { text += ev.text || ''; if (current === sid) celineCard(null, text, 'thinking'); }
+      else if (ev.type === 'token') { text += ev.text || ''; if (!wanted || wanted()) celineCard(null, text, 'thinking'); }
       else if (ev.type === 'done') final = ev.text != null ? ev.text : text;
       else if (ev.type === 'error') throw new Error(ev.text || 'Celine stopped with an error.');
     };
@@ -1930,7 +1973,7 @@
       const reader = r.body.getReader(), dec = new TextDecoder();
       for (;;) {
         const {value, done} = await reader.read();
-        if (done) break;
+        if (done || (wanted && !wanted())) break;
         buffer += dec.decode(value, {stream: true});
         const lines = buffer.split('\n'); buffer = lines.pop();
         lines.forEach(take);
@@ -1940,8 +1983,8 @@
     return String(final != null ? final : text);
   }
   $('celine-btn').onclick = () => askCeline();
-  $('celine-quiet').onclick = hush;
-  $('celine-close').onclick = () => { hush(); $('celine-card').hidden = true; };
+  $('celine-quiet').onclick = celineStop;
+  $('celine-close').onclick = () => { celineStop(); $('celine-card').hidden = true; };
   $('add-project').onclick = () => { $('add-form').reset(); $('add-dialog').returnValue = ''; $('add-dialog').showModal(); };
   $('add-dialog').addEventListener('close', async () => {
     if ($('add-dialog').returnValue !== 'ok') return;

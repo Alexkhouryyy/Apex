@@ -92,6 +92,14 @@ def init_db():
             c.execute("ALTER TABLE memories ADD COLUMN embedding BLOB")
         except Exception:
             pass
+        # Where a memory came from, set only by code, never by a model's tool call:
+        # '' (any channel or tool), 'approved' (the owner approved a suggestion) or
+        # 'code_rule' (a rule for all code, agent/code_brain.add_rule). Only the
+        # last two reach a coding agent's brief or count as rules.
+        try:
+            c.execute("ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass
         c.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -320,7 +328,9 @@ def _write_conn():
 _REMEMBER_MAX_CHARS = 8000  # a single memory row shouldn't bloat every future recall/embed
 
 
-def remember(content: str, kind: str = "fact", importance: int = 5, tags: str = "") -> str:
+def remember(content: str, kind: str = "fact", importance: int = 5, tags: str = "", *, source: str = "") -> str:
+    """Save a memory. `source` is its provenance (see init_db); a memory plugin
+    is not told it, so what it stores counts as from any channel."""
     from agent import plugins
     handled, result = plugins.provider_call('memory', 'remember', content=content, kind=kind, importance=importance, tags=tags)
     if handled:
@@ -337,8 +347,8 @@ def remember(content: str, kind: str = "fact", importance: int = 5, tags: str = 
     embedding = _embed(content)
     with _conn() as c:
         c.execute(
-            "INSERT INTO memories (ts, kind, content, importance, tags, embedding) VALUES (?, ?, ?, ?, ?, ?)",
-            (time.time(), kind, content, importance, tags, embedding),
+            "INSERT INTO memories (ts, kind, content, importance, tags, embedding, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (time.time(), kind, content, importance, tags, embedding, str(source or "")),
         )
         new_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
     return f"Remembered [#{new_id} {kind} importance={importance}]: {content}"
@@ -395,12 +405,12 @@ def _candidates(kind: str = "") -> list[tuple]:
     with _conn() as c:
         if kind:
             return c.execute(
-                "SELECT id, ts, kind, content, importance, tags, embedding FROM memories WHERE kind = ? "
+                "SELECT id, ts, kind, content, importance, tags, embedding, source FROM memories WHERE kind = ? "
                 "ORDER BY importance DESC, ts DESC LIMIT ?",
                 (kind.lower(), _RECALL_CANDIDATE_CAP)
             ).fetchall()
         return c.execute(
-            "SELECT id, ts, kind, content, importance, tags, embedding FROM memories "
+            "SELECT id, ts, kind, content, importance, tags, embedding, source FROM memories "
             "ORDER BY importance DESC, ts DESC LIMIT ?",
             (_RECALL_CANDIDATE_CAP,)
         ).fetchall()
@@ -452,7 +462,8 @@ def match_terms(query: str, limit: int = 8, kind: str = "") -> list[dict]:
 
 def _format_rows(rows) -> list[dict]:
     return [
-        {"id": r[0], "ts": r[1], "kind": r[2], "content": r[3], "importance": r[4], "tags": r[5]}
+        {"id": r[0], "ts": r[1], "kind": r[2], "content": r[3], "importance": r[4], "tags": r[5],
+         "source": (r[7] if len(r) > 7 else "") or ""}
         for r in rows
     ]
 

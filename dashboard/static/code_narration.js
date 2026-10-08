@@ -3,16 +3,36 @@
    adds a short phrase for what the plan is doing ("running pytest", "editing upload.py"),
    at most one every 6 seconds and none while something is being said. Fixed phrases,
    no model, and never code: a fenced block is dropped, and a command or a file is said
-   by its name only. What the night shift built is said in counts, never titles. */
+   by its name only. Never a key or a token either (redact(), also used for everything the
+   page says). What the night shift built is said in counts, never titles. */
 (function (root) {
   'use strict';
   const GAP = 6000;                                     // ms between two play-by-play phrases, at least
   const PLAN = {claude: 'Claude', chatgpt: 'ChatGPT'};
   const SAFE_NAME = /^[\w.@+-]{1,40}$/;                 // a name to say, not code
+  // What is recognisably a credential, as agent/working_context.py's redact() finds it (and
+  // AWS key ids, and long runs of letters and digits): never said out loud, nor sent to be voiced.
+  const SECRETS = [
+    [/((?:pass(?:word|phrase)|secret|api[ _-]?key|token)\s*(?:is|=|:)\s*)(\S+)/gi, '$1[redacted]'],
+    [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
+    [/\b(?:xox[baprs]|gh[pousr]|github_pat|sk|pk|rk)[-_][A-Za-z0-9_\-]{16,}/g, '[redacted key]'],
+    [/\bAKIA[0-9A-Z]{16}\b/g, '[redacted key]'],
+    [/\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]+/g, '[redacted token]'],
+    [/\b[A-Za-z0-9._%+\-]+:[^\s:@/]{6,}@[A-Za-z0-9.\-]+\b/g, '[redacted credential]'],
+    [/\bBearer\s+[A-Za-z0-9._\-]{12,}/g, '[redacted bearer]'],
+    [/(?=[A-Za-z0-9+/=_-]*\d)(?=[A-Za-z0-9+/=_-]*[A-Za-z])[A-Za-z0-9+/=_-]{24,}/g, '[redacted]'],
+  ];
+  function redact(text) {
+    let out = String(text || '');
+    for (const [re, to] of SECRETS) out = out.replace(re, to);
+    return out;
+  }
+  // A span to say by its name: a plain name, with no long run of letters and digits (a key, a hash).
+  const sayable = inner => SAFE_NAME.test(inner) && !/[A-Za-z0-9]{16,}/.test(inner) && redact(inner) === inner;
   // Text without code: fenced blocks (closed or not) go, an inline span stays only when it is a name.
   function noCode(text) {
-    return String(text || '').replace(/```[\s\S]*?(```|$)/g, ' ')
-      .replace(/`([^`\n]*)`/g, (_, inner) => SAFE_NAME.test(inner.trim()) ? inner.trim() : ' ')
+    return redact(text).replace(/```[\s\S]*?(```|$)/g, ' ')
+      .replace(/`([^`\n]*)`/g, (_, inner) => sayable(inner.trim()) ? inner.trim() : ' ')
       .replace(/`/g, '').replace(/[*#>_~|]/g, '').replace(/\s+/g, ' ').trim();
   }
   // The first sentence, for "Done" (a full stop inside 3.5 or upload.py does not end it).
@@ -104,7 +124,7 @@
     if (busy) parts.push(`${count(busy)} ${busy === 1 ? 'is' : 'are'} still working.`);
     return parts.join(' ');
   }
-  const api = {GAP, noCode, firstSentence, milestone, program, playByPlay, pacer, overnight};
+  const api = {GAP, redact, noCode, firstSentence, milestone, program, playByPlay, pacer, overnight};
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ApexNarration = api;
 })(typeof window !== 'undefined' ? window : globalThis);
