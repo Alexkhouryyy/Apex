@@ -17,6 +17,37 @@ except ImportError:                              # imported from the repo root
     from scripts import voice_library
 
 
+def load_model(load):
+    """Load the voice model with `load()`, surviving one Windows quirk.
+
+    transformers first reserves the whole model as ONE block of GPU memory
+    (caching_allocator_warmup: about 3.6 GB for this model) so loading is
+    faster. On Windows that single block can be refused even with plenty
+    free ("Tried to allocate 3.59 GiB ... 6.89 GiB is free"), because other
+    apps split the GPU's memory. Then this loads again without the
+    warm-up, tensor by tensor: a little slower to load, the same model. A
+    second refusal is a real shortage, and the message says what to do."""
+    import torch
+    try:
+        return load()
+    except torch.OutOfMemoryError:
+        pass
+    print('The GPU refused one big block of memory; loading again piece by piece...', flush=True)
+    torch.cuda.empty_cache()
+    from transformers import modeling_utils
+    was = getattr(modeling_utils, 'caching_allocator_warmup', None)
+    modeling_utils.caching_allocator_warmup = lambda *args, **kwargs: None
+    try:
+        return load()
+    except torch.OutOfMemoryError as exc:
+        raise RuntimeError('Not enough GPU memory for Celine\'s voice (about 4 GB). Close other programs '
+                           'using the GPU (nvidia-smi lists them: games, other Apex windows, video '
+                           'apps), then start again.') from exc
+    finally:
+        if was is not None:
+            modeling_utils.caching_allocator_warmup = was
+
+
 class QwenVoice:
     """The model, loaded once; any voice in the library. Each voice's clone
     prompt is built on its first use and kept until its recording changes."""
@@ -26,9 +57,9 @@ class QwenVoice:
         from qwen_tts import Qwen3TTSModel
         if not torch.cuda.is_available():
             raise RuntimeError('CUDA unavailable. Use the GPU-enabled apex-qwen-env Python.')
-        self.model = Qwen3TTSModel.from_pretrained(
+        self.model = load_model(lambda: Qwen3TTSModel.from_pretrained(
             'Qwen/Qwen3-TTS-12Hz-1.7B-Base', device_map='cuda:0',
-            dtype=torch.bfloat16, attn_implementation='sdpa')
+            dtype=torch.bfloat16, attn_implementation='sdpa'))
         self.prompts: dict[str, tuple[float, object]] = {}
 
     def prompt(self, voice):

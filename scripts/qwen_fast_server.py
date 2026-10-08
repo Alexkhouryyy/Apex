@@ -27,10 +27,10 @@ import threading
 from pathlib import Path
 
 try:
-    from qwen_server import TRANSCRIPT
+    from qwen_server import TRANSCRIPT, load_model
     import voice_library
 except ImportError:                              # run from the repo root
-    from scripts.qwen_server import TRANSCRIPT
+    from scripts.qwen_server import TRANSCRIPT, load_model
     from scripts import voice_library
 
 WARMUP_TEXT = "Hi. I'm warming up, and I'll be ready in a moment."
@@ -56,7 +56,7 @@ class FastVoice:
             raise RuntimeError('CUDA unavailable. Use the apex-qwen-fast-env Python.')
         self.chunk_size = chunk_size
         self.prepared: dict[str, tuple[float, Path]] = {}
-        self.model = FasterQwen3TTS.from_pretrained('Qwen/Qwen3-TTS-12Hz-1.7B-Base')
+        self.model = load_model(lambda: FasterQwen3TTS.from_pretrained('Qwen/Qwen3-TTS-12Hz-1.7B-Base'))
         self.sample_rate = int(getattr(self.model, 'sample_rate', 0) or 24000)
 
     def reference(self, voice) -> Path:
