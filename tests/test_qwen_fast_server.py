@@ -183,3 +183,53 @@ def test_the_fast_launcher_uses_the_fast_environment_and_server(tmp_path, monkey
     assert "'scripts/qwen_fast_server.py'" in src
     cmd = (ROOT / "Start-Apex-Celine-Fast.cmd").read_text()
     assert "run_apex_qwen.py --fast" in cmd
+
+
+# ---------------------------------------------------------------- loading on a GPU whose memory other apps split
+
+def _fake_transformers(monkeypatch):
+    import sys
+    import types
+    warmup = lambda *args, **kwargs: 'reserved one big block'
+    utils = types.SimpleNamespace(caching_allocator_warmup=warmup)
+    monkeypatch.setitem(sys.modules, 'transformers', types.SimpleNamespace(modeling_utils=utils))
+    return utils, warmup
+
+
+def test_one_big_block_refused_loads_again_piece_by_piece(monkeypatch, capsys):
+    import torch
+    utils, warmup = _fake_transformers(monkeypatch)
+    monkeypatch.setattr(torch.cuda, 'empty_cache', lambda: None)
+    seen = []
+
+    def load():
+        seen.append(utils.caching_allocator_warmup())
+        if len(seen) == 1:
+            raise torch.OutOfMemoryError('CUDA out of memory. Tried to allocate 3.59 GiB')
+        return 'model'
+
+    assert fast.load_model(load) == 'model'
+    assert seen == ['reserved one big block', None], 'the second load skips the one-block warm-up'
+    assert utils.caching_allocator_warmup is warmup, 'and puts it back afterwards'
+    assert 'piece by piece' in capsys.readouterr().out
+
+
+def test_a_real_shortage_says_what_to_close(monkeypatch):
+    import pytest
+    import torch
+    utils, warmup = _fake_transformers(monkeypatch)
+    monkeypatch.setattr(torch.cuda, 'empty_cache', lambda: None)
+
+    def load():
+        raise torch.OutOfMemoryError('CUDA out of memory')
+
+    with pytest.raises(RuntimeError, match='nvidia-smi'):
+        fast.load_model(load)
+    assert utils.caching_allocator_warmup is warmup
+
+
+def test_a_normal_load_is_untouched(monkeypatch):
+    utils, warmup = _fake_transformers(monkeypatch)
+    calls = []
+    assert fast.load_model(lambda: calls.append(utils.caching_allocator_warmup()) or 'model') == 'model'
+    assert calls == ['reserved one big block'] and utils.caching_allocator_warmup is warmup
