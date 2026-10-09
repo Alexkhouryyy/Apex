@@ -4,7 +4,7 @@
   const $ = id => document.getElementById(id);
   const requestedView = new URLSearchParams(location.search).get('view');
   let state = {configured: false, connections: []}, view = ['connected', 'local'].includes(requestedView) ? requestedView : 'catalog';
-  let cursor = '', generation = 0, poll = null, polling = false, localItems = [], toolItems = [];
+  let cursor = '', generation = 0, poll = null, polling = false, localItems = [], toolItems = [], skipped = 0;
   const links = new Map();
   const labels = {not_connected:'Not connected',connected:'Connected',pending:'Awaiting sign-in',disabled:'Disabled',needs_reconnect:'Reconnect needed',disconnected:'Disconnected',disconnect_pending:'Disconnect pending'};
   function el(tag, text, cls) { const node = document.createElement(tag); if(text !== undefined) node.textContent = text; if(cls) node.className = cls; return node; }
@@ -45,7 +45,7 @@
     document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.view===view)));
     $('category').hidden=view!=='catalog';$('list-title').textContent={catalog:'Discover apps',connected:'Your connections',local:'Local MCP servers'}[view];
     $('view-help').textContent=view==='local'?'Direct connections run on your Apex host. Use Discover for managed app sign-in.':view==='connected'?'Disable pauses Apex access. Disconnect removes the managed connection.':'Choose only the apps you want Apex to use. Each account stays under your control.';
-    if(!append) {cursor='';$('results').replaceChildren();$('list-meta').textContent='';}
+    if(!append) {cursor='';skipped=0;$('catalog-warning').hidden=true;$('catalog-warning').textContent='';$('results').replaceChildren();$('list-meta').textContent='';}
     if(view==='catalog' && !state.configured){empty('Your catalog starts here','Add a Composio project key above to browse the live catalog, or open Local MCP.');return;}
     const q=$('query').value.trim().toLowerCase();
     if(view==='connected'){const items=state.connections.filter(c=>c.status!=='disconnected'&&(!q||(c.name+' '+c.slug).toLowerCase().includes(q)));items.forEach(c=>$('results').append(card(c)));$('list-meta').textContent=`${items.length} apps`;if(!items.length)empty('No matching connections','Find an app in Discover and connect your account.');return;}
@@ -53,7 +53,10 @@
     try {
       if(view==='local'){const data=await api('/local');if(gen!==generation)return;localItems=data.items.map(i=>({...i,runtime:data.runtime.servers.find(s=>s.server===i.id)}));const items=localItems.filter(i=>!q||(i.name+' '+i.blurb).toLowerCase().includes(q));items.forEach(i=>$('results').append(card(i,true)));$('list-meta').textContent=`${items.length} servers · ${data.runtime.tool_count} loaded actions`;$('view-help').textContent+=' '+data.runtime.detail;if(!items.length)empty('No matching servers','Try another search.');return;}
       const data=await api('/catalog?'+new URLSearchParams({q,category:$('category').value,cursor:append?cursor:''}));if(gen!==generation)return;
-      data.items.forEach(i=>$('results').append(card(i)));cursor=data.next_cursor||'';$('more').hidden=!cursor;$('list-meta').textContent=Number.isFinite(data.total_items)?`${data.total_items.toLocaleString()} matching apps`:`${$('results').children.length} apps loaded`;if(!$('results').children.length)empty('No matching apps','Try a different name or category.');
+      skipped+=Number.isInteger(data.skipped_items)&&data.skipped_items>0?data.skipped_items:0;
+      $('catalog-warning').hidden=!skipped;$('catalog-warning').textContent=skipped?`${skipped} app listing${skipped===1?'':'s'} could not be displayed. Try Search or Load more for other apps.`:'';
+      if(data.items.length)$('results').querySelectorAll('.empty').forEach(n=>n.remove());
+      data.items.forEach(i=>$('results').append(card(i)));cursor=data.next_cursor||'';$('more').hidden=!cursor;$('list-meta').textContent=Number.isFinite(data.total_items)?`${data.total_items.toLocaleString()} matching apps`:`${$('results').querySelectorAll('.card').length} apps loaded`;if(!$('results').children.length)empty(skipped?'No apps available on this page':'No matching apps',cursor?'Use Load more, or try a different name or category.':'Try a different name or category.');
     } catch(e){if(gen===generation){$('list-meta').textContent='Could not load';notice(e.message,true);if(!$('results').children.length)empty('Catalog unavailable','Use Refresh status or Search to try again.');}}
   }
   async function showTools(item){$('details-title').textContent=item.name+' actions';$('tool-list').replaceChildren(el('p','Loading…'));$('tool-filter').value='';toolItems=[];$('details').showModal();try{const data=await api('/'+encodeURIComponent(item.slug)+'/tools');toolItems=data.items;renderTools();}catch(e){$('tool-list').replaceChildren(el('p',e.message));}}

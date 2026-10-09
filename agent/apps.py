@@ -152,12 +152,13 @@ def status():
 
 
 def _card(item, saved):
-    meta = item.get('meta') or {}
+    meta = item.get('meta') if isinstance(item.get('meta'), dict) else {}
+    categories = meta.get('categories') if isinstance(meta.get('categories'), list) else []
     slug = _slug(item['slug'])
     row = saved.get(slug, {})
     return {'slug': slug, 'name': str(item.get('name') or slug),
             'description': str(meta.get('description') or '')[:1200],
-            'categories': [str(c.get('name') or c.get('id') or '') for c in meta.get('categories', []) if isinstance(c, dict)],
+            'categories': [str(c.get('name') or c.get('id') or '') for c in categories if isinstance(c, dict)],
             'tool_count': meta.get('tools_count'),
             'no_auth': bool(item.get('no_auth', item.get('is_no_auth', meta.get('isNoAuth', False)))),
             'status': row.get('status', 'not_connected'), 'enabled': row.get('enabled', False)}
@@ -169,9 +170,22 @@ def catalog(query='', category='', cursor=''):
     if category: params['category'] = category[:100]
     if cursor: params['cursor'] = cursor[:1000]
     page = _request('GET', '/toolkits', params=params)
+    entries = page.get('items')
+    if not isinstance(entries, list):
+        raise AppError('The app provider returned an unexpected catalog response. Your saved key was kept.')
     with _lock:
         saved = _state()['apps']
-        return {'items': [_card(i, saved) for i in page.get('items', [])],
+        cards, skipped = [], 0
+        for item in entries:
+            # Browsing must survive one unusable provider listing. Identifiers
+            # on connection/execution paths still pass the strict _slug gate.
+            try:
+                _slug(item.get('slug') if isinstance(item, dict) else None)
+            except AppError:
+                skipped += 1
+                continue
+            cards.append(_card(item, saved))
+        return {'items': cards, 'skipped_items': skipped,
                 'next_cursor': page.get('next_cursor'), 'total_items': page.get('total_items')}
 
 

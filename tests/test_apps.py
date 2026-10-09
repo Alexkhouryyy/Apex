@@ -227,6 +227,42 @@ def test_configure_verifies_before_persisting(provider):
     assert apps.status()['configured']
 
 
+def test_catalog_keeps_valid_apps_when_provider_returns_invalid_identifiers(provider, monkeypatch):
+    rows = [{'slug': 'github', 'name': 'GitHub'}, {'slug': 'bad/app'}, {'slug': None},
+            {'name': 'No identifier'}, None, 'not-a-record', {'slug': 'gmail', 'name': 'Gmail', 'meta': 3}]
+    monkeypatch.setattr(apps, '_request', lambda *a, **kw: {
+        'items': rows, 'next_cursor': 'next-page', 'total_items': 1001})
+    result = apps.catalog()
+    assert [item['slug'] for item in result['items']] == ['github', 'gmail']
+    assert result['skipped_items'] == 5
+    assert result['next_cursor'] == 'next-page' and result['total_items'] == 1001
+    assert apps.status()['configured'] and apps._state()['apps'] == {}
+
+
+@pytest.mark.parametrize('rows', [[], [{'slug': '../private'}, {'slug': 'Bad App'}]])
+def test_catalog_empty_or_all_invalid_page_keeps_pagination_and_key(provider, monkeypatch, rows):
+    monkeypatch.setattr(apps, '_request', lambda *a, **kw: {'items': rows, 'next_cursor': 'next-page'})
+    result = apps.catalog()
+    assert result['items'] == [] and result['skipped_items'] == len(rows)
+    assert result['next_cursor'] == 'next-page' and apps.status()['configured']
+
+
+@pytest.mark.parametrize('rows', [None, {}, 'invalid'])
+def test_catalog_rejects_an_invalid_page_shape_without_exposing_provider_text(provider, monkeypatch, rows):
+    monkeypatch.setattr(apps, '_request', lambda *a, **kw: {'items': rows})
+    with pytest.raises(apps.AppError, match='unexpected catalog response'):
+        apps.catalog()
+    assert apps.status()['configured']
+
+
+@pytest.mark.parametrize('slug', ['bad/app', '../private', None, 'Bad App'])
+def test_catalog_tolerance_does_not_relax_app_action_identifiers(provider, slug):
+    for fn, args in ((apps.connect, (slug,)), (apps.set_enabled, (slug, True)), (apps.disconnect, (slug,))):
+        with pytest.raises(apps.AppError, match='Invalid app identifier'):
+            fn(*args)
+    assert provider['calls'] == []
+
+
 def test_routes_require_owner_origin_bounded_json(provider,monkeypatch):
     from dashboard import server
     from fastapi.testclient import TestClient
