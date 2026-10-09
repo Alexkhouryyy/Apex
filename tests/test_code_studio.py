@@ -208,6 +208,55 @@ def kinds(sid):
     return [e['kind'] for e in code_studio.events(sid)]
 
 
+def test_provider_switch_does_not_reuse_the_other_providers_model(lab):
+    sid = wait(code_studio.start(lab.pid, 'First step', 'claude', model='opus', effort='high')['id'])['id']
+    code_studio.send(sid, 'Next step', engine='chatgpt')
+    wait(sid)
+    call = lab.calls('codex')[-1]
+    assert '-m' not in call['argv'] and not any('model_reasoning_effort=' in x for x in call['argv'])
+    assert code_studio.session(sid)['model'] == ''
+
+
+def test_approved_and_forgotten_memories_refresh_a_running_conversation(lab, monkeypatch):
+    from agent import longterm
+    monkeypatch.setattr(longterm, '_embed', lambda text: None)
+    sid = wait(code_studio.start(lab.pid, 'First step', 'claude')['id'])['id']
+    ident = _memory_id(longterm.remember('For coding use strict type hints', kind='preference', source='approved', tags='code'))
+    code_studio.send(sid, 'Next step'); wait(sid)
+    assert 'Updated Apex memory snapshot.' in lab.calls('claude')[-1]['stdin']
+    assert 'For coding use strict type hints' in lab.calls('claude')[-1]['stdin']
+    longterm.forget(ident)
+    code_studio.send(sid, 'Another step'); wait(sid)
+    prompt = lab.calls('claude')[-1]['stdin']
+    assert 'Updated Apex memory snapshot.' in prompt and 'For coding use strict type hints' not in prompt
+    code_studio.send(sid, 'Unchanged memory'); wait(sid)
+    assert lab.calls('claude')[-1]['stdin'] == 'Unchanged memory'
+
+
+def test_generated_images_are_shown_even_when_git_ignores_them(lab, monkeypatch):
+    from PIL import Image
+    original = code_engines.turn
+    def image_turn(engine, prompt, folder, *args, **kwargs):
+        result = original(engine, prompt, folder, *args, **kwargs)
+        target = Path(folder) / 'generated_images' / 'session' / 'call.png'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        Image.new('RGB', (8, 8), 'blue').save(target)
+        (Path(folder) / '.gitignore').write_text('generated_images/\n')
+        return result
+    monkeypatch.setattr(code_engines, 'turn', image_turn)
+    sid = wait(code_studio.start(lab.pid, 'Generate an image of the sea', 'chatgpt')['id'])['id']
+    images = [e for e in code_studio.events(sid) if e['kind'] == 'image']
+    assert [e['path'] for e in images] == ['generated_images/session/call.png']
+    image = code_studio.read_file(images[0]['path'], sid=sid)
+    assert image['image']['mime'] == 'image/png' and image['image']['base64']
+    assert 'built-in image_gen/imagegen' in lab.calls('codex')[-1]['stdin']
+    outside = lab.root.parent / 'outside.png'
+    Image.new('RGB', (8, 8), 'red').save(outside)
+    (Path(code_studio.session(sid)['worktree']) / 'escape.png').symlink_to(outside)
+    with pytest.raises(code_studio.CodeError, match='outside'):
+        code_studio.read_file('escape.png', sid=sid)
+
+
 # ---------------------------------------------------------------- a session
 
 def test_a_session_works_in_its_own_copy_and_your_project_is_untouched(lab):
@@ -774,6 +823,7 @@ def test_only_the_owner_codes_and_only_from_the_page(api, lab, monkeypatch):
     client, config = api
     monkeypatch.setattr(config, 'DASHBOARD_TOKEN', 'master')               # a device token, not the owner
     assert client.get('/api/code').status_code == 403                     # even reading code is the owner's
+    assert client.get('/api/code/models/chatgpt').status_code == 403
     assert client.post('/api/code/sessions', json={'project_id': lab.pid, 'prompt': 'x'}).status_code == 403
     monkeypatch.setattr(config, 'DASHBOARD_TOKEN', '')
     assert client.post('/api/code/sessions', json={'project_id': lab.pid, 'prompt': 'x'},
@@ -1391,7 +1441,7 @@ def test_match_terms_finds_memories_that_share_words_with_a_request(test_db, mon
     found = longterm.match_terms('add retry to the upload function')
     assert [m['content'] for m in found] == ['Uploads must retry 3 times']
     assert longterm.match_terms('dark') and longterm.match_terms('') == [] and longterm.match_terms('to a be') == []
-    assert longterm.recall('add retry to the upload function', semantic=False) == []    # why this exists
+    assert longterm.recall('add retry to the upload function', semantic=False) == found
 
 
 def test_check_options_only_takes_an_existing_brief_file_by_its_full_path(tmp_path):
@@ -1471,7 +1521,8 @@ def test_a_project_rule_reaches_the_next_session_and_the_one_already_open(lab):
     # The session already open hears it ahead of its next message (its plan keeps the brief it started with).
     code_studio.send(open_sid, 'Carry on'); wait(open_sid)
     stdin = lab.calls('claude')[-1]['stdin']
-    assert stdin.startswith('New rule from Alex for this project: Never touch the public API\n\nCarry on')
+    assert stdin.startswith('New rule from Alex for this project: Never touch the public API\n\n')
+    assert 'Updated Apex memory snapshot.' in stdin and stdin.endswith('Current request:\nCarry on')
     assert code_studio.session(open_sid)['pending_note'] == ''               # said once
     code_studio.send(open_sid, 'And again'); wait(open_sid)
     assert lab.calls('claude')[-1]['stdin'] == 'And again'

@@ -1870,12 +1870,13 @@ TOOLS = [
     # --- Tier-4: Image generation ---
     {
         "name": "generate_image",
-        "description": "Generate an image from a text prompt (Replicate/FLUX). Returns saved local file paths.",
+        "description": "Generate images through the signed-in ChatGPT/Codex subscription or explicitly configured Replicate. Returns saved image paths; no silent provider fallback.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "prompt": {"type": "string"},
-                "model": {"type": "string", "description": "Replicate model id, default flux-schnell"},
+                "model": {"type": "string", "description": "Optional provider-specific model: Codex host model for chatgpt, image model ID for replicate."},
+                "provider": {"type": "string", "enum": ["chatgpt", "replicate"], "description": "Use chatgpt for your signed-in ChatGPT subscription."},
                 "size": {"type": "string", "default": "1024x1024"},
                 "n": {"type": "integer", "default": 1},
             },
@@ -3220,6 +3221,7 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                 model=inputs.get("model"),
                 size=inputs.get("size", "1024x1024"),
                 n=int(inputs.get("n", 1)),
+                provider=inputs.get("provider", ""),
             )
 
         # --- Tier-4: Telemetry / Replay ---

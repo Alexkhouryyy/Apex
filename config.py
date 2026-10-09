@@ -238,6 +238,7 @@ TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 
 # Image generation (Replicate)
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
+IMAGE_GEN_PROVIDER = os.getenv("IMAGE_GEN_PROVIDER", "auto")
 IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "black-forest-labs/flux-schnell")
 IMAGE_GEN_OUTPUT_DIR = os.getenv("IMAGE_GEN_OUTPUT_DIR", "~/.voice_agent_images")
 

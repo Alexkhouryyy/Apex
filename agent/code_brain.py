@@ -137,6 +137,14 @@ def _trusted(rows) -> list[dict]:
     return [m for m in rows if m.get('source') in TRUSTED]
 
 
+def memory_signature(sources):
+    """Stable identity of current knowledge, excluding volatile session statistics."""
+    import hashlib
+    items = [{k: row.get(k) for k in ('kind', 'ref', 'text')} for row in sources
+             if row.get('kind') not in ('record', 'session')]
+    return hashlib.sha256(json.dumps(items, sort_keys=True).encode()).hexdigest()
+
+
 def _memories(pid, name, prompt) -> list[dict]:
     seen, picked = set(), []
 
@@ -310,7 +318,7 @@ def forget_file(sid: int) -> None:
 
 
 # ---------------------------------------------------------------- brain on tap: the memory server
-# The brief is what a session hears once, at the start. While it works, the plan
+# The brief starts a session and refreshes when its knowledge changes. The plan
 # can also ask Apex's memory itself, through Apex's own MCP server
 # (agent/mcp_server.py, run by scripts/apex_mcp.py): context, recall, lessons and
 # search_files only read, and what they return is redacted. `remember` only stages

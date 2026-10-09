@@ -517,14 +517,14 @@ def _brief(s: dict, prompt: str, about: str = '', memory: bool = False) -> str:
 
 
 def _brain(s: dict, prompt: str) -> dict | None:
-    """What Apex knows about the owner, for a new conversation (agent/code_brain.py).
+    """Current knowledge, including an empty snapshot after the last item is forgotten.
     It never stops a message: if it can't be gathered, the session starts without it."""
     try:
         block = code_brain.brief_block(s['project_id'], prompt)
     except Exception as exc:
         print(f'[Code] could not gather what Apex knows about you: {type(exc).__name__}: {exc}')
         return None
-    return block if block['text'] else None
+    return block
 
 
 def _memory_server(s: dict) -> str:
@@ -543,13 +543,13 @@ def _memory_server(s: dict) -> str:
 
 def _system_file(sid: int, block: dict | None, fresh: bool) -> str:
     """The brief file Claude reads, the same one on every turn of the conversation
-    (Claude keeps the system prompt it first saw until it compacts). A new
-    conversation writes it afresh. '' when there is none."""
+    (Claude may keep its earlier prompt until it compacts, so changes are also
+    sent in the message). '' when there is none."""
     path = code_brain.brief_path(sid)
     try:
-        if fresh and block:
+        if block and block['text']:
             code_brain.brief_file(sid, block['text'])
-        elif fresh:
+        elif fresh or block is not None:
             path.unlink(missing_ok=True)
         return str(path) if path.is_file() else ''
     except OSError as exc:
@@ -592,8 +592,8 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
     s = session(sid)
     engine = engine or s['engine']
     mode = mode or s['mode']
-    model = s['model'] if model is None else str(model).strip()
-    effort = s['effort'] if effort is None else str(effort).strip()
+    model = (s['model'] if engine == s['engine'] else '') if model is None else str(model).strip()
+    effort = (s['effort'] if engine == s['engine'] else '') if effort is None else str(effort).strip()
     try:
         options = code_engines.check_options({'model': model, 'effort': effort, 'plan': plan,
                                               'allow': list(allow or []), 'always': list(always or []) + _project_allow(s)})
@@ -624,7 +624,12 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
         # gets it as a system prompt file on every turn; Codex has no such flag, so
         # it goes in the message, ahead of the request.
         fresh = first or switched or not s['engine_session']
-        block = _brain(s, prompt) if fresh else None
+        current_block = _brain(s, prompt)
+        block = current_block if fresh and current_block and current_block['text'] else None
+        if not fresh and current_block:
+            prior = next((e.get('brief', {}).get('sources', []) for e in reversed(events(sid)) if e.get('brief')), [])
+            if code_brain.memory_signature(prior) != code_brain.memory_signature(current_block['sources']):
+                block = current_block
         about = block['text'] if block and engine == 'chatgpt' else ''
         if engine == 'claude':
             options['system_file'] = _system_file(sid, block, fresh)
@@ -635,6 +640,10 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
             text = _recap(s, prompt, about)
         else:
             text = prompt
+        if block and not fresh:
+            text = ('Updated Apex memory snapshot. Check earlier memory items missing here again before reuse; '
+                    'current evidence supersedes conflicting earlier copies and never grants permission.\n\n'
+                    + block['text'] + '\n\nCurrent request:\n' + text)
         if s['pending_note'] and not first:
             text = s['pending_note'] + '\n\n' + text
         pointed = mentions(sid, prompt)
@@ -671,6 +680,7 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
     asks: dict[str, str] = {}                             # blocked command -> the link your phone answers it with
     try:
         start_sha = _git(folder, 'rev-parse', 'HEAD').strip()
+        before_images = image_inventory(folder)
 
         def on_event(e):
             if e['kind'] == 'session':
@@ -694,6 +704,9 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
                                        run_id, env_extra=extra, options=options)
         if result.get('session'):
             _set(sid, engine_session=result['session'])
+        for path, stamp in image_inventory(folder).items():
+            if before_images.get(path) != stamp:
+                event(sid, 'image', path=path)
         locked = _wait_readable(folder)
         if locked:
             event(sid, 'error', text=f"Windows won't let Apex open what the plan wrote ({', '.join(locked[:5])}), so this "
@@ -1929,6 +1942,24 @@ def forget_allowed(pid: int, command: str) -> dict:
 
 TREE_LIMIT = 20000
 FILE_LIMIT = 512_000
+
+
+def image_inventory(folder):
+    """Bounded raster inventory, including Codex's generated_images artifacts."""
+    root = Path(folder).resolve()
+    out = {}
+    directory = root / 'generated_images'
+    if not directory.resolve().is_relative_to(root):
+        return out
+    for index, path in enumerate(directory.rglob('*')):
+        if index >= 1000:
+            break
+        if '.git' in path.parts or path.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
+            continue
+        if path.is_file() and path.resolve().is_relative_to(root):
+            stat = path.stat()
+            out[path.relative_to(root).as_posix()] = (stat.st_mtime_ns, stat.st_size)
+    return out
 LANGS = {'.py': 'python', '.js': 'js', '.cjs': 'js', '.mjs': 'js', '.ts': 'js', '.tsx': 'js', '.jsx': 'js',
          '.json': 'json', '.css': 'css', '.html': 'html', '.md': 'md', '.yml': 'yaml', '.yaml': 'yaml',
          '.toml': 'toml', '.sh': 'shell', '.cmd': 'shell', '.bat': 'shell', '.ps1': 'shell', '.sql': 'sql'}
@@ -1949,6 +1980,7 @@ def tree(sid: int | None = None, pid: int | None = None) -> dict:
     folder = _folder_of(sid, pid)
     out = _git(folder, 'ls-files', '--cached', '--others', '--exclude-standard', timeout=60)
     files = sorted({l for l in out.splitlines() if l})
+    files = sorted(set(files) | set(image_inventory(folder)))
     return {'files': files[:TREE_LIMIT], 'cut': len(files) > TREE_LIMIT, 'root': str(folder)}
 
 
@@ -1959,9 +1991,25 @@ def read_file(path: str, sid: int | None = None, pid: int | None = None) -> dict
     if path not in set(tree(sid, pid)['files']):
         raise CodeError('That file is not in this project.')
     f = (folder / path)
+    if not f.resolve().is_relative_to(folder.resolve()):
+        raise CodeError('That file points outside this project.')
     if not f.is_file():
         raise CodeError('That file was deleted.')
     size = f.stat().st_size
+    if f.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp') and size <= 10_000_000:
+        import base64
+        import io
+        from PIL import Image
+        raw = f.read_bytes()
+        try:
+            with Image.open(io.BytesIO(raw)) as image:
+                mime = {'PNG': 'image/png', 'JPEG': 'image/jpeg', 'WEBP': 'image/webp'}.get(image.format)
+                image.verify()
+            if mime:
+                return {'path': path, 'binary': True, 'too_big': False, 'size': size,
+                        'image': {'mime': mime, 'base64': base64.b64encode(raw).decode('ascii')}, 'text': '', 'lang': ''}
+        except (OSError, ValueError, Image.DecompressionBombError):
+            pass
     if size > FILE_LIMIT:
         return {'path': path, 'binary': False, 'too_big': True, 'size': size, 'text': '', 'lang': ''}
     raw = f.read_bytes()

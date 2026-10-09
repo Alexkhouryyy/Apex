@@ -66,6 +66,15 @@ async def overview(request: Request):
     return await _do(code_studio.overview)
 
 
+@router.get('/api/code/models/{engine}')
+async def coding_models(engine: str, request: Request, refresh: bool = False):
+    _owner(request)
+    if engine not in ('claude', 'chatgpt'):
+        raise HTTPException(400, 'Choose Claude or ChatGPT.')
+    from agent import code_catalog
+    return await asyncio.to_thread(code_catalog.catalog, engine, refresh)
+
+
 @router.get('/api/code/overnight')
 async def overnight(request: Request):
     """What the night shift built, for the morning (agent/code_studio.overnight): each
