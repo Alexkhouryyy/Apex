@@ -49,6 +49,26 @@
   let model = '', effort = '', planFirst = false, files = null, filesFor = null, live = null, liveSeen = -1, initial = true;
   const MODELS = {claude: [['', 'Model: default'], ['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']],
     chatgpt: [['', 'Model: default'], ['__other', 'Type a model…']]};
+  const catalogs = {}, choices = {};
+  function saveChoice() {
+    if (!NAME[engine]) return;
+    choices[engine] = {model, effort};
+    store.set(`apex.code.model.${engine}`, model);
+    store.set(`apex.code.effort.${engine}`, effort);
+  }
+  function switchEngine(next) {
+    saveChoice(); engine = next;
+    const saved = choices[engine] || {model: store.get(`apex.code.model.${engine}`, ''), effort: store.get(`apex.code.effort.${engine}`, '')};
+    model = saved.model; effort = saved.effort;
+    store.set('apex.code.engine', engine); renderEngine();
+  }
+  async function loadModels() {
+    await Promise.all(Object.keys(NAME).map(async provider => {
+      try { catalogs[provider] = await api(`/api/code/models/${provider}`); }
+      catch (_) { catalogs[provider] = {models: [], error: 'Model discovery unavailable; enter an exact model ID.'}; }
+    }));
+    renderEngine();
+  }
   const busy = () => !!(detail && (detail.working || detail.side));
 
   // ---------------------------------------------------------------- small pieces
@@ -238,12 +258,21 @@
       b.title = p ? (p.ready ? `${p.name}: ready` : `${p.name} ${p.why}`) : '';
     }
     for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
-    const sel = $('model'), opts = MODELS[engine] || MODELS.claude;
+    const sel = $('model'), catalog = catalogs[engine];
+    const opts = catalog && catalog.models.length ? [['', 'Model: account default'], ...catalog.models.map(m => [m.id, m.label])]
+      : (MODELS[engine] || MODELS.claude).filter(([value]) => value !== '__other');
+    opts.push(['__other', 'Type a model…']);
+    sel.title = catalog && catalog.error || 'Models from your signed-in coding client';
     const known = opts.some(([v]) => v === model);
     sel.replaceChildren(...opts.map(([v, t]) => { const o = el('option', '', t); o.value = v; return o; }));
     if (model && !known) { const o = el('option', '', model); o.value = model; sel.insertBefore(o, sel.lastChild); }
     sel.value = model || '';
     $('model-custom').hidden = true;
+    const picked = catalog && catalog.models.find(m => m.id === model);
+    const levels = picked && picked.efforts.length ? picked.efforts : engine === 'chatgpt' ? ['low', 'medium', 'high', 'xhigh'] : ['low', 'medium', 'high', 'max'];
+    const effortOptions = ['', ...levels];
+    if (effort && !effortOptions.includes(effort)) effortOptions.push(effort);
+    $('effort').replaceChildren(...effortOptions.map(value => { const o = el('option', '', value ? `Effort: ${value}` : 'Effort: default'); o.value = value; return o; }));
     $('effort').value = effort || '';
     $('plan-toggle').setAttribute('aria-pressed', String(planFirst));
     const hint = $('hint'), p = ov && ov.plans.find(x => x.id === engine);
@@ -261,14 +290,16 @@
     $('prompt').placeholder = finished ? `This session is ${detail.status === 'kept' ? 'kept' : 'thrown away'}. Start a new one.`
       : current ? 'Ask for a change, a fix, or "explain…"' : 'Tell Apex what to build, fix or explain…';
   }
-  for (const b of document.querySelectorAll('[data-engine]')) b.onclick = () => { engine = b.dataset.engine; store.set('apex.code.engine', engine); renderEngine(); };
+  for (const b of document.querySelectorAll('[data-engine]')) b.onclick = () => switchEngine(b.dataset.engine);
   for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => { mode = b.dataset.mode; store.set('apex.code.mode', mode); renderEngine(); };
   $('model').onchange = () => {
     if ($('model').value === '__other') { $('model-custom').hidden = false; $('model-custom').value = model; $('model-custom').focus(); return; }
     model = $('model').value;
+    saveChoice();
+    renderEngine();
   };
-  $('model-custom').onchange = () => { model = $('model-custom').value.trim(); renderEngine(); };
-  $('effort').onchange = () => { effort = $('effort').value; };
+  $('model-custom').onchange = () => { model = $('model-custom').value.trim(); saveChoice(); renderEngine(); };
+  $('effort').onchange = () => { effort = $('effort').value; saveChoice(); };
   $('plan-toggle').onclick = () => { planFirst = !planFirst; renderEngine(); };
   function autosize() { const p = $('prompt'); p.style.height = 'auto'; p.style.height = Math.min(p.scrollHeight + 2, innerHeight * 0.4) + 'px'; }
   $('prompt').addEventListener('input', autosize);
@@ -362,9 +393,10 @@
     try {
       await Promise.all([refreshDetail(), loadOverview()]);  // fresh plan status: one may have hit its limit since
       engine = detail.engine; mode = detail.mode; model = detail.model || ''; effort = detail.effort || ''; planFirst = false;
+      saveChoice();
       files = null; live = null; liveSeen = -1; initial = true;
       const mine = ov && ov.plans.find(p => p.id === engine), other = ov && ov.plans.find(p => p.id === OTHER[engine]);
-      if (mine && !mine.ready && other && other.ready) engine = other.id;      // its plan is resting: offer the ready one
+      if (mine && !mine.ready && other && other.ready) switchEngine(other.id);
       renderEngine(); await pull();
       if (!document.querySelector('[data-pane=rules]').hidden) renderRules();
     }
@@ -376,9 +408,12 @@
     schedule(400);
   }
   function home() {
+    saveChoice();
     current = null; detail = null; files = null; proof = null; show('home'); disconnect(); celineStop(); $('celine-card').hidden = true;
     history.replaceState(null, '', location.pathname);
     engine = store.get('apex.code.engine') || (ov && ov.default_engine) || 'claude'; mode = store.get('apex.code.mode', 'safe');
+    const saved = choices[engine] || {model: store.get(`apex.code.model.${engine}`, ''), effort: store.get(`apex.code.effort.${engine}`, '')};
+    model = saved.model; effort = saved.effort;
     if (ov) { renderHome(); renderRail(); } renderEngine(); loadBrain();
     if (night && night.length) loadOvernight(false);       // the morning's strip stays, kept up to date
   }
@@ -458,7 +493,7 @@
       for (const row of document.querySelectorAll(`.bl.k-memory[data-ref="${CSS.escape(String(id))}"]`)) {   // in the feed and the dialog
         row.classList.add('gone'); const b = row.querySelector('.forget'); if (b) b.disabled = true;
       }
-      say('Forgotten. Later sessions won\'t hear it.', 'good');
+      say('Forgotten. The next message will refresh memory.', 'good');
       if (after) after();
     } catch (err) { say(err.message, 'error'); }
   }
@@ -507,7 +542,7 @@
         use.disabled = true;
         try {
           await api(`/api/code/memories/${encodeURIComponent(x.ref)}/vouch`, {method: 'POST'});
-          say('Later sessions will hear it.', 'good');
+          say('Approved. The next message will refresh memory.', 'good');
           openBrain(); loadBrain();
         } catch (err) { use.disabled = false; say(err.message, 'error'); }
       }, 'small vouch');
@@ -703,7 +738,7 @@
     }
   };
   async function forgetRule(id) {
-    try { await api(`/api/memories/${encodeURIComponent(id)}`, {method: 'DELETE'}); say('Forgotten. Later sessions won\'t hear it.', 'good'); await renderRules(); loadBrain(); }
+    try { await api(`/api/memories/${encodeURIComponent(id)}`, {method: 'DELETE'}); say('Forgotten. The next message will refresh memory.', 'good'); await renderRules(); loadBrain(); }
     catch (err) { say(err.message, 'error'); }
   }
   async function loadVersions() {
@@ -819,6 +854,18 @@
         if (e.change === 'delete') s.append(el('span', 'muted', '  deleted'));
         s.querySelector('.p').onclick = () => openDiff(e.path);
         if (e.diff) s.append(inlineDiff(e.diff));
+        break;
+      }
+      case 'image': {
+        const card = step('image');
+        card.append(button(`Open generated image: ${e.path}`, () => openFile(e.path)));
+        api(`/api/code/sessions/${current}/file?path=${encodeURIComponent(e.path)}`).then(file => {
+          if (!file.image || !['image/png', 'image/jpeg', 'image/webp'].includes(file.image.mime)) return;
+          const image = el('img'); image.alt = e.path;
+          image.src = `data:${file.image.mime};base64,${file.image.base64}`;
+          image.style.maxWidth = '100%'; image.style.maxHeight = '420px';
+          card.append(image);
+        }).catch(error => card.append(el('p', 'fine', error.message)));
         break;
       }
       case 'todo': {
@@ -965,7 +1012,7 @@
     if (e.status === 'done') {
       acts.append(button('⚖ Second opinion', () => review()), button('▶ Run checks', () => runChecks()), button('🔊 Read it to me', () => speak(e.summary || t.lastText)));
     } else if (['limited', 'signed_out', 'missing'].includes(e.status) && e.engine) {
-      acts.append(button(`Continue on your ${NAME[OTHER[e.engine]]}`, () => { engine = OTHER[e.engine]; store.set('apex.code.engine', engine); sendText('Carry on with the request from where it stopped.'); }, 'primary'));
+      acts.append(button(`Continue on your ${NAME[OTHER[e.engine]]}`, () => { switchEngine(OTHER[e.engine]); sendText('Carry on with the request from where it stopped.'); }, 'primary'));
     }
     if (acts.childNodes.length) c.append(acts);
     t.tl.append(c);
@@ -1609,9 +1656,9 @@
       case '/push': if (need()) $('a-push').click(); break;
       case '/catchup': if (need()) $('a-catchup').click(); break;
       case '/discard': if (need()) $('a-discard').click(); break;
-      case '/model': model = arg === 'default' ? '' : arg; renderEngine(); say(model ? `Model: ${model}` : 'Model: the plan\'s default', 'good'); break;
-      case '/effort': if (['', 'low', 'medium', 'high', 'max'].includes(arg)) { effort = arg; renderEngine(); say(`Effort: ${arg || 'default'}`, 'good'); } else say('Effort is low, medium, high or max.', 'error'); break;
-      case '/claude': case '/chatgpt': engine = cmd.slice(1); store.set('apex.code.engine', engine); renderEngine(); break;
+      case '/model': model = arg === 'default' ? '' : arg; saveChoice(); renderEngine(); say(model ? `Model: ${model}` : 'Model: the plan\'s default', 'good'); break;
+      case '/effort': if (['', 'low', 'medium', 'high', 'xhigh', 'max'].includes(arg)) { effort = arg; saveChoice(); renderEngine(); say(`Effort: ${arg || 'default'}`, 'good'); } else say('Effort is low, medium, high, xhigh or max.', 'error'); break;
+      case '/claude': case '/chatgpt': switchEngine(cmd.slice(1)); break;
       case '/safe': case '/full': mode = cmd.slice(1); store.set('apex.code.mode', mode); renderEngine(); break;
       case '/rule':
         if (!arg) { if (need()) tab('rules'); break; }
@@ -1763,6 +1810,13 @@
     if (!$('viewer').open) $('viewer').showModal();
     try {
       const f = await api(current ? `/api/code/sessions/${current}/file?path=${encodeURIComponent(path)}` : `/api/code/projects/${project}/file?path=${encodeURIComponent(path)}`);
+      if (f.image && ['image/png', 'image/jpeg', 'image/webp'].includes(f.image.mime)) {
+        const image = el('img'); image.alt = path;
+        image.src = `data:${f.image.mime};base64,${f.image.base64}`;
+        image.style.maxWidth = '100%'; image.style.maxHeight = '80vh';
+        $('viewer-body').replaceChildren(image); $('viewer-meta').textContent = `${(f.size / 1024).toFixed(0)} KB`;
+        return;
+      }
       if (f.binary || f.too_big) { $('viewer-body').replaceChildren(el('p', 'fine', f.binary ? 'A binary file.' : `Too big to show here (${(f.size / 1024).toFixed(0)} KB).`)); return; }
       const lines = f.text.split('\n'); const shown = lines.slice(0, 6000);
       $('viewer-meta').textContent = `${lines.length.toLocaleString()} lines${f.lang ? ' · ' + f.lang : ''}`;
@@ -1788,7 +1842,7 @@
     }
     if (current && detail) items.push(['📏 Rules for this project', () => tab('rules')], ['🎙 Ask Celine about this session', () => askCeline()]);
     items.push(['＋ New session', () => { home(); $('prompt').focus(); }], ['📋 Plan first', () => { planFirst = true; renderEngine(); $('prompt').focus(); }],
-      ['◐ Switch look', toggleLook], [`Use your ${NAME[OTHER[engine]]}`, () => { engine = OTHER[engine]; renderEngine(); }],
+      ['◐ Switch look', toggleLook], [`Use your ${NAME[OTHER[engine]]}`, () => switchEngine(OTHER[engine])],
       ['🧠 What Apex knows about me', openBrain]);
     for (const s of (ov ? ov.sessions : []).slice(0, 30)) items.push([`Session: ${s.title}`, () => open(s.id)]);
     for (const f of (files || []).slice(0, 4000)) items.push([`File: ${f}`, () => openFile(f)]);
@@ -2027,6 +2081,8 @@
       if (ask && err.status === 403) return;
       say(/owner only/i.test(err.message) ? 'Apex Code is for the owner: open Apex with your master token.' : err.message, 'error'); return;
     }
+    const saved = choices[engine] || {model: store.get(`apex.code.model.${engine}`, ''), effort: store.get(`apex.code.effort.${engine}`, '')};
+    model = saved.model; effort = saved.effort; renderEngine(); loadModels();
     const m = location.hash.match(/^#s=(\d+)/), morning = location.hash === '#overnight';
     if (m) await open(Number(m[1])); else home();
     if (morning) await loadOvernight(true);                // the morning brief's link: what was built overnight

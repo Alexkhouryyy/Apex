@@ -124,7 +124,7 @@ def test_in_an_apex_code_session_context_is_that_code_project(apex, monkeypatch)
 def test_recall_matches_the_words_of_a_question(apex):
     """An engine asks in a few words; the text search wanted all of them in one memory."""
     longterm.remember('Uploads must retry 3 times', kind='decision')
-    assert longterm.recall('upload retry policy', semantic=False) == []
+    assert [m['content'] for m in longterm.recall('upload retry policy', semantic=False)] == ['Uploads must retry 3 times']
     assert 'Uploads must retry 3 times' in mcp_server.recall('upload retry policy')
     assert 'Nothing in memory' in mcp_server.recall('zebra migration patterns')
 

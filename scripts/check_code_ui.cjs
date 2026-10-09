@@ -165,6 +165,8 @@ const FILES = ['README.md', 'dashboard/static/work.js', 'dashboard/static/work.c
 w.fetch = async (url, opts = {}) => {
   calls.push({url, method: opts.method || 'GET', body: opts.body && typeof opts.body === 'string' ? JSON.parse(opts.body) : null});
   if (url === '/api/code') return Response.json(overview());
+  if (url === '/api/code/models/chatgpt') return Response.json({models: [{id: 'gpt-account', label: 'Account GPT', efforts: ['high', 'xhigh']}], error: ''});
+  if (url === '/api/code/models/claude') return Response.json({models: [{id: 'opus', label: 'Account Opus', efforts: []}, {id: 'sonnet', label: 'Account Sonnet', efforts: []}], error: ''});
   if (url === '/api/code/projects/1/brain') { const sources = brainSources.filter(x => !forgotten.includes(x.ref)); return Response.json({text: sources.length ? 'What Apex knows…' : '', sources, chars: 99, unvouched}); }
   const vm = url.match(/^\/api\/code\/memories\/(\d+)\/vouch$/);
   if (vm && opts.method === 'POST') { const x = unvouched.find(u => u.ref === +vm[1]); unvouched = unvouched.filter(u => u !== x); brainSources.push(x); return Response.json({ok: true, id: +vm[1]}); }
@@ -210,6 +212,7 @@ w.fetch = async (url, opts = {}) => {
   }
   if (/\/live$/.test(url)) return Response.json({v: 0, text: '', thinking: '', outputs: {}});
   if (/\/tree$/.test(url)) return Response.json({files: FILES, cut: false});
+  if (/\/file\?path=.*\.png$/.test(url)) return Response.json({path: 'generated_images/art.png', image: {mime: 'image/png', base64: 'aW1hZ2U='}, binary: true, size: 5});
   if (/\/file\?path=/.test(url)) return Response.json({path: decodeURIComponent(url.split('path=')[1]), text: 'const x = 1; // hi\nreturn "s";', lang: 'js', binary: false, too_big: false, size: 30});
   if (/\/history$/.test(url)) return Response.json({checkpoints: [{sha: 'a'.repeat(40), short: 'aaaaaaaa', files: 2, ts: now, undone: false, catch_up: false}]});
   if (/\/commit\?sha=/.test(url)) return new Response('Step\n\ndiff --git a/work.js b/work.js\nindex 1..2\n--- a/work.js\n+++ b/work.js\n@@ -1,1 +1,2 @@\n a\n+b', {status: 200});
@@ -575,7 +578,7 @@ async function phone() {
   assert.equal($('brain-body').querySelectorAll('.forget').length, 2, 'only memories can be forgotten here');
   $('brain-body').querySelector('.bl.k-memory .forget').click(); await tick(); await tick();
   assert.ok(calls.some(c => c.url === '/api/memories/12' && c.method === 'DELETE'), 'Forget deletes the memory');
-  assert.ok($('brain-body').querySelector('.bl.k-memory').classList.contains('gone')); assert.equal($('toast').textContent, "Forgotten. Later sessions won't hear it.");
+  assert.ok($('brain-body').querySelector('.bl.k-memory').classList.contains('gone')); assert.equal($('toast').textContent, 'Forgotten. The next message will refresh memory.');
   assert.equal($('brain-chip').textContent, '🧠Apex knows 3 things for Apex', 'the chip counts again');
   $('brain-close').click(); assert.equal($('brain-dialog').open, false);
   brainSources = []; $('brain-chip').click(); await tick(); await tick();
@@ -589,7 +592,7 @@ async function phone() {
   assert.equal($('brain-body').querySelector('.unvouched .bh').textContent, 'Not told until you OK it');
   waitRow.querySelector('.vouch').click(); await tick(); await tick(); await tick();
   assert.ok(calls.some(c => c.url === '/api/code/memories/40/vouch' && c.method === 'POST'), 'It\'s mine vouches for it');
-  assert.equal($('toast').textContent, 'Later sessions will hear it.');
+  assert.equal($('toast').textContent, 'Approved. The next message will refresh memory.');
   assert.equal($('brain-body').querySelector('.unvouched'), null, 'nothing left to vouch for');
   assert.ok([...$('brain-body').querySelectorAll('.bl.k-memory .tag')].some(t => t.textContent === '#40'), 'it is in the brief now');
   $('brain-dialog').close(); brainSources = BRAIN.slice(); forgotten = []; unvouched = [];
@@ -603,6 +606,18 @@ async function phone() {
   type('/re'); await tick();
   assert.match($('suggest').textContent, /\/reviewSecond opinion/); key('Escape'); assert.equal($('suggest').hidden, true);
   // A plan at its limit is never the default: the ready one is offered.
+  assert.ok([...$('model').options].some(o => o.textContent === 'Account Opus'), 'signed-in Claude models are offered');
+  $('model').value = 'opus'; $('model').dispatchEvent(new w.Event('change'));
+  d.querySelector('[data-engine=chatgpt]').click();
+  assert.equal($('model').value, '', 'Claude model is not passed to ChatGPT');
+  assert.ok([...$('model').options].some(o => o.value === 'gpt-account'), 'account GPT is selectable');
+  $('model').value = 'gpt-account'; $('model').dispatchEvent(new w.Event('change'));
+  $('effort').value = 'xhigh'; $('effort').dispatchEvent(new w.Event('change'));
+  d.querySelector('[data-engine=claude]').click();
+  assert.equal($('model').value, 'opus');
+  d.querySelector('[data-engine=chatgpt]').click();
+  assert.equal($('model').value, 'gpt-account'); assert.equal($('effort').value, 'xhigh');
+  d.querySelector('[data-engine=claude]').click();
   plans = [{id: 'claude', name: 'Claude plan', ready: false, why: 'reached its usage limit, resting until 15:40', how: ''}, plans[1]];
   // Start a session from the brief (Ctrl+Enter), with a model and an effort.
   $('model').value = 'opus'; $('model').dispatchEvent(new w.Event('change'));
@@ -642,7 +657,7 @@ async function phone() {
   [...told.querySelectorAll('.bl.k-memory')][1].querySelector('.forget').click(); await tick();
   assert.ok(calls.some(c => c.url === '/api/memories/15' && c.method === 'DELETE'));
   assert.ok([...told.querySelectorAll('.bl.k-memory')][1].classList.contains('gone') && [...told.querySelectorAll('.bl.k-memory')][1].querySelector('.forget').disabled);
-  assert.equal($('toast').textContent, "Forgotten. Later sessions won't hear it.");
+  assert.equal($('toast').textContent, 'Forgotten. The next message will refresh memory.');
   assert.equal(told.querySelectorAll('.step, .prose, .copy').length, 0, 'the card is not a step of the work');
   assert.match(f.querySelector('.working').textContent, /Apex is working · Claude plan · 1:1\d/, 'the clock counts from when you sent it');
   assert.equal($('send').textContent, '■ Stop');
@@ -1065,6 +1080,12 @@ async function phone() {
   // Reject: nothing is saved.
   suggestions = [...suggestions, SUGGEST(54, 'Alex hates tabs', 'preference', 9)];
   feed.push(E(40, 'done', {status: 'done', summary: 'Done.', seconds: 3, files: 0, total: 2, engine: 'claude'})); await tick(900);
+  feed.push(E(41, 'image', {path: 'generated_images/art.png'})); await tick(900);
+  const generated = $('feed').querySelector('.step.image img');
+  assert.ok(generated && generated.src.startsWith('data:image/png;base64,'), 'generated raster displayed in the feed');
+  $('feed').querySelector('.step.image button').click(); await tick();
+  assert.ok($('viewer-body').querySelector('img'), 'generated raster also opens in the viewer');
+  $('viewer').close();
   assert.equal($('box-waiting').hidden, false);
   const memories = calls.filter(c => c.url === '/api/memories' && c.method === 'POST').length;
   [...waits()[0].querySelectorAll('button')].find(b => b.textContent === 'Reject').click(); await tick(); await tick();

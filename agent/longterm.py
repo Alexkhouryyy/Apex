@@ -393,11 +393,13 @@ def recall(query: str = "", limit: int = 10, kind: str = "", semantic: bool = Tr
         # (It used to lowercase the memory but not the query, so any query
         # with a capital letter — "Jeep", "Alex" — matched nothing.)
         q = query.lower()
-        return _format_rows([r for r in rows if q in r[3].lower() or q in (r[5] or "").lower()][:int(limit)])
+        exact = _format_rows([r for r in rows if q in r[3].lower() or q in (r[5] or "").lower()][:int(limit)])
+        return exact or match_terms(query, limit, kind)
 
     elif query:
         q = query.lower()
-        return _format_rows([r for r in rows if q in r[3].lower() or q in (r[5] or "").lower()][:int(limit)])
+        exact = _format_rows([r for r in rows if q in r[3].lower() or q in (r[5] or "").lower()][:int(limit)])
+        return exact or match_terms(query, limit, kind)
 
     return _format_rows(rows[:int(limit)])
 
@@ -436,9 +438,8 @@ def _words(text: str) -> list[str]:
 def match_terms(query: str, limit: int = 8, kind: str = "") -> list[dict]:
     """Memories that share words with a request, with no embeddings.
 
-    recall(q, semantic=False) only finds memories holding the whole query as one
-    substring, so a coding request never matches anything; semantic recall can
-    stall on the embedding model's first download. This takes the query's words
+    This is also recall()'s fallback when no whole-query substring matches.
+    Semantic recall can stall on the embedding model's first download. This takes the query's words
     of 4 or more letters (common ones dropped), and scores each memory in the
     same bounded pool recall() uses by how many of them start a word in its
     content or tags. It keeps scores of 2 or more (1 or more when the query has

@@ -1,4 +1,4 @@
-"""Image generation via Replicate (FLUX schnell by default).
+"""Image generation through signed-in Codex or explicitly configured Replicate.
 
 Returns local file paths so the agent can reference / show / open the images.
 """
@@ -24,9 +24,54 @@ def _slug(text: str, max_len: int = 40) -> str:
     return s[:max_len] or "image"
 
 
-def generate_image(prompt: str, model: Optional[str] = None, size: str = "1024x1024", n: int = 1) -> str:
+def _chatgpt(prompt, model, size, n):
+    """Use the official signed-in Codex client; never copy OAuth tokens or bill API credits."""
+    from pathlib import Path
+    from uuid import uuid4
+    from agent import code_engines, code_studio
+    folder = Path(_output_dir()) / uuid4().hex
+    folder.mkdir()
+    request = (f'Generate {n} image(s) using your built-in image_gen/imagegen tool, requested size {size}. '
+               'Save the actual generated image files under generated_images/ in this folder. '
+               'Do not use APIs, external billing, shell-rendered drawings or placeholder images.\n\n' + prompt)
+    result = code_engines.turn('chatgpt', request, folder, options={'model': model or ''})
+    if result['status'] != 'done':
+        return '[image_gen] ' + result.get('summary', 'Codex image generation failed.')
+    paths = []
+    for relative in code_studio.image_inventory(folder):
+        path = folder / relative
+        if path.stat().st_size > 10_000_000:
+            continue
+        try:
+            from PIL import Image
+            with Image.open(path) as image:
+                if image.format not in ('PNG', 'JPEG', 'WEBP'):
+                    continue
+                image.verify()
+            paths.append(str(path))
+        except (OSError, ValueError, Image.DecompressionBombError):
+            continue
+    if not paths:
+        return '[image_gen] Codex returned no generated image. Update Codex and check ChatGPT image access/usage limits. No API provider was used.'
+    return 'Generated on your ChatGPT plan:\n' + '\n'.join(paths)
+
+
+def generate_image(prompt: str, model: Optional[str] = None, size: str = "1024x1024", n: int = 1, provider: str = "") -> str:
     """Generate `n` images. Returns a newline-joined list of saved file paths."""
     token = getattr(config, "REPLICATE_API_TOKEN", "") or ""
+    provider = provider or getattr(config, 'IMAGE_GEN_PROVIDER', 'auto')
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 32000:
+        return '[image_gen] A nonempty prompt up to 32,000 characters is required.'
+    if type(n) is not int or not 1 <= n <= 4:
+        return '[image_gen] Request 1–4 images.'
+    if not isinstance(size, str) or not re.fullmatch(r'\d{2,5}x\d{2,5}', size):
+        return '[image_gen] Size must use WIDTHxHEIGHT, for example 1024x1024.'
+    if provider == 'auto':
+        provider = 'replicate' if token else 'chatgpt'
+    if provider == 'chatgpt':
+        return _chatgpt(prompt, model, size, n)
+    if provider != 'replicate':
+        return '[image_gen] Choose chatgpt or replicate.'
     if not token:
         return "[image_gen] REPLICATE_API_TOKEN not set in .env."
 

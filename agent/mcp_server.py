@@ -213,10 +213,6 @@ def recall(query: str, limit: int = 8, semantic: bool = False) -> str:
     query = (query or '').strip()[:500]
     limit = max(1, min(int(limit), 20))
     rows = longterm.recall(query, limit=limit, semantic=semantic)
-    if not rows and query:
-        # The text search wants the whole query in one memory, so a question in a
-        # few words ("upload retry policy") found nothing: match its words instead.
-        rows = longterm.match_terms(query, limit)
     return _out('recall', _memories(rows) or f'Nothing in memory about {query!r}.', query=query)
 
 

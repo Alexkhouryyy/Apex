@@ -59,8 +59,8 @@ OUTPUT_TAIL = 2000
 RETRYING = re.compile(r'^(Reconnecting|Falling back|Retrying)\b', re.I)
 # The tool no longer has the conversation to resume (seen with the real tools).
 RESUME_LOST = re.compile(r'no rollout found|No conversation found', re.I)
-EFFORTS = ('low', 'medium', 'high', 'max')
-CODEX_EFFORT = {'low': 'low', 'medium': 'medium', 'high': 'high', 'max': 'high'}
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
+CODEX_EFFORT = {value: value for value in EFFORTS} | {'max': 'high'}
 MODEL = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,63}$')
 ALLOWED_COMMAND = re.compile(r'^[^\n\r()]{1,300}$')     # fits inside a Bash(...) rule
 PLAN_ONLY = ('Plan only, for now: read what you need, then write a short step-by-step plan for the request below '
@@ -532,6 +532,11 @@ def turn(engine: str, prompt: str, folder: Path, mode: str = 'safe', resume: str
     if (options or {}).get('plan'):
         prompt = f'{PLAN_ONLY}\n\n{prompt}'
     if engine == 'chatgpt' and mode != 'review':
+        if re.search(r'\b(image|images|picture|illustration|logo|banner|imagegen)\b', prompt, re.I):
+            prompt = ('For requested images, use your built-in image_gen/imagegen tool with this ChatGPT sign-in. '
+                      'Save generated raster assets inside generated_images/ in this worktree so Apex can display them. '
+                      'Never substitute a drawing for a requested generated image, or use API/Replicate credentials. '
+                      'If image generation is unavailable, report that clearly.\n\n' + prompt)
         prompt = we.codex_prompt(prompt)
     env = we._env()
     env.update(env_extra or {})
