@@ -1,0 +1,40 @@
+{
+  "schema": "apex-research-smoke/v1",
+  "evidence_type": "synthetic engineering validation",
+  "production_promotion_supported": false,
+  "real_model_calls": 0,
+  "real_task_accuracy_measured": false,
+  "admission": {
+    "cases": 200,
+    "inadmissible_units_excluded": 200,
+    "beneficial_units_retained": 200,
+    "p95_ms": 0.00391095
+  },
+  "replay": {
+    "seeded_incidents": 10,
+    "repetitions": 200,
+    "real_effects": 0
+  },
+  "learning_gate": {
+    "positive_fixture_passed": true,
+    "reward_hacking_rejections": {
+      "pass_all": [
+        "vacuous_verifier",
+        "anchor_regression"
+      ],
+      "abstain_all": [
+        "vacuous_verifier",
+        "anchor_regression"
+      ],
+      "permission": [
+        "permission_violation"
+      ],
+      "severe": [
+        "severe_regression"
+      ],
+      "cost": [
+        "learning_cost_cap"
+      ]
+    }
+  }
+}

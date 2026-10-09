@@ -52,8 +52,13 @@ def load_all() -> int:
     return count
 
 
-def _load(name: str) -> dict:
+def _load(name: str, *, _evaluated_install=False) -> dict:
     path = _skill_path(name)
+    import config
+    if getattr(config, "SKILL_EVALUATION_REQUIRED", False) and not _evaluated_install:
+        from agent import learning_registry
+        if not learning_registry.runtime_allowed(name, path.read_text(encoding="utf-8")):
+            raise RuntimeError("This evaluated version is retired or awaiting activation/restore; it cannot load.")
     spec = importlib.util.spec_from_file_location(f"skills.{name}", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -94,6 +99,11 @@ def run_skill(name: str, inputs: dict) -> str:
             known = [e["name"] for e in list_skills()]
             hint = f" Known: {known}" if known else " No skills installed yet."
             return f"[Skills] No skill named {name!r}.{hint}"
+    import config
+    if getattr(config, "SKILL_EVALUATION_REQUIRED", False):
+        from agent import learning_registry
+        if not learning_registry.runtime_allowed(name, _skill_path(name).read_text(encoding="utf-8")):
+            return "[Skills] This evaluated version is retired or awaiting activation/restore; it cannot run."
     start = time.perf_counter()
     try:
         result = str(_registry[name]["run"](inputs))
@@ -201,17 +211,33 @@ def create_skill(
         except Exception as e:
             return f"Skill {name!r} rewrite not installed (could not stage: {e})"
 
+    if _trigger != "manual":
+        import config
+        if getattr(config, "SKILL_EVALUATION_REQUIRED", False):
+            from agent import learning_registry
+            learning_registry.require_evaluated(name, code)
+
     source = (
-        f'"""Skill: {name} — {description}"""\n'
+        repr(f"Skill: {name} — {description}") + "\n"
         f"DESCRIPTION = {description!r}\n"
         f"VERSION = {version!r}\n\n"
         f"{code}\n"
     )
     old_source = path.read_text(encoding='utf-8') if path.exists() else None
+    old_entry = _registry.get(name)
     path.write_text(source, encoding='utf-8')
     try:
-        _load(name)
+        _load(name, _evaluated_install=_trigger != "manual")
+        if _trigger != "manual":
+            import config
+            if getattr(config, "SKILL_EVALUATION_REQUIRED", False):
+                from agent import learning_registry
+                learning_registry.note_installed(name, code, source)
     except Exception as e:
+        if old_entry is None:
+            _registry.pop(name, None)
+        else:
+            _registry[name] = old_entry
         if old_source is not None:
             # Overwrite failed — restore the previously working version so a bad
             # rewrite (e.g. from refine_skills) can never destroy a good skill.

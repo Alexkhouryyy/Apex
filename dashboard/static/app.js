@@ -685,6 +685,7 @@ document.getElementById('goal-form').addEventListener('submit', async e => {
 
 // ============== MEMORY ==============
 async function loadMemory() {
+  if (window.ApexScopedMemory) window.ApexScopedMemory.load();
   const q = document.getElementById('memory-search').value;
   const mems = await api('/api/memories?q=' + encodeURIComponent(q));
   const tbody = document.querySelector('#memory-table tbody');

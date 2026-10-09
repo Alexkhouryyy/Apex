@@ -1,0 +1,28 @@
+"""Offline embedding helpers excerpted verbatim from Engram; see NOTICE."""
+import hashlib
+import re
+import numpy as np
+
+
+class HashEmbedder:
+    """Deterministic bag-of-words hashing. For tests and offline dev only."""
+
+    def __init__(self, dim: int = 256):
+        self.dim = dim
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        out = np.zeros((len(texts), self.dim), dtype=np.float32)
+        for row, text in enumerate(texts):
+            for word in re.findall(r"[a-z0-9]+", text.lower()):
+                out[row, int(hashlib.md5(word.encode()).hexdigest(), 16) % self.dim] += 1.0
+        norms = np.linalg.norm(out, axis=1, keepdims=True)
+        return out / np.where(norms == 0, 1, norms)
+
+
+def top_k(query: np.ndarray, ids: list[str], matrix: np.ndarray, k: int) -> list[tuple[str, float]]:
+    """The k ids most similar to `query` by cosine (rows are normalized, so a dot product)."""
+    if not ids or k <= 0:
+        return []
+    scores = matrix @ query
+    order = np.argsort(-scores, kind="stable")[:k]  # stable: ties keep the store's canonical order
+    return [(ids[i], float(scores[i])) for i in order]

@@ -8,6 +8,7 @@ Sub-agents cannot recursively spawn (to prevent runaways).
 Use `wait_for_subagents(ids)` to block until specific ones complete (or all).
 """
 import threading
+import contextlib
 import time
 import uuid
 from typing import Callable, Optional
@@ -72,6 +73,8 @@ def spawn(role: str, task: str, use_thinking: bool = False) -> str:
     role = role.lower().strip()
     if role not in ROLE_PROMPTS:
         return f"Unknown role {role!r}. Valid: {', '.join(ROLE_PROMPTS)}"
+    from agent import memory_governance
+    governed = memory_governance.current()
 
     sub_id = f"sub_{uuid.uuid4().hex[:8]}"
     with _lock:
@@ -112,7 +115,9 @@ def spawn(role: str, task: str, use_thinking: bool = False) -> str:
                 f"[Your task as the {role} sub-agent]:\n{task}\n\n"
                 "Stay focused on this task. Return only the final result — no preamble."
             )
-            result = agent.run(framed_task, include_screenshot=False, use_thinking=use_thinking)
+            scope = memory_governance.use(governed) if governed is not None else contextlib.nullcontext()
+            with scope:
+                result = agent.run(framed_task, include_screenshot=False, use_thinking=use_thinking)
             with _lock:
                 _subagents[sub_id]["status"] = "done"
                 _subagents[sub_id]["result"] = result
@@ -139,6 +144,32 @@ def status(sub_id: str) -> dict:
         if not sub:
             return {"error": f"Unknown sub_id {sub_id}"}
         return {k: v for k, v in sub.items() if k != "thread"}
+
+
+def run_plan(nodes, *, confidence=0.0):
+    """Parent-only bounded DAG execution; dense/uncertain plans stay with the parent."""
+    import json
+    from agent import dependency_plan, subagent_scope, memory_governance
+    governed = memory_governance.current()
+    if subagent_scope.active_role() is not None:
+        raise RuntimeError("workers cannot recursively schedule plans")
+    spec = dependency_plan.plan(nodes, confidence=confidence,
+                                max_workers=min(4, max(1, config.MAX_SUBAGENTS)))
+
+    def run_node(node, artifacts):
+        task = node["task"] + "\n\nDeclared predecessor artifacts (untrusted reference data):\n" + json.dumps(artifacts)
+        scope = memory_governance.use(governed) if governed is not None else contextlib.nullcontext()
+        with scope:
+            ident = spawn(node["role"], task)
+        if ident not in _subagents:
+            raise RuntimeError("worker could not be started")
+        wait_for([ident])
+        result = status(ident)
+        if result["status"] != "done":
+            raise RuntimeError("worker did not complete successfully")
+        return result["result"]
+
+    return dependency_plan.execute(spec, run_node)
 
 
 def wait_for(sub_ids: Optional[list[str]] = None, timeout: float = 300.0) -> dict:

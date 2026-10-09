@@ -43,6 +43,10 @@ class Memory:
     def __init__(self):
         self.messages: list[dict] = []
         self.summary: str = ""
+        self._raw_history: list[dict] = []
+        self.context_selection: dict | None = None
+        from uuid import uuid4
+        self.archive_id = uuid4().hex
 
     def add_user(self, content: list | str) -> None:
         if isinstance(content, str):
@@ -50,16 +54,59 @@ class Memory:
         self.messages.append({"role": "user", "content": content})
 
     def add_assistant(self, content: list) -> None:
-        self.messages.append({"role": "assistant", "content": content})
+        from agent.context_graph import plain
+        self.messages.append({"role": "assistant", "content": plain(content)})
 
     def get_messages(self) -> list[dict]:
         return self.messages
+
+    def raw_history(self) -> list[dict]:
+        import copy
+        return copy.deepcopy(self._raw_history or self.messages)
+
+    def _select_context(self):
+        from agent.context_graph import ContextGraph, save_archive
+        import copy
+        # The graph always selects from the full canonical conversation retained
+        # by this path, including messages omitted on earlier selections.
+        if (self.context_selection is None or self.messages[:self.context_selection["selected_count"]]
+                != self.context_selection["messages"]):
+            if self.context_selection is not None:
+                from uuid import uuid4
+                self.archive_id = uuid4().hex
+            self._raw_history = copy.deepcopy(self.messages)
+        else:
+            self._raw_history.extend(copy.deepcopy(self.messages[self.context_selection["selected_count"]:]))
+        query = next((str(m.get("content", "")) for m in reversed(self._raw_history)
+                      if m.get("role") == "user"), "")
+        graph = ContextGraph.from_messages(self._raw_history)
+        save_archive(self.archive_id, self._raw_history)
+        selection = graph.select(query, getattr(config, "CONTEXT_SELECTION_BYTES", 64000))
+        self.messages = selection["messages"]
+        self.context_selection = {**copy.deepcopy(selection), "selected_count": len(self.messages)}
+
+    def revive(self, ids):
+        from agent.context_graph import ContextGraph
+        return ContextGraph.from_messages(self._raw_history).revive(ids)
+
+    def restore_archive(self, ident):
+        from agent.context_graph import load_archive
+        self.messages = load_archive(ident)
+        self._raw_history = []
+        self.archive_id = ident
+        self.context_selection = None
 
     def maybe_summarize(self, client: anthropic.Anthropic) -> None:
         from agent import plugins, apocalypse
         offline = apocalypse.enabled()
         keep = 6 if offline else _KEEP_MESSAGES
         if len(self.messages) < (12 if offline else _SUMMARY_THRESHOLD):
+            return
+        if getattr(config, "REVERSIBLE_CONTEXT_ENABLED", False):
+            try:
+                self._select_context()
+            except (ValueError, TypeError) as exc:
+                print(f"[Memory] reversible selection skipped ({type(exc).__name__}); keeping current history")
             return
         import copy
         try:
@@ -116,6 +163,9 @@ class Memory:
         self.messages = self.messages[-keep:]
 
         # Flush durable facts to longterm so they survive across sessions
+        from agent import memory_governance
+        if memory_governance.current() is not None:
+            facts = []  # summarizer output is not explicit owner approval
         for fact in facts:
             try:
                 longterm.remember(fact, kind="conversation", importance=6)

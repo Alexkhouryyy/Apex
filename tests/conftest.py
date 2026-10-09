@@ -23,6 +23,18 @@ def offline_http(monkeypatch):
     import requests
     from urllib.parse import urlparse
 
+    # DDGS uses a native Rust HTTP client, which bypasses both guards below.
+    # No unit test needs that transport: search tests inject DDGS explicitly.
+    # Block construction before a native client can emit any request/telemetry.
+    try:
+        import primp
+    except ImportError:
+        pass
+    else:
+        def native_http_disabled(*args, **kwargs):
+            raise RuntimeError('Native HTTP is disabled in unit tests; mock the search provider explicitly.')
+        monkeypatch.setattr(primp, 'Client', native_http_disabled)
+
     def check(url, transport=None):
         if isinstance(transport, (httpx.MockTransport, httpx.ASGITransport)):
             return

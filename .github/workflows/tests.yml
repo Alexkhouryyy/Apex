@@ -102,6 +102,8 @@ jobs:
           node --check dashboard/static/avatar-pose.js
           node --check dashboard/static/speech-model.js
           node scripts/check_team_ui.cjs
+          node --check dashboard/static/scoped-memory.js
+          node scripts/check_scoped_memory_ui.cjs
           node --check dashboard/static/world-view.js
           node scripts/check_world_view_ui.cjs
           node scripts/check_world_entry_ui.cjs

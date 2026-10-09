@@ -193,7 +193,7 @@ def test_replay_rejects_effectful_live_override(tmp_path):
         safety.check("bash", {"command": "rm -rf /tmp/example"})
     with incidents.replay(fixture) as session:
         session.replay_plan.live("apex.safety_check")
-        with pytest.raises(RuntimeError, match="Only the pure"):
+        with pytest.raises(RuntimeError, match="Only reviewed pure"):
             safety.check("bash", {"command": "rm -rf /tmp/example"})
 
 

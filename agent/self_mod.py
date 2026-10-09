@@ -61,7 +61,7 @@ def load_dynamic_handlers() -> int:
     count = 0
     for t in overlay.get("tools", []):
         try:
-            handler = _compile_handler(t["name"], t["code"])
+            handler = _evaluated_handler(t["name"], t["code"]) if t.get("evaluation_required") else _compile_handler(t["name"], t["code"])
             _dynamic_tool_handlers[t["name"]] = handler
             count += 1
         except Exception as e:
@@ -78,6 +78,18 @@ def _compile_handler(name: str, code: str) -> Callable:
     return ns["run"]
 
 
+def _evaluated_handler(name: str, code: str) -> Callable:
+    """Guard before module execution and again before each evaluated tool call."""
+    from agent import learning_registry
+    learning_registry.require_evaluated(name, code)
+    compiled = _compile_handler(name, code)
+
+    def guarded(inputs):
+        learning_registry.require_evaluated(name, code)
+        return compiled(inputs)
+    return guarded
+
+
 def update_system_prompt(addition: str, replace: bool = False) -> str:
     """Append (or replace) the user-defined addition to the system prompt."""
     overlay = _load()
@@ -91,7 +103,7 @@ def update_system_prompt(addition: str, replace: bool = False) -> str:
     return f"Prompt overlay updated ({len(overlay['prompt_addition'])} chars). Takes effect on next turn."
 
 
-def register_new_tool(name: str, description: str, input_schema: dict, code: str) -> str:
+def register_new_tool(name: str, description: str, input_schema: dict, code: str, *, evaluation_required=False) -> str:
     """Register a Python tool. `code` must define `def run(inputs): -> str`."""
     if not name.isidentifier():
         return f"Invalid tool name: {name!r}"
@@ -99,7 +111,7 @@ def register_new_tool(name: str, description: str, input_schema: dict, code: str
         return f"Reserved name: {name!r}"
     # Validate code compiles and defines run()
     try:
-        handler = _compile_handler(name, code)
+        handler = _evaluated_handler(name, code) if evaluation_required else _compile_handler(name, code)
     except Exception as e:
         return f"Tool code invalid: {e}"
 
@@ -111,6 +123,7 @@ def register_new_tool(name: str, description: str, input_schema: dict, code: str
         "description": description,
         "input_schema": input_schema,
         "code": code,
+        "evaluation_required": evaluation_required,
     })
     _save(overlay)
     _dynamic_tool_handlers[name] = handler

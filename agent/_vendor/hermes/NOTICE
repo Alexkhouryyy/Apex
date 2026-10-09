@@ -1,0 +1,6 @@
+Hermes Agent — Copyright (c) 2025 Nous Research, MIT.
+https://github.com/NousResearch/hermes-agent
+Tag: v2026.9.14; revision: 345cd2b057a452236de401d3534b8502a7465e8d
+file_lock.py: _kernel_lock and _file_lock from hermes_cli/auth.py, verbatim.
+Imports reduced; Apex rejects platforms lacking kernel locks rather than using the depth-only fallback.
+Only the advisory locking helper is reused, not the agent, auth credentials or learning loop.

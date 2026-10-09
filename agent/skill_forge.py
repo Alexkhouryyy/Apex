@@ -134,6 +134,9 @@ def approve_forged(tool_id: int) -> str:
 
     try:
         from agent import self_mod
+        if getattr(config, "SKILL_EVALUATION_REQUIRED", False):
+            from agent import learning_registry
+            learning_registry.require_evaluated(name, code)
         schema = _input_contract({"input_schema": json.loads(schema_text) if schema_text else None,
                                   "test_case": json.loads(example_text)})
         result = self_mod.register_new_tool(
@@ -141,6 +144,7 @@ def approve_forged(tool_id: int) -> str:
             description=description,
             input_schema=schema,
             code=code,
+            evaluation_required=getattr(config, "SKILL_EVALUATION_REQUIRED", False),
         )
         if not result.startswith(f"Registered dynamic tool {name!r}."):
             return f"Registration failed; tool remains pending: {result}"

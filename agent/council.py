@@ -227,6 +227,12 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
         the dashboard can pre-render skeleton cards with status pills.
     """
     members = available_members()
+    if not panel and getattr(config, "COUNCIL_PROFILE_PATH", "") and len(members) >= 2:
+        try:
+            from agent.council_selection import configured_panel
+            panel = configured_panel(config.COUNCIL_PROFILE_PATH, [m for m, _ in members], preset)
+        except (ValueError, KeyError, OSError):
+            print("[Council] calibrated selection unavailable; using the configured roster")
     if panel:
         members = [(m, l) for (m, l) in members if m in panel]
     if len(members) < 2:
