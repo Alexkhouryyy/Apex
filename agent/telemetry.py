@@ -17,6 +17,8 @@ from typing import Optional
 
 import config
 from agent import longterm
+from agent.incident_replay import boundary
+from agent import message_snapshot
 
 # Ambient session/turn — main loop sets these so we don't have to thread them through.
 _session_id: Optional[int] = None
@@ -168,6 +170,8 @@ def _resolve_call(client, call_site, kwargs):
     return client, kwargs
 
 
+@boundary("apex.llm_create", exclude_arguments=("client",),
+          encode_result=message_snapshot.encode, decode_result=message_snapshot.decode)
 def create(client, *, call_site: str, **kwargs):
     """Drop-in replacement for client.messages.create with telemetry capture."""
     client, kwargs = _resolve_call(client, call_site, kwargs)

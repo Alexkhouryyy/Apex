@@ -1,0 +1,169 @@
+{
+  "schema": "apex-learn2play-probe/v1",
+  "revision": "5e5fdf9db65d6ab45314f2baa0f7bcddcfc75624",
+  "license": "not found; external checkout only",
+  "real_model_calls": 0,
+  "agent_learning_measured": false,
+  "games": [
+    {
+      "game": "primordialsoup",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "fb61263df39ed0e07d6e8fd6b538978c205b30efffb03a5fc01a72ffbe34ea6f",
+      "error": null
+    },
+    {
+      "game": "gemforge",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "a0ca8ddf006f2a5bf186cc9481cc5d8fc5154c73397415e4e07c80ff237eb144",
+      "error": null
+    },
+    {
+      "game": "catnip",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "332caca180f7c9ab789655dc8363ad114b8836d73ceb271077d4be9b137d4cca",
+      "error": null
+    },
+    {
+      "game": "dungeon",
+      "seed": 2,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "9fcb6875bffc8ed2df99f30882db04b98e1f2b90f16b8df09c3ed24450923fe4",
+      "error": null
+    },
+    {
+      "game": "synergycorp",
+      "seed": 2,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "9e1817a0fd3b4c0af9611c2c82492ba4dc356451b3a3737562c8741a89822e3a",
+      "error": null
+    },
+    {
+      "game": "dreamgarden",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "711eee8278fdd891ed4d0f33949d0fb2d8d6f3d4e99123efb1000a68087c3e0b",
+      "error": null
+    },
+    {
+      "game": "ecosphere",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "ffb34d30890dad0d02a9eb8dc4cd708935de356f064dbf4e4f0476af78b91dad",
+      "error": null
+    },
+    {
+      "game": "grapevine",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "6f4b020660152bf24c728e2189f7304edd9da15510b821a16d05eb5d86dcee5b",
+      "error": null
+    },
+    {
+      "game": "hauntedinn",
+      "seed": 2,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "9143e03c494a44f9bcab8490f6e8eee4c2c92a2ded66262dbb263a2c548433ae",
+      "error": null
+    },
+    {
+      "game": "castaway",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "f3414bf6f7cda23cc553be4431f94bb2499be829ea0e34e5489117a01896098e",
+      "error": null
+    },
+    {
+      "game": "roadside_observatory",
+      "seed": 2,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "0a7ea88942b5653cf39d358bafffdabee87fa8ed979642c81fd6da4488fc97e5",
+      "error": null
+    },
+    {
+      "game": "lost_and_found",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "62d3a8e9ee311a16779e988c7ef647933e435d3f16919a13e6d37c770f809f4f",
+      "error": null
+    },
+    {
+      "game": "mola_tea",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "b9e06f16600dbddcf38e1078d42a6043dbca8088934d8b4fb0f374f028fcb2ab",
+      "error": null
+    },
+    {
+      "game": "plague",
+      "seed": 2,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "85131a7cba7a7874b06807ede161b67a85dbcfb34e68960d28b7d8c18719c0a0",
+      "error": null
+    },
+    {
+      "game": "patch_reality_moderate",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "68bbe17bef17a91061054a9f4300344e7a11d6a9f4714c8740ebc01c7d37e01b",
+      "error": null
+    },
+    {
+      "game": "poisoner",
+      "seed": 2,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "e8a74867e9553834ce805bef605c39e74c490626d8f4603c9e7e91715bfe1c21",
+      "error": null
+    },
+    {
+      "game": "hezu",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "d0dd3a7f4ee38b338a1363548bbda256ef5520362961b5026c0030c9177d8ed4",
+      "error": null
+    },
+    {
+      "game": "redeye",
+      "seed": 2,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "414fb59a09df4697be5a0f3f6bb3eaf36a87cea6763a148ff292b7227560b5d2",
+      "error": null
+    },
+    {
+      "game": "butterfly",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "e9b7517efac2f69525fbc5b6dc08bb34d933ce6e4ad5749100dd9d63b52dd1e1",
+      "error": null
+    },
+    {
+      "game": "modelkeeper_expert",
+      "seed": 1,
+      "returncode": 0,
+      "protocol_completed": true,
+      "output_sha": "8bfe05f39c360ede4ed6b5bcaf330ee8524b5a085222ec10315871b29125d3c1",
+      "error": null
+    }
+  ]
+}

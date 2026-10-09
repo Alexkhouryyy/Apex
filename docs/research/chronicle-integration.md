@@ -34,7 +34,8 @@ The adapter performs no optional import on the disabled path.
 
 Existing telemetry, observed outcomes, and trajectory learning remain in place.
 Tool dispatch includes memory tools, so memory effects are stubbed when replaying
-that dispatch. Direct memory API calls are not independently instrumented.
+that dispatch. Direct legacy remember/forget and governed memory store/forget
+calls also have independent effect boundaries.
 
 Each turn writes a separate local JSONL file. Concurrent threads use separate
 ContextVars and files; nested turn scopes reuse the enclosing trace. Context is
@@ -85,7 +86,7 @@ with incident_replay.replay("fixtures/traces/router-case", live_router=True):
 ```
 
 Default replay returns recorded boundary outputs without executing their bodies.
-The sole live cut-point allowed by the adapter is the pure model router. Tool
+Live cut-points are restricted to the reviewed pure router, memory-admission, learning-evaluation, dependency-plan, Council-selection and context-selection boundaries. Tool
 dispatch, safety checks (which may invoke a model or confirmation), and all other
 boundaries are stub-only. Missing boundaries fail rather than run live. Recorded
 exceptions raise `RecordedBoundaryError` with the sanitized incident message.
@@ -94,8 +95,7 @@ Live callers receive original values; replay receives sanitized fixture values.
 **`AgentCore.run()` is refused in adapter replay.** Orchestration has direct side effects
 outside these boundaries: conversation writes, subscription execution, telemetry,
 and live model calls. This release is a boundary replay test bench, not end-to-end
-agent replay. SDK LLM recording, streaming, direct memory boundaries, and skill
-promotion gates are subsequent work, not completed capabilities.
+agent replay. SDK response snapshots, terminal streaming-turn snapshots, governed memory boundaries and skill promotion gates are now covered. Streaming event timing/UI effects and full subscription/orchestration replay remain unsupported.
 
 ## Verification
 
@@ -111,13 +111,6 @@ or capture failures without duplicate execution. CI installs the optional packag
 The adapter pins upstream 0.5.0 because session restoration and replay safeguards
 touch its internal ContextVar/cursor. Revalidate these tests before upgrading.
 
-## Research backlog after this integration
+## Research suite follow-up
 
-1. LLM call recording and serializable SDK response reconstruction; streaming
-   and subscription paths need separate designs.
-2. Independent memory admission/provenance boundaries and safe pure policy cuts.
-3. Frozen evaluation contracts and versioned skill promotion/rollback.
-4. When Debate Helps metrics and Council trace adapters.
-5. Engram memory-selection benchmark, then measured retrieval integration.
-6. Hermes and SkillAA component/license assessment; availability checks for
-   ReCAP and the remaining watchlist. These are not yet integrated.
+See [integration-suite.md](integration-suite.md) for the consolidated paper-by-paper implementation, source audit, experiment criteria and remaining empirical/white-box blockers.

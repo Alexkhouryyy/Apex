@@ -1,0 +1,5 @@
+HGP Contributors, Copyright (c) 2024, MIT.
+https://github.com/Ouan6/HGP-
+Revision: 265c7c28137e583bf79a15295b74720feece50e6
+Extracted AdaptiveThresholdManager.get_current_threshold from train/adaptive_threshold.py verbatim.
+Host supplies validated state. No upstream persistence, classifier weights, training, Neo4j or LLM imports.

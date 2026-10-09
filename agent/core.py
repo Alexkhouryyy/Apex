@@ -22,6 +22,7 @@ from agent import skills as skills_mod
 from agent import budget as _budget
 from agent import provider
 from agent import incident_replay
+from agent import message_snapshot
 from tools import computer, bash, research, files, browser, repl, vision, phone, image_gen, telegram, discord, slack, whatsapp, signal
 
 SYSTEM_PROMPT = """You are an advanced AI agent with voice interface, computer vision, computer control, \
@@ -1377,6 +1378,19 @@ TOOLS = [
             "properties": {"task_id": {"type": "string"}},
             "required": ["task_id"],
         },
+    },
+    {
+        "name": "run_dependency_plan",
+        "description": "Run a bounded specialist DAG only for confidently separable branches. Coupled or uncertain plans return to you for single-agent execution. Workers see only declared predecessor artifacts and retain existing role/permission gates.",
+        "input_schema": {
+            "type": "object", "properties": {
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "nodes": {"type": "array", "minItems": 1, "maxItems": 50,
+                          "items": {"type": "object", "properties": {
+                              "id": {"type": "string"}, "role": {"type": "string"},
+                              "task": {"type": "string"}, "depends_on": {"type": "array", "items": {"type": "string"}}},
+                              "required": ["id", "role", "task", "depends_on"]}}},
+            "required": ["nodes"]},
     },
     {
         "name": "spawn_subagent",
@@ -2906,6 +2920,9 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return f"Recorded outcome #{rid}. This feeds recommendation accuracy."
 
         elif name == "remember":
+            from agent import memory_governance
+            if memory_governance.current() is not None:
+                return "[Memory] Governed evidence requires explicit owner approval in the Approved evidence panel."
             staged = _STAGE_REMEMBER.get()
             if staged:
                 return _stage_remember(inputs, staged)
@@ -2918,6 +2935,10 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             )
 
         elif name == "recall":
+            from agent import memory_governance
+            governed = memory_governance.current()
+            if governed is not None:
+                return json.dumps(memory_governance.recall(inputs.get("query", ""), governed), indent=2)
             results = longterm.recall(
                 query=inputs.get("query", ""),
                 kind=inputs.get("kind", ""),
@@ -2928,6 +2949,9 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return json.dumps(results, indent=2)
 
         elif name == "forget":
+            from agent import memory_governance
+            if memory_governance.current() is not None:
+                return "[Memory] Forget governed evidence by its citation ID in the Approved evidence panel."
             return longterm.forget(inputs["memory_id"])
 
         elif name == "open_url":
@@ -3016,6 +3040,8 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
 
         elif name == "spawn_subagent":
             return orchestrator.spawn(inputs["role"], inputs["task"], inputs.get("use_thinking", False))
+        elif name == "run_dependency_plan":
+            return json.dumps(orchestrator.run_plan(inputs["nodes"], confidence=inputs.get("confidence", 0.0)), indent=2)
         elif name == "wait_for_subagents":
             return json.dumps(
                 orchestrator.wait_for(inputs.get("sub_ids") or None, inputs.get("timeout_seconds", 300)),
@@ -3718,6 +3744,10 @@ class AgentCore:
         # and quietly multiply the bill. Last also makes it the most recent
         # thing the model reads before the conversation.
         from agent.continuity import prompt as continuity_prompt
+        from agent import task_skills
+        task_procedure = task_skills.current()
+        if task_procedure:
+            blocks.append({"type": "text", "text": "Task-local procedure (subject to existing permissions):\n" + task_procedure})
         project_context = continuity_prompt()
         if project_context:
             blocks.append({"type": "text", "text": project_context})
@@ -3827,7 +3857,7 @@ class AgentCore:
                  if cost else "."))
         return text
 
-    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None, persona: str | None = None, screen_origin: str = "browser", withhold: frozenset | None = None, stage_memories: dict | None = None) -> str:
+    def run(self, user_text: str, include_screenshot: bool = True, use_thinking: bool = False, streamer=None, *, channel_id: str | None = None, max_iterations: int | None = None, cancel_event: "threading.Event | None" = None, screen_image: str | None = None, companion_mode: str | None = None, persona: str | None = None, screen_origin: str = "browser", withhold: frozenset | None = None, stage_memories: dict | None = None, memory_context=None) -> str:
         """Run a full agent turn. Returns the final text response.
 
         `withhold`: tool names this turn may neither see nor run, whatever its
@@ -3856,8 +3886,9 @@ class AgentCore:
             raise ValueError("Companion mode must be discuss or work.")
         screen_b64 = companion.validate_screen_image(screen_image)
         memory, lock = self._get_channel(channel_id)
-        from agent import continuity
-        with lock, incident_replay.record_turn(channel_id), continuity.turn(channel_id), _staging_memories(stage_memories), \
+        from agent import continuity, memory_governance
+        governed_scope = memory_governance.use(memory_context) if memory_context is not None else contextlib.nullcontext()
+        with governed_scope, lock, incident_replay.record_turn(channel_id), continuity.turn(channel_id), _staging_memories(stage_memories), \
                 continuity.conversation(channel_id, self, memory, user_text) as memory:
             if cancel_event is not None and cancel_event.is_set():
                 return "[turn interrupted]"
@@ -4204,6 +4235,8 @@ class AgentCore:
             print(f"[Rerank] disabled for this turn: {e}")
             return first_content, first_text
 
+    @incident_replay.boundary("apex.llm_stream_turn", exclude_arguments=("self", "streamer", "cancel_event"),
+                              encode_result=message_snapshot.encode_turn, decode_result=message_snapshot.decode_turn)
     def _stream_turn(self, kwargs: dict, streamer, cancel_event: "threading.Event | None" = None) -> tuple[list, str, str]:
         """Run one streamed turn, feeding text deltas to the streamer.
 

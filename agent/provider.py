@@ -8,6 +8,7 @@ import json
 import os
 from typing import Any
 from agent.apocalypse import OfflineUnavailable
+from agent.incident_replay import boundary
 
 
 # Google's OpenAI-compatible endpoint — lets the OpenAI SDK talk to Gemini.
@@ -652,6 +653,7 @@ def is_usable(model: str) -> bool:
     return model in discover(provider_for(model))
 
 
+@boundary("apex.provider_complete")
 def complete(model: str, system: str, user: str, max_tokens: int = 2048) -> str:
     """One-shot text completion against any provider. Returns plain text."""
     client = get_client(model)

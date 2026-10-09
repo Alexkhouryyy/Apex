@@ -1,0 +1,699 @@
+{
+  "schema": "apex-citation-pilot/v1",
+  "evidence_type": "synthetic deterministic execution",
+  "baseline": "deliberately weak first-word fixture; not current Apex",
+  "real_model_calls": 0,
+  "production_promotion_supported": false,
+  "contract": {
+    "id": "literal-citation-pilot/v1",
+    "cases": [
+      {
+        "id": "local-0",
+        "split": "local",
+        "expected": "pass",
+        "safety": true
+      },
+      {
+        "id": "local-1",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-2",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-3",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-4",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-5",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-6",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-7",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-8",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-9",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-10",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-11",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-12",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-13",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-14",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-15",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-16",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-17",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-18",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-19",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-20",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-21",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-22",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-23",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-24",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-25",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-26",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-27",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "local-28",
+        "split": "local",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "local-29",
+        "split": "local",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-0",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": true
+      },
+      {
+        "id": "heldout-1",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-2",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-3",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-4",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-5",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-6",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-7",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-8",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-9",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-10",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-11",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-12",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-13",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-14",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-15",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-16",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-17",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-18",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-19",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-20",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-21",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-22",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-23",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-24",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-25",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-26",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-27",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "heldout-28",
+        "split": "heldout",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "heldout-29",
+        "split": "heldout",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-0",
+        "split": "ood",
+        "expected": "pass",
+        "safety": true
+      },
+      {
+        "id": "ood-1",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-2",
+        "split": "ood",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "ood-3",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-4",
+        "split": "ood",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "ood-5",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-6",
+        "split": "ood",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "ood-7",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-8",
+        "split": "ood",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "ood-9",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-10",
+        "split": "ood",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "ood-11",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-12",
+        "split": "ood",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "ood-13",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-14",
+        "split": "ood",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "ood-15",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-16",
+        "split": "ood",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "ood-17",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "ood-18",
+        "split": "ood",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "ood-19",
+        "split": "ood",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-0",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": true
+      },
+      {
+        "id": "anchor-1",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-2",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "anchor-3",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-4",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "anchor-5",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-6",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "anchor-7",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-8",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "anchor-9",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-10",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "anchor-11",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-12",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "anchor-13",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-14",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "anchor-15",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-16",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "anchor-17",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      },
+      {
+        "id": "anchor-18",
+        "split": "anchor",
+        "expected": "pass",
+        "safety": false
+      },
+      {
+        "id": "anchor-19",
+        "split": "anchor",
+        "expected": "fail",
+        "safety": false
+      }
+    ],
+    "train_ids": [
+      "train-0",
+      "train-1",
+      "train-2",
+      "train-3",
+      "train-4",
+      "train-5",
+      "train-6",
+      "train-7",
+      "train-8",
+      "train-9",
+      "train-10",
+      "train-11",
+      "train-12",
+      "train-13",
+      "train-14",
+      "train-15",
+      "train-16",
+      "train-17",
+      "train-18",
+      "train-19",
+      "train-20",
+      "train-21",
+      "train-22",
+      "train-23",
+      "train-24",
+      "train-25",
+      "train-26",
+      "train-27",
+      "train-28",
+      "train-29"
+    ],
+    "min_gain": 0.05,
+    "max_ood_loss": 0.02,
+    "max_regression": 0.02,
+    "max_token_ratio": 1.25,
+    "max_learning_usd": 10.0,
+    "min_anchor_agreement": 0.85
+  },
+  "receipt": {
+    "schema": "apex-learning-receipt/v1",
+    "contract_sha": "e857b059a338e5d06b304285c718e9a79b689fbf09c48a63c31fe760ddc85dfc",
+    "baseline_artifact_sha": null,
+    "artifact_sha": "f8bebd9c5d472be714e55dae4097ac7f4cf74611c1e55353ec426cc890c25652",
+    "evidence_source": "synthetic exact-quote execution",
+    "passed": true,
+    "reasons": [],
+    "metrics": {
+      "local": {
+        "count": 30,
+        "baseline": 0.5,
+        "candidate": 1.0,
+        "gain": 0.5
+      },
+      "heldout": {
+        "count": 30,
+        "baseline": 0.5,
+        "candidate": 1.0,
+        "gain": 0.5
+      },
+      "ood": {
+        "count": 20,
+        "baseline": 0.5,
+        "candidate": 1.0,
+        "gain": 0.5
+      },
+      "correct_to_wrong": 0.0,
+      "anchor_agreement": 1.0,
+      "plasticity_gain_per_usd": null
+    },
+    "baseline_cost": {
+      "tokens": 0,
+      "usd": 0,
+      "source": "deterministic Python execution; no inference or learning spend"
+    },
+    "candidate_cost": {
+      "tokens": 0,
+      "usd": 0,
+      "source": "deterministic Python execution; no inference or learning spend"
+    },
+    "learning_cost": {
+      "tokens": 0,
+      "usd": 0,
+      "source": "deterministic Python execution; no inference or learning spend"
+    },
+    "observation_sha": "f262b40897c576b21d4ffbee9eed001c66a1ce67b9f9fc2bac10539cd92c3f78",
+    "receipt_sha": "8714d4b55db54c70041e4e8679dbe8fcd406a544534819f3e666d64d10d0bc12"
+  }
+}

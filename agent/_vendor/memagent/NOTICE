@@ -1,0 +1,6 @@
+MemAgent by WalkerWorldPeace and contributors. Apache-2.0.
+https://github.com/WalkerWorldPeace/MemAgent
+Revision: 7121cfe991c329748cd610515a3419cabc875ba6
+EvolveLab/memory_types.py and base_memory.py copied verbatim.
+Only the provider interface is integrated; no learned router or models.
+BaseMemoryProvider.probe depends on upstream decision_types and is overridden by the Apex adapter.

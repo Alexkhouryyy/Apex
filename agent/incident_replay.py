@@ -1,7 +1,7 @@
 """Optional Chronicle integration. Recording never retries a real action.
 
 Replay is a boundary test bench, not a runner for AgentCore.run(): orchestration
-has side effects outside boundaries. Only the pure router may run live in replay.
+has side effects outside boundaries. Only reviewed pure decisions may run live.
 """
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ import config
 
 _log = logging.getLogger(__name__)
 _active = contextvars.ContextVar("apex_incident_session", default=None)
+PURE_BOUNDARIES = frozenset({"apex.route_model", "apex.learning_gate", "apex.memory_admission",
+                             "apex.delegation_plan", "apex.council_selection", "apex.context_selection"})
 _SECRET_FIELD = re.compile(r"(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|private[_-]?key)", re.I)
 _ASSIGNMENT = re.compile(
     r"(?i)((?:password|passwd|secret|token|api[_-]?key|authorization)\s*[=:]\s*)([^\s,;]+)"
@@ -55,8 +57,17 @@ def _redact_text(text):
 
 
 def _sanitize(value):
+    from dataclasses import asdict, is_dataclass
+    if is_dataclass(value):
+        return _sanitize(asdict(value))
+    if hasattr(value, "model_dump"):
+        return _sanitize(value.model_dump(mode="json"))
+    if type(value).__name__ == "ContextGraph" and hasattr(value, "blocks"):
+        return {"context_blocks": _sanitize(value.blocks)}
     if isinstance(value, dict):
-        return {k: "[REDACTED]" if _SECRET_FIELD.search(str(k)) else _sanitize(v)
+        counts = {"tokens", "max_tokens", "input_tokens", "output_tokens", "total_tokens",
+                  "cache_read_input_tokens", "cache_creation_input_tokens"}
+        return {k: "[REDACTED]" if _SECRET_FIELD.search(str(k)) and k not in counts else _sanitize(v)
                 for k, v in value.items()}
     if isinstance(value, (tuple, list)):
         return [_sanitize(v) for v in value]
@@ -73,7 +84,8 @@ def _sanitize(value):
     return value
 
 
-def boundary(name, *, kind="custom", tuple_result=False):
+def boundary(name, *, kind="custom", tuple_result=False, exclude_arguments=(),
+             encode_result=None, decode_result=None):
     """Lazy Chronicle boundary; no import or instrumentation outside our scope."""
     def decorate(fn):
         signature = inspect.signature(fn)
@@ -101,10 +113,11 @@ def boundary(name, *, kind="custom", tuple_result=False):
             def capture(*a, **kw):
                 bound = signature.bind(*a, **kw)
                 bound.apply_defaults()
-                return chronicle.Input(arguments=_sanitize(dict(bound.arguments)))
+                return chronicle.Input(arguments=_sanitize({k: v for k, v in bound.arguments.items()
+                                                           if k not in exclude_arguments}))
 
             def capture_result(value):
-                cleaned = _sanitize(value)
+                cleaned = _sanitize(encode_result(value) if encode_result else value)
                 if tuple_result and kind == "router":
                     import json
                     return json.dumps(cleaned)
@@ -119,8 +132,8 @@ def boundary(name, *, kind="custom", tuple_result=False):
             if replaying:
                 index = session._replay_cursor.get(name, 0) + 1
                 stub = session.replay_plan.should_stub(name, index)
-                if not stub and name != "apex.route_model":
-                    raise RuntimeError("Only the pure Apex router may execute live in replay.")
+                if not stub and name not in PURE_BOUNDARIES:
+                    raise RuntimeError("Only reviewed pure Apex boundaries may execute live in replay.")
                 if stub:
                     envelope = session.fixture_graph.envelope(name, index)
                     if envelope.status.code == "ERROR":
@@ -141,6 +154,8 @@ def boundary(name, *, kind="custom", tuple_result=False):
                     return tuple(json.loads(value))
                 if isinstance(value, dict) and "__apex_tuple__" in value:
                     return tuple(value["__apex_tuple__"])
+            if replaying and stub and decode_result:
+                return decode_result(value)
             return value
         return wrapped
     return decorate
@@ -216,10 +231,10 @@ def record_turn(channel_id=None, *, store=None, export=None):
 
 
 @contextmanager
-def replay(trace, *, live_router=False):
+def replay(trace, *, live_router=False, live_boundaries=()):
     """Replay boundary calls only. All effects/permission checks are stubbed.
 
-    The only supported live cut-point is apex.route_model, a pure decision.
+    Supported live cut-points are the reviewed PURE_BOUNDARIES decisions.
     Never call the full AgentCore.run() here: memory/telemetry outside recorded
     boundaries would still execute. Replay cannot be nested inside recording.
     """
@@ -230,8 +245,12 @@ def replay(trace, *, live_router=False):
     session = chronicle.ChronicleSession()
     session.load_trace(trace)
     plan = chronicle.ReplayPlan()
+    if not set(live_boundaries) <= PURE_BOUNDARIES:
+        raise ValueError("live replay is limited to the reviewed pure boundary allowlist")
     if live_router:
         plan.live("apex.route_model")
+    for name in live_boundaries:
+        plan.live(name)
     session.enable_replay(plan)
     session_token = sessions._session.set(session)
     active_token = _active.set(session)

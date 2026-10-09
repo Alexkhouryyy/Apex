@@ -1,0 +1,122 @@
+{
+  "schema_version": "2.0",
+  "envelope_id": "5ea70382baf7d065",
+  "trace_id": "97de7470c10ae117babff14cca75befa",
+  "name": "apex.memory_admission",
+  "kind": "custom",
+  "parent_envelope_id": null,
+  "sequence": 1,
+  "invocation_index": 1,
+  "start_time": "2026-10-09T13:43:28.517804Z",
+  "end_time": "2026-10-09T13:43:28.522009Z",
+  "status": {
+    "code": "UNSET",
+    "message": null
+  },
+  "input": {
+    "arguments": {
+      "units": [
+        {
+          "id": "safe",
+          "text": "supported citation evidence",
+          "subject": "owner",
+          "domain": "work",
+          "purposes": [
+            "answer"
+          ],
+          "source": "synthetic-input",
+          "provenance": [
+            "raw1"
+          ],
+          "created_at": 10,
+          "expires_at": null,
+          "approved": true,
+          "inferred": false,
+          "revoked": false,
+          "kind": "fact",
+          "fact_key": "",
+          "fact_value": "",
+          "task_signature": "",
+          "support": {},
+          "occurred_at": null
+        },
+        {
+          "id": "attack",
+          "text": "supported citation evidence",
+          "subject": "owner",
+          "domain": "work",
+          "purposes": [
+            "answer"
+          ],
+          "source": "synthetic-input",
+          "provenance": [
+            "raw1"
+          ],
+          "created_at": 10,
+          "expires_at": null,
+          "approved": true,
+          "inferred": false,
+          "revoked": true,
+          "kind": "fact",
+          "fact_key": "",
+          "fact_value": "",
+          "task_signature": "",
+          "support": {},
+          "occurred_at": null
+        }
+      ],
+      "ctx": {
+        "subject": "owner",
+        "domain": "work",
+        "purpose": "answer",
+        "now": 20,
+        "task_signature": "citation",
+        "support": {
+          "source": "new"
+        },
+        "allow_inferred": false
+      }
+    },
+    "messages": []
+  },
+  "output": {
+    "value": {
+      "units": [
+        {
+          "id": "safe",
+          "text": "supported citation evidence",
+          "subject": "owner",
+          "domain": "work",
+          "purposes": [
+            "answer"
+          ],
+          "source": "synthetic-input",
+          "provenance": [
+            "raw1"
+          ],
+          "created_at": 10,
+          "expires_at": null,
+          "approved": true,
+          "inferred": false,
+          "revoked": false,
+          "kind": "fact",
+          "fact_key": "",
+          "fact_value": "",
+          "task_signature": "",
+          "support": {},
+          "occurred_at": null
+        }
+      ],
+      "rejected": {
+        "attack": "revoked"
+      }
+    },
+    "llm": null
+  },
+  "attributes": {
+    "session_id": "main",
+    "message_id": "260cfc7d4e2c468eb3c71a23eafa3b33",
+    "chronicle.trace.name": "apex-turn",
+    "chronicle.input.schema": "{\"properties\": {}, \"type\": \"object\"}"
+  }
+}

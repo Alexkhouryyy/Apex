@@ -251,6 +251,16 @@
       <thead><tr><th>ID</th><th>Kind</th><th>Importance</th><th>Content</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
+    <h2>Approved evidence</h2>
+    <p>These records retain their source, permitted purpose and linked views. Forget removes the record and views that cite it.</p>
+    <form id="scoped-memory-form" class="controls">
+      <input name="text" aria-label="Evidence to remember" placeholder="A fact you want Apex to remember" maxlength="16000" required>
+      <input name="domain" aria-label="Memory domain" value="work" required>
+      <input name="purpose" aria-label="Permitted purpose" value="answer" required>
+      <button type="submit">Approve and save</button>
+    </form>
+    <p id="scoped-memory-status" role="status"></p>
+    <div id="scoped-memory-list" class="cards"></div>
   </section>
 
   <!-- KNOWLEDGE GRAPH -->
@@ -1006,6 +1016,7 @@
 <script src="/static/plugins.js?v=plugins44"></script>
 <script src="/static/environment.js?v=environment44"></script>
 <script src="/static/app.js?v=world3"></script>
+<script src="/static/scoped-memory.js"></script>
 <script src="/static/voice-mobile.js?v=omni30"></script>
 <script type="module" src="/static/cst3d.js?v=omni30"></script>
 <script src="/static/team.js"></script>

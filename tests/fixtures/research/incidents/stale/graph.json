@@ -1,0 +1,33 @@
+{
+  "trace_id": "58ba70a227a1131f61c16c8c4d5a0fdb",
+  "attributes": {
+    "session_id": "main",
+    "message_id": "514209f7f2b745c6be434a1b8b253ff8",
+    "chronicle.trace.name": "apex-turn",
+    "chronicle.input.schema": "{\"properties\": {}, \"type\": \"object\"}"
+  },
+  "spans": [
+    {
+      "envelope_id": "db1f8c2b9efcf049",
+      "name": "apex.memory_admission",
+      "kind": "custom",
+      "invocation_index": 1,
+      "sequence": 1,
+      "fixture": "001-apex.memory_admission-1.json"
+    }
+  ],
+  "nodes": [
+    {
+      "envelope_id": "db1f8c2b9efcf049",
+      "name": "apex.memory_admission",
+      "kind": "custom",
+      "invocation_index": 1,
+      "sequence": 1,
+      "fixture": "001-apex.memory_admission-1.json"
+    }
+  ],
+  "edges": [],
+  "roots": [
+    "db1f8c2b9efcf049"
+  ]
+}

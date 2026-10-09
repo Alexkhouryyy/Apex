@@ -1,0 +1,4 @@
+Mem++ by AIDAChip-Inc
+https://github.com/AIDAChip-Inc/mem-plus-plus
+Revision: 26ae8787542e1b1024dae37dc2c388bbf2411d05
+Apache-2.0. Extracted memory/store.py _rrf_fuse; body preserved, standalone default k=60. No database/model/LLM imports.

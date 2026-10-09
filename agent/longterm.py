@@ -18,6 +18,7 @@ import sqlite3
 import time
 import json
 import threading
+from agent.incident_replay import boundary
 from contextlib import contextmanager
 from typing import Optional, TYPE_CHECKING
 
@@ -321,13 +322,15 @@ def _write_conn():
     Exceptions still roll back via _conn; failures are never retried or hidden.
     """
     with _write_lock:
-        with _conn() as conn:
+        from agent.state_lock import writer
+        with writer(DB_PATH), _conn() as conn:
             yield conn
 
 
 _REMEMBER_MAX_CHARS = 8000  # a single memory row shouldn't bloat every future recall/embed
 
 
+@boundary("apex.memory_write")
 def remember(content: str, kind: str = "fact", importance: int = 5, tags: str = "", *, source: str = "") -> str:
     """Save a memory. `source` is its provenance (see init_db); a memory plugin
     is not told it, so what it stores counts as from any channel."""
@@ -468,6 +471,7 @@ def _format_rows(rows) -> list[dict]:
     ]
 
 
+@boundary("apex.memory_forget")
 def forget(memory_id: int) -> str:
     with _conn() as c:
         c.execute("DELETE FROM memories WHERE id = ?", (memory_id,))

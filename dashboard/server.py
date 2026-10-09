@@ -146,6 +146,8 @@ from dashboard.apps import router as apps_router
 app.include_router(apps_router)
 from dashboard.home import router as home_router
 app.include_router(home_router)
+from dashboard.research import router as research_router
+app.include_router(research_router)
 from dashboard.work import router as work_router
 app.include_router(work_router)
 from dashboard.code import router as code_router
