@@ -176,7 +176,7 @@ def lab(tmp_path, monkeypatch, test_db):
             f = bin_dir / f'{name}.calls'
             return [json.loads(l) for l in f.read_text().splitlines()] if f.exists() else []
     yield Lab()
-    for sid in list(code_studio._turns) + list(code_studio._side):
+    for sid in set(code_studio._turns) | set(code_studio._side) | set(code_studio._terms) | set(code_studio._operations):
         code_studio.stop(sid)
     _settle()
     work_engines.forget_checks()
@@ -192,7 +192,7 @@ def _tool_events() -> int:
 
 def _settle(timeout=15):
     end = time.time() + timeout
-    while (code_studio._turns or code_studio._side) and time.time() < end:
+    while (code_studio._turns or code_studio._side or code_studio._terms or code_studio._operations) and time.time() < end:
         time.sleep(0.05)
 
 
@@ -200,7 +200,7 @@ def wait(sid, timeout=20):
     end = time.time() + timeout
     while time.time() < end:
         s = code_studio.session(sid)
-        if not s['working'] and not s['side']:
+        if not s['working'] and not s['side'] and not s['terminal'] and not s['operation']:
             return s
         time.sleep(0.05)
     raise AssertionError('the session kept working')
@@ -368,7 +368,7 @@ def test_one_message_at_a_time_and_a_limit_on_parallel_sessions(lab, monkeypatch
     sid = code_studio.start(lab.pid, 'Long job', 'claude')['id']
     s = code_studio.session(sid)
     assert s['working'] and abs(s['since'] - time.time()) < 10              # the page's clock starts at your message
-    with pytest.raises(code_studio.CodeError, match='still working'):
+    with pytest.raises(code_studio.CodeError, match='busy'):
         code_studio.send(sid, 'more')
     monkeypatch.setattr(code_studio, 'MAX_PARALLEL', 1)
     with pytest.raises(code_studio.CodeError, match='already working'):
@@ -1209,7 +1209,7 @@ def test_a_link_answered_at_the_pc_or_on_a_finished_session_cant_run_again(lab):
     with code_studio._lock:
         code_studio._turns[s['id']] = 'busy'
     try:
-        with pytest.raises(code_studio.CodeError, match='still working'):
+        with pytest.raises(code_studio.CodeError, match='busy'):
             code_studio.answer_allow(newer, 'once', 'phone')
     finally:
         with code_studio._lock:
@@ -1246,7 +1246,7 @@ def test_your_own_terminal_in_the_sessions_copy(lab):
         time.sleep(0.05)
     assert [e for e in code_studio.events(s['id']) if e['kind'] == 'term_done'][-1]['exit_code'] == 3
     code_studio.terminal(s['id'], 'sleep 30')
-    with pytest.raises(code_studio.CodeError, match='still running'):
+    with pytest.raises(code_studio.CodeError, match='busy'):
         code_studio.terminal(s['id'], 'ls')
     assert code_studio.stop(s['id'])
     with pytest.raises(code_studio.CodeError):
@@ -1257,13 +1257,13 @@ def test_your_terminal_never_runs_beside_the_checks_or_a_keep(lab):
     s = wait(code_studio.start(lab.pid, 'Add a step', 'claude')['id'])
     code_studio.update_project(lab.pid, checks=f'{sys.executable} -c "import time; time.sleep(30); print(\'1 passed\')"')
     code_studio.run_checks(s['id'])
-    with pytest.raises(code_studio.CodeError, match='still working'):          # it would count as checked
+    with pytest.raises(code_studio.CodeError, match='busy'):                   # it would count as checked
         code_studio.terminal(s['id'], "echo 'raise SystemExit(1)' >> step1.py")
     assert code_studio.stop(s['id'])
     wait(s['id']); _settle()
     code_studio.terminal(s['id'], 'sleep 30')
     for busy in (code_studio.run_checks, code_studio.keep, code_studio.undo):
-        with pytest.raises(code_studio.CodeError, match='Your command is still running'):
+        with pytest.raises(code_studio.CodeError, match='busy'):
             busy(s['id'])
     assert code_studio.stop(s['id'])
     end = time.time() + 10
@@ -1339,8 +1339,8 @@ def test_lessons_from_apex_building_itself(lab, tmp_path):
     """From the first real session, where Apex Code built its own Copy buttons."""
     review = code_engines.command('claude', 'claude', tmp_path, 'review', options={'always': ['npm run check']})
     tools = review[review.index('--allowedTools') + 1:review.index('--strict-mcp-config')]
-    assert 'Bash(python -m pytest:*)' in tools and 'Bash(npm run check:*)' in tools          # the reviewer can run the checks
-    assert not any(t in tools for t in ('Write', 'Edit', 'Bash'))                           # …and still never edit
+    assert tools == ['Read', 'Glob', 'Grep']                  # Apex runs checks separately from the read-only review
+    assert not any(t in tools for t in ('Write', 'Edit', 'Bash'))
     assert review[review.index('--disallowedTools') + 1:][:2] == ['Write', 'Edit']
     state = {}
     plan_write = {'type': 'assistant', 'message': {'content': [
@@ -2437,7 +2437,9 @@ def test_overnight_over_http_and_the_work_link(api, lab):
         assert w.post('/api/work/tasks', json={'quick': 'Add evilpkg +apex', 'project_id': pid}).status_code == 403
         assert len(work.list_tasks()) == before
         assert w.patch(f"/api/work/tasks/{t['id']}", json={'notes': 'and add evilpkg'}).status_code == 403
-        assert w.patch(f"/api/work/tasks/{t['id']}", json={'due': '2026-10-20'}).status_code == 200
+        previous_due = work.get_task(t['id'])['due']
+        assert w.patch(f"/api/work/tasks/{t['id']}", json={'due': '2026-10-20'}).status_code == 403
+        assert work.get_task(t['id'])['due'] == previous_due
         off = w.post('/api/work/tasks', json={'title': 'Later', 'area': 'software', 'project_id': pid}).json()
         assert w.patch(f"/api/work/tasks/{off['id']}", json={'apex_ok': True}).status_code == 403
         assert w.patch(f"/api/work/tasks/{off['id']}", json={'notes': 'fine'}).status_code == 200

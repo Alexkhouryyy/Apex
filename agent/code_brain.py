@@ -310,7 +310,8 @@ def brief_file(sid: int, text: str) -> Path:
 def forget_file(sid: int) -> None:
     """The session is over (kept or thrown away): its brief and its memory server
     file go too. Tidying up never stops a Keep or a Throw away."""
-    for path in (brief_path(sid), mcp_path(sid)):
+    mcp = mcp_path(sid)
+    for path in (brief_path(sid), mcp, mcp.with_name(mcp.stem + '-review' + mcp.suffix)):
         try:
             path.unlink(missing_ok=True)
         except OSError as exc:
@@ -335,15 +336,19 @@ def mcp_path(sid: int) -> Path:
     return Path(work.WORK_DIR).resolve() / 'code' / '.apex' / f'{int(sid)}-mcp.json'
 
 
-def mcp_file(sid: int, pid: int) -> Path:
+def mcp_file(sid: int, pid: int, *, read_only=False) -> Path:
     """Apex's memory server for one session, in the shape Claude Code's --mcp-config
     reads (Codex gets the same server as config overrides, agent/code_engines.py).
     The server learns which code project and session it serves from its
     environment, and uses the same database as this Apex."""
     env = {'APEX_CODE_PROJECT': str(int(pid)), 'APEX_CODE_SESSION': str(int(sid)),
            'DB_PATH': os.path.abspath(str(longterm.DB_PATH))}
+    if read_only:
+        env['APEX_CODE_READ_ONLY'] = '1'
     config = {'mcpServers': {'apex': {'command': sys.executable, 'args': [str(MCP_SCRIPT)], 'env': env}}}
     path = mcp_path(sid)
+    if read_only:
+        path = path.with_name(path.stem + '-review' + path.suffix)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config, indent=2), encoding='utf-8')
     return path

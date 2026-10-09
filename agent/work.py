@@ -23,6 +23,7 @@ Quick add understands a little shorthand so a task is one line:
 from __future__ import annotations
 
 import json
+import functools
 import re
 import threading
 import time
@@ -44,6 +45,32 @@ _WEEKDAYS = {name: i for i, names in enumerate([('mon', 'monday'), ('tue', 'tues
 
 class WorkError(ValueError):
     pass
+
+
+class OwnerRequired(WorkError):
+    pass
+
+
+_mutation_lock = threading.RLock()
+
+
+def _mutation(call):
+    """Keep authorization and mutation together, including project linking."""
+    @functools.wraps(call)
+    def serialized(*args, **kwargs):
+        with _mutation_lock:
+            return call(*args, **kwargs)
+    return serialized
+
+
+def _linked_task(task):
+    project = get_project(task['project_id']) if task.get('project_id') is not None else None
+    return bool(task.get('apex_ok') and project and project.get('code_project_id') is not None)
+
+
+def _require_owner(by_owner):
+    if not by_owner:
+        raise OwnerRequired('Only the owner can change linked Apex Code work or its project instructions.')
 
 
 def init_db() -> None:
@@ -188,10 +215,15 @@ def get_project(pid):
         return _row(cur, row) if row else None
 
 
-def update_project(pid, **changes):
+@_mutation
+def update_project(pid, *, by_owner=True, **changes):
     project = get_project(pid)
     if not project:
         raise WorkError('No such project.')
+    # Shared by HTTP and tool dispatch. A linked project's name/client/notes
+    # enter the unattended prompt; its area and status affect scheduling.
+    if changes and (project.get('code_project_id') is not None or 'code_project_id' in changes):
+        _require_owner(by_owner)
     fields = {}
     for key, value in changes.items():
         if key == 'name':
@@ -235,8 +267,9 @@ def get_task(tid):
         return _row(cur, row) if row else None
 
 
+@_mutation
 def add_task(title=None, quick=None, area=None, project_id=None, due=None, priority=None, notes='', status=None, today=None,
-             apex_ok=None):
+             apex_ok=None, *, by_owner=True):
     """Either a `quick` line of shorthand, or the fields themselves (fields win)."""
     init_db()
     fields = parse_quick(quick, today, list_projects()) if quick else {}
@@ -264,6 +297,8 @@ def add_task(title=None, quick=None, area=None, project_id=None, due=None, prior
     status = fields.get('status', 'todo')
     if status not in STATUSES:
         raise WorkError('Unknown status.')
+    if _linked_task(fields):
+        _require_owner(by_owner)
     now = time.time()
     with longterm._conn() as db:
         cur = db.execute('''INSERT INTO work_tasks (project_id, area, title, notes, due, priority, status, apex_ok, created, updated)
@@ -274,10 +309,13 @@ def add_task(title=None, quick=None, area=None, project_id=None, due=None, prior
     return get_task(tid)                        # read back after the insert is committed
 
 
-def update_task(tid, **changes):
+@_mutation
+def update_task(tid, *, by_owner=True, **changes):
     task = get_task(tid)
     if not task:
         raise WorkError('No such task.')
+    if changes and (_linked_task(task) or _linked_task({**task, **changes})):
+        _require_owner(by_owner)
     fields = {}
     for key, value in changes.items():
         if key == 'title':
@@ -309,8 +347,12 @@ def update_task(tid, **changes):
     return get_task(tid)
 
 
-def delete_task(tid):
+@_mutation
+def delete_task(tid, *, by_owner=True):
     init_db()
+    task = get_task(tid)
+    if task and _linked_task(task):
+        _require_owner(by_owner)
     with longterm._conn() as db:
         return db.execute('DELETE FROM work_tasks WHERE id=?', (tid,)).rowcount == 1
 
@@ -569,12 +611,15 @@ def _line(t):
     return ' · '.join(bits)
 
 
-def tool(inputs: dict) -> str:
-    """The `work` tool: short, speakable answers."""
+def tool(inputs: dict, *, by_owner=False) -> str:
+    """Short, speakable answers. Owner identity is supplied by trusted dispatch,
+    never by an input field. Mutation functions also serve trusted local Python
+    callers; HTTP and model callers must pass their authenticated identity.
+    """
     action = inputs.get('action')
     try:
         if action == 'add':
-            t = add_task(quick=inputs.get('quick') or '', area=inputs.get('area'), notes=inputs.get('notes') or '')
+            t = add_task(quick=inputs.get('quick') or '', area=inputs.get('area'), notes=inputs.get('notes') or '', by_owner=by_owner)
             return f"Added task {_line(t)} ({AREA_NAMES[t['area']]})."
         if action == 'today':
             v = today_view()
@@ -592,7 +637,7 @@ def tool(inputs: dict) -> str:
             if not isinstance(tid, int):
                 return 'Give the task id (from today or list).'
             changes = {'status': 'done'} if action == 'done' else {k: inputs[k] for k in ('due', 'status', 'notes', 'area') if k in inputs}
-            t = update_task(tid, **changes)
+            t = update_task(tid, by_owner=by_owner, **changes)
             return f"Updated {_line(t)}."
         if action == 'agent':
             from agent import work_agent

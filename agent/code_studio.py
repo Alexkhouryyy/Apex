@@ -43,6 +43,7 @@ Coding never uses API credits: only the two plans, signed in on this PC.
 from __future__ import annotations
 
 import hashlib
+import functools
 import itertools
 import json
 import os
@@ -64,6 +65,7 @@ ENGINES = ('claude', 'chatgpt')
 MODES = ('safe', 'full')
 MAX_PROMPT = 20000
 MAX_PARALLEL = 3                      # sessions working at once
+MAX_QUEUED = 10                       # explicit owner follow-ups, per session
 CHECK_TIMEOUT = 1800
 REVIEW_DIFF_LIMIT = 60000             # characters of diff the second opinion gets
 DIFF_LIMIT = 400_000                  # characters of one file's diff shown
@@ -88,8 +90,43 @@ _lock = threading.Lock()
 _turns: dict[int, str] = {}           # session id -> run id of its running turn
 _side: dict[int, str] = {}            # session id -> run id of a running review or checks
 _terms: dict[int, str] = {}           # session id -> run id of your terminal command
+_operations: dict[int, str] = {}      # preparing an async run, or a full synchronous mutation
+_stopped_preparations: set[int] = set()
 _live: dict[int, dict] = {}           # session id -> what's being written right now (not stored)
 _live_seq = itertools.count(1)        # live versions only ever go up, across steps, so the page can't go back
+
+
+def _busy_locked(sid: int) -> bool:
+    return sid in _turns or sid in _side or sid in _terms or sid in _operations
+
+
+def _exclusive(call):
+    """Reserve before reading files/proof, until a mutation or async start ends.
+
+    Async workers retain their existing run reservation after this one is
+    released. The lock protects claims only, so other sessions keep working.
+    """
+    @functools.wraps(call)
+    def reserved(sid, *args, **kwargs):
+        with _lock:
+            if _busy_locked(sid):
+                raise CodeError('This session is busy. Wait for its operation to finish, or press Stop.')
+            _stopped_preparations.discard(sid)
+            _operations[sid] = call.__name__
+        try:
+            init_db()
+            with _lock:
+                q = _queue_state(sid)
+                if q['items'] and not q['paused']:
+                    raise CodeError('Follow-ups are waiting. Pause or remove them before another operation.')
+            return call(sid, *args, **kwargs)
+        finally:
+            with _lock:
+                _operations.pop(sid, None)
+                _stopped_preparations.discard(sid)
+            if call.__name__ == 'send':
+                _kick_queue(sid)
+    return reserved
 
 
 def _live_for(sid: int) -> dict:
@@ -153,6 +190,10 @@ def init_db() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL, ts REAL NOT NULL,
             kind TEXT NOT NULL, data TEXT NOT NULL)''')
         db.execute('CREATE INDEX IF NOT EXISTS code_events_session ON code_events (session_id, id)')
+        db.execute('''CREATE TABLE IF NOT EXISTS code_queue (
+            id TEXT PRIMARY KEY, session_id INTEGER NOT NULL, prompt TEXT NOT NULL,
+            options TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued', created REAL NOT NULL)''')
+        db.execute('CREATE INDEX IF NOT EXISTS code_queue_session ON code_queue (session_id, state, created)')
         # Away mode: a command Safe mode stopped, sent to your phone to answer. The id is
         # the link's secret; answered, choice and who (which device) are the audit.
         db.execute('''CREATE TABLE IF NOT EXISTS code_pending_allows (
@@ -162,6 +203,7 @@ def init_db() -> None:
         have = {r[1] for r in db.execute('PRAGMA table_info(code_sessions)')}
         for col, ddl in (('model', "TEXT NOT NULL DEFAULT ''"), ('effort', "TEXT NOT NULL DEFAULT ''"),
                          ('tokens', 'INTEGER NOT NULL DEFAULT 0'), ('check_sha', "TEXT NOT NULL DEFAULT ''"),
+                         ('queue_paused', 'INTEGER NOT NULL DEFAULT 0'), ('queue_reason', "TEXT NOT NULL DEFAULT ''"),
                          ('check_evidence', "TEXT NOT NULL DEFAULT ''"),
                          # origin: 'you', or 'night' for a Work task Apex took on its own overnight (task_id).
                          ('origin', "TEXT NOT NULL DEFAULT 'you'"), ('task_id', 'INTEGER')):
@@ -180,6 +222,9 @@ def init_db() -> None:
 def _recover() -> None:
     """Apex restarted: nothing can still be running from before."""
     with longterm._conn() as db:
+        db.execute("UPDATE code_queue SET state='queued' WHERE state='dispatching'")
+        db.execute("UPDATE code_sessions SET queue_paused=1, queue_reason='Apex restarted. Review the follow-ups before resuming.' "
+                   "WHERE id IN (SELECT session_id FROM code_queue WHERE state='queued')")
         stuck = [r[0] for r in db.execute("SELECT id FROM code_sessions WHERE turn_state != 'idle'")]
         # last_status too: the night shift reads it to tell its Work task the turn ended.
         db.execute("UPDATE code_sessions SET turn_state='idle', last_status='interrupted' WHERE turn_state != 'idle'")
@@ -341,6 +386,36 @@ def add_project(path: str, name: str = '') -> dict:
     return project(pid)
 
 
+def create_project(path: str, name: str = '') -> dict:
+    """Prepare a new, empty Git project for an idea. Never adopt or overwrite a folder."""
+    raw = str(path or '').strip().strip('"')
+    if not raw or not Path(raw).expanduser().is_absolute():
+        raise CodeError('Choose the full path of a new folder on this PC.')
+    folder = Path(raw).expanduser().resolve()
+    if folder.exists():
+        raise CodeError('That folder already exists. Add it as an existing project, or choose a new folder.')
+    if not folder.parent.is_dir():
+        raise CodeError('The parent folder does not exist. Choose a new folder inside an existing one.')
+    if _git(folder.parent, 'rev-parse', '--show-toplevel', check=False).returncode == 0:
+        raise CodeError('Choose a folder outside an existing Git project.')
+    title = str(name or folder.name).strip()[:60] or folder.name
+    try:
+        folder.mkdir()  # a concurrent creation fails; it is never reused
+    except FileExistsError as exc:
+        raise CodeError('That folder was just created. Choose another new folder.') from exc
+    except OSError as exc:
+        raise CodeError(f'Could not create the project folder: {exc}') from exc
+    try:
+        _git(folder, 'init', '-q', '-b', 'main')
+        with (folder / 'README.md').open('x', encoding='utf-8') as readme:
+            readme.write(f'# {title}\n\nCreated in Apex Code.\n')
+        _git(folder, 'add', '--', 'README.md')
+        _git(folder, *_ident(folder), 'commit', '-q', '-m', 'Create project in Apex Code')
+        return add_project(str(folder), title)
+    except Exception as exc:
+        raise CodeError(f'Project preparation stopped in {folder}: {exc}. The folder is kept so you can inspect it.') from exc
+
+
 def update_project(pid: int, name=None, checks=None, exit_ok=None) -> dict:
     """exit_ok: count a test run that exits 0 without printing a count as passed
     (for a runner that never prints one); otherwise that is 'unknown'."""
@@ -375,6 +450,138 @@ def _venv(project_path: str) -> dict:
 
 # ---------------------------------------------------------------- sessions
 
+def _queue_state(sid: int) -> dict:
+    """Persisted intent only; reading a queue never starts a model."""
+    with longterm._conn() as db:
+        row = db.execute('SELECT queue_paused, queue_reason FROM code_sessions WHERE id=?', (sid,)).fetchone()
+        items = db.execute("SELECT id, prompt, options, created FROM code_queue WHERE session_id=? "
+                           "AND state='queued' ORDER BY created, rowid", (sid,)).fetchall()
+    return {'paused': bool(row and row[0]), 'reason': row[1] if row else '',
+            'items': [{'id': r[0], 'prompt': r[1], **json.loads(r[2]), 'created': r[3]} for r in items]}
+
+
+def _pause_queue_locked(sid: int, reason: str) -> None:
+    _set(sid, queue_paused=1, queue_reason=reason)
+    event(sid, 'queue', action='paused', reason=reason)
+
+
+def enqueue(sid: int, prompt: str, engine=None, mode=None, model=None, effort=None,
+            plan: bool = False, request_id=None) -> dict:
+    """Queue an explicit owner message with its chosen settings. Retries use the same id."""
+    s = session(sid)
+    prompt = _clean_prompt(prompt)
+    engine, mode = engine or s['engine'], mode or s['mode']
+    if engine not in ENGINES or mode not in MODES:
+        raise CodeError('Choose a Claude or ChatGPT plan and safe or full mode.')
+    try:
+        opts = code_engines.check_options({'model': s['model'] if model is None else model,
+                                          'effort': s['effort'] if effort is None else effort, 'plan': plan})
+    except ValueError as exc:
+        raise CodeError(str(exc)) from exc
+    opts = {k: opts[k] for k in ('model', 'effort', 'plan')}
+    opts.update(engine=engine, mode=mode)
+    key = request_id or secrets.token_hex(16)
+    if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,80}', key):
+        raise CodeError('Invalid follow-up request id.')
+    with _lock:
+        with longterm._conn() as db:
+            previous = db.execute('SELECT session_id, prompt, options FROM code_queue WHERE id=?', (key,)).fetchone()
+            if previous:
+                if previous[0] != sid or previous[1] != prompt or json.loads(previous[2]) != opts:
+                    raise CodeError('This request id already belongs to another follow-up.')
+                return _queue_state(sid)
+            state = db.execute('SELECT status FROM code_sessions WHERE id=?', (sid,)).fetchone()
+            if not state or state[0] != 'ready':
+                raise CodeError('This session is finished. Start a new one.')
+            count = db.execute("SELECT COUNT(*) FROM code_queue WHERE session_id=? AND state IN ('queued','dispatching')", (sid,)).fetchone()[0]
+            if count >= MAX_QUEUED:
+                raise CodeError(f'At most {MAX_QUEUED} follow-ups can wait. Remove one first.')
+            db.execute('INSERT INTO code_queue (id, session_id, prompt, options, created) VALUES (?,?,?,?,?)',
+                       (key, sid, prompt, json.dumps(opts), time.time()))
+        event(sid, 'queue', action='added', item_id=key)
+        if _busy_locked(sid) and sid not in _turns:
+            _pause_queue_locked(sid, 'Another operation is running. Resume the follow-ups when it finishes.')
+    _kick_queue(sid)
+    return _queue_state(sid)
+
+
+def pause_queue(sid: int) -> dict:
+    session(sid)
+    with _lock:
+        _pause_queue_locked(sid, 'Paused by you. The current step can finish.')
+    return _queue_state(sid)
+
+
+def resume_queue(sid: int) -> dict:
+    s = session(sid)
+    with _lock:
+        if s['status'] != 'ready' or _busy_locked(sid):
+            raise CodeError('Wait for this session to be ready before resuming follow-ups.')
+        _set(sid, queue_paused=0, queue_reason='')
+        event(sid, 'queue', action='resumed')
+    _kick_queue(sid)
+    return _queue_state(sid)
+
+
+def remove_queued(sid: int, item_id: str) -> dict:
+    session(sid)
+    if not isinstance(item_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,80}', item_id):
+        raise CodeError('Invalid follow-up id.')
+    with _lock:
+        with longterm._conn() as db:
+            changed = db.execute("UPDATE code_queue SET state='cancelled' WHERE id=? AND session_id=? AND state='queued'",
+                                 (item_id, sid)).rowcount
+        if not changed:
+            raise CodeError('That follow-up has already started or was removed.')
+        event(sid, 'queue', action='removed', item_id=item_id)
+    return _queue_state(sid)
+
+
+def _kick_queue(sid: int) -> None:
+    with _lock:
+        q = _queue_state(sid)
+        if _busy_locked(sid) or q['paused'] or not q['items']:
+            return
+        threading.Thread(target=_drain_queue, args=(sid,), daemon=True, name=f'ApexCodeQueue-{sid}').start()
+
+
+def _drain_queue(sid: int) -> None:
+    """Claim and dispatch under the same reservation used by every Code mutation."""
+    init_db()
+    with _lock:
+        q = _queue_state(sid)
+        if _busy_locked(sid) or q['paused'] or not q['items']:
+            return
+        with longterm._conn() as db:
+            state = db.execute('SELECT status FROM code_sessions WHERE id=?', (sid,)).fetchone()
+            if not state or state[0] != 'ready':
+                _pause_queue_locked(sid, 'This session is finished. Follow-ups were not run.')
+                return
+            item = q['items'][0]
+            db.execute("UPDATE code_queue SET state='dispatching' WHERE id=?", (item['id'],))
+        _operations[sid] = 'queue'
+        _stopped_preparations.discard(sid)
+    started = False
+    try:
+        # Already reserved; bypass only the decorator, never send's option/turn validation.
+        send.__wrapped__(sid, item['prompt'], **{k: item[k] for k in ('engine', 'mode', 'model', 'effort', 'plan')})
+        started = True
+        with _lock:
+            with longterm._conn() as db:
+                db.execute("UPDATE code_queue SET state='started' WHERE id=?", (item['id'],))
+            event(sid, 'queue', action='started', item_id=item['id'])
+    except Exception as exc:
+        with _lock:
+            with longterm._conn() as db:
+                db.execute("UPDATE code_queue SET state='queued' WHERE id=?", (item['id'],))
+            _pause_queue_locked(sid, f'Follow-up did not start: {str(exc)[:400]}')
+    finally:
+        with _lock:
+            _operations.pop(sid, None)
+            _stopped_preparations.discard(sid)
+        if started:
+            _kick_queue(sid)       # also covers a worker finishing before preparation returned
+
 def session(sid: int) -> dict:
     rows = _rows('SELECT s.*, p.name AS project, p.path AS project_path FROM code_sessions s '
                  'JOIN code_projects p ON p.id = s.project_id WHERE s.id=?', (sid,))
@@ -385,7 +592,9 @@ def session(sid: int) -> dict:
         s['working'] = sid in _turns
         s['side'] = 'review' if s['review_state'] == 'working' else ('checks' if s['check_state'] == 'running' else '')
         s['terminal'] = sid in _terms
+        s['operation'] = _operations.get(sid, '')
     s['engine_name'] = we.NAMES.get(s['engine'], s['engine'])
+    s['queue'] = _queue_state(sid)
     from agent import code_usage
     completions = _rows("SELECT kind, data FROM code_events WHERE session_id=? AND kind IN ('done','review') ORDER BY id", (sid,))
     s['usage'] = code_usage.session_usage([
@@ -531,7 +740,7 @@ def _brain(s: dict, prompt: str) -> dict | None:
     return block
 
 
-def _memory_server(s: dict) -> str:
+def _memory_server(s: dict, *, read_only=False) -> str:
     """Apex's memory server for this session (agent/code_brain.mcp_file), written
     afresh each time: '' when it is turned off (CODE_APEX_MCP=false) or the file
     can't be written. A session never fails for want of it."""
@@ -539,7 +748,7 @@ def _memory_server(s: dict) -> str:
     if not getattr(config, 'CODE_APEX_MCP', True):
         return ''
     try:
-        return str(code_brain.mcp_file(s['id'], s['project_id']))
+        return str(code_brain.mcp_file(s['id'], s['project_id'], read_only=read_only))
     except OSError as exc:
         print(f"[Code] could not set up Apex's memory server for session {s['id']}: {exc}")
         return ''
@@ -588,6 +797,7 @@ def mentions(sid: int, prompt: str) -> list[str]:
     return [f.replace('\\', '/') for f in dict.fromkeys(found) if f.replace('\\', '/') in files]
 
 
+@_exclusive
 def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = None, _notes=(),
          model: str | None = None, effort: str | None = None, plan: bool = False, allow=None, always=None) -> dict:
     """One message: Apex works on it in the background; the feed shows each step.
@@ -610,6 +820,8 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
     if mode not in MODES:
         raise CodeError('Mode is safe or full.')
     with _lock:
+        if sid in _stopped_preparations:
+            raise CodeError('Stopped before the next message started.')
         if sid in _turns:
             raise CodeError('Apex is still working on your last message. Wait, or press Stop.')
         if sid in _side:
@@ -653,6 +865,9 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
         pointed = mentions(sid, prompt)
         if pointed:
             text = f"Files the owner pointed at (read these first): {', '.join(pointed)}\n\n{text}"
+        with _lock:
+            if sid in _stopped_preparations:
+                raise CodeError('Stopped before the next message started.')
         event(sid, 'you', text=prompt, engine=engine, mode=mode, model=model, effort=effort, plan=bool(plan),
               files=pointed, allow=list(allow or []), **({'correction': True} if correction else {}),
               **({'brief': {'chars': block['chars'], 'sources': block['sources']}} if block else {}))
@@ -681,6 +896,7 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
     folder = Path(s['worktree'])
     result = {'status': 'failed', 'summary': 'It did not start.'}
     files = 0
+    saved = False
     asks: dict[str, str] = {}                             # blocked command -> the link your phone answers it with
     try:
         start_sha = _git(folder, 'rev-parse', 'HEAD').strip()
@@ -719,11 +935,23 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
             files = 0
         else:
             files = _checkpoint(sid, start_sha, f'turn on your {we.NAMES[engine]}')
+            saved = True
     except Exception as exc:                              # never leave a session marked working
         result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
     finally:
         took = round(time.time() - started)
-        total = _count_changed(sid)
+        try:
+            total = _count_changed(sid)
+        except Exception as exc:
+            total = s.get('files_changed', 0)
+            saved = False
+            result = {'status': 'failed', 'summary': f'Could not inspect the completed step: {exc}'}
+        with _lock:
+            if result['status'] != 'done' or not saved or (options or {}).get('plan') or asks:
+                reason = ('checkpoint not saved' if not saved else result['status'] if result['status'] != 'done'
+                          else 'blocked command needs attention' if asks else 'plan ready')
+                _pause_queue_locked(sid, 'Review this step before resuming follow-ups: ' + reason)
+        # A queue-state event belongs to this step; its completion remains last.
         event(sid, 'done', status=result['status'], summary=(result.get('summary') or '')[:6000], seconds=took,
               files=files, total=total, engine=engine, tokens=result.get('tokens'),
               usage={**result['usage'], 'activity': 'coding'} if isinstance(result.get('usage'), dict) else None,
@@ -754,6 +982,7 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
             _ask_phone(sid, s['title'], engine, asks, night=s['origin'] == 'night')
         with _lock:                                       # last: "not working" means everything above is done
             _turns.pop(sid, None)
+        _kick_queue(sid)
 
 
 def _notify(sid: int, title: str, status: str, files: int) -> None:
@@ -1056,7 +1285,11 @@ def diff(sid: int, path: str) -> str:
 
 def stop(sid: int) -> bool:
     """Stop whatever is running in the session, even if it is only just starting."""
+    session(sid)
     with _lock:
+        _pause_queue_locked(sid, 'Stopped by you. Follow-ups will wait until you resume them.')
+        if sid in _operations:
+            _stopped_preparations.add(sid)
         ids = [x for x in (_turns.get(sid), _side.get(sid), _terms.get(sid)) if x]
     return any([we.stop(r, before_start=True) for r in ids])
 
@@ -1071,6 +1304,7 @@ def _idle(s: dict) -> None:
             raise CodeError('Your command is still running. Wait, or press Stop.')
 
 
+@_exclusive
 def undo(sid: int) -> dict:
     """Put the session's files back to before its last step."""
     s = session(sid)
@@ -1089,6 +1323,7 @@ def undo(sid: int) -> dict:
     return session(sid)
 
 
+@_exclusive
 def catch_up(sid: int) -> dict:
     """Bring the project's latest work into this session (a merge on its branch)."""
     s = session(sid)
@@ -1119,6 +1354,7 @@ def catch_up(sid: int) -> dict:
     return {**session(sid), 'caught_up': 'merged'}
 
 
+@_exclusive
 def keep(sid: int, push: bool = False, require_proof: bool = False) -> dict:
     """Merge the session into the project, then tidy away its working copy. With
     require_proof, only when Apex's own checks passed on what is there now
@@ -1211,9 +1447,16 @@ def discard(sid: int, reason: str = '') -> dict:
     if stop(sid):
         for _ in range(50):
             with _lock:
-                if sid not in _turns and sid not in _side:
+                if not _busy_locked(sid):
                     break
             time.sleep(0.1)
+    return _discard_idle(sid, reason)
+
+
+@_exclusive
+def _discard_idle(sid: int, reason: str) -> dict:
+    s = session(sid)
+    _idle(s)
     try:                                                  # read before the copy goes: the proof looks at it
         verdict = proof(sid)['verdict']
     except Exception as exc:
@@ -1234,8 +1477,8 @@ def discard(sid: int, reason: str = '') -> dict:
 
 REVIEW = """You are giving a second opinion on a code change another AI made in this git repository, for {owner}.
 Be brutally honest: {owner} wants the truth, not flattery. Look for bugs, things that don't do what was asked,
-missing or weak tests, security problems and needless complexity. Read any file you need, and run the project's
-tests or checks if that helps you judge it. Do not change any file.
+missing or weak tests, security problems and needless complexity. Read any file you need.
+Apex runs tests separately: this review has no shell or editing tools. Do not change any file.
 
 What {owner} asked for:
 {asks}
@@ -1278,6 +1521,7 @@ def _review_rules(s: dict, owner: str) -> str:
     return out
 
 
+@_exclusive
 def review(sid: int, engine: str | None = None) -> dict:
     """The other plan reviews the session's change, read-only, and rates it."""
     import config
@@ -1315,7 +1559,7 @@ def review(sid: int, engine: str | None = None) -> dict:
                     event(sid, 'review_step', title=e.get('title') or f"Read {e.get('path')}")
             result = code_engines.turn(engine, prompt, Path(folder), 'review', None, on_event, run_id,
                                        timeout=1200, env_extra=_venv(s['project_path']),
-                                       options={'always': _project_allow(s), 'mcp_file': _memory_server(s)})
+                                       options={'mcp_file': _memory_server(s, read_only=True)})
         except Exception as exc:
             result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
         finally:
@@ -1350,6 +1594,7 @@ def _argv(command: str, env: dict) -> list[str]:
     return [found or argv[0]] + argv[1:]
 
 
+@_exclusive
 def run_checks(sid: int) -> dict:
     """The project's test command, in the session's copy. The answer has three
     states, never two (agent/observed.py's rule): passed, failed, or unknown when
@@ -2036,6 +2281,7 @@ def read_file(path: str, sid: int | None = None, pid: int | None = None) -> dict
 TERMINAL_TIMEOUT = 900
 
 
+@_exclusive
 def terminal(sid: int, command: str) -> dict:
     """Run your own command in the session's copy, like a terminal there. Output
     streams into the feed. One at a time per session."""
@@ -2152,7 +2398,7 @@ def autopilot(sid: int) -> str:
             run_checks(sid)
         except CodeError as exc:
             with _lock:
-                if sid in _turns or sid in _side:         # something else started a moment ago
+                if _busy_locked(sid):                    # something else started a moment ago
                     return ''
             why = f"The night shift couldn't start the checks: {exc}"
             event(sid, 'checks', passed=False, state='unknown', why=why, sha='', seconds=0, output='', command=command)
@@ -2172,7 +2418,7 @@ def autopilot(sid: int) -> str:
             return 'review'
         except CodeError as exc:
             with _lock:
-                if sid in _turns or sid in _side:
+                if _busy_locked(sid):
                     return ''
             why = str(exc)
     note = ('No independent review: the other plan is resting.' if 'resting' in why or 'limit' in why

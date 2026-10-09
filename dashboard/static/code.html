@@ -5,11 +5,11 @@
   <title>Apex · Code</title>
   <link rel="icon" href="/static/icons/apex-refined.svg">
   <link rel="stylesheet" href="/static/brand.css?v=brand40">
-  <link rel="stylesheet" href="/static/code.css?v=code-11">
+  <link rel="stylesheet" href="/static/code.css?v=code-12">
   <script src="/static/code_usage.js?v=code-11" defer></script>
   <script src="/static/speech_queue.js?v=code-10" defer></script>
   <script src="/static/code_narration.js?v=code-10" defer></script>
-  <script src="/static/code.js?v=code-11" defer></script>
+  <script src="/static/code.js?v=code-12" defer></script>
   <link rel="stylesheet" href="/static/theme.css">
 </head>
 <body class="view-home term">
@@ -81,7 +81,13 @@
           <div class="ca" id="celine-a"></div>
           <p class="fine">She reads what Apex saw of this session. She can't keep, allow or send: you do.</p>
         </aside>
+        <nav class="code-path" id="code-path" aria-label="Build, inspect, verify and keep" hidden></nav>
         <div class="feed" id="feed" aria-live="polite"></div>
+        <section class="follow-ups" id="follow-ups" aria-labelledby="queue-title" hidden>
+          <div class="queue-head"><b id="queue-title">Next steps</b><span class="grow"></span><button type="button" class="small" id="queue-toggle">Pause</button></div>
+          <p class="fine" id="queue-state" role="status"></p>
+          <ol id="queue-items"></ol>
+        </section>
         <div id="session-slot"></div>
       </section>
 
@@ -110,6 +116,7 @@
             <button type="button" class="mic" id="mic" aria-label="Talk instead of typing" title="Talk instead of typing">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
             </button>
+            <button type="button" class="send stop" id="stop-run" hidden>Stop</button>
             <button type="submit" class="primary send" id="send">Build it <kbd>Ctrl ⏎</kbd></button>
             <button type="button" class="stop" id="stop-run" hidden>■ Stop</button>
           </div>
@@ -300,8 +307,10 @@
     <h2 id="add-title">Add a project folder</h2>
     <label class="field">Folder on this PC <input id="add-path" placeholder="C:\Users\you\projects\my-app" spellcheck="false" required></label>
     <label class="field">Name (optional) <input id="add-name" maxlength="60"></label>
-    <p class="fine">It must be a git project with at least one commit. Sessions work on their own branch of it.</p>
-    <div class="row end"><button value="cancel">Cancel</button><button value="ok" class="primary">Add</button></div>
+    <label class="new-project-choice"><input type="checkbox" id="add-create"> Create a new project for my idea</label>
+    <p class="fine" id="add-help">For an existing project, choose its Git folder. For a new idea, choose a folder that does not exist yet, inside an existing folder. Apex prepares Git and the first checkpoint.</p>
+    <p class="fine danger" id="add-error" role="alert" hidden></p>
+    <div class="row end"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary" id="add-submit">Add project</button></div>
   </form>
 </dialog>
 

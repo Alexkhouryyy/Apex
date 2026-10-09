@@ -94,6 +94,7 @@ jobs:
           node scripts/check_work_ui.cjs
           node --check dashboard/static/work.js
           node scripts/check_code_ui.cjs
+          node scripts/check_code_flow.cjs
           node --check dashboard/static/code.js
           node scripts/check_code_usage_ui.cjs
           node --check dashboard/static/code_usage.js
