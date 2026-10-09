@@ -21,6 +21,7 @@ from agent import resilience
 from agent import skills as skills_mod
 from agent import budget as _budget
 from agent import provider
+from agent import incident_replay
 from tools import computer, bash, research, files, browser, repl, vision, phone, image_gen, telegram, discord, slack, whatsapp, signal
 
 SYSTEM_PROMPT = """You are an advanced AI agent with voice interface, computer vision, computer control, \
@@ -2351,6 +2352,7 @@ def _code_act(inputs: dict) -> str:
         return f"[Code] {exc}"
 
 
+@incident_replay.boundary("apex.execute_tool", kind="tool")
 def _execute_tool(name: str, inputs: dict) -> str:
     """Dispatch a tool call, capturing its outcome for trajectory learning.
 
@@ -3844,6 +3846,7 @@ class AgentCore:
         on the same channel are serialized by a per-channel threading.Lock.
         Pass channel_id=None (default) for the main voice/text conversation.
         """
+        incident_replay.require_live_turn()
         from agent import companion
         if withhold is None:
             withhold = companion.CODE_TOOLS
@@ -3852,7 +3855,7 @@ class AgentCore:
         screen_b64 = companion.validate_screen_image(screen_image)
         memory, lock = self._get_channel(channel_id)
         from agent import continuity
-        with lock, continuity.turn(channel_id), _staging_memories(stage_memories), \
+        with lock, incident_replay.record_turn(channel_id), continuity.turn(channel_id), _staging_memories(stage_memories), \
                 continuity.conversation(channel_id, self, memory, user_text) as memory:
             if cancel_event is not None and cancel_event.is_set():
                 return "[turn interrupted]"

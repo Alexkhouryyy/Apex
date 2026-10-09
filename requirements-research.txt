@@ -1,0 +1,2 @@
+# Optional research integrations; no LangGraph, GPU or judge extras required.
+agent-chronicle==0.5.0
