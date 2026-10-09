@@ -233,3 +233,16 @@ def test_a_normal_load_is_untouched(monkeypatch):
     calls = []
     assert fast.load_model(lambda: calls.append(utils.caching_allocator_warmup()) or 'model') == 'model'
     assert calls == ['reserved one big block'] and utils.caching_allocator_warmup is warmup
+
+
+def test_a_full_page_file_says_how_to_fix_it(monkeypatch):
+    import pytest
+    _fake_transformers(monkeypatch)
+
+    def load():
+        raise OSError('The paging file is too small for this operation to complete. (os error 1455)')
+
+    with pytest.raises(RuntimeError, match='sysdm.cpl'):
+        fast.load_model(load)
+    with pytest.raises(FileNotFoundError):                    # any other OS error is left as it is
+        fast.load_model(lambda: (_ for _ in ()).throw(FileNotFoundError('model.safetensors')))

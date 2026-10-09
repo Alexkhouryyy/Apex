@@ -17,6 +17,21 @@ except ImportError:                              # imported from the repo root
     from scripts import voice_library
 
 
+PAGE_FILE_HELP = (
+    "Windows ran out of virtual memory (RAM plus the page file) loading Celine's voice "
+    "(Windows error 1455: the paging file is too small). Fix it once: press Win+R, type "
+    "sysdm.cpl, then Advanced > Performance Settings > Advanced > Virtual memory > Change. "
+    "Tick 'Automatically manage paging file size for all drives' (or set C: to a custom size "
+    "of 16384 to 32768 MB), press Set and OK, and restart the PC. Closing big programs "
+    "(games, many browser tabs) helps until then.")
+
+
+def _page_file(exc: OSError) -> None:
+    """Windows error 1455 in plain words, instead of a traceback."""
+    if getattr(exc, 'winerror', None) == 1455 or '1455' in str(exc) or 'paging file' in str(exc).lower():
+        raise RuntimeError(PAGE_FILE_HELP) from exc
+
+
 def load_model(load):
     """Load the voice model with `load()`, surviving one Windows quirk.
 
@@ -32,6 +47,9 @@ def load_model(load):
         return load()
     except torch.OutOfMemoryError:
         pass
+    except OSError as exc:
+        _page_file(exc)
+        raise
     print('The GPU refused one big block of memory; loading again piece by piece...', flush=True)
     torch.cuda.empty_cache()
     from transformers import modeling_utils
@@ -39,6 +57,9 @@ def load_model(load):
     modeling_utils.caching_allocator_warmup = lambda *args, **kwargs: None
     try:
         return load()
+    except OSError as exc:
+        _page_file(exc)
+        raise
     except torch.OutOfMemoryError as exc:
         raise RuntimeError('Not enough GPU memory for Celine\'s voice (about 4 GB). Close other programs '
                            'using the GPU (nvidia-smi lists them: games, other Apex windows, video '

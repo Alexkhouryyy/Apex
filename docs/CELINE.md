@@ -166,3 +166,21 @@ confusion this feature exists to prevent.
   in the page are labelled CELINE when the CELINE profile is chosen. With
   "Apex default voice" the label still reads APEX, even though the server
   answers as Celine when the launcher set her as the default.
+
+## If her voice stops at startup
+
+- **"The paging file is too small" (Windows error 1455).** Windows ran out of
+  virtual memory (RAM plus the page file) while loading the 3.6 GB voice
+  model.
+  - Fix it once:
+    1. Press Win+R, type `sysdm.cpl` and press Enter.
+    2. Go to Advanced > Performance Settings > Advanced > Virtual memory >
+       Change.
+    3. Tick *Automatically manage paging file size for all drives*, or set
+       C: to a custom size of 16384–32768 MB.
+    4. Press Set, then OK, and restart the PC.
+  - Until then, closing big programs helps.
+  - C: needs that much free space.
+- **"CUDA out of memory" with plenty free.** Windows refused one big block of
+  GPU memory. The voice server then loads again piece by piece on its own. If
+  it still fails, close the other programs that `nvidia-smi` lists.
