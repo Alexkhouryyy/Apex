@@ -15,12 +15,17 @@ from agent.incident_replay import boundary
 
 
 def plain(value):
+    """SDK objects as plain dicts, serialized the way the SDK sends them back
+    (anthropic._utils._transform): only fields the API actually set. A full
+    model_dump() adds fields like "caller": null to every tool_use block,
+    which the API never sent and may reject on the next request."""
     if isinstance(value, dict):
         return {k: plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [plain(v) for v in value]
     if hasattr(value, "model_dump"):
-        return plain(value.model_dump())
+        return plain(value.model_dump(exclude_unset=True, mode="json", by_alias=True,
+                                      exclude=getattr(value, "__api_exclude__", None)))
     return value
 
 
