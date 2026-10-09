@@ -1,0 +1,6 @@
+Engram — Copyright (c) 2026 Rishabh Sharma, MIT.
+Source: https://github.com/ris3abh/Engram
+Revision: 2080752aaabb38b56a28f2e68429cfde18b6739d
+embed.py: HashEmbedder and top_k from src/engram/embed.py, verbatim.
+Imports reduced to their dependencies. HashEmbedder is for offline development only.
+No benchmark data, mem0 prompts, or model weights are included.
