@@ -1643,6 +1643,7 @@ async def council_endpoint(request: Request):
         "members": result.members,
         "final_answer": result.final_answer,
         "transcript": result.transcript,
+        "readout_trace": result.readout_trace,
         "confidence": result.confidence,
         "confidence_note": result.confidence_note,
         "disagreement": result.disagreement,

@@ -26,6 +26,8 @@ Outside projects (1,000+ stars) reviewed for three named gaps, each with a verdi
 **[docs/OPEN_SOURCE_REGISTER.md](docs/OPEN_SOURCE_REGISTER.md)**.
 Optional Chronicle incident recording and safe boundary replay:
 **[docs/research/chronicle-integration.md](docs/research/chronicle-integration.md)**.
+Council proposal/recovery/damage metrics from When Debate Helps:
+**[docs/research/council-readout-integration.md](docs/research/council-readout-integration.md)**.
 Word, PowerPoint, Excel and PDF files as sources, and how to check them on your own files:
 **[docs/DOCUMENTS.md](docs/DOCUMENTS.md)**.
 Two real tasks, checked by rules, with what they cost, so you can compare models:

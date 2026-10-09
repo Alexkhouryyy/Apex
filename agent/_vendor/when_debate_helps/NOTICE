@@ -1,0 +1,12 @@
+When Debate Helps: Proposal Supply and Verification-Aware Readout
+Source: https://github.com/Wang-ML-Lab/when-debate-helps
+Revision: 899b2834acd13f7b3298eb88233d39ab419d7a15
+Authors: Zihao Zhao, Tunyu Zhang, Haizhou Shi, Yusong Zhao, Xinxi Zhang, Hao Wang.
+
+metrics.py is an unmodified copy of src/when_debate_helps/metrics.py at that
+revision. Its Apache License 2.0 is included in LICENSE. Apex's package
+initializers and adapters are separate additions. No model weights, datasets,
+GPU runtime, or generation pipeline are included.
+
+The upstream metric tests are included in tests/test_wdh_upstream_metrics.py
+with only their import changed to Apex's vendored module.
