@@ -221,3 +221,20 @@ class TestParseCompressionResponse:
         summary, facts = _parse_compression_response(text)
         # Empty summary → fallback to raw text
         assert summary == text
+
+
+def test_saved_replies_go_back_to_the_api_as_the_sdk_would_send_them():
+    """History must not gain fields the API never sent (a full model_dump adds
+    "caller": null to tool_use and "citations": null to text)."""
+    from anthropic.types import Message
+    from agent.memory import Memory as ConversationMemory
+    reply = Message.model_validate({
+        'id': 'msg_1', 'type': 'message', 'role': 'assistant', 'model': 'm', 'stop_reason': 'tool_use',
+        'stop_sequence': None, 'usage': {'input_tokens': 1, 'output_tokens': 1},
+        'content': [{'type': 'text', 'text': 'Checking.'},
+                    {'type': 'tool_use', 'id': 'toolu_1', 'name': 'bash', 'input': {'cmd': 'ls'}}]})
+    mem = ConversationMemory()
+    mem.add_assistant(reply.content)
+    assert mem.get_messages()[-1]['content'] == [
+        {'type': 'text', 'text': 'Checking.'},
+        {'type': 'tool_use', 'id': 'toolu_1', 'name': 'bash', 'input': {'cmd': 'ls'}}]
