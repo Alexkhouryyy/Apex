@@ -47,9 +47,35 @@
   let project = Number(store.get('apex.code.project')) || null;
   let engine = store.get('apex.code.engine'), mode = store.get('apex.code.mode', 'safe');
   let model = '', effort = '', planFirst = false, files = null, filesFor = null, live = null, liveSeen = -1, initial = true;
+  let draftContext = null, submitting = false;
+  const draftKey = () => current ? `s:${current}` : `p:${project || 'new'}`;
+  function composerDrafts() { try { const bag = JSON.parse(store.get('apex.code.composer-drafts', '{}'));
+    return bag && typeof bag === 'object' && !Array.isArray(bag) ? Object.fromEntries(Object.entries(bag).filter(([, v]) => v && typeof v.text === 'string' && Number.isFinite(v.updated))) : {};
+  } catch (_) { return {}; } }
+  function saveDraft() {
+    if (!draftContext) return;
+    const bag = composerDrafts(), text = $('prompt').value;
+    bag[draftContext] = {...bag[draftContext], text, updated: Date.now()};
+    const kept = Object.fromEntries(Object.entries(bag).filter(([, v]) => Date.now() - v.updated < 30 * 86400000)
+      .sort((a, b) => b[1].updated - a[1].updated).slice(0, 20));
+    store.set('apex.code.composer-drafts', JSON.stringify(kept));
+  }
+  function restoreDraft() { draftContext = draftKey(); $('prompt').value = composerDrafts()[draftContext]?.text || ''; autosize(); }
+  function clearSentDraft(key, text) {
+    const bag = composerDrafts();
+    if (bag[key]?.text?.trim() === text) { delete bag[key]; store.set('apex.code.composer-drafts', JSON.stringify(bag)); }
+    if (draftContext === key && $('prompt').value.trim() === text) { $('prompt').value = ''; autosize(); }
+  }
+  function queueRequestId(key, signature) {
+    saveDraft(); const bag = composerDrafts(), d = bag[key] || {};
+    if (d.signature !== signature || !d.request_id) d.request_id = window.crypto?.randomUUID?.() || `next-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    bag[key] = {...d, signature, updated: Date.now()}; store.set('apex.code.composer-drafts', JSON.stringify(bag)); return d.request_id;
+  }
+  window.addEventListener('pagehide', saveDraft);
   const MODELS = {claude: [['', 'Model: default'], ['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']],
     chatgpt: [['', 'Model: default'], ['__other', 'Type a model…']]};
-  const busy = () => !!(detail && (detail.working || detail.side || detail.terminal || detail.operation));
+  const busy = () => !!(detail && (detail.working || detail.side || detail.terminal || detail.operation ||
+    (detail.queue?.items?.length && !detail.queue.paused)));
 
   // ---------------------------------------------------------------- small pieces
   function ago(ts) {
@@ -132,11 +158,11 @@
     return h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   }
   const STARTS = [
-    ['⚑', 'Fix a bug', 'Fix this bug in Apex: '],
-    ['✦', 'Add a feature', 'Add this to Apex: '],
-    ['◎', 'Explain', 'Explain how this part of Apex works. Change nothing, just explain: '],
+    ['✦', 'Build from an idea', 'Build this idea in the selected project. First check what already exists: '],
+    ['⚑', 'Fix a bug', 'Fix this bug in the selected project: '],
+    ['◎', 'Explain', 'Explain how this part of the selected project works. Change nothing, just explain: '],
     ['✓', 'Write tests', 'Write tests for '],
-    ['◈', 'Make it look better', 'Make this page cleaner and more futuristic, without breaking anything: '],
+    ['◈', 'Improve a feature', 'Improve this existing feature. Preserve working behavior and verify the change: '],
     ['⚖', 'Brutal review', 'Review the last commit honestly. Rate it out of 10, list what is wrong with file:line, and change nothing.'],
   ];
   function renderHome() {
@@ -204,7 +230,7 @@
       list.append(row);
     }
   }
-  $('project').onchange = e => { project = Number(e.target.value); store.set('apex.code.project', project); renderHome(); renderRail(); renderEngine(); loadBrain(); };
+  $('project').onchange = e => { if (!current) saveDraft(); project = Number(e.target.value); store.set('apex.code.project', project); if (!current) restoreDraft(); renderHome(); renderRail(); renderEngine(); loadBrain(); };
 
   // ---------------------------------------------------------------- what tends to happen here (agent/code_brain.track_record)
   // Counted from this project's sessions every time, never stored: a line shows only with
@@ -253,13 +279,15 @@
     else if (mode === 'full') { text = 'Full: Apex may run any command, inside this session\'s own copy of the project.'; warn = true; }
     else if (planLine()) text += ` ${capital(planLine().text)}.`;
     hint.textContent = text; hint.className = 'hint' + (warn ? ' warn' : '');
-    const send = $('send'); send.classList.toggle('stop', busy());
-    send.replaceChildren(busy() ? '■ Stop' : planFirst ? 'Plan it' : current ? 'Send' : 'Build it', ...(busy() ? [] : [el('kbd', '', 'Ctrl ⏎')]));
-    send.classList.toggle('primary', !busy());
+    const queued = current && (busy() || detail?.queue?.items?.length);
+    const send = $('send'); send.classList.remove('stop'); send.classList.add('primary');
+    send.replaceChildren(queued ? 'Queue next' : planFirst ? 'Plan it' : current ? 'Send' : 'Build it', el('kbd', '', 'Ctrl ⏎'));
+    $('stop-run').hidden = !busy();
     const finished = detail && detail.status !== 'ready';
-    $('prompt').disabled = !!finished; send.disabled = !!finished;
+    $('prompt').disabled = !!finished; send.disabled = !!finished || submitting;
     $('prompt').placeholder = finished ? `This session is ${detail.status === 'kept' ? 'kept' : 'thrown away'}. Start a new one.`
-      : current ? 'Ask for a change, a fix, or "explain…"' : 'Tell Apex what to build, fix or explain…';
+      : queued ? 'Add the next step. It will wait for the current step to finish.' : current ? 'Ask for a change, a fix, or "explain…"' : 'Tell Apex what to build, fix or explain…';
+    renderQueue();
   }
   for (const b of document.querySelectorAll('[data-engine]')) b.onclick = () => { engine = b.dataset.engine; store.set('apex.code.engine', engine); renderEngine(); };
   for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => { mode = b.dataset.mode; store.set('apex.code.mode', mode); renderEngine(); };
@@ -271,38 +299,90 @@
   $('effort').onchange = () => { effort = $('effort').value; };
   $('plan-toggle').onclick = () => { planFirst = !planFirst; renderEngine(); };
   function autosize() { const p = $('prompt'); p.style.height = 'auto'; p.style.height = Math.min(p.scrollHeight + 2, innerHeight * 0.4) + 'px'; }
-  $('prompt').addEventListener('input', autosize);
+  $('prompt').addEventListener('input', () => { autosize(); saveDraft(); });
   $('prompt').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); $('brief-form').requestSubmit(); } });
 
   $('brief-form').onsubmit = async e => {
     e.preventDefault();
-    if (busy()) return stop();
+    if (submitting) return;
     const text = $('prompt').value.trim();
     if (!text) { $('prompt').focus(); return; }
     hideSuggest();
-    if (text.startsWith('/')) { $('prompt').value = ''; autosize(); return slash(text); }
+    if (text.startsWith('/')) { saveDraft(); clearSentDraft(draftContext, text); return slash(text); }
     if (text.startsWith('!')) {
       if (!current) { say('Start a session first: terminal commands run in its own copy.', 'error'); return; }
-      $('prompt').value = ''; autosize(); return runTerminal(text.slice(1).trim());
+      saveDraft(); const key = draftContext;
+      if (await runTerminal(text.slice(1).trim())) clearSentDraft(key, text);
+      return;
     }
-    $('send').disabled = true;
+    saveDraft(); submitting = true; renderEngine();
+    const sid = current, key = draftContext, pid = project;
     const opts = {engine, mode, model, effort, plan: planFirst};
     try {
-      if (!current) {
-        if (!project) throw new Error('Add a project first.');
-        const s = await post('/api/code/sessions', {project_id: project, prompt: text, ...opts});
-        $('prompt').value = ''; autosize(); planFirst = false;
-        await open(s.id);
+      if (!sid) {
+        if (!pid) throw new Error('Add a project first.');
+        const s = await post('/api/code/sessions', {project_id: pid, prompt: text, ...opts});
+        clearSentDraft(key, text);
+        if (draftContext === key) { planFirst = false; await open(s.id); }
       } else {
-        detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, ...opts});
-        $('prompt').value = ''; autosize(); planFirst = false; renderEngine(); schedule(300);
+        const queue = busy() || detail?.queue?.items?.length;
+        const r = await post(`/api/code/sessions/${sid}/${queue ? 'queue' : 'messages'}`, {prompt: text, ...opts,
+          ...(queue ? {request_id: queueRequestId(key, JSON.stringify([text, opts]))} : {})});
+        clearSentDraft(key, text);
+        if (current === sid) { if (queue) detail.queue = r; else detail = r; planFirst = false; renderEngine(); schedule(300); }
+        if (queue) say('Follow-up saved. It will run in order unless the queue pauses.', 'good');
       }
     } catch (err) { say(err.message, 'error'); }
-    $('send').disabled = false; renderEngine();
+    submitting = false; renderEngine();
   };
+  $('stop-run').onclick = stop;
   async function stop() {
     if (!current) return;
-    try { await post(`/api/code/sessions/${current}/stop`); say('Stopping…'); schedule(300); } catch (err) { say(err.message, 'error'); }
+    try { await post(`/api/code/sessions/${current}/stop`); say('Stopping. Follow-ups are paused.'); schedule(300); } catch (err) { say(err.message, 'error'); }
+  }
+  function renderQueue() {
+    const q = detail?.queue || {items: [], paused: false}, box = $('follow-ups');
+    box.hidden = !current || !q.items.length;
+    if (box.hidden) return;
+    $('queue-title').textContent = `Next steps · ${q.items.length}`;
+    $('queue-state').textContent = q.paused ? q.reason || 'Paused. Resume when you are ready.'
+      : 'Runs in order after each successful step. Stop pauses all waiting steps.';
+    $('queue-toggle').textContent = q.paused ? 'Resume' : 'Pause';
+    $('queue-toggle').disabled = q.paused && (busy() || detail.status !== 'ready');
+    $('queue-items').replaceChildren(...q.items.map(item => {
+      const li = el('li'), body = el('div', 'grow');
+      body.append(el('p', '', item.prompt), el('span', 'fine', `${NAME[item.engine]} · ${item.mode}${item.plan ? ' · plan first' : ''}`));
+      li.append(body, button('Remove', () => queueAction('queue-remove', {id: item.id}), 'small')); return li;
+    }));
+  }
+  async function queueAction(action, body = {}) {
+    const sid = current;
+    try { const q = await post(`/api/code/sessions/${sid}/${action}`, body);
+      if (current === sid && detail) { detail.queue = q; renderEngine(); schedule(200); }
+    } catch (err) { say(err.message, 'error'); }
+  }
+  $('queue-toggle').onclick = () => queueAction(detail?.queue?.paused ? 'queue-resume' : 'queue-pause');
+  function renderPath() {
+    const root = $('code-path'); root.hidden = !detail; if (!detail) return;
+    const s = detail, waiting = s.queue?.items?.length && !s.queue.paused, working = busy(), finished = s.status !== 'ready';
+    const proved = proof?.verdict === 'proved', changed = !!s.changes?.files?.length;
+    const active = finished ? 3 : working || waiting || !changed ? 0 : proved ? 3 : 2;
+    root.replaceChildren(...['Build', 'Inspect', 'Verify', 'Keep'].map((name, i) => {
+      const b = button(`${i + 1} ${name}`, () => {
+        if (i === 0) $('prompt').focus();
+        else if (i === 1) tab('changes');
+        else if (i === 2) { tab('changes'); $('box-checks').scrollIntoView({block: 'nearest'}); $('k-go').focus(); }
+        else keepIt(false);
+      }, i === active ? 'current' : '');
+      if (i === active) b.setAttribute('aria-current', 'step');
+      b.disabled = i === 3 && (working || finished || !!waiting || !changed);
+      return b;
+    }));
+    const note = finished ? (s.status === 'kept' ? 'Kept in your project.' : 'Session thrown away.')
+      : working ? 'Building. You can queue the next thought below.' : waiting ? 'Finish or pause the next steps before reviewing.'
+      : !changed ? 'Describe what you want to build or improve.' : proved ? 'Checks proved this change. Inspect it, then Keep.'
+      : 'Inspect the changes, then run the project checks. Keep asks before accepting unverified work.';
+    root.append(el('p', 'fine', note));
   }
 
   // Talk instead of typing: recorded here, transcribed by Apex on this PC (no API credits).
@@ -353,14 +433,17 @@
     (view === 'home' ? $('home-slot') : $('session-slot')).append($('brief-form'));
   }
   async function open(id) {
+    saveDraft();
     // The old session's stream, typing and voice end here, before anything is awaited:
     // its next step must never land in this feed (or move lastId), nor be said out loud.
     disconnect(); celineStop(); initial = true; liveSeen = -1; live = null;
     current = id; detail = null; lastId = 0; feed = {turn: null, root: $('feed'), yous: 0}; proof = null; proofDue = true; $('celine-card').hidden = true;
     $('feed').replaceChildren(); show('session');
+    restoreDraft();
     if (location.hash !== `#s=${id}`) history.replaceState(null, '', `#s=${id}`);
     try {
       await Promise.all([refreshDetail(), loadOverview()]);  // fresh plan status: one may have hit its limit since
+      if (current !== id) return;
       engine = detail.engine; mode = detail.mode; model = detail.model || ''; effort = detail.effort || ''; planFirst = false;
       files = null; live = null; liveSeen = -1; initial = true;
       const mine = ov && ov.plans.find(p => p.id === engine), other = ov && ov.plans.find(p => p.id === OTHER[engine]);
@@ -368,7 +451,8 @@
       renderEngine(); await pull();
       if (!document.querySelector('[data-pane=rules]').hidden) renderRules();
     }
-    catch (err) { say(err.message, 'error'); home(); return; }
+    catch (err) { if (current === id) { say(err.message, 'error'); home(); } return; }
+    if (current !== id) return;
     if (ov) renderRail();
     $('feed').scrollTop = $('feed').scrollHeight;
     initial = false;
@@ -376,9 +460,11 @@
     schedule(400);
   }
   function home() {
+    saveDraft();
     current = null; detail = null; files = null; proof = null; show('home'); disconnect(); celineStop(); $('celine-card').hidden = true;
     history.replaceState(null, '', location.pathname);
     engine = store.get('apex.code.engine') || (ov && ov.default_engine) || 'claude'; mode = store.get('apex.code.mode', 'safe');
+    restoreDraft();
     if (ov) { renderHome(); renderRail(); } renderEngine(); loadBrain();
     if (night && night.length) loadOvernight(false);       // the morning's strip stays, kept up to date
   }
@@ -1039,7 +1125,7 @@
     } catch (err) { console.warn('[Code] update failed, retrying:', err); }   // offline for a moment, or a bug: never silent
     schedule(document.hidden ? 10000 : stream.on ? 5000 : busy() ? 1000 : 4000);
   }
-  const REFRESH = new Set(['done', 'checkpoint', 'review', 'checks', 'kept', 'discarded', 'conflict', 'undo', 'file', 'review_started', 'checks_started', 'you', 'term_done', 'pushed', 'owner_evidence']);
+  const REFRESH = new Set(['queue', 'done', 'checkpoint', 'review', 'checks', 'kept', 'discarded', 'conflict', 'undo', 'file', 'review_started', 'checks_started', 'you', 'term_done', 'pushed', 'owner_evidence']);
   // The proof costs Apex some git work too: read again only after what can change it, not every edit.
   let waitingDue = false;
   const PROOF_AFTER = new Set(['done', 'checkpoint', 'review', 'checks', 'kept', 'discarded', 'undo', 'term_done', 'owner_evidence']);
@@ -1082,6 +1168,7 @@
 
   // ---------------------------------------------------------------- the side panel
   function renderDetail() {
+    renderQueue(); renderPath();
     const s = detail;
     $('s-title').textContent = s.title;
     const meta = $('s-meta'); meta.replaceChildren();
@@ -1238,7 +1325,12 @@
   async function review() { try { detail = await post(`/api/code/sessions/${current}/review`, {}); renderDetail(); renderEngine(); schedule(200); } catch (err) { say(err.message, 'error'); } }
   const runChecks = () => act('checks');
   async function sendText(text) {
-    try { detail = await post(`/api/code/sessions/${current}/messages`, {prompt: text, engine, mode, model, effort, plan: false}); renderEngine(); schedule(200); return true; }
+    // An explicit action (Build it / Allow / Fix) can happen before a paused queue.
+    // It leaves those follow-ups paused for the owner to review and resume.
+    const sid = current, queue = busy();
+    try { const r = await post(`/api/code/sessions/${sid}/${queue ? 'queue' : 'messages'}`, {prompt: text, engine, mode, model, effort, plan: false,
+      ...(queue ? {request_id: window.crypto?.randomUUID?.() || `next-${Date.now()}-${Math.random().toString(36).slice(2)}`} : {})});
+      if (current === sid) { if (queue) detail.queue = r; else detail = r; renderEngine(); schedule(200); } return true; }
     catch (err) { say(err.message, 'error'); return false; }
   }
   // Keep reads the proof first. Proved: the usual question, with what proves it. Otherwise
@@ -1555,8 +1647,9 @@
   });
   async function runTerminal(command) {
     if (!command) return;
-    try { await post(`/api/code/sessions/${current}/terminal`, {command}); termHistory.unshift(command); termAt = -1; schedule(200); }
-    catch (err) { say(err.message, 'error'); }
+    const sid = current;
+    try { await post(`/api/code/sessions/${sid}/terminal`, {command}); termHistory.unshift(command); termAt = -1; if (current === sid) schedule(200); return true; }
+    catch (err) { say(err.message, 'error'); return false; }
   }
   const termHistory = []; let termAt = -1;
   function termLog(e) {
@@ -1986,13 +2079,17 @@
   $('celine-btn').onclick = () => askCeline();
   $('celine-quiet').onclick = celineStop;
   $('celine-close').onclick = () => { celineStop(); $('celine-card').hidden = true; };
-  $('add-project').onclick = () => { $('add-form').reset(); $('add-dialog').returnValue = ''; $('add-dialog').showModal(); };
+  $('add-project').onclick = () => { $('add-form').reset(); $('add-error').hidden = true; $('add-submit').textContent = 'Add project'; $('add-dialog').returnValue = ''; $('add-dialog').showModal(); };
+  $('add-create').onchange = () => { $('add-submit').textContent = $('add-create').checked ? 'Create project' : 'Add project'; };
   $('add-dialog').addEventListener('close', async () => {
     if ($('add-dialog').returnValue !== 'ok') return;
     try {
-      const p = await post('/api/code/projects', {path: $('add-path').value, name: $('add-name').value});
-      project = p.id; store.set('apex.code.project', project); await loadOverview(); loadBrain(); say(`Added ${p.name}.`, 'good');
-    } catch (err) { say(err.message, 'error'); }
+      const p = await post('/api/code/projects', {path: $('add-path').value, name: $('add-name').value, ...($('add-create').checked ? {create: true} : {})});
+      const idea = $('add-create').checked && !current ? $('prompt').value : '';
+      saveDraft(); project = p.id; store.set('apex.code.project', project);
+      if (!current) { restoreDraft(); if (idea && !$('prompt').value) { $('prompt').value = idea; autosize(); saveDraft(); } }
+      await loadOverview(); loadBrain(); say(`Added ${p.name}.`, 'good');
+    } catch (err) { $('add-error').textContent = err.message; $('add-error').hidden = false; if (!$('add-dialog').open) $('add-dialog').showModal(); }
   });
   $('token-save').onclick = () => { store.set('apex_token', $('token').value.trim()); boot(); };
   function closeDrawers() { $('rail').classList.remove('open'); $('side').classList.remove('open'); $('scrim').hidden = true; }

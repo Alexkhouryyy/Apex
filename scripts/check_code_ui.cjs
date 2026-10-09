@@ -594,7 +594,7 @@ async function phone() {
   assert.ok([...$('brain-body').querySelectorAll('.bl.k-memory .tag')].some(t => t.textContent === '#40'), 'it is in the brief now');
   $('brain-dialog').close(); brainSources = BRAIN.slice(); forgotten = []; unvouched = [];
   [...d.querySelectorAll('.chip')].find(b => b.textContent.includes('Fix a bug')).click();
-  assert.equal($('prompt').value, 'Fix this bug in Apex: ');
+  assert.equal($('prompt').value, 'Fix this bug in the selected project: ');
   // @ files and / commands as you type.
   type('Look at @wor'); await tick(); await tick();
   assert.equal($('suggest').hidden, false);
@@ -645,7 +645,7 @@ async function phone() {
   assert.equal($('toast').textContent, "Forgotten. Later sessions won't hear it.");
   assert.equal(told.querySelectorAll('.step, .prose, .copy').length, 0, 'the card is not a step of the work');
   assert.match(f.querySelector('.working').textContent, /Apex is working · Claude plan · 1:1\d/, 'the clock counts from when you sent it');
-  assert.equal($('send').textContent, '■ Stop');
+  assert.match($('send').textContent, /Queue next/); assert.equal($('stop-run').hidden, false);
   // Copy buttons: every code block, command, output and diff copies its own text and says "Copied".
   const copied = [];
   Object.defineProperty(w.navigator, 'clipboard', {configurable: true, value: {writeText: async t => { copied.push(t); }}});
@@ -754,7 +754,7 @@ async function phone() {
     session = {...session, terminal: false, operation: '', ...active};
     $('back').click(); await tick();
     w.location.hash = '#s=7'; await tick(300); await tick(300);
-    assert.equal($('send').textContent, '■ Stop');
+    assert.match($('send').textContent, /Queue next/); assert.equal($('stop-run').hidden, false);
     for (const id of ['a-keep', 'a-push', 'a-undo', 'a-catchup', 'r-go', 'k-go', 't-cmd']) {
       assert.equal($(id).disabled, true, `${id} waits for the terminal or session operation`);
     }

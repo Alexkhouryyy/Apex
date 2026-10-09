@@ -10,6 +10,19 @@
   --mono:"JetBrains Mono","Cascadia Code","SFMono-Regular",Consolas,ui-monospace,monospace;
   --top:58px}
 *{box-sizing:border-box}
+.code-path{display:flex;gap:6px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
+.code-path button{font-size:12px;min-height:32px;flex:1;background:var(--field);color:var(--soft)}
+.code-path button.current{color:var(--a);border-color:var(--a)}
+.code-path .fine{flex-basis:100%;margin:0;line-height:1.5}
+.follow-ups{padding:12px;margin:8px 0;border:1px solid var(--line2);border-radius:10px;background:var(--field);max-height:240px;overflow:auto}
+.queue-head,.follow-ups li{display:flex;gap:10px;align-items:center}
+.follow-ups ol{margin:10px 0 0;padding:0;list-style:none;counter-reset:next-step}
+.follow-ups li{padding:8px 0;border-top:1px solid var(--line);counter-increment:next-step}
+.follow-ups li::before{content:counter(next-step);color:var(--a);font:12px var(--mono)}
+.follow-ups li .grow{min-width:0}.follow-ups li p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:4.5em;overflow:auto;font-size:13px}
+button:focus-visible{outline:2px solid var(--a);outline-offset:3px}
+.new-project-choice{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink)}
+.new-project-choice input{width:auto;accent-color:var(--a)}
 html,body{height:100%}
 body{margin:0;background:radial-gradient(1200px 520px at 50% -160px,color-mix(in srgb,var(--a) 13%,transparent),transparent 70%),var(--bg);
   color:var(--ink);font:14px/1.55 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden}

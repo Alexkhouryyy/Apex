@@ -156,7 +156,7 @@ def test_each_operation_refuses_running_terminal(monkeypatch, entry):
 
 
 @pytest.mark.parametrize('entry,boundary', [('keep', 'proof'), ('undo', 'events'), ('catch_up', '_on_branch')])
-def test_full_synchronous_operation_reserves_session_and_releases_on_error(monkeypatch, tmp_path, entry, boundary):
+def test_full_synchronous_operation_reserves_session_and_releases_on_error(monkeypatch, tmp_path, test_db, entry, boundary):
     sid = 999902
     s = {'id': sid, 'status': 'ready', 'worktree': str(tmp_path), 'project_path': str(tmp_path)}
     monkeypatch.setattr(code_studio, 'session', lambda *args: s)

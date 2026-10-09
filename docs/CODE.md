@@ -23,6 +23,42 @@ git worktree under `ApexWork\code\`).
 
 ## The page
 
+### Build an idea or improve a project
+
+Choose **Add a project**, then either select an existing Git project or check
+**Create a new project for my idea**. For a new project, enter the full path
+of a folder that does not exist yet, inside an existing parent folder. Apex
+prepares Git and an initial README checkpoint. It rejects existing folders
+and folders inside another Git project. Describe the idea in the composer
+and start the session. Generated changes stay in the session's worktree until Keep.
+
+### Keep talking while it builds
+
+**Send** becomes **Queue next** while a step runs. It saves your follow-up
+with the chosen plan, model, effort and mode. The visible **Next steps** list
+runs in order after successful, saved coding steps; Pause and Remove control
+what is waiting. **Stop** is a separate button and also pauses waiting steps.
+At most ten follow-ups can wait in one session. Retrying the same queued
+submission after a lost response does not run it twice.
+
+The queue pauses after a failed or stopped step, a plan that needs your
+approval, a blocked command, an unsaved checkpoint, or an Apex restart.
+It also pauses when you add a follow-up during checks, review or a terminal
+operation. Review what happened, then explicitly Resume once the session is
+idle. Queue entries survive a restart; they never resume automatically.
+While the queue is paused, explicit actions such as **Build it** or **Allow
+once** can complete the current task; waiting follow-ups stay paused.
+
+The **Build → Inspect → Verify → Keep** strip links to the existing changes,
+checks and Keep controls. Verification comes from the existing proof system;
+Keep still asks before accepting work without current proof.
+
+Composer drafts stay with each project or session on this browser. They are
+stored locally for up to 30 days, with at most 20 contexts retained. Normal
+message failures preserve the draft. Switching sessions or typing a new
+thought while an earlier submission completes does not clear the new text.
+These browser drafts are separate from Celine's suggested messages.
+
 - **Home:**
   - a greeting, with your two plans as reactor rings: ready, resting (at a
     usage limit, with the time it resets) or not signed in;
@@ -31,8 +67,8 @@ git worktree under `ApexWork\code\`).
   - the brief: what you want, which plan, and Safe or Full. Ctrl+Enter sends.
     The microphone lets you talk instead: Apex transcribes it on your PC, with
     no API credits;
-  - quick starts (Fix a bug, Add a feature, Explain, Write tests, Make it look
-    better, Brutal review), then your recent sessions with their ratings.
+  - quick starts (Build from an idea, Fix a bug, Explain, Write tests,
+    Improve a feature, Brutal review), then your recent sessions with their ratings.
 - **A session:**
   - your message, then Apex's live timeline:
     - what it's thinking;
