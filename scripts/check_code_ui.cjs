@@ -220,6 +220,17 @@ w.fetch = async (url, opts = {}) => {
   if (/\/diff\?path=/.test(url)) return new Response('@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d', {status: 200});
   m = url.match(/^\/api\/code\/sessions\/(\d+)\/(\w[\w-]*)$/);
   if (m && opts.method === 'POST') {
+    if (m[2] === 'queue') {
+      const body = JSON.parse(opts.body);
+      session.queue ||= {items: [], paused: false, reason: ''};
+      session.queue.items.push({id: body.request_id, ...body});
+      return Response.json(session.queue);
+    }
+    if (m[2] === 'queue-remove') {
+      session.queue.items = session.queue.items.filter(item => item.id !== JSON.parse(opts.body).id);
+      return Response.json(session.queue);
+    }
+    if (m[2] === 'stop' && session.queue) session.queue.paused = true;
     if (m[2] === 'keep') {
       const body = JSON.parse(opts.body || '{}');
       if (keepClash && !body.unverified_ok) {                          // the proof changed after the page read it
@@ -599,7 +610,7 @@ async function phone() {
   assert.ok([...$('brain-body').querySelectorAll('.bl.k-memory .tag')].some(t => t.textContent === '#40'), 'it is in the brief now');
   $('brain-dialog').close(); brainSources = BRAIN.slice(); forgotten = []; unvouched = [];
   [...d.querySelectorAll('.chip')].find(b => b.textContent.includes('Fix a bug')).click();
-  assert.equal($('prompt').value, 'Fix this bug in Apex: ');
+  assert.equal($('prompt').value, 'Fix this bug in the selected project: ');
   // @ files and / commands as you type.
   type('Look at @wor'); await tick(); await tick();
   assert.equal($('suggest').hidden, false);
@@ -662,15 +673,19 @@ async function phone() {
   assert.equal($('toast').textContent, 'Forgotten. The next message will refresh memory.');
   assert.equal(told.querySelectorAll('.step, .prose, .copy').length, 0, 'the card is not a step of the work');
   assert.match(f.querySelector('.working').textContent, /Apex is working · Claude plan · 1:1\d/, 'the clock counts from when you sent it');
-  assert.equal($('send').disabled, true);
-  assert.equal($('stop-run').hidden, false);
+  assert.match($('send').textContent, /Queue next/); assert.equal($('stop-run').hidden, false);
+  assert.equal($('send').disabled, false);
   $('prompt').value = 'A follow-up draft';
   const stopCount = calls.filter(c => /\/stop$/.test(c.url)).length;
   $('brief-form').dispatchEvent(new w.Event('submit', {bubbles: true, cancelable: true})); await tick();
   assert.equal(calls.filter(c => /\/stop$/.test(c.url)).length, stopCount, 'submitting a follow-up cannot interrupt the running turn');
-  assert.equal($('prompt').value, 'A follow-up draft', 'busy submission preserves the draft');
+  assert.equal(calls.filter(c => /\/queue$/.test(c.url)).at(-1).body.prompt, 'A follow-up draft', 'busy submission queues the follow-up');
+  assert.equal($('prompt').value, '', 'a queued message clears only its sent draft');
   $('stop-run').click(); await tick();
   assert.equal(calls.filter(c => /\/stop$/.test(c.url)).length, stopCount + 1, 'the dedicated Stop button interrupts explicitly');
+  assert.equal(session.queue.paused, true, 'Stop retains follow-ups in a paused queue');
+  $('queue-items').querySelector('button').click(); await tick();
+  assert.equal(session.queue.items.length, 0, 'the owner can remove the paused follow-up');
   $('prompt').value = '';
   // Copy buttons: every code block, command, output and diff copies its own text and says "Copied".
   const copied = [];
@@ -779,6 +794,19 @@ async function phone() {
   $('diff-next').click(); await tick(); assert.equal($('diff-path').textContent, 'new.css');
   $('diff').close();
   // !command runs in the terminal; its output lands in the feed and the Terminal tab.
+  for (const active of [{terminal: true}, {operation: 'keep'}]) {
+    session = {...session, terminal: false, operation: '', ...active};
+    $('back').click(); await tick();
+    w.location.hash = '#s=7'; await tick(300); await tick(300);
+    assert.match($('send').textContent, /Queue next/); assert.equal($('stop-run').hidden, false);
+    for (const id of ['a-keep', 'a-push', 'a-undo', 'a-catchup', 'r-go', 'k-go', 't-cmd']) {
+      assert.equal($(id).disabled, true, `${id} waits for the terminal or session operation`);
+    }
+  }
+  session = {...session, terminal: false, operation: ''};
+  $('back').click(); await tick();
+  w.location.hash = '#s=7'; await tick(300); await tick(300);
+  assert.equal($('a-keep').disabled, false, 'controls recover when the operation finishes');
   type('!ls -la'); key('Enter', {ctrlKey: true}); await tick();
   assert.deepEqual(last(/\/terminal$/).body, {command: 'ls -la'});
   feed.push(E(20, 'term', {command: 'ls -la', ref: 't1'}), E(21, 'term_done', {ref: 't1', exit_code: 0, output: 'total 0', seconds: 1}),

@@ -138,7 +138,8 @@ async def answer_allow(token: str, request: Request):
 @router.post('/api/code/projects')
 async def add_project(request: Request):
     body = await _json(request)
-    return await _do(code_studio.add_project, body.get('path', ''), body.get('name', ''))
+    call = code_studio.create_project if body.get('create') is True else code_studio.add_project
+    return await _do(call, body.get('path', ''), body.get('name', ''))
 
 
 @router.patch('/api/code/projects/{pid}')
@@ -191,6 +192,32 @@ async def send(sid: int, request: Request):
 
 
 # 'discard' has its own route above, which takes the reason (an empty body is no reason).
+@router.post('/api/code/sessions/{sid}/queue')
+async def enqueue(sid: int, request: Request):
+    body = await _json(request)
+    return await _do(code_studio.enqueue, sid, body.get('prompt', ''), body.get('engine'), body.get('mode'),
+                     model=body.get('model'), effort=body.get('effort'), plan=body.get('plan') is True,
+                     request_id=body.get('request_id'))
+
+
+@router.post('/api/code/sessions/{sid}/queue-pause')
+async def pause_queue(sid: int, request: Request):
+    await _json(request)
+    return await _do(code_studio.pause_queue, sid)
+
+
+@router.post('/api/code/sessions/{sid}/queue-resume')
+async def resume_queue(sid: int, request: Request):
+    await _json(request)
+    return await _do(code_studio.resume_queue, sid)
+
+
+@router.post('/api/code/sessions/{sid}/queue-remove')
+async def remove_queued(sid: int, request: Request):
+    body = await _json(request)
+    return await _do(code_studio.remove_queued, sid, body.get('id', ''))
+
+
 ACTIONS = {'stop': code_studio.stop, 'undo': code_studio.undo, 'catch-up': code_studio.catch_up,
            'discard': code_studio.discard, 'checks': code_studio.run_checks}
 

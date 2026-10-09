@@ -380,7 +380,7 @@ def run_resident(model_override: Optional[str] = None) -> None:
             state.set(ResidentState.THINKING)
             try:
                 reply = agent.run(user_text, include_screenshot=True, use_thinking=False,
-                                  withhold=frozenset())   # the owner's voice at the PC
+                                  withhold=frozenset(), by_owner=True)   # the owner's voice at the PC
                 # Pin the turn this answer landed on, so spoken feedback on the
                 # NEXT turn rates this one and not whatever background turn the
                 # scheduler/cortex has advanced the global counter to since.
