@@ -37,7 +37,8 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-from agent import work_engines as we
+from agent import code_usage, work_engines as we
+from agent.working_context import redact
 
 MODES = ('safe', 'full', 'review')
 TURN_TIMEOUT = 3600                         # one message's work: at most an hour
@@ -321,7 +322,8 @@ def _claude_tool(name: str, args: dict, folder: Path) -> list[dict]:
         where = f" in {path}" if path else ''
         return [{'kind': 'tool', 'tool': 'search', 'title': f'Searched for {_short(what, 80)}{where}'}]
     if name in ('Bash', 'PowerShell'):
-        return [{'kind': 'tool', 'tool': 'command', 'title': _short(args.get('command'), 200),
+        return [{'kind': 'tool', 'tool': 'command', 'title': _short(redact(str(args.get('command') or '')), 200),
+                 'command': _cap(redact(str(args.get('command') or ''))),
                  'detail': _short(args.get('description'), 160)}]
     if name == 'WebSearch':
         return [{'kind': 'tool', 'tool': 'web', 'title': f"Searched the web: {_short(args.get('query'), 120)}"}]
@@ -353,6 +355,7 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
     out = []
     if kind == 'system':
         if d.get('subtype') == 'init' and d.get('session_id'):
+            state['model'] = d.get('model') or None
             out.append({'kind': 'session', 'id': d['session_id'], 'model': d.get('model') or ''})
         elif d.get('subtype') == 'api_retry':
             out.append({'kind': 'note', 'text': 'The plan is busy; retrying…'})
@@ -366,6 +369,8 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
             return [{'kind': 'delta', 'thinking': delta['thinking']}]
         return []
     if kind == 'assistant':
+        if (d.get('message') or {}).get('model'):
+            state['model'] = d['message']['model']
         for block in (d.get('message') or {}).get('content') or []:
             t = block.get('type')
             if t == 'text' and block.get('text', '').strip():
@@ -429,13 +434,12 @@ def _parse_claude(d: dict, folder: Path, state: dict) -> list[dict]:
         failed = bool(d.get('is_error')) or d.get('subtype') not in (None, 'success')
         detail = '\n'.join([str(d.get('result') or '')] + [str(e) for e in d.get('errors') or []])
         status = we._classify(detail, failed)
-        usage = d.get('usage') or {}
+        usage = code_usage.turn_usage('claude', d.get('usage'), model=state.get('model'),
+                                      cost=d.get('total_cost_usd'), model_usage=d.get('modelUsage'))
         out.append({'kind': 'done', 'status': status,
                     'summary': str(d.get('result') or '') if not failed else error_text(detail) or 'It stopped with an error.',
                     'reset_at': we.reset_time(detail) if status == 'limited' else None,
-                    # Cached re-reads of the same context are left out: counting them made a short session look like millions.
-                    'tokens': (usage.get('input_tokens') or 0) + (usage.get('output_tokens') or 0)
-                              + (usage.get('cache_creation_input_tokens') or 0)})
+                    'usage': usage, 'tokens': usage['total_tokens']})
         if d.get('session_id'):
             state['session'] = d['session_id']
         return out
@@ -447,9 +451,9 @@ def _parse_codex(d: dict, folder: Path, state: dict) -> list[dict]:
     if kind == 'thread.started' and d.get('thread_id'):
         return [{'kind': 'session', 'id': d['thread_id'], 'model': ''}]
     if kind == 'turn.completed':
-        u = d.get('usage') or {}
+        usage = code_usage.turn_usage('chatgpt', d.get('usage'))
         return [{'kind': 'done', 'status': 'done', 'summary': state.get('last_text', ''), 'reset_at': None,
-                 'tokens': (u.get('input_tokens') or 0) + (u.get('output_tokens') or 0)}]
+                 'tokens': usage['total_tokens'], 'usage': usage}]
     if kind in ('turn.failed', 'error'):
         msg = (d.get('error') or {}).get('message') if kind == 'turn.failed' else d.get('message')
         state['error'] = str(msg or '')
@@ -459,7 +463,8 @@ def _parse_codex(d: dict, folder: Path, state: dict) -> list[dict]:
             return [{'kind': 'error', 'text': error_text(str(msg or 'Codex reported an error.'))}]
         status = we._classify(state['error'], True)
         return [{'kind': 'done', 'status': status, 'summary': error_text(state['error']) or 'Codex stopped with an error.',
-                 'reset_at': we.reset_time(state['error']) if status == 'limited' else None, 'tokens': 0}]
+                 'reset_at': we.reset_time(state['error']) if status == 'limited' else None, 'tokens': None,
+                 'usage': code_usage.turn_usage('chatgpt')}]
     if kind not in ('item.started', 'item.updated', 'item.completed'):
         return []
     item = d.get('item') or {}
@@ -475,7 +480,8 @@ def _parse_codex(d: dict, folder: Path, state: dict) -> list[dict]:
         return [{'kind': 'live', 'ref': iid, 'output': _tail(item['aggregated_output'])}]
     if t == 'command_execution':
         if kind == 'item.started':
-            return [{'kind': 'tool', 'tool': 'command', 'title': _short(item.get('command'), 200), 'id': iid}]
+            return [{'kind': 'tool', 'tool': 'command', 'title': _short(redact(str(item.get('command') or '')), 200),
+                     'command': _cap(redact(str(item.get('command') or ''))), 'id': iid}]
         if done:
             return [{'kind': 'result', 'id': iid, 'ok': item.get('exit_code') == 0 and item.get('status') != 'failed',
                      'exit_code': item.get('exit_code'), 'output': _tail(item.get('aggregated_output'))}]
@@ -490,6 +496,13 @@ def _parse_codex(d: dict, folder: Path, state: dict) -> list[dict]:
         return out
     if t == 'web_search' and kind == 'item.started':
         return [{'kind': 'tool', 'tool': 'web', 'title': f"Searched the web: {_short(item.get('query'), 120)}", 'id': iid}]
+    if t == 'web_search' and done:
+        failed = item.get('status') in ('failed', 'declined') or bool(item.get('error'))
+        error = item.get('error')
+        why = error.get('message') if isinstance(error, dict) else error
+        return [{'kind': 'result', 'id': iid, 'ok': not failed,
+                 'status': 'failed' if failed else item.get('status') or 'completed',
+                 'output': _tail(redact(why)) if why else ''}]
     if t == 'todo_list':
         return [{'kind': 'todo', 'items': [{'text': _short(x.get('text'), 160), 'done': bool(x.get('completed')), 'active': False}
                                             for x in item.get('items') or []]}]
@@ -497,10 +510,22 @@ def _parse_codex(d: dict, folder: Path, state: dict) -> list[dict]:
         if item.get('server') == 'apex':
             return [{**_memory_tool(str(item.get('tool') or ''), item.get('arguments')), 'id': iid}]
         return [{'kind': 'tool', 'tool': 'other', 'title': f"{item.get('server', '')} {item.get('tool', '')}".strip(), 'id': iid}]
-    if t == 'mcp_tool_call' and done and item.get('server') == 'apex':
-        failed = item.get('status') == 'failed' or bool(item.get('error'))
+    if t == 'mcp_tool_call' and done:
+        result = item.get('result')
+        result_failed = isinstance(result, dict) and bool(result.get('isError') or result.get('is_error'))
+        failed = item.get('status') in ('failed', 'declined') or bool(item.get('error')) or result_failed
         why = (item.get('error') or {}).get('message') if isinstance(item.get('error'), dict) else item.get('error')
-        return [{'kind': 'result', 'id': iid, 'ok': not failed, 'output': _tail(why) if failed and why else ''}]
+        # Memory values are deliberately omitted from the feed. Other tools
+        # need their completion paired with the running row, with bounded text.
+        output = _tail(redact(why)) if failed and why else ''
+        if not why and item.get('server') != 'apex':
+            if isinstance(result, dict):
+                output = _tail(redact('\n'.join(str(c.get('text') or '') for c in result.get('content') or []
+                                               if isinstance(c, dict) and c.get('type') == 'text')))
+            elif isinstance(result, str):
+                output = _tail(redact(result))
+        return [{'kind': 'result', 'id': iid, 'ok': not failed,
+                 'status': 'failed' if failed else item.get('status'), 'output': output}]
     if t == 'error' and done:
         return [{'kind': 'error', 'text': _short(item.get('message'), 400)}]
     return []
@@ -514,7 +539,8 @@ def turn(engine: str, prompt: str, folder: Path, mode: str = 'safe', resume: str
     """Run one message's work, calling on_event for each step. Never raises
     for a failed run. Returns the final 'done' event plus the session id."""
     def finish(status, summary, **more):
-        event = {'kind': 'done', 'status': status, 'summary': summary, 'reset_at': None, 'tokens': 0, **more}
+        event = {'kind': 'done', 'status': status, 'summary': summary, 'reset_at': None, 'tokens': None,
+                 'usage': code_usage.turn_usage(engine, model=state.get('model')), **more}
         on_event(event)
         return {**event, 'session': state.get('session')}
 
@@ -592,7 +618,8 @@ def turn(engine: str, prompt: str, folder: Path, mode: str = 'safe', resume: str
             f'{we.NAMES[engine]} ended without finishing (exit {proc.returncode}).'
         status = we._classify(detail + '\n' + err[-3000:], True)
         final = {'kind': 'done', 'status': status, 'summary': detail,
-                 'reset_at': we.reset_time(detail + '\n' + err) if status == 'limited' else None, 'tokens': 0}
+                 'reset_at': we.reset_time(detail + '\n' + err) if status == 'limited' else None, 'tokens': None,
+                 'usage': code_usage.turn_usage(engine, model=state.get('model'))}
     if final['status'] == 'signed_out':
         we.forget_checks()
     on_event(final)

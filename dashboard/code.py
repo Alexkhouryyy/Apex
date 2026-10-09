@@ -75,6 +75,16 @@ async def coding_models(engine: str, request: Request, refresh: bool = False):
     return await asyncio.to_thread(code_catalog.catalog, engine, refresh)
 
 
+@router.get('/api/code/usage/{engine}')
+async def coding_usage(engine: str, request: Request, refresh: bool = False):
+    """Provider-reported account limits/activity; owner-only and read-only."""
+    _owner(request)
+    if engine not in ('claude', 'chatgpt'):
+        raise HTTPException(400, 'Choose Claude or ChatGPT.')
+    from agent import code_usage
+    return await asyncio.to_thread(code_usage.snapshot, engine, refresh)
+
+
 @router.get('/api/code/overnight')
 async def overnight(request: Request):
     """What the night shift built, for the morning (agent/code_studio.overnight): each
