@@ -46,6 +46,35 @@ IDs remain available when the catalog is incomplete. Legacy Codex `max` retains
 its prior `high` mapping; select `xhigh` explicitly when the account model
 supports it.
 
+## Usage and run controls
+
+Open **Usage** in the Code header, or select a session's token count. Apex shows
+provider-reported input, output, cache reads/writes and reasoning counters when
+available. Session totals include coding turns and second-opinion reviews, with
+separate subtotals. A breakdown appears under each completed coding turn.
+Missing counters stay **Not reported**; incomplete totals are labeled **partial**.
+Historical scalar totals do not supply a detailed breakdown. Reopening a session
+does not add its usage a second time.
+
+The account section reads Codex's public `account/rateLimits/read` and
+`account/usage/read` app-server methods without submitting a prompt. It shows
+reported quota windows, remaining percentages, reset times and token activity.
+Snapshots are cached for 60 seconds; **Refresh** bypasses that cache. Unsupported
+methods or unavailable clients produce an explicit unavailable state. Claude's
+read-only CLI integration supplies turn usage but no supported account-quota
+protocol. Session tokens cannot determine remaining subscription quota.
+
+Requested model/effort and the model actually reported by the client are labeled
+separately. Turn token counts accumulate across model requests and cannot measure
+current context utilization. Provider cost estimates, when present, are labeled
+as estimates and are not subscription charges.
+
+While a turn runs, the composer preserves your next-message draft. Use the
+dedicated **Stop** button to interrupt. Sending while busy does not cancel the
+turn. This exec-based integration does not yet queue or steer follow-ups.
+
+See [the comparison record](code-comparison.md) for validation and live-test limits.
+
 ## Memory during a conversation
 
 Before every message, Apex recomputes the current coding brief. If its knowledge

@@ -386,6 +386,10 @@ def session(sid: int) -> dict:
         s['side'] = 'review' if s['review_state'] == 'working' else ('checks' if s['check_state'] == 'running' else '')
         s['terminal'] = sid in _terms
     s['engine_name'] = we.NAMES.get(s['engine'], s['engine'])
+    from agent import code_usage
+    completions = _rows("SELECT kind, data FROM code_events WHERE session_id=? AND kind IN ('done','review') ORDER BY id", (sid,))
+    s['usage'] = code_usage.session_usage([
+        {**json.loads(row['data']), 'activity': 'review' if row['kind'] == 'review' else 'coding'} for row in completions])
     s['task'] = _task_of(s.get('task_id'))
     s['since'] = None                                     # when the work now running began, for the page's clock
     if s['working'] or s['side']:
@@ -721,10 +725,17 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
         took = round(time.time() - started)
         total = _count_changed(sid)
         event(sid, 'done', status=result['status'], summary=(result.get('summary') or '')[:6000], seconds=took,
-              files=files, total=total, engine=engine, tokens=result.get('tokens') or 0,
+              files=files, total=total, engine=engine, tokens=result.get('tokens'),
+              usage={**result['usage'], 'activity': 'coding'} if isinstance(result.get('usage'), dict) else None,
+              run_id=run_id, activity='coding',
+              model=(options or {}).get('model') or '', effort=(options or {}).get('effort') or '',
               reset_at=result.get('reset_at'), plan=bool((options or {}).get('plan')))
+        # Final turn records, rather than live or resumed thread totals, own the
+        # accounting. Recomputing makes refresh/replay idempotent. Unknown turns
+        # remain explicit in session()['usage']; this scalar is compatibility.
+        usage_total = session(sid)['usage']['total_tokens']
         fields = {'turn_state': 'idle', 'last_status': result['status'], 'files_changed': total,
-                  'tokens': (session(sid).get('tokens') or 0) + (result.get('tokens') or 0)}
+                  'tokens': usage_total or 0}
         with _lock:
             _live.pop(sid, None)
         if result['status'] == 'done':
@@ -1311,8 +1322,11 @@ def review(sid: int, engine: str | None = None) -> dict:
             text = (result.get('summary') or '').strip()
             rating = parse_rating(text) if result['status'] == 'done' else None
             ok = result['status'] == 'done'
-            event(sid, 'review', engine=engine, status=result['status'], rating=rating, text=text[:8000])
-            _set(sid, review_state='done' if ok else 'failed', review_rating=rating, review_text=text[:8000])
+            event(sid, 'review', engine=engine, status=result['status'], rating=rating, text=text[:8000],
+                  run_id=run_id, activity='review', tokens=result.get('tokens'),
+                  usage={**result['usage'], 'activity': 'review'} if isinstance(result.get('usage'), dict) else None)
+            _set(sid, review_state='done' if ok else 'failed', review_rating=rating, review_text=text[:8000],
+                 tokens=session(sid)['usage']['total_tokens'] or 0)
             if result['status'] in ('limited', 'signed_out', 'missing'):
                 try:
                     from agent import work_agent

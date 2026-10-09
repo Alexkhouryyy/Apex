@@ -74,6 +74,7 @@ if '{name}' == 'claude':
         out({{'type': 'assistant', 'session_id': sid, 'message': {{'content': [
             {{'type': 'tool_use', 'id': 't1', 'name': 'Read', 'input': {{'file_path': str(cwd / 'README.md')}}}}]}}}})
         out({{'type': 'result', 'subtype': 'success', 'is_error': False, 'session_id': sid, 'permission_denials': [],
+             'usage': {{'input_tokens': 20, 'cache_read_input_tokens': 40, 'cache_creation_input_tokens': 10, 'output_tokens': 7}},
              'result': '**Rating:** 6/10\nVerdict: works, thin tests.\nProblems:\n- step.py:1 no test'}}); sys.exit(0)
     if mode == 'check':
         pass
@@ -97,7 +98,8 @@ if '{name}' == 'claude':
             {{'type': 'tool_result', 'tool_use_id': f'b{{n}}', 'content': [{{'type': 'text', 'text': '3 passed'}}]}}]}}}})
     out({{'type': 'assistant', 'session_id': sid, 'message': {{'content': [{{'type': 'text', 'text': f'Done: step {{n}}.'}}]}}}})
     out({{'type': 'result', 'subtype': 'success', 'is_error': False, 'result': f'Added step{{n}}.py and ran the tests.',
-         'session_id': sid, 'usage': {{'input_tokens': 10, 'output_tokens': 5}},
+         'session_id': sid, 'usage': {{'input_tokens': 10, 'output_tokens': 5,
+                                      'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0}},
          'permission_denials': [{{'tool_name': 'Bash', 'tool_input': {{'command': 'rm -rf build'}}}}]}})
 else:
     out({{'type': 'thread.started', 'thread_id': 'thread-codex-1'}})
@@ -215,6 +217,58 @@ def test_provider_switch_does_not_reuse_the_other_providers_model(lab):
     call = lab.calls('codex')[-1]
     assert '-m' not in call['argv'] and not any('model_reasoning_effort=' in x for x in call['argv'])
     assert code_studio.session(sid)['model'] == ''
+
+
+def test_final_usage_persists_and_provider_switch_aggregates_once(lab):
+    sid = wait(code_studio.start(lab.pid, 'First step', 'claude')['id'])['id']
+    first = code_studio.session(sid)
+    assert first['usage']['total_tokens'] == 15 and first['tokens'] == 15
+    assert first['usage']['last_turn']['model'] == 'm'
+    code_studio.send(sid, 'Next step', engine='chatgpt')
+    result = wait(sid)
+    assert result['usage']['total_tokens'] == 25 and result['tokens'] == 25
+    assert result['usage']['observed_turns'] == 2 and result['usage']['complete']
+    assert code_studio.session(sid)['usage'] == result['usage']
+    done = [e for e in code_studio.events(sid) if e['kind'] == 'done']
+    assert [e['usage']['total_tokens'] for e in done] == [15, 10]
+    assert all(e['run_id'] for e in done)
+
+
+def test_reviewer_usage_is_counted_once_and_attributed_separately(lab):
+    sid = wait(code_studio.start(lab.pid, 'Build something', 'claude')['id'])['id']
+    lab.mode('codex', 'review')
+    wait(code_studio.review(sid, 'chatgpt')['id'])
+    first = code_studio.session(sid)
+    assert first['usage']['total_tokens'] == 25 and first['tokens'] == 25
+    assert first['usage']['by_activity']['coding']['total_tokens'] == 15
+    assert first['usage']['by_activity']['review']['total_tokens'] == 10
+    assert first['usage']['last_turn']['activity'] == 'coding'
+    assert first['usage']['last_review']['activity'] == 'review'
+    wait(code_studio.review(sid, 'chatgpt')['id'])
+    again = code_studio.session(sid)
+    assert again['usage']['total_tokens'] == 35 and again['tokens'] == 35
+    assert again['usage']['by_activity']['review']['observed_turns'] == 2
+    review_events = [e for e in code_studio.events(sid) if e['kind'] == 'review']
+    assert len(review_events) == 2 and review_events[0]['run_id'] != review_events[1]['run_id']
+    # Defensive aggregation of a duplicated persisted event does not bill the
+    # same review twice. Live final callbacks were never counted separately.
+    repeated = {k: v for k, v in review_events[-1].items() if k not in ('id', 'ts', 'kind')}
+    code_studio.event(sid, 'review', **repeated)
+    assert code_studio.session(sid)['usage']['total_tokens'] == 35
+    assert code_studio.session(sid)['usage'] == code_studio.session(sid)['usage']
+
+
+def test_usage_endpoint_is_owner_only_and_explicit_about_invalid_provider(api, lab, monkeypatch):
+    from agent import code_usage
+    client, config = api
+    monkeypatch.setattr(code_usage, 'snapshot', lambda engine, refresh=False: {
+        'engine': engine, 'available': False, 'limits': [], 'activity': None, 'refresh': refresh})
+    result = client.get('/api/code/usage/chatgpt?refresh=true')
+    assert result.status_code == 200 and result.json()['refresh'] is True
+    assert result.json()['activity'] is None
+    assert client.get('/api/code/usage/invalid').status_code == 400
+    monkeypatch.setattr(config, 'DASHBOARD_TOKEN', 'master')
+    assert client.get('/api/code/usage/chatgpt').status_code == 403
 
 
 def test_approved_and_forgotten_memories_refresh_a_running_conversation(lab, monkeypatch):
@@ -824,6 +878,7 @@ def test_only_the_owner_codes_and_only_from_the_page(api, lab, monkeypatch):
     monkeypatch.setattr(config, 'DASHBOARD_TOKEN', 'master')               # a device token, not the owner
     assert client.get('/api/code').status_code == 403                     # even reading code is the owner's
     assert client.get('/api/code/models/chatgpt').status_code == 403
+    assert client.get('/api/code/usage/chatgpt').status_code == 403
     assert client.post('/api/code/sessions', json={'project_id': lab.pid, 'prompt': 'x'}).status_code == 403
     monkeypatch.setattr(config, 'DASHBOARD_TOKEN', '')
     assert client.post('/api/code/sessions', json={'project_id': lab.pid, 'prompt': 'x'},
@@ -1297,7 +1352,11 @@ def test_lessons_from_apex_building_itself(lab, tmp_path):
     assert code_engines.parse('claude', json.dumps(refused), tmp_path, state) == []        # expected, so not shown as an error
     done = {'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'ok', 'permission_denials': [],
             'usage': {'input_tokens': 10, 'output_tokens': 5, 'cache_read_input_tokens': 340000, 'cache_creation_input_tokens': 100}}
-    assert code_engines.parse('claude', json.dumps(done), tmp_path, {})[-1]['tokens'] == 115
+    measured = code_engines.parse('claude', json.dumps(done), tmp_path, {})[-1]
+    assert measured['tokens'] == 340115
+    assert measured['usage']['input_tokens'] == 340110
+    assert measured['usage']['cached_input_tokens'] == 340000
+    assert measured['usage']['cache_write_input_tokens'] == 100
 
 
 # ---------------------------------------------------------------- Apex knows you: the brief in every session
@@ -1998,7 +2057,7 @@ def test_calls_to_apex_memory_show_as_memory_steps(tmp_path):
         [{'kind': 'tool', 'tool': 'memory', 'title': "Checked Apex's memory: error logging", 'id': 'x1'}]
     done = {**item, 'status': 'failed', 'error': {'message': 'server not running'}}
     assert code_engines.parse('chatgpt', json.dumps({'type': 'item.completed', 'item': done}), tmp_path, {}) == \
-        [{'kind': 'result', 'id': 'x1', 'ok': False, 'output': 'server not running'}]
+        [{'kind': 'result', 'id': 'x1', 'ok': False, 'status': 'failed', 'output': 'server not running'}]
     other = {**item, 'server': 'github', 'tool': 'search'}
     assert code_engines.parse('chatgpt', json.dumps({'type': 'item.started', 'item': other}), tmp_path, {})[0]['tool'] == 'other'
 

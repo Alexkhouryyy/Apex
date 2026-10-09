@@ -5,10 +5,11 @@
   <title>Apex · Code</title>
   <link rel="icon" href="/static/icons/apex-refined.svg">
   <link rel="stylesheet" href="/static/brand.css?v=brand40">
-  <link rel="stylesheet" href="/static/code.css?v=code-10">
+  <link rel="stylesheet" href="/static/code.css?v=code-11">
+  <script src="/static/code_usage.js?v=code-11" defer></script>
   <script src="/static/speech_queue.js?v=code-10" defer></script>
   <script src="/static/code_narration.js?v=code-10" defer></script>
-  <script src="/static/code.js?v=code-10" defer></script>
+  <script src="/static/code.js?v=code-11" defer></script>
   <link rel="stylesheet" href="/static/theme.css">
 </head>
 <body class="view-home term">
@@ -18,6 +19,7 @@
     <a href="/" class="brand apex-brand" aria-label="Open Apex dashboard"><span class="apex-logo" aria-hidden="true"></span><span class="apex-wordmark">APEX</span><small>CODE</small></a>
     <div class="plans" id="plans" aria-label="Your plans"></div>
     <span class="credits" id="credits" title="Coding here only ever uses your Claude and ChatGPT plans">$0 API credits</span>
+    <button type="button" class="small" id="account-usage" aria-haspopup="dialog">Usage</button>
     <nav class="links"><a href="/work">Work</a><a href="/">Dashboard</a></nav>
     <button type="button" class="look small" data-look-toggle></button>
   </header>
@@ -62,7 +64,7 @@
             <h1 id="s-title"></h1>
             <p class="meta" id="s-meta"></p>
           </div>
-          <span class="tokens" id="s-tokens" title="Tokens this session (your plan's usage, never API credits)"></span>
+          <button type="button" class="tokens ghost" id="s-tokens" aria-haspopup="dialog" title="Reported tokens for this session; separate from account limits"></button>
           <button type="button" class="small celine-btn" id="celine-btn" title="Ask Celine about this session, out loud (Ctrl+Shift+Space). Press again when you're done." aria-label="Ask Celine">🎙<span class="wide"> Ask Celine</span></button>
           <select id="narrate" class="narrate" aria-label="Narration" title="Said out loud in your Voicebox voice, free on this PC. Without Voicebox running, Apex chimes instead; it never uses OpenAI's paid voice (tts-1) for this.">
             <option value="off">🔈 Off</option><option value="milestones">🔊 Milestones</option><option value="play">🔊 Play-by-play</option>
@@ -109,6 +111,7 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
             </button>
             <button type="submit" class="primary send" id="send">Build it <kbd>Ctrl ⏎</kbd></button>
+            <button type="button" class="stop" id="stop-run" hidden>■ Stop</button>
           </div>
         </div>
         <p class="hint" id="hint">Every session works on its own branch. Nothing touches your project until you press Keep.</p>
@@ -212,6 +215,20 @@
     </aside>
   </div>
 </div>
+
+<dialog id="usage-dialog" aria-labelledby="usage-title">
+  <div class="dialog-head"><h2 id="usage-title">Coding usage</h2><span class="grow"></span>
+    <button type="button" id="usage-close" aria-label="Close usage">✕</button></div>
+  <div class="usage-body">
+    <section aria-labelledby="usage-session-title"><h3 id="usage-session-title">This session</h3><div id="usage-session"></div></section>
+    <section aria-labelledby="usage-account-title"><div class="row"><h3 id="usage-account-title">Account limits</h3><span class="grow"></span>
+      <select id="usage-provider" aria-label="Usage provider"><option value="chatgpt">ChatGPT / Codex</option><option value="claude">Claude Code</option></select>
+      <button type="button" id="usage-refresh">Refresh</button></div>
+      <div id="usage-account" role="status" aria-live="polite"></div>
+    </section>
+    <p class="fine">Session tokens measure work across model requests. They are not your current context size or the percentage of your plan remaining.</p>
+  </div>
+</dialog>
 
 <dialog id="diff" aria-labelledby="diff-path">
   <div class="dialog-head">

@@ -43,6 +43,7 @@
 
   const NAME = {claude: 'Claude plan', chatgpt: 'ChatGPT plan'};
   const OTHER = {claude: 'chatgpt', chatgpt: 'claude'};
+  window.ApexCodeUsage?.init(api);
   let ov = null, current = null, detail = null, lastId = 0, feed = null, pollTimer = null, lastOverview = 0, quiet = 0;
   let project = Number(store.get('apex.code.project')) || null;
   let engine = store.get('apex.code.engine'), mode = store.get('apex.code.mode', 'safe');
@@ -251,6 +252,7 @@
 
   // ---------------------------------------------------------------- the brief: plan, mode, voice
   function renderEngine() {
+    window.ApexCodeUsage?.select(engine);
     for (const b of document.querySelectorAll('[data-engine]')) {
       const p = ov && ov.plans.find(x => x.id === b.dataset.engine);
       b.setAttribute('aria-checked', String(b.dataset.engine === engine));
@@ -282,11 +284,11 @@
     else if (mode === 'full') { text = 'Full: Apex may run any command, inside this session\'s own copy of the project.'; warn = true; }
     else if (planLine()) text += ` ${capital(planLine().text)}.`;
     hint.textContent = text; hint.className = 'hint' + (warn ? ' warn' : '');
-    const send = $('send'); send.classList.toggle('stop', busy());
-    send.replaceChildren(busy() ? '■ Stop' : planFirst ? 'Plan it' : current ? 'Send' : 'Build it', ...(busy() ? [] : [el('kbd', '', 'Ctrl ⏎')]));
-    send.classList.toggle('primary', !busy());
+    const send = $('send');
+    send.replaceChildren(busy() ? 'Working…' : planFirst ? 'Plan it' : current ? 'Send' : 'Build it', el('kbd', '', 'Ctrl ⏎'));
+    $('stop-run').hidden = !busy();
     const finished = detail && detail.status !== 'ready';
-    $('prompt').disabled = !!finished; send.disabled = !!finished;
+    $('prompt').disabled = !!finished; send.disabled = !!finished || busy();
     $('prompt').placeholder = finished ? `This session is ${detail.status === 'kept' ? 'kept' : 'thrown away'}. Start a new one.`
       : current ? 'Ask for a change, a fix, or "explain…"' : 'Tell Apex what to build, fix or explain…';
   }
@@ -307,7 +309,7 @@
 
   $('brief-form').onsubmit = async e => {
     e.preventDefault();
-    if (busy()) return stop();
+    if (busy()) { say('Apex is working. Your draft stays here; send it when this turn finishes. Use Stop to interrupt.'); return; }
     const text = $('prompt').value.trim();
     if (!text) { $('prompt').focus(); return; }
     hideSuggest();
@@ -335,6 +337,7 @@
     if (!current) return;
     try { await post(`/api/code/sessions/${current}/stop`); say('Stopping…'); schedule(300); } catch (err) { say(err.message, 'error'); }
   }
+  $('stop-run').onclick = stop;
 
   // Talk instead of typing: recorded here, transcribed by Apex on this PC (no API credits).
   // One recording at a time, for the mic or for Celine; pressing its button again ends it.
@@ -410,6 +413,7 @@
   function home() {
     saveChoice();
     current = null; detail = null; files = null; proof = null; show('home'); disconnect(); celineStop(); $('celine-card').hidden = true;
+    window.ApexCodeUsage?.render(null);
     history.replaceState(null, '', location.pathname);
     engine = store.get('apex.code.engine') || (ov && ov.default_engine) || 'claude'; mode = store.get('apex.code.mode', 'safe');
     const saved = choices[engine] || {model: store.get(`apex.code.model.${engine}`, ''), effort: store.get(`apex.code.effort.${engine}`, '')};
@@ -828,12 +832,18 @@
           const s = step('cmd'), line = el('div', 'line');
           line.append(el('span', 'sym', '$'), el('span', 'c', e.title), el('span', 'st muted', '…'));
           line.title = e.detail || e.title; s.dataset.label = `Running ${e.title}`;
-          copyLine(line, e.title); s.append(line); if (e.ref) { t.tools[e.ref] = s; s.dataset.ref = e.ref; }
+          copyLine(line, e.command || e.title); s.append(line); if (e.ref) { t.tools[e.ref] = s; s.dataset.ref = e.ref; }
         } else if (e.tool === 'memory') {                 // it asked Apex's memory, or suggested a memory
           t.reads = null;
           const s = step('memory', ic('🧠'), el('span', 'mt', e.title), el('span', 'st muted', '…'));
           if (e.ref) { t.tools[e.ref] = s; s.dataset.ref = e.ref; }
-        } else { t.reads = null; step('', ic(e.tool === 'web' ? '◌' : '·'), e.title); }
+        } else {
+          t.reads = null;
+          const s = step('tool-other'), line = el('div', 'line');
+          line.append(ic(e.tool === 'web' ? '◌' : '·'), el('span', '', e.title));
+          if (e.ref || e.id) { const ref = e.ref || e.id; line.append(el('span', 'st muted', '…')); t.tools[ref] = s; s.dataset.ref = ref; }
+          s.append(line);
+        }
         break;
       case 'result': {
         const s = t.tools[e.ref];
@@ -848,11 +858,10 @@
       case 'file': {
         const s = step('file');
         const label = {add: '+', delete: '−', write: '✎', update: '✎'}[e.change] || '✎';
-        s.append(ic(label), el('span', 'p', e.path));
+        s.append(ic(label), button(e.path, () => openDiff(e.path), 'p ghost'));
         if (e.plus != null) s.append(el('span', 'plus', `+${e.plus}`), el('span', 'minus', `−${e.minus || 0}`));
         if (e.change === 'add') s.append(el('span', 'muted', '  new file'));
         if (e.change === 'delete') s.append(el('span', 'muted', '  deleted'));
-        s.querySelector('.p').onclick = () => openDiff(e.path);
         if (e.diff) s.append(inlineDiff(e.diff));
         break;
       }
@@ -1007,6 +1016,7 @@
     const bits = [clock(e.seconds || 0), e.files ? `${e.files} file${e.files === 1 ? '' : 's'} this step` : 'no file changes', e.total != null ? `${e.total} in total` : '', e.tokens ? `${tokens(e.tokens)} tokens` : '', `on your ${NAME[e.engine] || 'plan'}`];
     h.append(label, el('span', 'st', bits.filter(Boolean).join(' · ')));
     c.append(h);
+    if (e.usage) c.append(window.ApexCodeUsage?.turn(e.usage) || document.createDocumentFragment());
     if (e.summary && !(e.status === 'done' && t.lastProse && t.lastProse.classList.contains('final'))) { const p = el('div', 'prose'); p.append(md(e.summary)); c.append(p); }
     const acts = el('div', 'acts');
     if (e.status === 'done') {
@@ -1132,6 +1142,9 @@
     $('s-title').textContent = s.title;
     const meta = $('s-meta'); meta.replaceChildren();
     meta.append(el('span', '', s.project), el('code', '', s.branch || ''), el('span', 'badge ' + s.engine, NAME[s.engine]));
+    meta.append(el('span', 'requested-model', `Requested: ${s.model || 'account default'} · effort ${s.effort || 'default'}`));
+    if (s.usage?.last_turn?.model) meta.append(el('span', '', `Reported: ${s.usage.last_turn.model}`));
+    meta.append(el('span', 'run-state', s.working ? 'Running' : s.side ? 'Review / checks running' : s.last_status === 'limited' ? 'Usage limit reached' : s.last_status === 'failed' ? 'Run failed' : 'Idle'));
     if (s.mode === 'full') meta.append(el('span', 'badge full', 'FULL'));
     if (s.origin === 'night') meta.append(nightBadge());
     if (s.status !== 'ready') meta.append(el('span', 'badge ' + (s.status === 'kept' ? 'kept' : ''), s.status === 'kept' ? 'KEPT' : 'THROWN AWAY'));
@@ -1187,6 +1200,7 @@
     $('a-keep').disabled = !idle || !changed.length || !!s.conflict;
     $('a-push').disabled = $('a-keep').disabled;
     $('s-tokens').textContent = s.tokens ? `${tokens(s.tokens)} tokens` : '';
+    window.ApexCodeUsage?.render(s);
     $('t-where').textContent = s.worktree || '';
     $('t-cmd').disabled = !ready;
     $('a-keep').textContent = s.status === 'kept' ? '✓ Kept' : `✓ Keep it${proj && proj.branch ? ` → ${proj.branch}` : ''}`;
@@ -2083,6 +2097,7 @@
     }
     const saved = choices[engine] || {model: store.get(`apex.code.model.${engine}`, ''), effort: store.get(`apex.code.effort.${engine}`, '')};
     model = saved.model; effort = saved.effort; renderEngine(); loadModels();
+    window.ApexCodeUsage?.select(engine);
     const m = location.hash.match(/^#s=(\d+)/), morning = location.hash === '#overnight';
     if (m) await open(Number(m[1])); else home();
     if (morning) await loadOvernight(true);                // the morning brief's link: what was built overnight

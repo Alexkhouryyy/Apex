@@ -78,7 +78,7 @@ let feed = [
   E(8, 'tool', {tool: 'search', title: 'Searched for renderHeader', ref: 'g1'}),
   E(9, 'file', {path: 'work.js', change: 'update', plus: 1, minus: 0, ref: 'e1', diff: '@@ -4,1 +4,2 @@\n a\n+b'}),
   E(10, 'todo', {items: [{text: 'Add button', done: true, active: false}, {text: 'Test', done: false, active: true}]}),
-  E(11, 'tool', {tool: 'command', title: 'python -m pytest -q', ref: 'b1'}),
+  E(11, 'tool', {tool: 'command', title: 'python -m pytest -q', detail: 'Run the regression checks', ref: 'b1'}),
   E(12, 'result', {ref: 'b1', ok: false, exit_code: 1, output: '1 failed'}),
   E(13, 'blocked', {title: 'Bash: rm -rf build', command: 'rm -rf build', allow_id: 'tok-blocked-0123456789'}),
 ];
@@ -167,6 +167,7 @@ w.fetch = async (url, opts = {}) => {
   if (url === '/api/code') return Response.json(overview());
   if (url === '/api/code/models/chatgpt') return Response.json({models: [{id: 'gpt-account', label: 'Account GPT', efforts: ['high', 'xhigh']}], error: ''});
   if (url === '/api/code/models/claude') return Response.json({models: [{id: 'opus', label: 'Account Opus', efforts: []}, {id: 'sonnet', label: 'Account Sonnet', efforts: []}], error: ''});
+  if (url.startsWith('/api/code/usage/')) return Response.json({limits_available:false, activity_available:false});
   if (url === '/api/code/projects/1/brain') { const sources = brainSources.filter(x => !forgotten.includes(x.ref)); return Response.json({text: sources.length ? 'What Apex knows…' : '', sources, chars: 99, unvouched}); }
   const vm = url.match(/^\/api\/code\/memories\/(\d+)\/vouch$/);
   if (vm && opts.method === 'POST') { const x = unvouched.find(u => u.ref === +vm[1]); unvouched = unvouched.filter(u => u !== x); brainSources.push(x); return Response.json({ok: true, id: +vm[1]}); }
@@ -245,6 +246,7 @@ w.localStorage.setItem('apex.voicebox.profile', 'celine');
 w.eval(fs.readFileSync(path.join(base, 'theme.js'), 'utf8'));
 w.eval(fs.readFileSync(path.join(base, 'speech_queue.js'), 'utf8'));
 w.eval(fs.readFileSync(path.join(base, 'code_narration.js'), 'utf8'));
+w.eval(fs.readFileSync(path.join(base, 'code_usage.js'), 'utf8'));
 w.eval(fs.readFileSync(path.join(base, 'code.js'), 'utf8'));
 const tick = (ms = 40) => new Promise(r => setTimeout(r, ms));
 const type = (text) => { const p = $('prompt'); p.focus(); p.value = text; p.setSelectionRange(text.length, text.length); p.dispatchEvent(new w.Event('input')); };
@@ -660,7 +662,16 @@ async function phone() {
   assert.equal($('toast').textContent, 'Forgotten. The next message will refresh memory.');
   assert.equal(told.querySelectorAll('.step, .prose, .copy').length, 0, 'the card is not a step of the work');
   assert.match(f.querySelector('.working').textContent, /Apex is working · Claude plan · 1:1\d/, 'the clock counts from when you sent it');
-  assert.equal($('send').textContent, '■ Stop');
+  assert.equal($('send').disabled, true);
+  assert.equal($('stop-run').hidden, false);
+  $('prompt').value = 'A follow-up draft';
+  const stopCount = calls.filter(c => /\/stop$/.test(c.url)).length;
+  $('brief-form').dispatchEvent(new w.Event('submit', {bubbles: true, cancelable: true})); await tick();
+  assert.equal(calls.filter(c => /\/stop$/.test(c.url)).length, stopCount, 'submitting a follow-up cannot interrupt the running turn');
+  assert.equal($('prompt').value, 'A follow-up draft', 'busy submission preserves the draft');
+  $('stop-run').click(); await tick();
+  assert.equal(calls.filter(c => /\/stop$/.test(c.url)).length, stopCount + 1, 'the dedicated Stop button interrupts explicitly');
+  $('prompt').value = '';
   // Copy buttons: every code block, command, output and diff copies its own text and says "Copied".
   const copied = [];
   Object.defineProperty(w.navigator, 'clipboard', {configurable: true, value: {writeText: async t => { copied.push(t); }}});
@@ -738,7 +749,10 @@ async function phone() {
   assert.equal(f.querySelector('.card2 .ring10 text').textContent, '8');
   assert.equal(f.querySelector('.working'), null);
   assert.equal($('send').textContent, 'SendCtrl ⏎');
-  assert.equal($('s-tokens').textContent, '12.3k tokens');
+  assert.equal($('s-tokens').textContent, 'Usage', 'legacy scalar totals do not invent a detailed token breakdown');
+  $('account-usage').click(); await tick();
+  assert.equal(calls.filter(c => c.url.startsWith('/api/code/usage/')).at(-1).url, '/api/code/usage/chatgpt', 'Usage follows the current composer provider');
+  $('usage-close').click();
   // The side panel: changes, the review ring, Keep → main.
   assert.equal($('c-count').textContent, '2 · +13 −0');
   assert.equal(d.querySelector('#r-body .ring10 text').textContent, '8');
@@ -1092,6 +1106,22 @@ async function phone() {
   assert.ok(last(/\/api\/staged-writes\/54\/reject$/)); assert.equal($('toast').textContent, 'Rejected. Nothing was saved.');
   assert.equal(calls.filter(c => c.url === '/api/memories' && c.method === 'POST').length, memories, 'Reject saves nothing');
   assert.equal($('box-waiting').hidden, true);
+  // A shortened label still copies the complete command; generic tools keep results visible.
+  const longCommand = 'python -c ' + 'x'.repeat(260);
+  feed.push(E(42, 'tool', {tool:'command', title:longCommand.slice(0, 200), command:longCommand, ref:'long-cmd'}),
+    E(43, 'result', {ref:'long-cmd', ok:true, output:'ok'}),
+    E(44, 'tool', {tool:'other', title:'Connected tool', ref:'external-tool'}),
+    E(45, 'result', {ref:'external-tool', ok:false, output:'<img src=x onerror="window.pwned=1"> unavailable'}));
+  await tick(1100);
+  const fullCmd = f.querySelector('[data-ref="long-cmd"]');
+  await clickCopy(copyOf(fullCmd.querySelector('.line')));
+  assert.equal(copied.at(-1), longCommand, 'Copy retains command text beyond the display label');
+  const generic = f.querySelector('[data-ref="external-tool"]');
+  assert.equal(generic.querySelector('.st').className, 'st bad');
+  assert.equal(generic.querySelector('details').open, true);
+  assert.match(generic.querySelector('pre').textContent, /unavailable/);
+  assert.equal(generic.querySelector('img'), null, 'tool results remain text');
+  assert.equal(f.querySelector('.step.file .p').tagName, 'BUTTON', 'changed file is keyboard accessible');
   await celine();
   await switching();
   await nightShift();
