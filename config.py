@@ -29,6 +29,7 @@ FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "anthropic/claude-3-5-sonnet")
 SMART_ROUTING_ENABLED = False   # set True to activate; routes simple queries to Haiku
 INCIDENT_RECORDING_ENABLED = os.getenv("INCIDENT_RECORDING_ENABLED", "false").lower() in {"1", "true", "yes"}
 INCIDENT_RECORDING_DIR = os.path.expanduser(os.getenv("INCIDENT_RECORDING_DIR", "~/.apex/incidents"))
+COUNCIL_VERIFY_READOUT = os.getenv("COUNCIL_VERIFY_READOUT", "false").lower() in {"1", "true", "yes"}
 ROUTING_SIMPLE_MODEL = "claude-haiku-4-5"
 CURATOR_ENABLED = True
 CURATOR_INTERVAL_DAYS = 7

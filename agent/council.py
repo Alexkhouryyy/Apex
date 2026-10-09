@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 import config
 from agent import provider
+from agent import council_readout
 
 
 # (model, display label) — one flagship model per provider.
@@ -102,6 +103,8 @@ class CouncilResult:
     # a chair that read three similar answers will report high confidence for
     # the same reason the answers were similar, so it cannot be the check.
     agreement: dict | None = None
+    # Upstream-compatible trace. Correctness is null until independently labeled.
+    readout_trace: dict | None = None
 
 
 _CONFIDENCE_RE = re.compile(
@@ -177,7 +180,8 @@ def preset_names() -> list[dict]:
     return [{"id": k, "label": v["label"]} for k, v in _PRESETS.items()]
 
 
-def _ask_all(members, sys_for, user_for, max_tokens=1500, round_no=0, on_answer=None) -> dict:
+def _ask_all(members, sys_for, user_for, max_tokens=1500, round_no=0, on_answer=None,
+             errors=None) -> dict:
     """Call every member in parallel. Returns {label: text}.
 
     If on_answer is given, it is called as on_answer(round_no, label, text) the
@@ -195,6 +199,8 @@ def _ask_all(members, sys_for, user_for, max_tokens=1500, round_no=0, on_answer=
                 text = fut.result()
             except Exception as e:
                 text = f"[{label} failed to respond: {e}]"
+                if errors is not None:
+                    errors[label] = True
             out[label] = text
             if on_answer:
                 try:
@@ -210,7 +216,7 @@ def _format_answers(answers: dict) -> str:
 
 def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
             preset: str = "general", on_progress=None, on_answer=None,
-            on_round_start=None) -> CouncilResult:
+            on_round_start=None, *, verify_readout: bool | None = None) -> CouncilResult:
     """Run the council.
 
     rounds  — number of debate rounds after the opening.
@@ -234,8 +240,12 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
         )
 
     pre = _PRESETS.get(preset) or _PRESETS["general"]
+    if verify_readout is None:
+        verify_readout = getattr(config, "COUNCIL_VERIFY_READOUT", False)
     opening_sys = _OPENING_SYS + pre["opening"]
     chair_sys = _CHAIR_SYS + pre["chair"]
+    if verify_readout:
+        chair_sys += council_readout.VERIFY_CHAIR
     member_labels = [label for _, label in members]
 
     def _progress(msg: str):
@@ -253,6 +263,7 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
                 pass
 
     transcript: list[dict] = []
+    round_errors = {0: {}}
 
     # Round 0 — opening statements
     _progress(f"Opening round — {len(members)} members answering in parallel...")
@@ -263,12 +274,14 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
         user_for=lambda _l: question,
         round_no=0,
         on_answer=on_answer,
+        errors=round_errors[0],
     )
     for label, text in answers.items():
         transcript.append({"round": 0, "label": label, "text": text})
 
     # Debate rounds
     for r in range(1, max(0, rounds) + 1):
+        round_errors[r] = {}
         _progress(f"Debate round {r} — members critiquing and revising...")
         _round_start(r)
         debate_user = (
@@ -278,10 +291,12 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
         )
         answers = _ask_all(
             members,
-            sys_for=lambda label: _DEBATE_SYS.format(label=label),
+            sys_for=lambda label: _DEBATE_SYS.format(label=label) + (
+                council_readout.VERIFY_DEBATE if verify_readout else ""),
             user_for=lambda _l: debate_user,
             round_no=r,
             on_answer=on_answer,
+            errors=round_errors[r],
         )
         for label, text in answers.items():
             transcript.append({"round": r, "label": label, "text": text})
@@ -293,12 +308,22 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
         tag = "Opening" if entry["round"] == 0 else f"Debate {entry['round']}"
         blocks.append(f"=== {entry['label']} ({tag}) ===\n{entry['text']}")
     chair_user = f"QUESTION:\n{question}\n\nCOUNCIL TRANSCRIPT:\n\n" + "\n\n".join(blocks)
+    final_error = False
     try:
         final = provider.complete(_CHAIR, chair_sys, chair_user, max_tokens=2000)
     except Exception as e:
+        final_error = True
         final = f"[Chair synthesis failed: {e}]"
 
     clean, confidence, confidence_note, disagreement = _parse_verdict(final)
+    try:
+        readout_trace = council_readout.make_trace(
+            question, members, transcript, clean, errors=round_errors,
+            final_error=final_error, verify_readout=verify_readout,
+        )
+    except Exception:
+        print("[Council] readout trace unavailable; completed answer preserved")
+        readout_trace = None
 
     try:
         from agent import consensus
@@ -326,4 +351,5 @@ def convene(question: str, rounds: int = 1, panel: list[str] | None = None,
         confidence_note=confidence_note,
         disagreement=disagreement,
         agreement=measured,
+        readout_trace=readout_trace,
     )

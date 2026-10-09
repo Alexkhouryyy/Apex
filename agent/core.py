@@ -3286,6 +3286,8 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             return json.dumps({
                 "council_members": result.members,
                 "final_answer": result.final_answer,
+                "readout_trace_id": (result.readout_trace or {}).get("example_id"),
+                "readout_status": (result.readout_trace or {}).get("evaluation_status", "unavailable"),
             }, indent=2)
 
         # --- The Constellation: domain-expert panel ---
