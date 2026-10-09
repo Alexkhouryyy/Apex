@@ -24,6 +24,8 @@ The roadmap's acceptance test in one command (projects, restart, app write, reco
 **[docs/DEMO.md](docs/DEMO.md)**.
 Outside projects (1,000+ stars) reviewed for three named gaps, each with a verdict:
 **[docs/OPEN_SOURCE_REGISTER.md](docs/OPEN_SOURCE_REGISTER.md)**.
+Optional Chronicle incident recording and safe boundary replay:
+**[docs/research/chronicle-integration.md](docs/research/chronicle-integration.md)**.
 Word, PowerPoint, Excel and PDF files as sources, and how to check them on your own files:
 **[docs/DOCUMENTS.md](docs/DOCUMENTS.md)**.
 Two real tasks, checked by rules, with what they cost, so you can compare models:

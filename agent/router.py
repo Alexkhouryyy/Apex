@@ -10,6 +10,7 @@ import re
 
 import config
 from agent.provider import provider_for
+from agent.incident_replay import boundary
 
 _COMPLEX_MIN_WORDS = 100
 _SHORT_WORDS = 12
@@ -61,6 +62,7 @@ def classify_query(text: str, use_thinking: bool = False) -> str:
     return "complex"
 
 
+@boundary("apex.route_model", kind="router", tuple_result=True)
 def route_model(user_text: str, current_model: str, use_thinking: bool = False):
     """Return (model_to_use, complexity|None).
 

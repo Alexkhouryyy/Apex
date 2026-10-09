@@ -1,6 +1,7 @@
 """Safety layer — intercepts dangerous tool calls and requires confirmation."""
 import re
 import threading
+from agent.incident_replay import boundary
 
 # (tool_name, input_key, pattern) → human-readable risk description
 _RULES: list[tuple[str, str, re.Pattern, str]] = [
@@ -77,6 +78,7 @@ def interactive_only(prompt_fn, *, announce=None):
     return _confirm
 
 
+@boundary("apex.safety_check", tuple_result=True)
 def check(tool_name: str, inputs: dict) -> tuple[bool, str]:
     """Returns (proceed: bool, reason: str). False means blocked by user."""
     for rule_tool, rule_key, pattern, description in _RULES:
