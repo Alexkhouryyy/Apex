@@ -251,16 +251,21 @@
       <thead><tr><th>ID</th><th>Kind</th><th>Importance</th><th>Content</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
-    <h2>Approved evidence</h2>
-    <p>These records retain their source, permitted purpose and linked views. Forget removes the record and views that cite it.</p>
+    <h2>Remember something</h2>
+    <p>Saved into Apex's long-term memory above, as yours: Apex recalls it in conversations, and Apex Code's brief can use it.</p>
     <form id="scoped-memory-form" class="controls">
-      <input name="text" aria-label="Evidence to remember" placeholder="A fact you want Apex to remember" maxlength="16000" required>
-      <input name="domain" aria-label="Memory domain" value="work" required>
-      <input name="purpose" aria-label="Permitted purpose" value="answer" required>
-      <button type="submit">Approve and save</button>
+      <input name="text" aria-label="Something for Apex to remember" placeholder="A fact you want Apex to remember" maxlength="8000" required>
+      <select name="kind" aria-label="Kind of memory">
+        <option value="fact">Fact</option><option value="preference">Preference</option><option value="decision">Decision</option>
+      </select>
+      <button type="submit">Save</button>
     </form>
     <p id="scoped-memory-status" role="status"></p>
-    <div id="scoped-memory-list" class="cards"></div>
+    <details id="scoped-research" hidden>
+      <summary>Research evidence (not used in Apex's answers yet)</summary>
+      <p>Scoped records from the governed-memory research. Apex's normal turns don't read them; Forget removes a record and the views that cite it.</p>
+      <div id="scoped-memory-list" class="cards"></div>
+    </details>
   </section>
 
   <!-- KNOWLEDGE GRAPH -->

@@ -1,4 +1,4 @@
-/* Owner-controlled evidence with explicit source and deletion receipts. */
+/* Remember something (into Apex's long-term memory), plus any governed-memory research records, labelled as unused. */
 (() => {
   const root = document.getElementById('scoped-memory-list');
   if (!root) return;
@@ -24,7 +24,7 @@
         });
         card.append(content, detail, provenance, forget);root.append(card);
       }
-      if (!memories.length) root.textContent = 'No approved evidence saved.';
+      document.getElementById('scoped-research').hidden = !memories.length;   // only if research records exist
       status.textContent = '';
     } catch (error) {status.textContent = error.message;}
   }
@@ -32,8 +32,10 @@
   form.addEventListener('submit', async event => {
     event.preventDefault();const submit = form.querySelector('button');submit.disabled = true;
     try {
-      await api('/api/research/memory', {method:'POST',body:JSON.stringify({text:form.elements.text.value,domain:form.elements.domain.value,purposes:[form.elements.purpose.value]})});
-      form.elements.text.value = '';await load();
+      // Apex's real long-term memory: the research store above is not read by normal turns.
+      await api('/api/memories', {method:'POST',body:JSON.stringify({content:form.elements.text.value,kind:form.elements.kind.value})});
+      form.elements.text.value = '';status.textContent = 'Saved. Apex will remember it.';
+      if (typeof loadMemory === 'function') loadMemory();
     } catch (error) {status.textContent = error.message;}
     finally {submit.disabled = false;}
   });

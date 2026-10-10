@@ -83,6 +83,7 @@ const submit = async text => { type(text); $('brief-form').requestSubmit(); awai
   assert.equal(calls.filter(c => c.url.endsWith('/stop')).length, 0, 'Submitting must never stop the current run');
   assert.equal(sessions[7].queue.items[0].prompt, 'Add keyboard navigation');
   assert.match($('queue-items').textContent, /Add keyboard navigation/);
+  assert.match($('toast').textContent, /runs next, in order/);
   assert.equal($('prompt').value, '');
   failQueue = true; await submit('Keep this after failure');
   assert.equal($('prompt').value, 'Keep this after failure');
@@ -97,6 +98,9 @@ const submit = async text => { type(text); $('brief-form').requestSubmit(); awai
   $('stop-run').click(); await tick(600);
   assert.equal(calls.filter(c => c.url.endsWith('/stop')).length, 1);
   assert.equal(sessions[7].queue.paused, true);
+  await submit('While paused');                                   // said at once, never a silent wait
+  assert.match($('toast').textContent, /follow-ups are paused: Stopped by you.*Resume/);
+  sessions[7].queue.items = sessions[7].queue.items.filter(x => x.prompt !== 'While paused');
   assert.match($('code-path').textContent, /Build.*Inspect.*Verify.*Keep/);
   const approvePlan = [...$('feed').querySelectorAll('button')].find(b => b.textContent.includes('Build it'));
   assert.ok(approvePlan, 'The plan offers its explicit Build it action');

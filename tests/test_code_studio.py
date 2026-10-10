@@ -287,6 +287,25 @@ def test_approved_and_forgotten_memories_refresh_a_running_conversation(lab, mon
     assert lab.calls('claude')[-1]['stdin'] == 'Unchanged memory'
 
 
+def test_rewording_a_request_or_a_long_session_never_resends_unchanged_memory(lab, monkeypatch):
+    from agent import longterm
+    monkeypatch.setattr(longterm, '_embed', lambda text: None)
+    longterm.remember('For coding use strict type hints', kind='preference', source='approved', tags='code')
+    longterm.remember('Prefer pathlib over os.path for files', kind='preference', source='approved')
+    sid = wait(code_studio.start(lab.pid, 'First step', 'claude')['id'])['id']
+    # Words that match a different memory each time: the memory itself did not change.
+    for prompt in ('Use pathlib for the files here', 'Now add type hints', 'Tidy the files module'):
+        code_studio.send(sid, prompt); wait(sid)
+        assert lab.calls('claude')[-1]['stdin'] == prompt, 'no snapshot when only the wording changed'
+    for _ in range(600):                                   # past the 500 events one page of the feed holds
+        code_studio.event(sid, 'note', text='filler')
+    code_studio.send(sid, 'Still the same memory'); wait(sid)
+    assert lab.calls('claude')[-1]['stdin'] == 'Still the same memory'
+    longterm.remember('Never add new dependencies to my code', kind='preference', source='approved', tags='code')
+    code_studio.send(sid, 'Carry on'); wait(sid)
+    assert 'Updated Apex memory snapshot.' in lab.calls('claude')[-1]['stdin'], 'a real change still goes'
+
+
 def test_generated_images_are_shown_even_when_git_ignores_them(lab, monkeypatch):
     from PIL import Image
     original = code_engines.turn

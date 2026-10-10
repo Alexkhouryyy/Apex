@@ -1523,7 +1523,7 @@ async def chat_endpoint(request: Request):
     # it, nor continue a thread (and its memory) that did.
     from agent import companion as _companion
     owner = _owner(request)
-    code_tools = frozenset() if owner else _companion.CODE_TOOLS
+    code_tools = frozenset() if owner else _companion.OWNER_TOOLS
     if code_tools and conversations.owner_only(thread_id):
         return JSONResponse({"error": "This conversation is the owner's (master dashboard token)."}, status_code=403)
 

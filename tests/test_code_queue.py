@@ -206,3 +206,80 @@ def test_queue_routes_require_owner_and_same_site(controlled, monkeypatch):
         response = client.post(f'/api/code/sessions/{sid}/queue', json={'prompt': 'Next', 'request_id': 'route-request'})
         assert response.status_code == 200 and len(response.json()['items']) == 1
         assert client.post(f'/api/code/sessions/{sid}/queue', headers={'Origin': 'https://untrusted.example'}, json={'prompt': 'Next'}).status_code == 403
+
+
+def test_a_stop_with_nothing_queued_never_holds_a_later_followup(controlled):
+    sid, calls, release, result = controlled
+    result['status'] = 'stopped'
+    code.stop(sid)                                        # nothing waiting yet
+    release.set()
+    until(lambda: not code.session(sid)['working'])
+    assert not code.session(sid)['queue']['paused'], 'a pause with nothing queued holds nothing'
+    result['status'] = 'done'
+    code.enqueue(sid, 'Add tests later', request_id='later-request-01')
+    until(lambda: len(calls) == 2 and not code.session(sid)['working'] and not code.session(sid)['operation'])
+    assert 'Add tests later' in calls[1][1]
+
+
+def test_an_old_automatic_pause_is_cleared_when_the_queue_is_empty(controlled):
+    sid, calls, release, _ = controlled
+    release.set()
+    until(lambda: not code.session(sid)['working'] and not code.session(sid)['operation'])
+    with code._lock:                                      # a pause left by the version before this fix
+        code._pause_queue_locked(sid, 'Stopped by you. Follow-ups will wait until you resume them.')
+    code.enqueue(sid, 'Run me', request_id='after-old-pause')
+    until(lambda: len(calls) == 2 and not code.session(sid)['working'] and not code.session(sid)['operation'])
+    # Your own pause is kept, even with nothing waiting.
+    code.pause_queue(sid)
+    code.enqueue(sid, 'Wait for me', request_id='after-your-pause')
+    time.sleep(.3)
+    assert len(calls) == 2 and code.session(sid)['queue']['paused']
+
+
+def test_removing_the_last_waiting_followup_clears_an_automatic_pause(controlled):
+    sid, calls, release, result = controlled
+    result['status'] = 'failed'
+    code.enqueue(sid, 'Will be removed', request_id='remove-me-0001')
+    release.set()
+    until(lambda: not code.session(sid)['working'] and code.session(sid)['queue']['paused'])
+    code.remove_queued(sid, 'remove-me-0001')
+    assert not code.session(sid)['queue']['paused']
+
+
+def test_a_followup_waits_for_checks_then_runs(controlled, monkeypatch):
+    sid, calls, release, _ = controlled
+    release.set()
+    until(lambda: not code.session(sid)['working'] and not code.session(sid)['operation'])
+    with code._lock:                                      # the checks are running
+        code._side[sid] = 'checks-run'
+    code.enqueue(sid, 'After the checks', request_id='after-checks-01')
+    time.sleep(.3)
+    assert len(calls) == 1 and not code.session(sid)['queue']['paused'], 'it waits, it does not pause'
+    with code._lock:
+        code._side.pop(sid, None)
+    code._kick_waiting()                                  # what the checks' end does
+    until(lambda: len(calls) == 2)
+
+
+def test_a_followup_waits_for_a_free_slot_instead_of_pausing(controlled, monkeypatch):
+    sid, calls, release, _ = controlled
+    release.set()
+    until(lambda: not code.session(sid)['working'] and not code.session(sid)['operation'])
+    monkeypatch.setattr(code, 'MAX_PARALLEL', 1)
+    with code._lock:                                      # another session holds the only slot
+        code._turns[-1] = 'other-run'
+    code.enqueue(sid, 'When a slot frees', request_id='slot-request-01')
+    time.sleep(.3)
+    assert len(calls) == 1 and not code.session(sid)['queue']['paused']
+    with code._lock:
+        code._turns.pop(-1, None)
+    code._kick_waiting()                                  # what the other turn's end does
+    until(lambda: len(calls) == 2)
+
+
+def test_a_followup_on_the_other_plan_never_gets_this_plans_model(controlled):
+    sid, calls, release, _ = controlled
+    code._set(sid, model='opus', effort='max')
+    code.enqueue(sid, 'Over to ChatGPT', engine='chatgpt', request_id='switch-request-1')
+    q = code.session(sid)['queue']['items'][0]
+    assert (q['model'], q['effort']) == ('', '')

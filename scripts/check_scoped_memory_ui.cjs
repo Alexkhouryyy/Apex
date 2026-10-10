@@ -2,7 +2,9 @@ const {JSDOM}=require('jsdom'),fs=require('fs'),assert=require('node:assert/stri
 const dom=new JSDOM(fs.readFileSync('dashboard/static/index.html','utf8'),{url:'http://localhost:7860',runScripts:'outside-only'});
 const w=dom.window,d=w.document;
 let records=[{id:'unit',text:'<img src=x onerror=alert(1)>',domain:'work',purposes:['answer'],source:'owner-input',inferred:false,provenance:['raw'],expires_at:null}],failed=false;
+const saved=[];let reloaded=0;w.loadMemory=()=>{reloaded++;};
 w.api=async(url,options={})=>{
+ if(url==='/api/memories'&&options.method==='POST'){saved.push(JSON.parse(options.body));return {result:'Remembered'};}
  if(options.method==='POST'){
   if(failed)throw Error('Disconnected; evidence remains saved');
   if(url.endsWith('/forget')){records=[];return {deleted:['unit','derived']};}
@@ -16,9 +18,16 @@ const tick=()=>new Promise(r=>setTimeout(r,0));
  await w.ApexScopedMemory.load();
  const root=d.getElementById('scoped-memory-list');
  assert.equal(root.querySelector('img'),null);assert.match(root.textContent,/Observed.*owner-input/);
+ assert.equal(d.getElementById('scoped-research').hidden,false,'research records are shown, labelled as unused');
  failed=true;root.querySelector('button').click();await tick();
  assert.equal(root.querySelector('button').disabled,false);assert.match(d.getElementById('scoped-memory-status').textContent,/Disconnected/);
  failed=false;root.querySelector('button').click();await tick();
  assert.equal(records.length,0);assert.match(d.getElementById('scoped-memory-status').textContent,/Deleted 2/);
- console.log('Scoped memory UI: escaping, source visibility, failed delete and deletion receipt passed');
+ await w.ApexScopedMemory.load();assert.equal(d.getElementById('scoped-research').hidden,true,'no research records: no research section');
+ // "Remember something" saves into Apex's real long-term memory, which turns read.
+ const form=d.getElementById('scoped-memory-form');form.elements.text.value='My dentist is on Tuesday';form.elements.kind.value='fact';
+ form.dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();await tick();
+ assert.deepEqual(saved,[{content:'My dentist is on Tuesday',kind:'fact'}]);assert.equal(reloaded,1,'the memory table reloads');
+ assert.match(d.getElementById('scoped-memory-status').textContent,/Apex will remember it/);
+ console.log('Scoped memory UI: escaping, source visibility, failed delete, deletion receipt, research labelled unused, and Remember saving to long-term memory passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

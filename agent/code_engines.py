@@ -91,6 +91,18 @@ def _file_option(o: dict, key: str, what: str) -> None:
         o[key] = ''
 
 
+# A request to MAKE an image, not any mention of one ("fix the logo alignment" isn't).
+IMAGE_REQUEST = re.compile(r'\b(generate|create|make|draw|design|render|produce|paint)\b[^.\n]{0,60}?'
+                           r'\b(images?|pictures?|illustrations?|logos?|banners?|icons?|artwork|wallpapers?)\b'
+                           r'|\bimagegen\b', re.I)
+
+
+def wants_images(text: str) -> bool:
+    """Whose words: Apex Code passes only the owner's own message (options['images']),
+    never its brief or recap, which mention images for other reasons."""
+    return bool(IMAGE_REQUEST.search(text or ''))
+
+
 def check_options(options: dict | None) -> dict:
     """Model, effort, plan-only, allowed commands, the brief file and the memory
     server's file for one message, checked: every value here ends up on a command line."""
@@ -558,7 +570,8 @@ def turn(engine: str, prompt: str, folder: Path, mode: str = 'safe', resume: str
     if (options or {}).get('plan'):
         prompt = f'{PLAN_ONLY}\n\n{prompt}'
     if engine == 'chatgpt' and mode != 'review':
-        if re.search(r'\b(image|images|picture|illustration|logo|banner|imagegen)\b', prompt, re.I):
+        images = (options or {}).get('images')
+        if wants_images(prompt) if images is None else images:
             prompt = ('For requested images, use your built-in image_gen/imagegen tool with this ChatGPT sign-in. '
                       'Save generated raster assets inside generated_images/ in this worktree so Apex can display them. '
                       'Never substitute a drawing for a requested generated image, or use API/Replicate credentials. '

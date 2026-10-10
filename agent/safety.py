@@ -24,7 +24,7 @@ _RULES: list[tuple[str, str, re.Pattern, str]] = [
     # Tier-4: outbound communications need explicit confirmation
     ("sms_send", "to", re.compile(r".+"), "sending an SMS to a real phone number"),
     ("call_user", "to", re.compile(r".+"), "placing an outbound voice call"),
-    ("generate_image", "prompt", re.compile(r".+"), "generating an image (uses Replicate credits)"),
+    ("generate_image", "prompt", re.compile(r".+", re.S), "generating an image (on your ChatGPT plan through Codex, or Replicate credits if REPLICATE_API_TOKEN is set)"),
     # IoT: irreversible or safety-critical HA actions require confirmation
     ("iot_call_service", "domain", re.compile(r"^(lock|alarm_control_panel)$", re.I), "controlling a lock or alarm"),
     ("iot_call_service", "service", re.compile(r"^(unlock|open_cover|disarm|trigger)$", re.I), "unlocking / opening / disarming an IoT device"),
@@ -86,7 +86,11 @@ def check(tool_name: str, inputs: dict) -> tuple[bool, str]:
             continue
         value = str(inputs.get(rule_key, ""))
         if pattern.search(value):
-            reason = f"Risky action: {description}\nTool: {tool_name}\nValue: {value[:120]}"
+            # An image request is handed to an agent: show all of it, not a teaser
+            # that could hide an instruction past the cut.
+            limit = 2000 if tool_name == "generate_image" else 120
+            shown = value[:limit] + (f"… ({len(value) - limit:,} more characters)" if len(value) > limit else "")
+            reason = f"Risky action: {description}\nTool: {tool_name}\nValue: {shown}"
             if _confirm_fn is None:
                 print(f"\n[Safety] {reason}")
                 answer = input("Proceed? (y/N): ").strip().lower()

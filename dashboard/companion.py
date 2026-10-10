@@ -507,7 +507,7 @@ async def companion_chat(request: Request, durable: bool = False):
                 channel_id=channel_id, cancel_event=cancel,
                 companion_mode=mode, screen_image=body.get("screen_image"),
                 max_iterations=1 if proactive else None, persona=persona,
-                screen_origin=screen_origin, withhold=frozenset() if owner else companion.CODE_TOOLS,
+                screen_origin=screen_origin, withhold=frozenset() if owner else companion.OWNER_TOOLS,
                 stage_memories=code_stage, by_owner=owner,
             )
             if cancel.is_set():

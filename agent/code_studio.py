@@ -51,6 +51,7 @@ import re
 import secrets
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -100,6 +101,10 @@ def _busy_locked(sid: int) -> bool:
     return sid in _turns or sid in _side or sid in _terms or sid in _operations
 
 
+class AtCapacity(CodeError):
+    """MAX_PARALLEL sessions are working: a queued follow-up waits for a free slot."""
+
+
 def _exclusive(call):
     """Reserve before reading files/proof, until a mutation or async start ends.
 
@@ -124,8 +129,7 @@ def _exclusive(call):
             with _lock:
                 _operations.pop(sid, None)
                 _stopped_preparations.discard(sid)
-            if call.__name__ == 'send':
-                _kick_queue(sid)
+            _kick_waiting()
     return reserved
 
 
@@ -206,7 +210,9 @@ def init_db() -> None:
                          ('queue_paused', 'INTEGER NOT NULL DEFAULT 0'), ('queue_reason', "TEXT NOT NULL DEFAULT ''"),
                          ('check_evidence', "TEXT NOT NULL DEFAULT ''"),
                          # origin: 'you', or 'night' for a Work task Apex took on its own overnight (task_id).
-                         ('origin', "TEXT NOT NULL DEFAULT 'you'"), ('task_id', 'INTEGER')):
+                         ('origin', "TEXT NOT NULL DEFAULT 'you'"), ('task_id', 'INTEGER'),
+                         # brief_sig: what the conversation was last told it knows (memory_signature).
+                         ('brief_sig', "TEXT NOT NULL DEFAULT ''")):
             if col not in have:
                 db.execute(f'ALTER TABLE code_sessions ADD COLUMN {col} {ddl}')
         # checks_exit_ok: this project's test runner prints no count, so exit 0 is taken as a pass.
@@ -460,9 +466,26 @@ def _queue_state(sid: int) -> dict:
             'items': [{'id': r[0], 'prompt': r[1], **json.loads(r[2]), 'created': r[3]} for r in items]}
 
 
+PAUSED_BY_YOU = 'Paused by you. The current step can finish.'
+
+
 def _pause_queue_locked(sid: int, reason: str) -> None:
     _set(sid, queue_paused=1, queue_reason=reason)
     event(sid, 'queue', action='paused', reason=reason)
+
+
+def _pause_waiting_locked(sid: int, reason: str) -> None:
+    """Pause only follow-ups that are already waiting. A pause with nothing queued
+    would silently hold a follow-up added much later, under a stale reason."""
+    if _queue_state(sid)['items']:
+        _pause_queue_locked(sid, reason)
+
+
+def _clear_empty_pause_locked(sid: int) -> None:
+    """Nothing left waiting: an automatic pause has nothing left to protect."""
+    q = _queue_state(sid)
+    if q['paused'] and not q['items'] and q['reason'] != PAUSED_BY_YOU:
+        _set(sid, queue_paused=0, queue_reason='')
 
 
 def enqueue(sid: int, prompt: str, engine=None, mode=None, model=None, effort=None,
@@ -474,8 +497,10 @@ def enqueue(sid: int, prompt: str, engine=None, mode=None, model=None, effort=No
     if engine not in ENGINES or mode not in MODES:
         raise CodeError('Choose a Claude or ChatGPT plan and safe or full mode.')
     try:
-        opts = code_engines.check_options({'model': s['model'] if model is None else model,
-                                          'effort': s['effort'] if effort is None else effort, 'plan': plan})
+        same = engine == s['engine']                # the session's model never goes to the other plan
+        opts = code_engines.check_options({'model': (s['model'] if same else '') if model is None else model,
+                                          'effort': (s['effort'] if same else '') if effort is None else effort,
+                                          'plan': plan})
     except ValueError as exc:
         raise CodeError(str(exc)) from exc
     opts = {k: opts[k] for k in ('model', 'effort', 'plan')}
@@ -496,19 +521,20 @@ def enqueue(sid: int, prompt: str, engine=None, mode=None, model=None, effort=No
             count = db.execute("SELECT COUNT(*) FROM code_queue WHERE session_id=? AND state IN ('queued','dispatching')", (sid,)).fetchone()[0]
             if count >= MAX_QUEUED:
                 raise CodeError(f'At most {MAX_QUEUED} follow-ups can wait. Remove one first.')
+        if not count:
+            _clear_empty_pause_locked(sid)        # an old pause (Stop, a plan) held nothing back
+        with longterm._conn() as db:
             db.execute('INSERT INTO code_queue (id, session_id, prompt, options, created) VALUES (?,?,?,?,?)',
                        (key, sid, prompt, json.dumps(opts), time.time()))
         event(sid, 'queue', action='added', item_id=key)
-        if _busy_locked(sid) and sid not in _turns:
-            _pause_queue_locked(sid, 'Another operation is running. Resume the follow-ups when it finishes.')
-    _kick_queue(sid)
+    _kick_queue(sid)                           # busy: it waits, and runs when the operation ends
     return _queue_state(sid)
 
 
 def pause_queue(sid: int) -> dict:
     session(sid)
     with _lock:
-        _pause_queue_locked(sid, 'Paused by you. The current step can finish.')
+        _pause_queue_locked(sid, PAUSED_BY_YOU)
     return _queue_state(sid)
 
 
@@ -534,7 +560,22 @@ def remove_queued(sid: int, item_id: str) -> dict:
         if not changed:
             raise CodeError('That follow-up has already started or was removed.')
         event(sid, 'queue', action='removed', item_id=item_id)
+        _clear_empty_pause_locked(sid)
     return _queue_state(sid)
+
+
+def _kick_waiting() -> None:
+    """An operation or turn ended: start every session's waiting follow-ups that
+    can run now (its own, and others that were waiting for a free slot)."""
+    try:
+        with longterm._conn() as db:
+            ids = [r[0] for r in db.execute(
+                "SELECT DISTINCT q.session_id FROM code_queue q JOIN code_sessions s ON s.id = q.session_id "
+                "WHERE q.state='queued' AND s.queue_paused=0 AND s.status='ready' ORDER BY q.created")]
+    except sqlite3.OperationalError:
+        return
+    for sid in ids:
+        _kick_queue(sid)
 
 
 def _kick_queue(sid: int) -> None:
@@ -550,8 +591,8 @@ def _drain_queue(sid: int) -> None:
     init_db()
     with _lock:
         q = _queue_state(sid)
-        if _busy_locked(sid) or q['paused'] or not q['items']:
-            return
+        if _busy_locked(sid) or q['paused'] or not q['items'] or len(_turns) >= MAX_PARALLEL:
+            return                             # waits; _kick_waiting starts it when a slot frees
         with longterm._conn() as db:
             state = db.execute('SELECT status FROM code_sessions WHERE id=?', (sid,)).fetchone()
             if not state or state[0] != 'ready':
@@ -574,7 +615,8 @@ def _drain_queue(sid: int) -> None:
         with _lock:
             with longterm._conn() as db:
                 db.execute("UPDATE code_queue SET state='queued' WHERE id=?", (item['id'],))
-            _pause_queue_locked(sid, f'Follow-up did not start: {str(exc)[:400]}')
+            if not isinstance(exc, AtCapacity):  # another session took the last slot: just wait
+                _pause_queue_locked(sid, f'Follow-up did not start: {str(exc)[:400]}')
     finally:
         with _lock:
             _operations.pop(sid, None)
@@ -729,6 +771,17 @@ def _brief(s: dict, prompt: str, about: str = '', memory: bool = False) -> str:
             f"{owner}'s request:\n{prompt}")
 
 
+def _last_brief_sources(sid: int) -> list:
+    """The newest brief this session sent (sessions from before brief_sig existed)."""
+    with longterm._conn() as db:
+        row = db.execute("SELECT data FROM code_events WHERE session_id=? AND kind='you' AND data LIKE ? "
+                         'ORDER BY id DESC LIMIT 1', (sid, '%"brief"%')).fetchone()
+    try:
+        return list(json.loads(row[0])['brief']['sources']) if row else []
+    except (ValueError, KeyError, TypeError):
+        return []
+
+
 def _brain(s: dict, prompt: str) -> dict | None:
     """Current knowledge, including an empty snapshot after the last item is forgotten.
     It never stops a message: if it can't be gathered, the session starts without it."""
@@ -827,7 +880,7 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
         if sid in _side:
             raise CodeError('Wait for the review or the checks to finish, or press Stop.')
         if len(_turns) >= MAX_PARALLEL:
-            raise CodeError(f'{MAX_PARALLEL} sessions are already working. Wait for one to finish.')
+            raise AtCapacity(f'{MAX_PARALLEL} sessions are already working. Wait for one to finish.')
         run_id = f'code-{sid}-{int(time.time() * 1000)}'
         _turns[sid] = run_id
     try:
@@ -842,14 +895,21 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
         fresh = first or switched or not s['engine_session']
         current_block = _brain(s, prompt)
         block = current_block if fresh and current_block and current_block['text'] else None
+        # What changed in what Apex knows, not in the words of this message: the
+        # signature leaves out memories matched to the prompt, so rewording a request
+        # never re-sends the whole snapshot. It is stored on the session, so a long
+        # session compares against what it was really told last.
+        stable = _brain(s, '') if current_block else None
+        sig = code_brain.memory_signature(stable['sources']) if stable else ''
         if not fresh and current_block:
-            prior = next((e.get('brief', {}).get('sources', []) for e in reversed(events(sid)) if e.get('brief')), [])
-            if code_brain.memory_signature(prior) != code_brain.memory_signature(current_block['sources']):
+            told = s.get('brief_sig') or code_brain.memory_signature(_last_brief_sources(sid))
+            if sig != told:
                 block = current_block
         about = block['text'] if block and engine == 'chatgpt' else ''
         if engine == 'claude':
             options['system_file'] = _system_file(sid, block, fresh)
         options['mcp_file'] = _memory_server(s)
+        options['images'] = code_engines.wants_images(prompt)   # the owner's words only
         if first:
             text = _brief(s, prompt, about, memory=bool(options['mcp_file']))
         elif switched or not s['engine_session']:
@@ -877,6 +937,7 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
             event(sid, 'note', text=f'Switched to your {we.NAMES[engine]}. It gets a recap of the session so far.')
         resume = None if (switched or first) else s['engine_session']
         _set(sid, engine=engine, mode=mode, model=model, effort=effort, turn_state='working',
+             **({'brief_sig': sig} if block else {}),
              **({'engine_session': None} if switched else {}))
         _note_sent(sid, s['pending_note'])
         with _lock:
@@ -950,7 +1011,7 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
             if result['status'] != 'done' or not saved or (options or {}).get('plan') or asks:
                 reason = ('checkpoint not saved' if not saved else result['status'] if result['status'] != 'done'
                           else 'blocked command needs attention' if asks else 'plan ready')
-                _pause_queue_locked(sid, 'Review this step before resuming follow-ups: ' + reason)
+                _pause_waiting_locked(sid, 'Review this step before resuming follow-ups: ' + reason)
         # A queue-state event belongs to this step; its completion remains last.
         event(sid, 'done', status=result['status'], summary=(result.get('summary') or '')[:6000], seconds=took,
               files=files, total=total, engine=engine, tokens=result.get('tokens'),
@@ -982,7 +1043,7 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
             _ask_phone(sid, s['title'], engine, asks, night=s['origin'] == 'night')
         with _lock:                                       # last: "not working" means everything above is done
             _turns.pop(sid, None)
-        _kick_queue(sid)
+        _kick_waiting()
 
 
 def _notify(sid: int, title: str, status: str, files: int) -> None:
@@ -1287,7 +1348,7 @@ def stop(sid: int) -> bool:
     """Stop whatever is running in the session, even if it is only just starting."""
     session(sid)
     with _lock:
-        _pause_queue_locked(sid, 'Stopped by you. Follow-ups will wait until you resume them.')
+        _pause_waiting_locked(sid, 'Stopped by you. Follow-ups will wait until you resume them.')
         if sid in _operations:
             _stopped_preparations.add(sid)
         ids = [x for x in (_turns.get(sid), _side.get(sid), _terms.get(sid)) if x]
@@ -1579,6 +1640,7 @@ def review(sid: int, engine: str | None = None) -> dict:
                     print(f'[Code] could not rest the plan: {exc}')
             with _lock:
                 _side.pop(sid, None)
+            _kick_waiting()
     threading.Thread(target=go, daemon=True, name=f'ApexCodeReview-{sid}').start()
     return session(sid)
 
@@ -1665,6 +1727,7 @@ def run_checks(sid: int) -> dict:
             _set(sid, check_state=state, check_output=out, check_sha=sha, check_evidence=why)
             with _lock:
                 _side.pop(sid, None)
+            _kick_waiting()
     threading.Thread(target=go, daemon=True, name=f'ApexCodeChecks-{sid}').start()
     return session(sid)
 
@@ -2333,6 +2396,7 @@ def terminal(sid: int, command: str) -> dict:
             event(sid, 'term_done', ref=ref, exit_code=code, output=text[-6000:], seconds=round(time.time() - started))
             with _lock:
                 _terms.pop(sid, None)
+            _kick_waiting()
     threading.Thread(target=go, daemon=True, name=f'ApexCodeTerm-{sid}').start()
     return session(sid)
 

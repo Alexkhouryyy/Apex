@@ -1381,7 +1381,7 @@ TOOLS = [
     },
     {
         "name": "run_dependency_plan",
-        "description": "Run a bounded specialist DAG only for confidently separable branches. Coupled or uncertain plans return to you for single-agent execution. Workers see only declared predecessor artifacts and retain existing role/permission gates.",
+        "description": "Run a bounded specialist DAG only for confidently separable branches. Coupled or uncertain plans (confidence under 0.8) return to you for single-agent execution. Workers see only declared predecessor artifacts and retain existing role/permission gates. The whole plan gets at most 10 minutes and stops with the turn; never use it in a quick voice exchange.",
         "input_schema": {
             "type": "object", "properties": {
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
@@ -1390,7 +1390,7 @@ TOOLS = [
                               "id": {"type": "string"}, "role": {"type": "string"},
                               "task": {"type": "string"}, "depends_on": {"type": "array", "items": {"type": "string"}}},
                               "required": ["id", "role", "task", "depends_on"]}}},
-            "required": ["nodes"]},
+            "required": ["nodes", "confidence"]},
     },
     {
         "name": "spawn_subagent",
@@ -2237,6 +2237,8 @@ _tool_observer = None
 # {'who', 'project_id', 'session_id'}; the Code page lists it under that project.
 _STAGE_REMEMBER: contextvars.ContextVar[dict | None] = contextvars.ContextVar("apex_stage_remember", default=None)
 _TURN_OWNER: contextvars.ContextVar[bool] = contextvars.ContextVar("apex_turn_owner", default=False)
+# The turn's Stop: a tool that waits a long time (run_dependency_plan) checks it.
+_TURN_CANCEL: contextvars.ContextVar = contextvars.ContextVar("apex_turn_cancel", default=None)
 
 
 @contextlib.contextmanager
@@ -2252,11 +2254,13 @@ def _staging_memories(stage: dict | None):
 
 
 @contextlib.contextmanager
-def _owner_turn(by_owner: bool):
+def _owner_turn(by_owner: bool, cancel_event=None):
     token = _TURN_OWNER.set(by_owner is True)
+    cancel = _TURN_CANCEL.set(cancel_event)
     try:
         yield
     finally:
+        _TURN_CANCEL.reset(cancel)
         _TURN_OWNER.reset(token)
 
 
@@ -3062,7 +3066,8 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
         elif name == "spawn_subagent":
             return orchestrator.spawn(inputs["role"], inputs["task"], inputs.get("use_thinking", False))
         elif name == "run_dependency_plan":
-            return json.dumps(orchestrator.run_plan(inputs["nodes"], confidence=inputs.get("confidence", 0.0)), indent=2)
+            return json.dumps(orchestrator.run_plan(inputs["nodes"], confidence=inputs.get("confidence", 0.0),
+                                                    cancel=_TURN_CANCEL.get()), indent=2)
         elif name == "wait_for_subagents":
             return json.dumps(
                 orchestrator.wait_for(inputs.get("sub_ids") or None, inputs.get("timeout_seconds", 300)),
@@ -3907,14 +3912,14 @@ class AgentCore:
         incident_replay.require_live_turn()
         from agent import companion
         if withhold is None:
-            withhold = companion.CODE_TOOLS
+            withhold = companion.OWNER_TOOLS
         if companion_mode is not None and companion_mode not in {"discuss", "work", "observe"}:
             raise ValueError("Companion mode must be discuss or work.")
         screen_b64 = companion.validate_screen_image(screen_image)
         memory, lock = self._get_channel(channel_id)
         from agent import continuity, memory_governance
         governed_scope = memory_governance.use(memory_context) if memory_context is not None else contextlib.nullcontext()
-        with governed_scope, lock, incident_replay.record_turn(channel_id), continuity.turn(channel_id), _staging_memories(stage_memories), _owner_turn(by_owner), \
+        with governed_scope, lock, incident_replay.record_turn(channel_id), continuity.turn(channel_id), _staging_memories(stage_memories), _owner_turn(by_owner, cancel_event), \
                 continuity.conversation(channel_id, self, memory, user_text) as memory:
             if cancel_event is not None and cancel_event.is_set():
                 return "[turn interrupted]"
