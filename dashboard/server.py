@@ -151,6 +151,8 @@ app.include_router(research_router)
 from dashboard.work import router as work_router
 app.include_router(work_router)
 from dashboard.code import router as code_router
+from dashboard.code_ide import router as code_ide_router
+app.include_router(code_ide_router)
 app.include_router(code_router)
 from dashboard.environment import router as environment_router
 app.include_router(environment_router)
@@ -223,16 +225,37 @@ async def _auth(request: Request, call_next):
     # CORSMiddleware can answer it.
     if request.method == "OPTIONS":
         return await call_next(request)
+
+    async def dispatch():
+        # CORS controls response visibility, not whether a simple cross-site
+        # POST executes. Protect every mutation, including tokenless localhost.
+        # Signed inbound webhooks authenticate in their own handlers instead.
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path not in _WEBHOOK_PATHS:
+            origin = request.headers.get("origin", "")
+            extension = origin.startswith(("chrome-extension://", "moz-extension://"))
+            if not (extension and getattr(request.state, "bearer_authenticated", False)):
+                from dashboard.companion import _check_origin
+                try:
+                    _check_origin(request)
+                except HTTPException:
+                    return JSONResponse({"error": "Use the same origin as your Apex dashboard."}, status_code=403)
+        return await call_next(request)
+
     token = config.DASHBOARD_TOKEN
+    if request.url.path.startswith('/code/ide/'):
+        from dashboard.code_ide import authenticate
+        if not authenticate(request, token):
+            return JSONResponse({'error': 'Open Full IDE from Apex Code.'}, status_code=401)
+        return await dispatch()
     if request.url.path.startswith('/world/engine/'):
         from dashboard.world_engine import authenticate
         if not authenticate(request, token):
             if request.method == 'GET' and request.url.path == '/world/engine/' and request.headers.get('sec-fetch-dest') in ('document', 'iframe'):
                 return FileResponse(STATIC_DIR / 'world-engine.html')
             return JSONResponse({'error': 'Sign in to Apex to open World View.'}, status_code=401)
-        return await call_next(request)
+        return await dispatch()
     if not token:
-        return await call_next(request)
+        return await dispatch()
     path = request.url.path
     # Allow the SPA shell + static assets so the login overlay can load.
     # PWA entry points (manifest + service worker) must also load pre-auth so the
@@ -247,8 +270,8 @@ async def _auth(request: Request, call_next):
     # would hand out `/board/prop/...` unauthenticated.
     if (path == "/" or path.startswith("/static/") or path == "/health"
             or path == "/study" or path == "/board" or path == "/companion" or path == "/drive" or path == "/apps" or path == "/home" or path == "/setup" or path == "/apocalypse" or path == "/world" or path == "/world/basic" or path == "/voices" or path == "/missions" or path == "/work" or path == "/code"
-            or path == "/sw.js" or path == "/manifest.webmanifest"):
-        return await call_next(request)
+            or path == "/api/setup/access" or path == "/sw.js" or path == "/manifest.webmanifest"):
+        return await dispatch()
     # Inbound webhooks can't present a bearer token, so they authenticate
     # themselves instead — see dashboard/webhook_auth.py and each handler.
     # This exemption is only safe because EVERY path below verifies a signature
@@ -256,7 +279,7 @@ async def _auth(request: Request, call_next):
     # an unauthenticated route into an agent with shell access; the startup
     # audit prints the state of each one so that cannot happen quietly again.
     if path in _WEBHOOK_PATHS:
-        return await call_next(request)
+        return await dispatch()
     ip = request.client.host if request.client else "?"
     if _throttle.is_locked(ip):
         return Response("Too many attempts. Try again later.", status_code=429)
@@ -268,16 +291,24 @@ async def _auth(request: Request, call_next):
         # can require master.
         if hmac.compare_digest(provided, token):
             request.state.is_master = True
-            return await call_next(request)
+            request.state.bearer_authenticated = True
+            return await dispatch()
         try:
             from agent import access_tokens
             if access_tokens.verify(provided):
                 request.state.is_master = False
-                return await call_next(request)
+                request.state.bearer_authenticated = True
+                return await dispatch()
         except Exception:
             pass
     _throttle.record_failure(ip)
     return Response("Unauthorized", status_code=401)
+
+
+def _require_master_approval(request: Request) -> None:
+    """Approval gates and self-modification require an authenticated owner."""
+    if not getattr(request.state, "is_master", False):
+        raise HTTPException(403, "Sign in with DASHBOARD_TOKEN to manage approvals or self-modifications.")
 
 
 @app.get("/health")
@@ -519,12 +550,14 @@ def get_selfmod():
 
 
 @app.post("/api/selfmod/prompt")
-def update_prompt(payload: dict):
+def update_prompt(payload: dict, request: Request):
+    _require_master_approval(request)
     return {"result": self_mod.update_system_prompt(payload["addition"], replace=payload.get("replace", False))}
 
 
 @app.post("/api/selfmod/revert")
-def revert_selfmod(payload: dict = None):
+def revert_selfmod(request: Request, payload: dict = None):
+    _require_master_approval(request)
     return {"result": self_mod.revert(restore_backup=(payload or {}).get("restore_backup", False))}
 
 
@@ -613,14 +646,20 @@ def budget_get():
         **cfg,
         "today_spend":   budget_mod.today_spend(),
         "session_spend": budget_mod.session_spend(),
+        **budget_mod.reservations(),
     }
 
 
 @app.post("/api/budget")
 async def budget_post(request: Request):
+    if not _require_master(request):
+        raise HTTPException(403, "Only the master token can change spending limits.")
     body = await request.json()
     allowed = {"daily_usd", "session_usd", "enabled"}
-    budget_mod.set_config({k: v for k, v in body.items() if k in allowed})
+    try:
+        budget_mod.set_config({k: v for k, v in body.items() if k in allowed})
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc))
     return {"ok": True}
 
 
@@ -1153,17 +1192,18 @@ def auth_tokens_revoke(token_id: int, request: Request):
 
 
 @app.get("/api/pending-actions")
-def pending_actions_list():
-    """List cortex actions awaiting user approval."""
+def pending_actions_list(status: str = "pending"):
+    """List cortex actions; running/unknown/failed states are inspectable too."""
     try:
         from agent import cortex as _cortex
-        return {"actions": _cortex.list_pending("pending")}
+        return {"actions": _cortex.list_pending(status)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/api/pending-actions/{action_id}/approve")
-def pending_actions_approve(action_id: int):
+def pending_actions_approve(action_id: int, request: Request):
+    _require_master_approval(request)
     try:
         from agent import cortex as _cortex
         result = _cortex.approve_action(action_id)
@@ -1173,7 +1213,8 @@ def pending_actions_approve(action_id: int):
 
 
 @app.post("/api/pending-actions/{action_id}/reject")
-def pending_actions_reject(action_id: int):
+def pending_actions_reject(action_id: int, request: Request):
+    _require_master_approval(request)
     try:
         from agent import cortex as _cortex
         result = _cortex.reject_action(action_id)
@@ -1345,7 +1386,8 @@ def _pct(rate) -> str:
 
 
 @app.post("/api/forged-tools/{tool_id}/approve")
-def forged_tools_approve(tool_id: int):
+def forged_tools_approve(tool_id: int, request: Request):
+    _require_master_approval(request)
     try:
         from agent import skill_forge as _forge
         result = _forge.approve_forged(tool_id)
@@ -1357,7 +1399,8 @@ def forged_tools_approve(tool_id: int):
 
 
 @app.post("/api/forged-tools/{tool_id}/reject")
-def forged_tools_reject(tool_id: int):
+def forged_tools_reject(tool_id: int, request: Request):
+    _require_master_approval(request)
     try:
         from agent import skill_forge as _forge
         result = _forge.reject_forged(tool_id)
@@ -1378,6 +1421,19 @@ def staged_writes_list():
 
 @app.post("/api/staged-writes/{write_id}/approve")
 def staged_writes_approve(write_id: str, request: Request):
+    # Devices can approve data without vouching for it as owner-authored. Code,
+    # instructions, outbound messages and bulk approval are owner authority.
+    if not _require_master(request):
+        if write_id.lower() == "all":
+            _require_master_approval(request)
+        try:
+            numeric_id = int(write_id)
+        except ValueError:
+            raise HTTPException(400, "Invalid staged write identifier.")
+        with longterm._conn() as conn:
+            row = conn.execute("SELECT kind FROM staged_writes WHERE id = ?", (numeric_id,)).fetchone()
+        if not row or row[0] not in {"memory", "note", "remember", "goal_proposal"}:
+            _require_master_approval(request)
     try:
         from agent import approvals as _appr
         return {"ok": True, "result": _appr.approve(write_id, by_owner=_owner(request))}
@@ -1386,7 +1442,8 @@ def staged_writes_approve(write_id: str, request: Request):
 
 
 @app.post("/api/staged-writes/{write_id}/reject")
-def staged_writes_reject(write_id: str):
+def staged_writes_reject(write_id: str, request: Request):
+    _require_master_approval(request)
     try:
         from agent import approvals as _appr
         return {"ok": True, "result": _appr.reject(write_id)}

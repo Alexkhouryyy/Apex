@@ -192,9 +192,8 @@
     const g = $('greeting'); g.replaceChildren(greeting() + (name ? ', ' : '.'));
     if (name) { g.append(el('span', 'name', name), '.'); }
     const ready = ov.plans.filter(p => p.ready), down = ov.plans.filter(p => !p.ready);
-    $('greet-sub').textContent = !down.length ? 'Both plans are ready. Zero API credits. What are we building?'
-      : ready.length ? `Your ${down[0].name} ${down[0].why}. Your ${ready[0].name} has you covered. What are we building?`
-      : `Neither plan is ready: ${down[0].how || 'run Setup-Apex-Work-Plans.cmd'}`;
+    $('greet-sub').textContent = ready.length ? 'Open a workspace to edit and run your project, or ask your connected agent to build.'
+      : 'Open a workspace to edit and run your project. Connect a coding plan in Setup when you want the agent to build.';
     const w = ov.week, week = $('week'); week.replaceChildren();
     for (const [v, label, cls] of [[w.sessions, 'sessions this week', ''], [w.kept, `kept · ${w.proved || 0} proved`, ''],
       [w.rating == null ? '–' : `${w.rating}/10`, 'average rating', ''], [`${w.minutes}m`, 'of AI work', ''], ['$0', 'API credits', 'good']]) {
@@ -348,13 +347,14 @@
       if (await runTerminal(text.slice(1).trim())) clearSentDraft(key, text);
       return;
     }
+    if (current && window.ApexWorkspace && !await window.ApexWorkspace.beforeOperation()) return;
     saveDraft(); submitting = true; renderEngine();
     const sid = current, key = draftContext, pid = project;
     const opts = {engine, mode, model, effort, plan: planFirst};
     try {
       if (!sid) {
         if (!pid) throw new Error('Add a project first.');
-        const s = await post('/api/code/sessions', {project_id: pid, prompt: text, ...opts});
+        const s = await post('/api/code/sessions', {project_id: pid, prompt: text, ...opts, include_changes:$('include-changes').checked});
         clearSentDraft(key, text);
         if (draftContext === key) { planFirst = false; await open(s.id); }
       } else {
@@ -402,7 +402,7 @@
     const active = finished ? 3 : working || waiting || !changed ? 0 : proved ? 3 : 2;
     root.replaceChildren(...['Build', 'Inspect', 'Verify', 'Keep'].map((name, i) => {
       const b = button(`${i + 1} ${name}`, () => {
-        if (i === 0) $('prompt').focus();
+        if (i === 0) { window.ApexWorkspace?.chooseView('agent'); $('prompt').focus(); }
         else if (i === 1) tab('changes');
         else if (i === 2) { tab('changes'); $('box-checks').scrollIntoView({block: 'nearest'}); $('k-go').focus(); }
         else keepIt(false);
@@ -467,11 +467,13 @@
     (view === 'home' ? $('home-slot') : $('session-slot')).append($('brief-form'));
   }
   async function open(id) {
+    if (current !== id && (await window.ApexCodeIDE?.beforeLeaving()) === false) return;
     saveDraft();
     // The old session's stream, typing and voice end here, before anything is awaited:
     // its next step must never land in this feed (or move lastId), nor be said out loud.
     disconnect(); celineStop(); initial = true; liveSeen = -1; live = null;
     current = id; detail = null; lastId = 0; feed = {turn: null, root: $('feed'), yous: 0}; proof = null; proofDue = true; $('celine-card').hidden = true;
+    window.ApexWorkspace?.switchContext();
     $('feed').replaceChildren(); show('session');
     restoreDraft();
     if (location.hash !== `#s=${id}`) history.replaceState(null, '', `#s=${id}`);
@@ -494,10 +496,12 @@
     connect(id);
     schedule(400);
   }
-  function home() {
+  async function home() {
+    if ((await window.ApexCodeIDE?.beforeLeaving()) === false) return;
     saveDraft();
     saveChoice();
     current = null; detail = null; files = null; proof = null; show('home'); disconnect(); celineStop(); $('celine-card').hidden = true;
+    window.ApexWorkspace?.switchContext();
     window.ApexCodeUsage?.render(null);
     history.replaceState(null, '', location.pathname);
     engine = store.get('apex.code.engine') || (ov && ov.default_engine) || 'claude'; mode = store.get('apex.code.mode', 'safe');
@@ -1298,6 +1302,7 @@
     $('a-where').textContent = ready ? `Working copy: ${s.worktree}` : s.status === 'kept' ? `Merged as ${s.kept_commit.slice(0, 10)}.` : '';
     renderWaiting();
     renderProof();
+    window.ApexWorkspace?.update();
   }
 
   // ---------------------------------------------------------------- proof: what it said vs what Apex saw (code_studio.proof)
@@ -1380,12 +1385,17 @@
     catch (err) { say(err.message, 'error'); }
   };
   async function act(action, okText) {
-    try { const r = await post(`/api/code/sessions/${current}/${action}`); if (okText) say(typeof okText === 'function' ? okText(r) : okText, 'good'); schedule(200); return r; }
+    const sid=current;
+    if (window.ApexWorkspace && !await window.ApexWorkspace.beforeOperation()) return;
+    if (sid!==current) return;
+    try { const r = await post(`/api/code/sessions/${sid}/${action}`); if (okText) say(typeof okText === 'function' ? okText(r) : okText, 'good'); schedule(200); return r; }
     catch (err) { say(err.message, 'error'); }
   }
   async function review() { try { detail = await post(`/api/code/sessions/${current}/review`, {}); renderDetail(); renderEngine(); schedule(200); } catch (err) { say(err.message, 'error'); } }
   const runChecks = () => act('checks');
   async function sendText(text) {
+    if (window.ApexWorkspace && !await window.ApexWorkspace.beforeOperation()) return false;
+    window.ApexWorkspace?.chooseView('agent');
     // An explicit action (Build it / Allow / Fix) can happen before a paused queue.
     // It leaves those follow-ups paused for the owner to review and resume.
     const sid = current, queue = busy();
@@ -1426,6 +1436,7 @@
     return true;
   }
   async function keepIt(push) {
+    if (window.ApexWorkspace && !await window.ApexWorkspace.beforeOperation()) return;
     if (!await keepFlow(current, push, {project_id: detail.project_id, project: detail.project, files: detail.changes.files.length})) return;
     proofDue = true; await loadOverview(); await refreshDetail(); schedule(200);
   }
@@ -1608,6 +1619,7 @@
       (p.lastElementChild && !/^(PRE|UL)$/.test(p.lastElementChild.tagName) ? p.lastElementChild : p).append(el('span', 'cursor', '▍'));   // right after the last word
     } else if (box) { box.remove(); box = null; }
     for (const [ref, out] of Object.entries(lv.outputs || {})) {
+      if (detail?.terminal) window.ApexWorkspace?.termOutput(out);
       const s = (feed && feed.turn && feed.turn.tools[ref]) || $('feed').querySelector(`[data-ref="${CSS.escape(ref)}"]`);
       if (!s) continue;
       let lo = s.querySelector('.live-out');
@@ -1708,12 +1720,14 @@
   });
   async function runTerminal(command) {
     if (!command) return;
+    if (window.ApexWorkspace && !await window.ApexWorkspace.beforeOperation()) return false;
     const sid = current;
     try { await post(`/api/code/sessions/${sid}/terminal`, {command}); termHistory.unshift(command); termAt = -1; if (current === sid) schedule(200); return true; }
     catch (err) { say(err.message, 'error'); return false; }
   }
   const termHistory = []; let termAt = -1;
   function termLog(e) {
+    window.ApexWorkspace?.termOutput(e.kind==='term'?'❯ '+e.command+'\nRunning…':(e.output||'(no output)')+`\n[exit ${e.exit_code??'?'}]`);
     const log = $('t-log');
     if (e.kind === 'term') {
       const row = el('div', 't-row'); row.dataset.ref = e.ref;
@@ -1912,6 +1926,7 @@
   }
   let viewing = null;
   async function openFile(path) {
+    if (current && window.ApexWorkspace) { await window.ApexWorkspace.openFile(path); closeDrawers(); return; }
     viewing = path;
     $('viewer-path').textContent = path; $('viewer-meta').textContent = '';
     $('viewer-body').replaceChildren(el('p', 'fine', 'Loading…'));
@@ -2160,16 +2175,34 @@
     } catch (err) { $('add-error').textContent = err.message; $('add-error').hidden = false; if (!$('add-dialog').open) $('add-dialog').showModal(); }
   });
   $('token-save').onclick = () => { store.set('apex_token', $('token').value.trim()); boot(); };
-  function closeDrawers() { $('rail').classList.remove('open'); $('side').classList.remove('open'); $('scrim').hidden = true; }
-  $('open-rail').onclick = () => { $('rail').classList.add('open'); $('scrim').hidden = false; };
-  $('open-side').onclick = () => { $('side').classList.add('open'); $('scrim').hidden = false; };
-  $('close-side').onclick = closeDrawers; $('scrim').onclick = closeDrawers;
+  let drawerOpener = null;
+  function closeDrawers(restoreFocus = false) {
+    $('rail').classList.remove('open'); $('side').classList.remove('open'); $('scrim').hidden = true;
+    $('open-rail').setAttribute('aria-expanded','false'); $('open-side').setAttribute('aria-expanded','false');
+    if (restoreFocus) drawerOpener?.focus(); drawerOpener = null;
+  }
+  function openDrawer(id, opener) {
+    closeDrawers(); drawerOpener = opener; $(id).classList.add('open'); $('scrim').hidden = false;
+    opener.setAttribute('aria-expanded','true');
+    $(id).querySelector('button:not([disabled]),input,select,a[href]')?.focus();
+  }
+  $('open-rail').onclick = () => openDrawer('rail',$('open-rail'));
+  $('open-side').onclick = () => openDrawer('side',$('open-side'));
+  $('close-side').onclick = () => closeDrawers(true); $('scrim').onclick = () => closeDrawers(true);
   document.addEventListener('keydown', e => {
+    const drawer = ['rail','side'].map(id=>$(id)).find(node=>node.classList.contains('open'));
+    if (drawer && e.key === 'Escape') { e.preventDefault(); closeDrawers(true); return; }
+    if (drawer && e.key === 'Tab') {
+      const focusable = [...drawer.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href],[tabindex="0"]')].filter(node=>node.getClientRects().length);
+      const first=focusable[0],last=focusable[focusable.length-1];
+      if (first && (e.shiftKey && document.activeElement === first || !e.shiftKey && document.activeElement === last)) { e.preventDefault(); (e.shiftKey?last:first).focus(); }
+    }
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
     const dialog = [...document.querySelectorAll('dialog')].some(d => d.open);
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (!$('palette').open) openPalette(); return; }
     if (e.ctrlKey && e.shiftKey && (e.code === 'Space' || e.key === ' ')) { e.preventDefault(); if (current && !dialog) askCeline(); return; }
-    if (e.ctrlKey && e.key === '`' && current) { e.preventDefault(); tab('terminal'); $('t-cmd').focus(); return; }
+    if (e.ctrlKey && e.key === '`' && current) { e.preventDefault(); if (window.ApexWorkspace) window.ApexWorkspace.terminal(); else { tab('terminal'); $('t-cmd').focus(); } return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p' && current) { e.preventDefault(); openPalette(); return; }
     if (e.key === 'Escape' && busy() && !dialog) { e.preventDefault(); stop(); }
     else if (e.key === '/' && !typing && !dialog) { e.preventDefault(); $('prompt').focus(); }
   });
@@ -2201,5 +2234,18 @@
     if (morning) await loadOvernight(true);                // the morning brief's link: what was built overnight
     schedule(1000);
   }
+  window.ApexWorkspace?.init({api,put,post,say,confirm:confirmBox,runCommand:runTerminal,stopCommand:stop,
+    context:()=>({id:current,detail,busy:busy()}),
+    refresh:async()=>{files=null;await refreshDetail();await renderFiles();}
+  });
+  window.ApexCodeIDE?.init({api,post,say,context:()=>({id:current,detail,busy:busy()}),
+    beforeOperation:()=>window.ApexWorkspace.beforeOperation(),
+    refresh:async()=>{files=null;await refreshDetail();await renderFiles();}
+  });
+  $('open-workspace').onclick = async () => {
+    const b=$('open-workspace');b.disabled=true;
+    try {const s=await post('/api/code/workspaces',{project_id:project,engine,mode,include_changes:$('include-changes').checked});await loadOverview();await open(s.id);tab('files');closeDrawers();window.ApexWorkspace?.chooseView('editor');}
+    catch(err){say(err.message,'error');}finally{b.disabled=false;}
+  };
   applyLook(); show('home'); boot();
 })();

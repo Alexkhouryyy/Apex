@@ -15,6 +15,28 @@ import anthropic
 import config
 
 
+def _billing_failure(exc: anthropic.APIStatusError) -> bool:
+    """Recognize payment errors, including Anthropic's legacy credit 400."""
+    status = getattr(exc, "status_code", 0)
+    if status == 402:
+        return True
+    if status != 400:
+        return False
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return False
+    error = body.get("error", body)
+    if not isinstance(error, dict):
+        return False
+    if error.get("type") == "billing_error":
+        return True
+    # invalid_request_error alone is not enough: genuine request validation
+    # failures use it too. Read only the provider's structured message.
+    message = error.get("message", "")
+    return isinstance(message, str) and message.strip().lower().startswith(
+        ("your credit balance is too low", "credit balance is too low"))
+
+
 def classify(exc: Exception) -> str:
     """Map an exception to a short category string for logs and messaging."""
     if isinstance(exc, anthropic.RateLimitError):
@@ -23,6 +45,8 @@ def classify(exc: Exception) -> str:
         return "network"
     if isinstance(exc, anthropic.APIStatusError):
         status = getattr(exc, "status_code", 0) or 0
+        if _billing_failure(exc):
+            return "billing"
         if status == 529:
             return "overloaded"
         if status >= 500:
@@ -57,11 +81,6 @@ def fallback_create(messages: list[dict], system: str = "", max_tokens: int = 40
         raise RuntimeError("OPENROUTER_API_KEY not configured.")
     model = getattr(config, "FALLBACK_MODEL", "") or "anthropic/claude-3-5-sonnet"
 
-    try:
-        from openai import OpenAI  # optional dependency
-    except ImportError:
-        raise RuntimeError("openai package not installed — run: pip install openai")
-
     oai_messages: list[dict] = []
     if system:
         oai_messages.append({"role": "system", "content": system})
@@ -80,13 +99,14 @@ def fallback_create(messages: list[dict], system: str = "", max_tokens: int = 40
             oai_messages.append({"role": role, "content": content})
 
     try:
-        client = OpenAI(api_key=key, base_url="https://openrouter.ai/api/v1")
-        resp = client.chat.completions.create(
+        from agent import provider, telemetry
+        client = provider.OpenAIAdapter(api_key=key, base_url="https://openrouter.ai/api/v1")
+        resp = telemetry.create(client, call_site="resilience/fallback",
             model=model,
             messages=oai_messages,
             max_tokens=max_tokens,
         )
-        return resp.choices[0].message.content or ""
+        return " ".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
     except Exception as e:
         raise RuntimeError(f"Fallback provider also failed: {e}") from e
 
@@ -97,6 +117,7 @@ _MESSAGES = {
     "overloaded": "The API is overloaded right now. Try again in a minute.",
     "server_error": "The API had a server error. Try again shortly.",
     "auth": "My API key was rejected — this needs a config fix before I can respond.",
+    "billing": "The model API is blocked by billing or insufficient credit. Check your API account's billing, or choose another configured model in Apex.",
     "client_error": "The API rejected that request as malformed. Let me know how to proceed.",
     "api_error": "I hit an API error and couldn't finish that turn. Try again.",
     "unexpected": "Something went wrong on my end and I couldn't finish that turn.",

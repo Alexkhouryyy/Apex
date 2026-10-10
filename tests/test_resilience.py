@@ -10,9 +10,9 @@ def _rate_limit():
     return anthropic.RateLimitError("rate limited", response=httpx.Response(429, request=req), body=None)
 
 
-def _status(code: int):
+def _status(code: int, body=None):
     req = httpx.Request("POST", "https://api.anthropic.com")
-    return anthropic.APIStatusError("err", response=httpx.Response(code, request=req), body=None)
+    return anthropic.APIStatusError("err", response=httpx.Response(code, request=req), body=body)
 
 
 def _conn():
@@ -48,6 +48,35 @@ class TestClassify:
     def test_client_error_422(self):
         assert resilience.classify(_status(422)) == "client_error"
 
+    @pytest.mark.parametrize("nested", [False, True])
+    def test_insufficient_credit_400_is_billing(self, nested):
+        error = {"type": "invalid_request_error", "message": (
+            "Your credit balance is too low to access the Anthropic API. "
+            "Please go to Plans & Billing to upgrade or purchase credits.")}
+        body = {"type": "error", "error": error} if nested else error
+        assert resilience.classify(_status(400, body)) == "billing"
+
+    def test_payment_required_402_is_billing(self):
+        assert resilience.classify(_status(402)) == "billing"
+
+    def test_structured_billing_type_400_is_billing(self):
+        assert resilience.classify(_status(400, {"error": {
+            "type": "billing_error", "message": "Payment details need attention."}})) == "billing"
+
+    @pytest.mark.parametrize("body", [None, "invalid", [], {"error": None},
+                                     {"error": "invalid"}, {"message": None}])
+    def test_unstructured_400_remains_client_error(self, body):
+        assert resilience.classify(_status(400, body)) == "client_error"
+
+    def test_quoted_billing_words_do_not_reclassify_validation_failure(self):
+        body = {"error": {"type": "invalid_request_error", "message": (
+            "Invalid messages.0: received 'Your credit balance is too low'.")}}
+        assert resilience.classify(_status(400, body)) == "client_error"
+
+    def test_server_error_is_not_reclassified_by_billing_text(self):
+        assert resilience.classify(_status(503, {"error": {
+            "message": "Your credit balance is too low"}})) == "server_error"
+
     def test_network_connection(self):
         assert resilience.classify(_conn()) == "network"
 
@@ -82,6 +111,15 @@ class TestFriendlyMessage:
         msg = resilience.friendly_message(KeyboardInterrupt())
         assert isinstance(msg, str) and msg.strip()
 
+    def test_credit_message_is_actionable_without_echoing_response_body(self):
+        body = {"error": {"type": "invalid_request_error", "message": (
+            "Your credit balance is too low. private-provider-detail")}}
+        msg = resilience.friendly_message(_status(400, body))
+        assert "credit" in msg and "billing" in msg
+        assert "another configured model" in msg
+        assert "malformed" not in msg and "private-provider-detail" not in msg
+        assert len(msg) <= 300  # scheduler notifications truncate at 300
+
 
 class TestShouldFallback:
     def test_rate_limit_triggers_fallback(self):
@@ -102,6 +140,9 @@ class TestShouldFallback:
     def test_client_error_does_not_trigger_fallback(self):
         assert not resilience.should_fallback("client_error")
 
+    def test_billing_does_not_automatically_switch_paid_providers(self):
+        assert not resilience.should_fallback("billing")
+
 
 class TestFallbackCreate:
     def test_raises_when_no_key_configured(self, monkeypatch):
@@ -110,12 +151,14 @@ class TestFallbackCreate:
         with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
             resilience.fallback_create([{"role": "user", "content": "hi"}])
 
-    def test_converts_list_content_to_text(self, monkeypatch):
+    def test_converts_list_content_to_text(self, monkeypatch, test_db):
         """Verifies message conversion and call path without a real API call or real openai package."""
         import sys
         import config
         monkeypatch.setattr(config, "OPENROUTER_API_KEY", "fake-key")
         monkeypatch.setattr(config, "FALLBACK_MODEL", "test/model")
+        monkeypatch.setitem(config.MODEL_PRICING, "test/model",
+                            {"input": 1, "output": 1, "cache_read": 0, "cache_create": 0})
 
         captured = {}
 

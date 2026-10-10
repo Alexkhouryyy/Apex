@@ -82,6 +82,7 @@ def _agent(monkeypatch):
 
 class TestStreamTurnCancellation:
     def test_cancel_before_stream_returns_interrupted(self, monkeypatch):
+        monkeypatch.setattr(_FakeClient.messages, "stream", lambda **kw: pytest.fail("cancelled request was sent"))
         a = _agent(monkeypatch)
         cancel = threading.Event()
         cancel.set()
@@ -91,10 +92,10 @@ class TestStreamTurnCancellation:
         assert content[0]["text"] == "[INTERRUPTED]"
         assert cap.fed == []
 
-    def test_no_cancel_completes_normally(self, monkeypatch):
+    def test_no_cancel_completes_normally(self, monkeypatch, test_db):
         a = _agent(monkeypatch)
         cap = _Cap()
-        content, stop, text = a._stream_turn({}, cap, threading.Event())
+        content, stop, text = a._stream_turn({"model": "claude-opus-5", "max_tokens": 100}, cap, threading.Event())
         assert stop == "end_turn"
         assert "".join(cap.fed) == "hi hi hi "
         assert text == "hi hi hi"

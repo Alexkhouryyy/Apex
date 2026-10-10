@@ -16,9 +16,8 @@ can do is make Apex *more* cautious.
 
 Failure posture:
   - Unparseable / unexpected model output  -> RISKY (fail safe)
-  - Model unreachable, no key, timeout     -> fall back to blocklist-only and LOG.
-    That is exactly today's posture, so it is a degradation, not a regression.
-    Set SAFETY_REVIEW_REQUIRED=true to fail closed instead (mirrors SANDBOX_REQUIRE).
+  - Model unreachable, no key, timeout     -> require explicit confirmation.
+    SAFETY_REVIEW_REQUIRED=false explicitly opts into pattern-only fallback.
 
 Cost is bounded by reviewing only tools that can actually cause harm, and by
 caching verdicts per (tool, exact inputs) — agents repeat themselves a lot.
@@ -95,9 +94,11 @@ def parse_verdict(text: str) -> tuple[bool, str]:
 
 def review(tool: str, inputs: dict) -> tuple[bool, str]:
     """Return (risky, reason). Called ONLY when the blocklist found nothing."""
-    if not getattr(config, "SAFETY_LLM_REVIEW", False):
-        return False, ""
     if not is_reviewable(tool):
+        return False, ""
+    if not getattr(config, "SAFETY_LLM_REVIEW", False):
+        if getattr(config, "SAFETY_REVIEW_REQUIRED", True):
+            return _unavailable("semantic review is disabled")
         return False, ""
 
     key = _cache_key(tool, inputs)
@@ -126,8 +127,8 @@ def review(tool: str, inputs: dict) -> tuple[bool, str]:
 
 
 def _unavailable(why: str) -> tuple[bool, str]:
-    """Reviewer could not run. Fail closed only if explicitly required."""
-    if getattr(config, "SAFETY_REVIEW_REQUIRED", False):
+    """Reviewer could not run. Require confirmation unless explicitly opted out."""
+    if getattr(config, "SAFETY_REVIEW_REQUIRED", True):
         return True, f"safety review required but unavailable ({why})"
     print(f"[Safety] LLM review unavailable — falling back to pattern rules only ({why}).")
     return False, ""

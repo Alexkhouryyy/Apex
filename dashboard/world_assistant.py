@@ -34,8 +34,8 @@ def _value(block, name, default=None):
 
 
 def _complete(model, messages, tools):
-    from agent import provider
-    response = provider.get_client(model).messages.create(model=model, max_tokens=2400,
+    from agent import provider, telemetry
+    response = telemetry.create(provider.get_client(model), call_site="world_assistant/turn", model=model, max_tokens=2400,
         system=SYSTEM, messages=messages, tools=tools)
     content = []
     for block in response.content:

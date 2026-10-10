@@ -6,7 +6,9 @@ import os
 import stat
 import sys
 import time
+from threading import Event, enumerate as active_threads
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -73,6 +75,7 @@ PLAN_CLAUDE = json.dumps({'loggedIn': True, 'authMethod': 'claude.ai', 'apiProvi
 
 @pytest.fixture
 def fake(tmp_path, monkeypatch, test_db):
+    previous_threads = set(active_threads())
     bin_dir = tmp_path / 'bin'; bin_dir.mkdir()
     for name in ('claude', 'codex'):
         p = bin_dir / name
@@ -86,6 +89,15 @@ def fake(tmp_path, monkeypatch, test_db):
     work_engines._supports.clear()
     monkeypatch.setenv('FAKE_DIR', str(bin_dir))
     monkeypatch.setenv('PATH', f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    # Removing a fake CLI must not fall through to a real signed-in host tool.
+    # Keep real path discovery, but permit plan binaries only in this fixture.
+    real_which = work_engines.shutil.which
+    def fixture_which(command, *args, **kwargs):
+        found = real_which(command, *args, **kwargs)
+        if command in ('claude', 'codex') and found and not Path(found).resolve().is_relative_to(tmp_path):
+            return None
+        return found
+    monkeypatch.setattr(work_engines.shutil, 'which', fixture_which)
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'sk-ant-should-not-reach-the-plan')
     monkeypatch.setenv('OPENAI_API_KEY', 'sk-should-not-reach-the-plan')
     monkeypatch.setattr(work, 'WORK_DIR', tmp_path / 'ApexWork')
@@ -101,8 +113,22 @@ def fake(tmp_path, monkeypatch, test_db):
         def auth(self, name, text): (bin_dir / f'{name}.auth').write_text(text); work_engines.forget_checks()
         def asked(self, name): return (bin_dir / f'{name}.asked').exists()
         def helper(self, name): return int((bin_dir / f'{name}.helper').read_text())
-    yield Fake()
-    work_engines.forget_checks()
+    try:
+        yield Fake()
+    finally:
+        # Finish this fixture's workers before monkeypatch restores DB_PATH or
+        # PATH; otherwise a late completion can write into the next test's DB.
+        with work.longterm._conn() as db:
+            fixture_runs = {row[0] for row in db.execute('SELECT id FROM work_runs')}
+        for run_id in fixture_runs:
+            work_engines.stop(run_id, before_start=True)
+        for thread in active_threads():
+            if thread not in previous_threads and thread.name.startswith('ApexWork-'):
+                thread.join(timeout=5)
+                assert not thread.is_alive(), 'work fixture left a live worker'
+        with work_engines._lock:
+            work_engines._stopped.difference_update(fixture_runs)
+        work_engines.forget_checks()
 
 
 def wait_for(task_id, timeout=10):
@@ -386,6 +412,44 @@ def test_works_on_its_own_on_your_plans_and_moves_on_at_a_limit(fake):
     assert any('Apex finished "urgent one"' in x for x in finished)
     assert any('picked up "later one" on your ChatGPT plan' in x for x in finished)
     wait_for(later['id'])
+
+
+def test_plan_rest_is_saved_before_a_task_can_be_retried(fake, monkeypatch):
+    work_agent.update_settings(enabled=True, auto_work=True, brief_time='23:59', evening_time='23:59')
+    task = work.add_task(quick='race regression +apex')
+    fake.mode('claude', 'limited')
+    entered, release = Event(), Event()
+    real_mark = work_agent.mark_unavailable
+    def delayed_mark(*args, **kwargs):
+        entered.set()
+        assert release.wait(5), 'test did not release cooldown writer'
+        return real_mark(*args, **kwargs)
+    monkeypatch.setattr(work_agent, 'mark_unavailable', delayed_mark)
+    try:
+        assert 'Claude plan' in work_agent.tick(NOON, agent=object())[0]
+        assert entered.wait(5)
+        work.sync_apex()
+        assert work.get_task(task['id'])['apex_state'] == 'running'
+        assert work_agent.tick(NOON, agent=object()) == []
+    finally:
+        release.set()
+    wait_for(task['id'])
+    assert 'ChatGPT plan' in work_agent.tick(NOON, agent=object())[0]
+    assert wait_for(task['id'])['status'] == 'review'
+
+
+def test_cooldown_write_failure_does_not_publish_a_retryable_task(fake, monkeypatch):
+    work_agent.update_settings(enabled=True, auto_work=True, brief_time='23:59', evening_time='23:59')
+    task = work.add_task(quick='cooldown failure +apex')
+    fake.mode('claude', 'limited')
+    def broken_mark(*args, **kwargs):
+        raise RuntimeError('cooldown database unavailable')
+    monkeypatch.setattr(work_agent, 'mark_unavailable', broken_mark)
+    work_agent.tick(NOON, agent=object())
+    result = wait_for(task['id'])
+    assert result['apex_state'] == 'failed'
+    assert 'cooldown database unavailable' in result['apex_summary']
+    assert not any('picked up' in message for message in work_agent.tick(NOON, agent=object()))
 
 
 def test_one_task_at_a_time(fake):

@@ -86,6 +86,10 @@ class CodeError(ValueError):
     pass
 
 
+class FileConflict(CodeError):
+    """The editor must keep its draft and ask the owner to reload the disk version."""
+
+
 _lock = threading.Lock()
 _turns: dict[int, str] = {}           # session id -> run id of its running turn
 _side: dict[int, str] = {}            # session id -> run id of a running review or checks
@@ -448,6 +452,11 @@ def _venv(project_path: str) -> dict:
     return {'PATH': str(bindir) + os.pathsep + os.environ.get('PATH', ''), 'VIRTUAL_ENV': str(venv)}
 
 
+def _workspace_env(s: dict) -> dict:
+    """Use dependencies installed in this workspace before the original project's env."""
+    return _venv(s.get('worktree') or '') or _venv(s['project_path'])
+
+
 # ---------------------------------------------------------------- sessions
 
 def _queue_state(sid: int) -> dict:
@@ -649,11 +658,10 @@ def _title(prompt: str) -> str:
 ORIGINS = ('you', 'night')
 
 
-def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'safe', model: str = '',
-          effort: str = '', plan: bool = False, origin: str = 'you', task_id: int | None = None) -> dict:
-    """A new session: its own branch and working copy, then the first message.
-    origin 'night' is a Work task (task_id) the night shift took (agent/work_agent.py)."""
-    prompt = _clean_prompt(prompt)
+def _prepare_workspace(project_id: int, title: str, engine: str, mode: str,
+                       origin: str = 'you', task_id: int | None = None,
+                       include_changes: bool = False) -> tuple[int, list[str]]:
+    """Create a working copy without launching or requiring a coding provider."""
     if origin not in ORIGINS:
         raise CodeError('A session comes from you or from the night shift.')
     if engine not in ENGINES:
@@ -674,9 +682,9 @@ def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'saf
     with longterm._conn() as db:
         cur = db.execute('INSERT INTO code_sessions (project_id, title, engine, mode, base_ref, base_commit, origin, task_id, '
                          'created, updated) VALUES (?,?,?,?,?,?,?,?,?,?)',
-                         (project_id, _title(prompt), engine, mode, base_ref, base_commit, origin, task_id, now, now))
+                         (project_id, _title(title), engine, mode, base_ref, base_commit, origin, task_id, now, now))
         sid = cur.lastrowid
-    slug = _slug(_title(prompt))
+    slug = _slug(_title(title))
     branch = f'apex/{sid}-{slug}'
     folder = Path(work.WORK_DIR) / 'code' / f"{_slug(proj['name'], 16)}-{sid}-{slug}"
     # Left over from an older install with the same numbers: never reuse, never overwrite.
@@ -694,16 +702,94 @@ def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'saf
     notes = [f"Your {len(dirty)} unsaved change{'s' if len(dirty) != 1 else ''} in {proj['name']} "
              f"{'are' if len(dirty) != 1 else 'is'} not in this session: it starts from your last commit."] if dirty else []
     try:
+        if include_changes and dirty:
+            _snapshot_changes(repo, folder, sid)
+            notes = ['Your uncommitted files were copied into this workspace. Your original files are untouched. '
+                     'Commit or stash overlapping changes in the original project before Keep.']
+    except Exception:
+        _drop_prepared(sid, repo, folder, branch)
+        raise
+    return sid, notes
+
+
+def _drop_prepared(sid: int, repo: Path, folder: Path, branch: str) -> None:
+    _remove_copy(repo, str(folder))
+    _git(repo, 'branch', '-D', branch, check=False)
+    code_brain.forget_file(sid)
+    with longterm._conn() as db:
+        db.execute('DELETE FROM code_events WHERE session_id=?', (sid,))
+        db.execute('DELETE FROM code_sessions WHERE id=?', (sid,))
+
+
+def _snapshot_changes(repo: Path, folder: Path, sid: int) -> None:
+    """Copy the owner's explicit snapshot, including nonignored untracked files.
+
+    Git produces/applies a binary patch; no stash, commit or index mutation occurs
+    in the original project. Refuse links and oversized snapshots before copying.
+    """
+    changed = set(_git(repo, 'diff', '--name-only', '-z', 'HEAD').split('\0'))
+    added = set(_git(repo, 'ls-files', '--others', '--exclude-standard', '-z').split('\0'))
+    paths = sorted((changed | added) - {''})
+    if len(paths) > 1000:
+        raise CodeError('Too many uncommitted files to copy (limit 1,000). Commit them first, or start from the last commit.')
+    size = 0
+    before = {}
+    for name in paths:
+        f = _safe_path(repo, name)
+        if f.exists():
+            if not f.is_file():
+                raise CodeError(f'Cannot copy {name}: commit submodule or directory changes first.')
+            size += f.stat().st_size
+            if size > 20_000_000:
+                raise CodeError('Uncommitted files exceed 20 MB. Commit them first, or start from the last commit.')
+            before[name] = hashlib.sha256(f.read_bytes()).hexdigest()
+        else:
+            before[name] = None
+    result = subprocess.run(['git', 'diff', '--binary', '--no-ext-diff', '--no-textconv', 'HEAD'],
+                            cwd=repo, capture_output=True, env=_git_env(), timeout=60, **we._hidden())
+    if result.returncode:
+        raise CodeError('Could not read uncommitted changes. Commit them first, or retry.')
+    if result.stdout:
+        applied = subprocess.run(['git', 'apply', '--binary', '-'], input=result.stdout, cwd=folder,
+                                 capture_output=True, env=_git_env(), timeout=60, **we._hidden())
+        if applied.returncode:
+            raise CodeError('Could not copy uncommitted changes. Commit them first, or retry.')
+    for name in added - {''}:
+        source, target = _safe_path(repo, name), _safe_path(folder, name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    for name, revision in before.items():
+        f = _safe_path(repo, name)
+        now = hashlib.sha256(f.read_bytes()).hexdigest() if f.is_file() else None
+        if now != revision:
+            raise CodeError('Your files changed while the workspace was opening. Retry to copy their current version.')
+    _checkpoint(sid, _git(folder, 'rev-parse', 'HEAD').strip(), 'your uncommitted snapshot')
+
+
+def open_workspace(project_id: int, engine: str = 'claude', mode: str = 'safe',
+                   include_changes: bool = False) -> dict:
+    proj = project(project_id)
+    sid, notes = _prepare_workspace(project_id, f"{proj['name']} workspace", engine, mode,
+                                    include_changes=include_changes)
+    for note in notes:
+        event(sid, 'note', text=note)
+    event(sid, 'note', text='Workspace opened. Edit files and run commands here; send an agent request when you need one.')
+    return session(sid)
+
+
+def start(project_id: int, prompt: str, engine: str = 'claude', mode: str = 'safe', model: str = '',
+          effort: str = '', plan: bool = False, origin: str = 'you', task_id: int | None = None,
+          include_changes: bool = False) -> dict:
+    """A new working copy, then the first agent message. Existing callers keep their default behavior."""
+    prompt = _clean_prompt(prompt)
+    sid, notes = _prepare_workspace(project_id, prompt, engine, mode, origin, task_id, include_changes)
+    try:
         return send(sid, prompt, engine, mode, _notes=notes, model=model, effort=effort, plan=plan)
     except CodeError:
         # Never started (say, every slot filled in between): leave no session, copy or
         # branch behind, or the night shift would count it as working and start another.
-        _remove_copy(repo, str(folder))
-        _git(repo, 'branch', '-D', branch, check=False)
-        code_brain.forget_file(sid)
-        with longterm._conn() as db:
-            db.execute('DELETE FROM code_events WHERE session_id=?', (sid,))
-            db.execute('DELETE FROM code_sessions WHERE id=?', (sid,))
+        s = session(sid)
+        _drop_prepared(sid, Path(s['project_path']), Path(s['worktree']), s['branch'])
         raise
 
 
@@ -720,7 +806,15 @@ def _brief(s: dict, prompt: str, about: str = '', memory: bool = False) -> str:
             f"worktree made for this session (branch {s['branch']}); {owner}'s own copy stays untouched until they "
             "keep your work.\n"
             "- Do what is asked below, and keep the change focused on it.\n"
+            "- Inspect the existing entry points, project instructions and dependencies before choosing an approach. "
+            "Use the project's existing stack and conventions.\n"
+            "- Build the requested user workflow through to a usable result, including loading, errors and empty states "
+            "where relevant. A scaffold or placeholder is not completion of a working feature.\n"
+            "- If a missing detail changes the intended result substantially, ask the owner a focused question. "
+            "Use reasonable defaults for small implementation choices and state them.\n"
             "- Run the relevant tests if the project has them, and fix what you break.\n"
+            "- Run the relevant build or syntax checks too. Inspect a running app when a browser is available. "
+            "If a command or network request is blocked, state the exact blocker and next action; do not claim it ran.\n"
             "- Do not commit, push, switch branches or change git settings: Apex records your work after each message.\n"
             + ask +
             "- Finish with a short summary: what you changed, how you checked it, and anything "
@@ -771,12 +865,19 @@ def _system_file(sid: int, block: dict | None, fresh: bool) -> str:
 
 
 def _recap(s: dict, new_prompt: str, about: str = '') -> str:
-    asks = [e['text'] for e in events(s['id']) if e['kind'] == 'you'][-6:]
+    history = [e['text'] for e in events(s['id']) if e['kind'] == 'you']
+    # Keep the actual specification during provider handoffs or lost resumes.
+    # Previously the first request disappeared after six follow-ups, and each
+    # remaining request lost everything after character 600.
+    asks = history if len(history) <= 7 else [history[0], *history[-6:]]
     stat = ''
     if s['worktree'] and Path(s['worktree']).is_dir():
         stat = _git(s['worktree'], 'diff', '--stat', '--no-renames', _base(s), check=False).stdout.strip()[-3000:]
     lines = [f"You are taking over a coding session in this git worktree (branch {s['branch']}).",
-             'What has been asked so far:'] + [f'- {a[:600]}' for a in asks] + \
+             'Preserve the original requirements; later owner instructions supersede conflicting earlier ones.',
+             'Inspect the current files and dependencies, complete the requested working workflow, and run relevant checks.',
+             *([f'{len(history)-7} older follow-ups omitted; the original request and six most recent follow-ups are below.'] if len(history)>7 else []),
+             'What has been asked so far:'] + [f'- {a}' for a in asks] + \
             [f"Last summary: {s['summary'][:1500] or '(none)'}",
              'Changes so far (git diff --stat against where the session started):', stat or '(none yet)',
              '', 'Do not commit, push or switch branches: Apex records your work after each message.',
@@ -914,7 +1015,7 @@ def _run_turn(sid, run_id, engine, mode, text, resume, prompt, options=None, abo
                 # A tool's own id (to pair a command with its result) is kept as `ref`.
                 event(sid, e['kind'], **{('ref' if k == 'id' else k): v for k, v in e.items() if k != 'kind'})
 
-        extra = _venv(s['project_path'])
+        extra = _workspace_env(s)
         result = code_engines.turn(engine, text, folder, mode, resume, on_event, run_id, env_extra=extra, options=options)
         if result['status'] == 'failed' and resume and code_engines.RESUME_LOST.search(result.get('summary') or ''):
             event(sid, 'note', text='The plan had lost this conversation, so Apex started it fresh with a recap.')
@@ -1361,6 +1462,10 @@ def keep(sid: int, push: bool = False, require_proof: bool = False) -> dict:
     (proof): otherwise NotProved says why, and you can keep it anyway."""
     s = session(sid)
     _idle(s)
+    from agent import code_terminal
+    code_terminal.stop(sid)
+    from agent import code_ide
+    code_ide.stop(sid)
     try:
         verdict = proof(sid)
     except CodeError:
@@ -1457,6 +1562,10 @@ def discard(sid: int, reason: str = '') -> dict:
 def _discard_idle(sid: int, reason: str) -> dict:
     s = session(sid)
     _idle(s)
+    from agent import code_terminal
+    code_terminal.stop(sid)
+    from agent import code_ide
+    code_ide.stop(sid)
     try:                                                  # read before the copy goes: the proof looks at it
         verdict = proof(sid)['verdict']
     except Exception as exc:
@@ -1558,7 +1667,7 @@ def review(sid: int, engine: str | None = None) -> dict:
                 if e['kind'] in ('tool', 'file') and e.get('title', e.get('path')):
                     event(sid, 'review_step', title=e.get('title') or f"Read {e.get('path')}")
             result = code_engines.turn(engine, prompt, Path(folder), 'review', None, on_event, run_id,
-                                       timeout=1200, env_extra=_venv(s['project_path']),
+                                       timeout=1200, env_extra=_workspace_env(s),
                                        options={'mcp_file': _memory_server(s, read_only=True)})
         except Exception as exc:
             result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
@@ -1608,7 +1717,7 @@ def run_checks(sid: int) -> dict:
     if not proj['checks']:
         raise CodeError('Set a checks command for this project first (Project settings).')
     env = we._env()
-    env.update(_venv(s['project_path']))
+    env.update(_workspace_env(s))
     argv = _argv(proj['checks'], env)
     run_id = f'checks-{sid}-{int(time.time() * 1000)}'
     with _lock:
@@ -2203,6 +2312,177 @@ TREE_LIMIT = 20000
 FILE_LIMIT = 512_000
 
 
+def _safe_path(folder: Path, path: str) -> Path:
+    """Portable project-relative paths; refuse Git internals and link traversal."""
+    if not isinstance(path, str) or not path or len(path) > 500:
+        raise CodeError('Choose a relative file path, at most 500 characters.')
+    name = path.replace('\\', '/')
+    parts = name.split('/')
+    reserved = re.compile(r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)', re.I)
+    if any(p in ('', '.', '..') or p.lower() == '.git' or p.endswith((' ', '.'))
+           or reserved.match(p) or re.search(r'[<>:"|?*\x00-\x1f]', p) for p in parts):
+        raise CodeError('Choose a relative path with valid Windows file names, outside .git.')
+    root = folder.resolve()
+    target = root.joinpath(*parts)
+    for parent in [target, *target.parents]:
+        if parent == root:
+            break
+        if parent.is_symlink() or getattr(parent, 'is_junction', lambda: False)():
+            raise CodeError('That file is a link or points outside this project.')
+    if not target.resolve().is_relative_to(root):
+        raise CodeError('That file points outside this project.')
+    return target
+
+
+def _file_revision(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _editable_session(sid: int) -> dict:
+    s = session(sid)
+    _idle(s)
+    if not s['worktree'] or not Path(s['worktree']).is_dir():
+        raise CodeError('This workspace is unavailable. Open a new workspace.')
+    return s
+
+
+def _check_file_revision(target: Path, revision: str) -> bytes:
+    if not isinstance(revision, str) or not re.fullmatch(r'[0-9a-f]{64}', revision):
+        raise CodeError('Reload this file before saving or changing it.')
+    if not target.is_file():
+        raise FileConflict('This file was removed. Your draft is kept; reload the file list.')
+    if target.stat().st_size > FILE_LIMIT:
+        raise CodeError('This file is too large to edit here.')
+    raw = target.read_bytes()
+    if _file_revision(raw) != revision:
+        raise FileConflict('This file changed on disk. Your draft is kept; reload and compare before saving.')
+    return raw
+
+
+def _owner_file_checkpoint(sid: int, previous: str, why: str) -> str | None:
+    # A successful disk save must return its new revision even when Git is
+    # temporarily locked. Otherwise a retry falsely conflicts with our own save.
+    try:
+        _checkpoint(sid, previous, why)
+    except CodeError as exc:
+        warning = f'File change saved, but its Undo checkpoint failed: {exc}. Resolve the Git error before using Undo.'
+        event(sid, 'note', text=warning)
+        return warning
+    return None
+
+
+@_exclusive
+def write_file(sid: int, path: str, text: str, revision: str | None = None, create: bool = False) -> dict:
+    """Save an owner edit in the worktree with stale-write protection and a checkpoint."""
+    s = _editable_session(sid)
+    root = Path(s['worktree'])
+    target = _safe_path(root, path)
+    name = target.relative_to(root.resolve()).as_posix()
+    if not isinstance(text, str) or '\0' in text or len(text.encode('utf-8')) > FILE_LIMIT:
+        raise CodeError('Only UTF-8 text files up to 512 KB can be edited here.')
+    old = b''
+    if create:
+        if target.exists():
+            raise FileConflict('That file already exists. Open it to edit, or choose another name.')
+        if _git(root, 'check-ignore', '-q', '--', name, check=False).returncode == 0:
+            raise CodeError('That path is ignored by Git. Choose a tracked path, or change .gitignore first.')
+    else:
+        if name not in tree(sid)['files']:
+            raise FileConflict('That file is no longer in this workspace. Your draft is kept; reload the file list.')
+        old = _check_file_revision(target, revision)
+        try:
+            old.decode('utf-8')
+        except UnicodeDecodeError:
+            raise CodeError('This file is not UTF-8. Convert it before editing here.')
+        if b'\0' in old:
+            raise CodeError('Binary files cannot be edited here.')
+    # CodeMirror normalizes line endings. Keep the existing Windows CRLF style.
+    if b'\r\n' in old and b'\n' not in old.replace(b'\r\n', b''):
+        text = text.replace('\r\n', '\n').replace('\n', '\r\n')
+    raw = text.encode('utf-8')
+    if len(raw) > FILE_LIMIT:
+        raise CodeError('The saved file would exceed 512 KB with its existing line endings.')
+    previous = _git(root, 'rev-parse', 'HEAD').strip()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = None
+    try:
+        if create:
+            try:
+                with target.open('xb') as f:
+                    f.write(raw)
+            except FileExistsError as exc:
+                raise FileConflict('That file was just created. Open it, or choose another name.') from exc
+        else:
+            with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as f:
+                temp = Path(f.name)
+                f.write(raw)
+            shutil.copymode(target, temp)
+            _check_file_revision(target, revision)
+            os.replace(temp, target)
+    except OSError as exc:
+        raise CodeError(f'Could not save {name}: {exc}. Your draft is kept.') from exc
+    finally:
+        if temp and temp.exists():
+            temp.unlink()
+    warning = _owner_file_checkpoint(sid, previous, f'your edit to {name}')
+    _set(sid, files_changed=_count_changed(sid))
+    event(sid, 'note', text=f'You saved {name}.')
+    result = read_file(name, sid)
+    if warning:
+        result['warning'] = warning
+    return result
+
+
+@_exclusive
+def rename_file(sid: int, path: str, destination: str, revision: str) -> dict:
+    s = _editable_session(sid)
+    root = Path(s['worktree'])
+    source, target = _safe_path(root, path), _safe_path(root, destination)
+    destination = target.relative_to(root.resolve()).as_posix()
+    if path.replace('\\', '/') not in tree(sid)['files']:
+        raise CodeError('That file is not in this workspace.')
+    _check_file_revision(source, revision)
+    if target.exists():
+        raise FileConflict('The destination already exists. Choose another name.')
+    if _git(root, 'check-ignore', '-q', '--', destination, check=False).returncode == 0:
+        raise CodeError('The destination is ignored by Git.')
+    previous = _git(root, 'rev-parse', 'HEAD').strip()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # A hard link creates the destination exclusively; unlike rename on POSIX,
+        # it cannot silently replace a file another process just created.
+        os.link(source, target)
+        source.unlink()
+    except OSError as exc:
+        raise CodeError(f'Could not rename the file: {exc}') from exc
+    warning = _owner_file_checkpoint(sid, previous, f'your rename of {path}')
+    _set(sid, files_changed=_count_changed(sid))
+    event(sid, 'note', text=f'You renamed {path} to {destination}.')
+    result = read_file(destination, sid)
+    if warning:
+        result['warning'] = warning
+    return result
+
+
+@_exclusive
+def delete_file(sid: int, path: str, revision: str) -> dict:
+    s = _editable_session(sid)
+    root = Path(s['worktree'])
+    target = _safe_path(root, path)
+    if path.replace('\\', '/') not in tree(sid)['files']:
+        raise CodeError('That file is not in this workspace.')
+    _check_file_revision(target, revision)
+    previous = _git(root, 'rev-parse', 'HEAD').strip()
+    try:
+        target.unlink()
+    except OSError as exc:
+        raise CodeError(f'Could not remove the file: {exc}') from exc
+    warning = _owner_file_checkpoint(sid, previous, f'your removal of {path}')
+    _set(sid, files_changed=_count_changed(sid))
+    event(sid, 'note', text=f'You removed {path}. Undo last step can restore it.')
+    return {'removed': path, **({'warning': warning} if warning else {})}
+
+
 def image_inventory(folder):
     """Bounded raster inventory, including Codex's generated_images artifacts."""
     root = Path(folder).resolve()
@@ -2243,6 +2523,50 @@ def tree(sid: int | None = None, pid: int | None = None) -> dict:
     return {'files': files[:TREE_LIMIT], 'cut': len(files) > TREE_LIMIT, 'root': str(folder)}
 
 
+def search_files(sid: int, query: str) -> dict:
+    """Literal project search, with bounded reads and explicit truncation."""
+    if not isinstance(query, str) or not query.strip() or len(query) > 200:
+        raise CodeError('Search for 1 to 200 characters.')
+    folder = _folder_of(sid, None)
+    needle = query.casefold()
+    matches, scanned, size, cut = [], 0, 0, False
+    listing = tree(sid)
+    for name in listing['files']:
+        try:
+            f = _safe_path(folder, name)
+            if not f.is_file() or f.stat().st_size > FILE_LIMIT:
+                continue
+            if scanned >= 2000 or size + f.stat().st_size > 8_000_000:
+                cut = True
+                break
+            raw = f.read_bytes()
+            scanned += 1
+            size += len(raw)
+            if b'\0' in raw:
+                continue
+            text = raw.decode('utf-8')
+        except (OSError, UnicodeDecodeError, CodeError):
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            if needle in line.casefold():
+                matches.append({'path': name, 'line': number, 'text': line[:300]})
+                if len(matches) >= 200:
+                    return {'matches': matches, 'scanned': scanned, 'cut': True}
+    return {'matches': matches, 'scanned': scanned, 'cut': cut or listing['cut']}
+
+
+@_exclusive
+def start_terminal(sid: int, rows: int = 24, cols: int = 80) -> dict:
+    """Reserve startup so Keep/Discard cannot remove the working copy midway."""
+    from agent import code_terminal
+    s = _editable_session(sid)
+    env = {**we._env(), **_workspace_env(s)}
+    try:
+        return code_terminal.start(sid, s['worktree'], env, rows, cols)
+    except (ValueError, OSError) as exc:
+        raise CodeError(str(exc)) from exc
+
+
 def read_file(path: str, sid: int | None = None, pid: int | None = None) -> dict:
     """One file's text for the viewer. Only files in the tree: never anything else on the PC."""
     folder = _folder_of(sid, pid)
@@ -2274,8 +2598,13 @@ def read_file(path: str, sid: int | None = None, pid: int | None = None) -> dict
     raw = f.read_bytes()
     if b'\0' in raw[:4096]:
         return {'path': path, 'binary': True, 'too_big': False, 'size': size, 'text': '', 'lang': ''}
-    return {'path': path, 'binary': False, 'too_big': False, 'size': size,
-            'text': raw.decode('utf-8', errors='replace'), 'lang': LANGS.get(Path(path).suffix.lower(), '')}
+    try:
+        text = raw.decode('utf-8')
+        editable = True
+    except UnicodeDecodeError:
+        text, editable = raw.decode('utf-8', errors='replace'), False
+    return {'path': path, 'binary': False, 'too_big': False, 'size': size, 'revision': _file_revision(raw),
+            'text': text, 'editable': editable, 'lang': LANGS.get(Path(path).suffix.lower(), '')}
 
 
 TERMINAL_TIMEOUT = 900
@@ -2303,7 +2632,7 @@ def terminal(sid: int, command: str) -> dict:
     event(sid, 'term', command=command, ref=ref)
     argv = ['cmd.exe', '/d', '/s', '/c', command] if os.name == 'nt' else ['bash', '-lc', command]
     env = we._env()
-    env.update(_venv(s['project_path']))
+    env.update(_workspace_env(s))
 
     def go():
         started, out, code = time.time(), [], None

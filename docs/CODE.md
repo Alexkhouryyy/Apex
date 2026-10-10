@@ -2,6 +2,28 @@
 
 Open **Code** from the dashboard sidebar, or go to `/code`.
 
+**Open workspace** lets you edit and run a project without connecting a coding
+plan. Files open in the central editor with tabs, syntax highlighting, search,
+undo and **Ctrl+S**. **New file**, Rename and Delete act on this session's copy.
+**Ctrl+Shift+F** searches the project. **Ctrl+`** opens a persistent terminal:
+commands, interactive prompts and development servers work in the same shell.
+On Windows it uses `cmd.exe` through ConPTY; install the current desktop
+requirements to enable it. Enter your running app's URL in **Preview**, or
+open it in a browser tab. Browser applications that need their own origin,
+cookies or embedding permission should use the browser tab.
+
+See [Windows Code acceptance](CODE-WINDOWS-ACCEPTANCE.md) for a short device
+check, including a real task for your coding agent.
+
+**Full IDE** opens the Eclipse Theia workbench in this same session's working
+copy. Run `Setup-Apex-Code-IDE.cmd` once on Windows to build it. It includes
+Python and JavaScript/TypeScript completion, diagnostics and navigation, real
+debuggers, tasks, and extensions from Open VSX or local VSIX files. Use
+**Focus IDE** for the full width. Apex waits for Save All and a Git checkpoint
+before an agent action, checks, Undo or Keep. Installed extensions persist
+across sessions. See [IDE setup and debugging](../ide/README.md) for commands,
+debug configurations and compatibility limits.
+
 You tell Apex what to build, fix or explain, by typing or by talking. Your
 Claude plan (Claude Code) or your ChatGPT plan (Codex) does the work, and you
 watch every step as it happens. It never uses API credits: only the two plans
@@ -15,11 +37,22 @@ git worktree under `ApexWork\code\`).
   which keeps running normally.
 - **Keep** merges the session into your branch. **Throw away** deletes the
   copy and the branch, and nothing else changes.
-- After every message, Apex saves a checkpoint on the session's branch.
+- After every message and successful manual file change, Apex saves a checkpoint on the session's branch.
   **Undo last step** puts the files back to before the last step, and Apex is
   told, so it doesn't assume its work is still there.
-- If your project has unsaved changes when a session starts, the session says
-  so: it starts from your last commit.
+- **Include uncommitted files** copies your saved, uncommitted project changes
+  into the session without changing the original files or Git index. Clear it
+  to start from the last commit. Git-ignored files, including `.env` and
+  `node_modules`, are excluded; install dependencies or configure your app in
+  the session's terminal as needed. Apex can use the original project's Python
+  `.venv` when the working copy does not have one.
+- File drafts stay in this tab's memory until saved. Switching files preserves
+  drafts and editor undo history. A disk conflict preserves your draft and asks
+  you to reload and compare; it never silently replaces the other version.
+  Save before closing the browser. The editor handles UTF-8 text up to 512 KB
+  and preserves existing Windows CRLF endings.
+- Keep and Throw away close the session's terminal and its running child
+  processes. Hiding the terminal or switching sessions leaves the shell running.
 
 ## The page
 
@@ -58,6 +91,15 @@ stored locally for up to 30 days, with at most 20 contexts retained. Normal
 message failures preserve the draft. Switching sessions or typing a new
 thought while an earlier submission completes does not clear the new text.
 These browser drafts are separate from Celine's suggested messages.
+
+Agent handoffs and recovery retain the complete original request plus the six
+most recent follow-ups. If older follow-ups are omitted, the handoff says so.
+The original specification is kept even after a long conversation; later
+instructions take precedence when they change the requirements.
+
+Code provides a browser workbench with an agent, editor, terminal, preview and
+Git review workflow. It does not currently include a debugger, a language-server
+integration or an extension marketplace.
 
 - **Home:**
   - a greeting, with your two plans as reactor rings: ready, resting (at a

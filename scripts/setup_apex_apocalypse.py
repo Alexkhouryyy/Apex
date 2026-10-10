@@ -22,7 +22,7 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from agent import apocalypse
+from agent import apocalypse, nomad_readers
 
 
 def local_executable(name):
@@ -272,14 +272,17 @@ def nomad(home, prepare=False):
     print('NOMAD started from cached images at http://127.0.0.1:8080. Download desired apps and content while online.',flush=True)
 
 
-def prepare_nomad_readers():
+def prepare_nomad_readers(readers=None, maps=False):
     """Use original NOMAD APIs after Docker storage and the stack are ready."""
     if apocalypse.enabled():
         raise RuntimeError('App installation and map preparation require an online preparation session.')
-    base = 'http://127.0.0.1:8080'
-    with httpx.Client(trust_env=False, timeout=httpx.Timeout(1800, connect=10)) as client:
+    readers = ['library'] if readers is None else list(dict.fromkeys(readers))
+    if set(readers) - set(nomad_readers.READERS):
+        raise ValueError('Choose library, courses, notes or tools.')
+    base = nomad_readers.BASE
+    with httpx.Client(trust_env=False, timeout=httpx.Timeout(1800, connect=10), follow_redirects=False) as client:
         def call(method, path, payload=None):
-            response = client.request(method, base+path, json=payload)
+            response = client.request(method, base+path, json=payload, timeout=10 if method == 'GET' else 1800)
             response.raise_for_status()
             data = response.json()
             if isinstance(data, dict) and data.get('success') is False:
@@ -287,21 +290,56 @@ def prepare_nomad_readers():
             return data
         if call('GET', '/api/health').get('status') != 'ok':
             raise RuntimeError('Start the prepared NOMAD Command Center first.')
-        installed = {row['service_name']: row for row in call('GET', '/api/system/services')}
-        for service in ('nomad_kiwix_server', 'nomad_kolibri_2', 'nomad_cyberchef', 'nomad_flatnotes'):
+        def services():
+            data = call('GET', '/api/system/services')
+            if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+                raise RuntimeError('NOMAD service status is unavailable. Nothing else was installed.')
+            return {row.get('service_name'): row for row in data}
+        installed = services()
+        for key in readers:
+            label, service = nomad_readers.READERS[key]
             row = installed.get(service)
-            if row and row.get('installed'):
+            if row and nomad_readers.installed(row):
                 if row.get('status') != 'running':
                     call('POST', '/api/system/services/affect', {'service_name':service, 'action':'start'})
-                continue
-            print('Installing '+service, flush=True)
-            call('POST', '/api/system/services/install', {'service_name':service})
-        call('POST', '/api/zim/rescan-library', {})
-        call('POST', '/api/maps/download-base-assets', {})
-        call('POST', '/api/maps/setup-world-basemap', {})
-    print('Reader installation requests accepted and map assets prepared. Check each app in NOMAD. '
-          'Kolibri course import, FDA database ingestion, AI/embedding models and an offline test remain required. '
-          'Existing Ollama was left alone; configure NOMAD AI separately to avoid its 11434 port conflict.', flush=True)
+            else:
+                preparation = ('NOMAD downloads its reader image and a small starter Wikipedia archive; the large library plan stays deferred.'
+                               if key == 'library' else 'This can download its app image; no course imports or map downloads are requested.')
+                print('Installing '+label+'. '+preparation, flush=True)
+                call('POST', '/api/system/services/install', {'service_name':service})
+            deadline = time.monotonic() + 600
+            while True:
+                row = services().get(service, {})
+                if nomad_readers.installed(row) and row.get('status') == 'running':
+                    print(label+': running.', flush=True)
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(label+' is not running yet. Check NOMAD, then retry; its cached files were kept.')
+                time.sleep(3)
+        if 'library' in readers:
+            call('POST', '/api/zim/rescan-library', {})
+            library = services().get(nomad_readers.READERS['library'][1], {})
+            url = nomad_readers.local_reader_url(library.get('ui_location'))
+            if not url:
+                raise RuntimeError('Library is running, but its local address is unavailable. Check NOMAD.')
+            deadline = time.monotonic() + 60
+            while True:
+                try:
+                    response = client.get(url+nomad_readers.CATALOG_PATH, timeout=5)
+                    response.raise_for_status()
+                    count = nomad_readers.catalog_entries(response.content)
+                    break
+                except (httpx.HTTPError, ValueError):
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('Library is running, but its catalog did not answer. Check the reader before going offline.')
+                    time.sleep(3)
+            print(f'Library catalog answered: {count} titles listed (up to 50). Open {url} to read an article.', flush=True)
+            if not count:
+                print('The catalog is empty. Check the downloaded ZIM files in nomad/storage/zim and rescan in NOMAD.', flush=True)
+        if maps:
+            call('POST', '/api/maps/download-base-assets', {})
+            call('POST', '/api/maps/setup-world-basemap', {})
+    print('Selected reader setup finished. Course imports, map content, AI indexing and a disconnected test are separate steps.', flush=True)
 
 
 def main():
@@ -309,15 +347,22 @@ def main():
     p.add_argument('--nomad',action='store_true',help='Prepare and start full NOMAD (Docker required)')
     p.add_argument('--nomad-start',action='store_true',help='Start cached NOMAD without pulls or builds')
     p.add_argument('--library',action='store_true',help='Prepare English knowledge and worldwide maps (resumes existing downloads)')
-    p.add_argument('--nomad-apps',action='store_true',help='Install NOMAD readers/data tools and prepare local map assets (online)')
+    readers_group=p.add_mutually_exclusive_group()
+    readers_group.add_argument('--nomad-apps',action='store_true',help='Install all four NOMAD readers/data tools; content and maps are separate (online)')
+    readers_group.add_argument('--nomad-readers',action='store_true',help='Install the information-library reader only, unless --reader selects others (online)')
+    p.add_argument('--reader',action='append',choices=tuple(nomad_readers.READERS),help='Select a reader with --nomad-readers; may be repeated')
+    p.add_argument('--nomad-maps',action='store_true',help='Explicitly download map assets and prepare the worldwide basemap (online)')
     p.add_argument('--model',default=apocalypse.model_name())
     p.add_argument('--model-transport', choices=('ollama', 'curl'), default='ollama', help='Use Windows curl for pinned qwen3:4b if normal model transfers return EOF')
     args=p.parse_args()
     home=apocalypse.library_root()
-    if args.nomad_apps:
+    if args.reader and not args.nomad_readers:
+        p.error('--reader requires --nomad-readers.')
+    if args.nomad_apps or args.nomad_readers or args.nomad_maps:
         if args.nomad or args.nomad_start or args.library:
-            p.error('--nomad-apps is a separate step after NOMAD is ready.')
-        prepare_nomad_readers()
+            p.error('Reader/map preparation is a separate step after NOMAD is ready.')
+        selected=list(nomad_readers.READERS) if args.nomad_apps else (args.reader or ['library']) if args.nomad_readers else []
+        prepare_nomad_readers(selected, maps=args.nomad_maps)
         return
     if args.library:
         if args.nomad or args.nomad_start:

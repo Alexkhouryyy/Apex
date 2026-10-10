@@ -1,0 +1,56 @@
+/* Verify owner actions wait for Save All and preserve live iframe buffers. */
+const {JSDOM}=require('jsdom');
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const dir=path.join(__dirname,'../dashboard/static');
+const dom=new JSDOM(fs.readFileSync(path.join(dir,'code.html'),'utf8'),{url:'https://apex.test/code',runScripts:'outside-only'});
+const w=dom.window,$=id=>w.document.getElementById(id),tick=()=>new Promise(r=>setTimeout(r,0));
+let ctx={id:1,detail:{status:'ready',worktree:'C:\\Apex projects\\work ü'},busy:false},running=true,warning='',poll;
+const writes=[],messages=[],posts=[];
+const nativeTimeout=w.setTimeout.bind(w);let expire;
+w.setInterval=fn=>{poll=fn;return 1;};
+w.setTimeout=(fn,ms)=>{if(ms===15000){expire=fn;return 123;}return nativeTimeout(fn,ms);};
+w.eval(fs.readFileSync(path.join(dir,'code_ide.js'),'utf8'));
+w.ApexCodeIDE.init({context:()=>ctx,say:m=>messages.push(m),refresh:async()=>{},beforeOperation:async()=>true,
+ api:async(url,options)=>{if(options?.method==='DELETE')writes.push('close');return {running};},
+ post:async url=>{writes.push(url.endsWith('checkpoint')?'checkpoint':'launch');return {url:'/code/ide/'+ctx.id+'/',warning};}});
+const bridge=(frame,type,data={},origin=w.location.origin,source=frame.contentWindow)=>w.dispatchEvent(new w.MessageEvent('message',{origin,source,data:{channel:'apex-ide',type,...data}}));
+(async()=>{
+ await w.ApexCodeIDE.open();
+ const first=$('ide-frames').firstElementChild,source=first.contentWindow;
+ source.postMessage=(data,origin)=>posts.push({data,origin});
+ bridge(first,'ready');bridge(first,'state',{dirty:true});
+ assert.equal(w.ApexCodeIDE.dirty(),true);
+ let done=false;const saving=w.ApexCodeIDE.save().then(v=>{done=true;return v;});
+ const duplicate=w.ApexCodeIDE.save();
+ assert.equal(posts.length,1,'Repeated actions share one Save All');
+ const id=posts[0].data.id;
+ bridge(first,'saved',{id,ok:true},'https://foreign.test');
+ bridge(first,'saved',{id,ok:true},w.location.origin,w);
+ await tick();assert.equal(done,false,'Spoofed acknowledgements cannot release owner actions');
+ assert.equal(writes.includes('checkpoint'),false,'Checkpoint waits for real disk-save acknowledgement');
+ bridge(first,'state',{dirty:false});bridge(first,'saved',{id,ok:true});
+ assert.equal(await saving,true);assert.equal(await duplicate,true);
+ assert.equal(writes.filter(v=>v==='checkpoint').length,1);
+ assert.equal(w.ApexCodeIDE.openFile('src/hello ü.py'),true);
+ assert.equal(posts.at(-1).data.uri,'file:///C:/Apex%20projects/work%20%C3%BC/src/hello%20%C3%BC.py');
+ ctx={...ctx,id:2};w.ApexCodeIDE.update();await w.ApexCodeIDE.open();
+ const second=$('ide-frames').lastElementChild;bridge(second,'ready');
+ assert.equal(first.isConnected,true,'Workspace switching preserves the original iframe and editor buffers');
+ assert.equal(first.hidden,true);
+ ctx={...ctx,id:1};w.ApexCodeIDE.update();assert.equal(first.hidden,false);
+ running=false;await poll();assert.match($('ide-status').textContent,/disconnected/);
+ assert.equal(await w.ApexCodeIDE.beforeLeaving(),false,'Disconnected buffers block leaving');
+ await w.ApexCodeIDE.open();assert.equal($('ide-frames').firstElementChild,first,'Reconnect keeps the existing iframe');
+ bridge(first,'state',{dirty:true});const failed=w.ApexCodeIDE.save();
+ bridge(first,'saved',{id:posts.at(-1).data.id,ok:false,error:'Disk is full'});
+ assert.equal(await failed,false);assert.equal(w.ApexCodeIDE.dirty(),true);
+ assert(messages.includes('Disk is full'));
+ const timedOut=w.ApexCodeIDE.save();expire();assert.equal(await timedOut,false);
+ assert.equal(first.isConnected,true,'Timeout preserves the unsaved buffer');
+ ctx={...ctx,busy:true};assert.equal(await w.ApexCodeIDE.save(),false,'Dirty IDE blocks commands during an operation');
+ bridge(first,'state',{dirty:false});assert.equal(await w.ApexCodeIDE.save(),true,'A clean IDE allows another queued agent message');
+ ctx={...ctx,busy:false};warning='Unable to create an Undo checkpoint';
+ const noCheckpoint=w.ApexCodeIDE.save();bridge(first,'saved',{id:posts.at(-1).data.id,ok:true});
+ assert.equal(await noCheckpoint,false,'A failed checkpoint blocks destructive follow-up actions');
+ console.log('Full IDE bridge: trusted acknowledgements, Save All ordering, duplicate actions, Windows Unicode paths, persistent buffers, reconnect, failures, timeouts and busy queue pass.');
+})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>dom.window.close());

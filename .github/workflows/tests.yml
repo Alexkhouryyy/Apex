@@ -12,6 +12,97 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  code-ide:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci-tests-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ide/package-lock.json
+      - name: Install Apex and the locked IDE
+        shell: bash
+        run: |
+          python -m pip install -r requirements.txt
+          python scripts/setup_code_ide.py
+      - name: Audit the IDE runtime dependencies
+        shell: bash
+        run: npm audit --prefix ide --omit=dev --audit-level=moderate
+      - name: IDE access, extractor and real process lifecycle
+        shell: bash
+        env:
+          APEX_IDE_INTEGRATION: "1"
+        run: python -m pytest -q tests/test_code_ide.py tests/test_code_workspace.py tests/test_code_terminal.py
+      - name: Install browser acceptance dependencies
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/ide-browser" --no-audit --no-fund playwright@1.64.0
+          "$RUNNER_TEMP/ide-browser/node_modules/.bin/playwright" install chromium
+      - name: Actual language services, debuggers, extensions and Save All
+        shell: bash
+        run: |
+          export NODE_PATH="$RUNNER_TEMP/ide-browser/node_modules"
+          python scripts/check_code_ide_runtime.py --output-dir "$RUNNER_TEMP/ide-acceptance"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-ide-acceptance-${{ matrix.os }}
+          path: ${{ runner.temp }}/ide-acceptance
+      - uses: actions/upload-artifact@v4
+        if: success() && runner.os == 'Windows'
+        with:
+          name: apex-code-ide-windows-node24
+          include-hidden-files: true
+          path: |
+            ide/lib
+            ide/src-gen
+            ide/node_modules
+            ide/plugins
+            ide/apex-extension
+            ide/archive-adapter
+            ide/package.json
+            ide/package-lock.json
+            ide/plugins.lock.json
+            ide/README.md
+
+  windows-code:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install desktop dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Real Windows terminal and workspace checks without model calls
+        env:
+          ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci-tests-only
+        run: python -m pytest -q tests/test_code_terminal.py tests/test_code_workspace.py
+
+  mcp-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        requirements: [requirements.txt, requirements-cloud.txt]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Fresh MCP SDK and real stdio round trip
+        run: python scripts/check_mcp_sdk.py --requirements ${{ matrix.requirements }} --install
+
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +141,8 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/apex-ui-check" --no-audit --no-fund jsdom@30.0.1
           export NODE_PATH="$RUNNER_TEMP/apex-ui-check/node_modules"
+          node --check dashboard/static/app.js
+          node scripts/check_budget_ui.cjs
           node --check dashboard/static/companion.js
           node scripts/check_companion_ui.cjs
           node scripts/check_companion_voice_ui.cjs
@@ -95,6 +188,10 @@ jobs:
           node --check dashboard/static/work.js
           node scripts/check_code_ui.cjs
           node scripts/check_code_flow.cjs
+          node scripts/check_code_workspace_ui.cjs
+          node scripts/check_code_ide_ui.cjs
+          node --check dashboard/static/code_workspace.js
+          node --check dashboard/static/code_ide.js
           node --check dashboard/static/code.js
           node scripts/check_code_usage_ui.cjs
           node --check dashboard/static/code_usage.js
@@ -120,6 +217,13 @@ jobs:
           node scripts/check_world_flights_ui.cjs
           node --check dashboard/static/world-earthquakes.js
           node scripts/check_world_earthquakes_ui.cjs
+          node scripts/check_setup_ui.cjs
+
+      - name: Rebuild the bundled editor and verify checked-in assets
+        run: |
+          npm ci --prefix dashboard/editor --no-audit --no-fund
+          npm run build --prefix dashboard/editor
+          git diff --exit-code -- dashboard/static/vendor
 
       - name: Structural audits (informational — never fails the build)
         env:

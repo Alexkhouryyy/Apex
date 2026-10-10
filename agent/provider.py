@@ -80,8 +80,8 @@ KNOWN_MODELS = {
 # Providers ship models faster than this file gets edited, and being unable to
 # use one until someone patches a set literal is a bad trade. EXTRA_MODELS is the
 # escape hatch: `EXTRA_MODELS=gpt-6,gemini-4-pro` in .env and they are selectable
-# immediately. Anything unpriced bills as $0 in telemetry, which is the honest
-# failure — see config.MODEL_PRICING.
+# immediately. Unpriced remote models have unknown cost and require pricing
+# when spend caps are enabled — see config.MODEL_PRICING.
 KNOWN_MODELS |= {
     m.strip() for m in os.getenv("EXTRA_MODELS", "").split(",") if m.strip()
 }
@@ -132,10 +132,10 @@ def supports_sampling(model: str) -> bool:
 class _Usage:
     __slots__ = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
-    def __init__(self, inp: int, out: int):
+    def __init__(self, inp: int, out: int, cache_read: int = 0):
         self.input_tokens = inp
         self.output_tokens = out
-        self.cache_read_input_tokens = 0
+        self.cache_read_input_tokens = cache_read
         self.cache_creation_input_tokens = 0
 
 
@@ -180,7 +180,7 @@ class _ToolUseBlock(dict):
 class _FakeMessage:
     __slots__ = ("content", "stop_reason", "usage")
 
-    def __init__(self, content: list, stop_reason: str, usage: _Usage):
+    def __init__(self, content: list, stop_reason: str, usage: _Usage | None):
         self.content = content
         self.stop_reason = stop_reason
         self.usage = usage
@@ -365,6 +365,19 @@ def _require_local_answer(content: list, limited: bool) -> None:
         "The local model returned no final answer. Try asking for one part of the question at a time.")
 
 
+def _wrap_usage(usage) -> _Usage | None:
+    if usage is None:
+        return None
+    prompt = getattr(usage, "prompt_tokens", None)
+    completion = getattr(usage, "completion_tokens", None)
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", 0) or getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+    if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0
+               for v in (prompt, completion, cached)) or cached > prompt:
+        return None
+    return _Usage(prompt - cached, completion, cached)
+
+
 def _wrap_response(resp, *, local: bool = False) -> _FakeMessage:
     choice = resp.choices[0] if resp.choices else None
     content: list = []
@@ -391,10 +404,7 @@ def _wrap_response(resp, *, local: bool = False) -> _FakeMessage:
     return _FakeMessage(
         content,
         stop_reason,
-        _Usage(
-            getattr(usage_obj, "prompt_tokens", 0) or 0,
-            getattr(usage_obj, "completion_tokens", 0) or 0,
-        ),
+        _wrap_usage(usage_obj),
     )
 
 
@@ -408,31 +418,33 @@ class _OpenAIStream:
         self._kwargs = kwargs
         self._local = local
         self._final: _FakeMessage | None = None
+        self._started = False
+        self._response = None
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        pass
+        close = getattr(self._response, "close", None)
+        if callable(close):
+            close()
 
     def __iter__(self):
+        if self._started:
+            raise RuntimeError("An OpenAI stream cannot be requested twice.")
+        self._started = True
         acc_text = ""
         tool_acc: dict[int, dict] = {}
-        usage = _Usage(0, 0)
+        usage = None
         limited = False
 
         stream_kwargs = {**self._kwargs, "stream": True, "stream_options": {"include_usage": True}}
         resp = self._oai.chat.completions.create(**stream_kwargs)
+        self._response = resp
 
         for chunk in resp:
-            # Capture usage from the final usage-only chunk
-            if not chunk.choices and getattr(chunk, "usage", None):
-                u = chunk.usage
-                usage = _Usage(
-                    getattr(u, "prompt_tokens", 0) or 0,
-                    getattr(u, "completion_tokens", 0) or 0,
-                )
-                continue
+            if getattr(chunk, "usage", None) is not None:
+                usage = _wrap_usage(chunk.usage)
 
             if not chunk.choices:
                 continue
@@ -476,6 +488,8 @@ class _OpenAIStream:
 
     def get_final_message(self) -> _FakeMessage:
         if self._final is None:
+            if self._started:
+                raise RuntimeError("The OpenAI stream is incomplete; final usage is unavailable.")
             for _ in self:
                 pass
         return self._final
@@ -657,7 +671,8 @@ def is_usable(model: str) -> bool:
 def complete(model: str, system: str, user: str, max_tokens: int = 2048) -> str:
     """One-shot text completion against any provider. Returns plain text."""
     client = get_client(model)
-    resp = client.messages.create(
+    from agent import telemetry
+    resp = telemetry.create(client, call_site="provider.complete",
         model=model,
         max_tokens=max_tokens,
         system=system,
@@ -676,12 +691,12 @@ def stream_complete(model: str, system: str, user: str, max_tokens: int = 2048,
     `content_block_delta` events natively, and OpenAIAdapter's _OpenAIStream
     fabricates the same shape for OpenAI, Gemini and Ollama.
 
-    Falls back to the blocking path on any streaming failure — a slow answer is
-    strictly better than no answer, and the caller cannot tell the difference
-    apart from the tokens not arriving early.
+    Falls back only when streaming is explicitly unsupported before dispatch.
+    A failed paid stream must not silently create another paid request.
     """
     if on_token is None:
         return complete(model, system, user, max_tokens=max_tokens)
+    from agent import telemetry
 
     kwargs = {
         "model": model,
@@ -692,7 +707,7 @@ def stream_complete(model: str, system: str, user: str, max_tokens: int = 2048,
     try:
         client = get_client(model)
         acc = []
-        with client.messages.stream(**kwargs) as stream:
+        with telemetry.stream(client, call_site="provider.stream_complete", **kwargs) as stream:
             for event in stream:
                 if getattr(event, "type", "") != "content_block_delta":
                     continue
@@ -708,8 +723,6 @@ def stream_complete(model: str, system: str, user: str, max_tokens: int = 2048,
                 except Exception:
                     pass          # a broken consumer must not kill generation
         out = "".join(acc).strip()
-        if out:
-            return out
-    except Exception as e:
-        print(f"[Provider] streaming failed ({e}); falling back to blocking call")
-    return complete(model, system, user, max_tokens=max_tokens)
+        return out
+    except telemetry.StreamUnavailable:
+        return complete(model, system, user, max_tokens=max_tokens)

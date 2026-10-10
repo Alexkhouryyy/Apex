@@ -23,6 +23,7 @@ from agent import budget as _budget
 from agent import provider
 from agent import incident_replay
 from agent import message_snapshot
+from agent import offline_library
 from tools import computer, bash, research, files, browser, repl, vision, phone, image_gen, telegram, discord, slack, whatsapp, signal
 
 SYSTEM_PROMPT = """You are an advanced AI agent with voice interface, computer vision, computer control, \
@@ -493,7 +494,7 @@ def refresh_study_tool():
     tool["input_schema"]["properties"]["model"]["enum"] = _study_library_ids()
 
 
-TOOLS = [
+TOOLS = [*offline_library.DEFINITIONS,
     {
         "name": "start_team_task",
         "description": "Start a durable specialist workflow for a concrete user-requested project task. Select only needed roles; research, coding and read-only review run in that order, followed by Apex's summary. Coding can edit host files through existing safety gates. Supply the actual project path and acceptance checks in context. Reuse the same id when retrying a submission. This returns immediately; use team_task_status later. Do not delegate simple questions unnecessarily.",
@@ -2896,6 +2897,9 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
                     f"{out['notes']} grounded findings, "
                     f"{out['sources_cited']} sources cited.\n\n{out['report']}")
 
+        elif name in {'library_list', 'library_search', 'library_read'}:
+            return offline_library.call(name, inputs)
+
         elif name == "read_file":
             if apocalypse.enabled():
                 return apocalypse.read_local_file(inputs['path'], inputs.get('offset', 0), inputs.get('page', 1))
@@ -3693,6 +3697,10 @@ class AgentCore:
                 f"The user's offline library is {apocalypse.library_root() / 'documents'}. "
                 "Uploads store files there; they are not automatically indexed into the knowledge base. "
                 "Use list_dir/find_files and read_file (offset/page for text/PDF) to consult them. "
+                "For downloaded reference books, use library_search with short keywords and an optional "
+                "book title; library_list shows installed books. Read matching articles with library_read "
+                "before answering, then include their returned cite links. Search previews are not full "
+                "articles. If results are insufficient, say so; never invent a library source. "
                 "Use remember/recall for durable memory and skill_manage to view local skills.\n"
             )
             text += "\nSaved memory:\n" + self._memory_files.get('memory', '')[:2200]
@@ -4268,10 +4276,10 @@ class AgentCore:
         text is returned with an [INTERRUPTED] marker and stop_reason 'end_turn',
         so the caller ends the turn cleanly with a consistent conversation history.
         """
-        import time as _time
+        if cancel_event is not None and cancel_event.is_set():
+            return [{"type": "text", "text": "[INTERRUPTED]"}], "end_turn", ""
         accumulated_text = ""
-        start = _time.time()
-        with self.client.messages.stream(**kwargs) as stream:
+        with telemetry.stream(self.client, call_site="agent.core/stream", **kwargs) as stream:
             for event in stream:
                 if cancel_event is not None and cancel_event.is_set():
                     out = accumulated_text.strip()
@@ -4288,19 +4296,6 @@ class AgentCore:
                         streamer.feed(text)
             final = stream.get_final_message()
 
-        latency_ms = int((_time.time() - start) * 1000)
-        tool_calls = [
-            {"name": getattr(b, "name", ""), "id": getattr(b, "id", "")}
-            for b in final.content if getattr(b, "type", "") == "tool_use"
-        ]
-        telemetry.record(
-            call_site="agent.core/stream",
-            model=kwargs.get("model", "?"),
-            usage=getattr(final, "usage", None),
-            latency_ms=latency_ms,
-            stop_reason=getattr(final, "stop_reason", "") or "",
-            tool_calls=tool_calls,
-        )
         return final.content, final.stop_reason, accumulated_text.strip()
 
     def proactive_check(self, screenshot_b64: str) -> str | None:

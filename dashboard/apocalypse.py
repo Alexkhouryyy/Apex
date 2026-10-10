@@ -10,9 +10,9 @@ import time
 
 import httpx
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
-from agent import apocalypse as mode, offline_sessions, continuity, board_workspaces
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
+from agent import apocalypse as mode, offline_sessions, continuity, board_workspaces, nomad_readers
 from dashboard.apps import owner
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +21,40 @@ api = APIRouter(prefix='/api/apocalypse', dependencies=[Depends(owner)])
 _chat_lock = asyncio.Lock()
 _log = logging.getLogger(__name__)
 EXTENSIONS = {'.txt', '.md', '.pdf', '.zim', '.pmtiles'}
+
+
+async def library_operation(name, inputs):
+    """Reuse the bounded local reader transport without running a model turn."""
+    from agent import offline_library
+    try:
+        data = json.loads(await asyncio.to_thread(offline_library.call, name, inputs))
+    except Exception as exc:
+        _log.warning('Offline library unavailable: %s', type(exc).__name__)
+        raise HTTPException(503, 'The local library could not answer. Check NOMAD and the library drive.',
+                            headers={'Cache-Control': 'no-store'}) from exc
+    if 'error' in data:
+        raise HTTPException(503, data['error'], headers={'Cache-Control': 'no-store'})
+    return JSONResponse(data, headers={'Cache-Control': 'no-store'})
+
+
+@api.get('/library/books')
+async def library_books():
+    return await library_operation('library_list', {})
+
+
+@api.get('/library/search')
+async def library_search(q: str = Query(min_length=1, max_length=240),
+                         book: str = Query(default='', max_length=200),
+                         limit: int = Query(default=5, ge=1, le=5)):
+    if not q.strip():
+        raise HTTPException(400, 'Enter a few keywords to search the saved books.')
+    return await library_operation('library_search', {'query': q, 'book': book, 'limit': limit})
+
+
+@api.get('/library/article')
+async def library_article(url: str = Query(min_length=1, max_length=4096),
+                          offset: int = Query(default=0, ge=0, le=2 * 1024 * 1024)):
+    return await library_operation('library_read', {'url': url, 'offset': offset})
 
 
 async def project_operation(fn, *args, **kwargs):
@@ -106,6 +140,8 @@ async def status():
             local_json(client, mode.ollama_url()+'/api/tags'),
             local_json(client, 'http://127.0.0.1:8080/api/health'),
             local_json(client, voice_url))
+        nomad_ready = isinstance(nomad, dict) and nomad.get('status') == 'ok'
+        readers = await nomad_readers.status(client, nomad_ready)
     models = [row.get('name') or row.get('model') for row in (tags or {}).get('models', []) if mode.is_local_model(row)]
     selected = mode.model_name()
     disk = mode.library_root()
@@ -116,8 +152,8 @@ async def status():
     provenance = json.loads((ROOT/'integrations/project-nomad/UPSTREAM.json').read_text())
     return {'active': mode.enabled(), 'model': {'selected': selected, 'downloaded': selected in models,
             'available': models, 'server_ready': tags is not None, 'response_verified': False},
-            'storage': {'path': str(disk), 'free_bytes': free}, 'documents': documents(),
-            'nomad': {'ready': isinstance(nomad, dict) and nomad.get('status') == 'ok',
+            'storage': {'path': str(disk), 'free_bytes': free, 'available': disk.is_dir()}, 'documents': documents(),
+            'nomad': {'ready': nomad_ready, 'readers': readers,
                       'url': 'http://127.0.0.1:8080', 'revision': provenance['revision'],
                       'docker_available': bool(shutil.which('docker'))},
             'voice': {'server_ready': isinstance(voice, dict), 'audio_verified': False},

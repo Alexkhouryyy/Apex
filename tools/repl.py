@@ -10,13 +10,27 @@ import threading
 from queue import Empty
 from typing import Optional
 
+import config
+
 _km = None    # KernelManager
 _kc = None    # KernelClient
 _lock = threading.Lock()
 
 
+def _check_execution_policy() -> None:
+    # This kernel is a host process, not a Docker kernel. Refuse rather than
+    # silently bypass the execution policy, even if a host kernel already exists.
+    if config.EXECUTION_BACKEND != "local" or config.SANDBOX_REQUIRE:
+        raise RuntimeError(
+            "Persistent Python requires EXECUTION_BACKEND=local and SANDBOX_REQUIRE=false. "
+            "Host execution is refused under the configured isolation policy; "
+            "use sandboxed bash for isolated Python execution."
+        )
+
+
 def _ensure_kernel():
     global _km, _kc
+    _check_execution_policy()
     if _kc is not None:
         return _kc
     from jupyter_client.manager import KernelManager
@@ -121,6 +135,7 @@ def reset() -> str:
     """Restart the kernel — all state lost."""
     global _km, _kc
     with _lock:
+        _check_execution_policy()
         try:
             if _km:
                 _km.shutdown_kernel(now=True)
@@ -128,7 +143,7 @@ def reset() -> str:
             pass
         _km = None
         _kc = None
-    _ensure_kernel()
+        _ensure_kernel()
     return "Python kernel reset. All variables cleared."
 
 

@@ -1,11 +1,10 @@
 anthropic>=0.40.0
 apscheduler
 sentence-transformers
-# PINNED: MCP spec 2026-07-28 removed the initialize() handshake that
-# agent/mcp_client.py calls (mcp_client.py:81,112). Unpinned, a routine
-# `pip install -U` could silently break all MCP tools. Re-pin deliberately
-# after verifying the stdio transport against the new spec.
-mcp<2.0
+# MCP 1.x supplies the Tool.inputSchema field our discovery adapter reads.
+# MCP 2.x changes that model; validate discovery and both transports before
+# migrating. Keep desktop and cloud constraints aligned. HTTP needs >=1.10.
+mcp>=1.10,<2.0
 httpx>=0.27,<1
 jsonschema>=4,<5
 PyYAML>=6,<7
@@ -18,7 +17,7 @@ markitdown[docx,pptx,xlsx,pdf]==0.1.8   # Word, PowerPoint, Excel, PDF as text (
 pyperclip
 fastapi
 uvicorn[standard]
-websockets
+websockets>=14,<18
 pytesseract
 opencv-contrib-python
 # The SAME OpenCV that mediapipe (below) pulls in. Listing a different one here
@@ -54,6 +53,9 @@ twilio
 replicate
 python-multipart
 prompt_toolkit  # terminal UI mode (--tui)
+pywinpty>=2.0.13,<4; sys_platform == 'win32'  # Code's persistent Windows terminal
+ptyprocess>=0.7,<1; sys_platform != 'win32'   # Code's persistent Unix terminal
+psutil>=5.9,<8  # Close a Code terminal's foreground and background child processes
 cryptography    # Ed25519 verification for inbound Discord interactions
 openai>=1.40.0   # required for GPT models, Gemini (OpenAI-compatible endpoint), and OpenAI voice
 pystray         # system tray icon (--resident)
