@@ -363,7 +363,8 @@
           ...(queue ? {request_id: queueRequestId(key, JSON.stringify([text, opts]))} : {})});
         clearSentDraft(key, text);
         if (current === sid) { if (queue) detail.queue = r; else detail = r; planFirst = false; renderEngine(); schedule(300); }
-        if (queue) say('Follow-up saved. It will run in order unless the queue pauses.', 'good');
+        if (queue) say(r.paused ? `Follow-up saved, but follow-ups are paused: ${r.reason} Press Resume to run them.`
+          : 'Follow-up saved. It runs next, in order, as soon as this session is free.', r.paused ? '' : 'good');
       }
     } catch (err) { say(err.message, 'error'); }
     submitting = false; renderEngine();
