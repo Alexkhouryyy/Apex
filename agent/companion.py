@@ -36,6 +36,9 @@ DISCUSS_TOOLS = frozenset({
 WORK_ONLY_TOOLS = frozenset({"code_act"})
 # Apex Code is the owner's (dashboard/code.py): a turn from a device token gets neither.
 CODE_TOOLS = frozenset({"code_status", "code_act"})
+# Withheld from every turn the owner didn't start (device tokens, channels, background):
+# Apex Code, and image generation, which runs an agent on the owner's ChatGPT plan.
+OWNER_TOOLS = CODE_TOOLS | {"generate_image"}
 
 
 def validate_screen_image(value: str | None) -> str | None:

@@ -42,9 +42,14 @@ At most ten follow-ups can wait in one session. Retrying the same queued
 submission after a lost response does not run it twice.
 
 The queue pauses after a failed or stopped step, a plan that needs your
-approval, a blocked command, an unsaved checkpoint, or an Apex restart.
-It also pauses when you add a follow-up during checks, review or a terminal
-operation. Review what happened, then explicitly Resume once the session is
+approval, a blocked command, an unsaved checkpoint, or an Apex restart, but
+only when follow-ups are waiting at that moment: a pause never holds back a
+follow-up you add later. An automatic pause clears once nothing is waiting
+(your own Pause stays until you resume), and if you add a follow-up while
+the queue is paused, the page says so at once.
+A follow-up added during checks, a review or a terminal command, or while
+three sessions are already working, waits and starts by itself as soon as
+that ends. Review what happened, then explicitly Resume once the session is
 idle. Queue entries survive a restart; they never resume automatically.
 While the queue is paused, explicit actions such as **Build it** or **Allow
 once** can complete the current task; waiting follow-ups stay paused.

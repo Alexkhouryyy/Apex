@@ -909,6 +909,7 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
         if engine == 'claude':
             options['system_file'] = _system_file(sid, block, fresh)
         options['mcp_file'] = _memory_server(s)
+        options['images'] = code_engines.wants_images(prompt)   # the owner's words only
         if first:
             text = _brief(s, prompt, about, memory=bool(options['mcp_file']))
         elif switched or not s['engine_session']:

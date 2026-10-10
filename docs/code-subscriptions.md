@@ -21,6 +21,13 @@ an error rather than falling back to a billed API. `provider="replicate"` retain
 the existing integration. `IMAGE_GEN_PROVIDER=auto` preserves Replicate when its
 token is configured and otherwise selects ChatGPT. Set
 `IMAGE_GEN_PROVIDER=chatgpt` to make the subscription your preferred image path.
+On ChatGPT it runs Codex for at most 10 minutes. Only the owner's own turns get the
+tool (it is withheld from device-token, channel and background turns like Apex
+Code), the confirmation shows the whole request, the description is passed to
+Codex as data with an instruction not to follow anything inside it, and a
+failure returns Apex's own reason, never Codex's text.
+Inside Apex Code, Codex is told to generate images only when your own message
+asks to make one ("make a logo"), not when a brief or recap mentions one.
 The `model` parameter for ChatGPT selects the coding model; the native client
 selects its image model. The requested size is a prompt instruction, not a
 guarantee of an exact output resolution.

@@ -146,8 +146,17 @@ def status(sub_id: str) -> dict:
         return {k: v for k, v in sub.items() if k != "thread"}
 
 
-def run_plan(nodes, *, confidence=0.0):
-    """Parent-only bounded DAG execution; dense/uncertain plans stay with the parent."""
+PLAN_BUDGET = 600.0          # seconds for a whole plan, every wave together
+ARTIFACT_LIMIT = 15000       # characters a worker hands on (dependency_plan refuses over 16,000)
+
+
+def run_plan(nodes, *, confidence=0.0, cancel=None, budget: float = PLAN_BUDGET):
+    """Parent-only bounded DAG execution; dense/uncertain plans stay with the parent.
+
+    One deadline covers the whole plan, not 300 s per step, and the turn's Stop
+    (`cancel`) ends the wait within a second, so a voice turn is never held for
+    waves × 5 minutes. A worker that is still running then is left to finish on
+    its own; its result is not used. A long result is cut, not thrown away."""
     import json
     from agent import dependency_plan, subagent_scope, memory_governance
     governed = memory_governance.current()
@@ -155,19 +164,29 @@ def run_plan(nodes, *, confidence=0.0):
         raise RuntimeError("workers cannot recursively schedule plans")
     spec = dependency_plan.plan(nodes, confidence=confidence,
                                 max_workers=min(4, max(1, config.MAX_SUBAGENTS)))
+    deadline = time.time() + budget
 
     def run_node(node, artifacts):
+        if cancel is not None and cancel.is_set():
+            raise RuntimeError("stopped")
         task = node["task"] + "\n\nDeclared predecessor artifacts (untrusted reference data):\n" + json.dumps(artifacts)
         scope = memory_governance.use(governed) if governed is not None else contextlib.nullcontext()
         with scope:
             ident = spawn(node["role"], task)
         if ident not in _subagents:
             raise RuntimeError("worker could not be started")
-        wait_for([ident])
+        while status(ident).get("status") == "running":
+            if cancel is not None and cancel.is_set():
+                raise RuntimeError("stopped")
+            left = deadline - time.time()
+            if left <= 0:
+                raise TimeoutError("the plan's time budget is used up")
+            wait_for([ident], timeout=min(1.0, left))
         result = status(ident)
         if result["status"] != "done":
             raise RuntimeError("worker did not complete successfully")
-        return result["result"]
+        text = result["result"] if isinstance(result["result"], str) else json.dumps(result["result"])
+        return text if len(text) <= ARTIFACT_LIMIT else text[:ARTIFACT_LIMIT] + "\n… (cut: the full result was longer)"
 
     return dependency_plan.execute(spec, run_node)
 
