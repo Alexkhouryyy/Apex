@@ -124,6 +124,18 @@ class TestSnapshots:
             rows = c.execute("SELECT content FROM memories").fetchall()
         assert rows == [("call the dentist",)]
 
+    def test_snapshot_preserves_rows_from_uri_character_paths(self, tmp_path):
+        from contextlib import closing
+        src = tmp_path / 'brain #1.db'
+        with closing(sqlite3.connect(src)) as conn:
+            conn.execute('CREATE TABLE memories (content TEXT)')
+            conn.execute("INSERT INTO memories VALUES ('current work')")
+            conn.commit()
+        restored = tmp_path / 'restored.db'
+        restored.write_bytes(relay.snapshot_bytes(str(src)))
+        with closing(sqlite3.connect(restored)) as conn:
+            assert conn.execute('SELECT content FROM memories').fetchall() == [('current work',)]
+
     @pytest.mark.parametrize('integrity', ['ok', 'corrupt'])
     def test_snapshot_releases_its_handles_even_when_verification_fails(self, db, monkeypatch, integrity):
         connect = sqlite3.connect

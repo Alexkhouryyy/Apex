@@ -21,7 +21,9 @@ from contextlib import closing
 import os
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 
 def default_db() -> Path:
@@ -32,29 +34,35 @@ def default_db() -> Path:
 def backup(src: Path, dest: Path) -> dict:
     if not src.exists():
         raise FileNotFoundError(f"no database at {src}")
+    if src.resolve() == dest.resolve() or dest.exists() and src.samefile(dest):
+        raise ValueError('The backup destination must not be the source database or its alias.')
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        dest.unlink()
+    # Stage on the same filesystem. Keep the last good backup until its
+    # replacement has been verified and every SQLite handle is closed.
+    with tempfile.TemporaryDirectory(prefix='.apex-backup-', dir=dest.parent) as tmp:
+        staged = Path(tmp) / 'backup.db'
+        source_uri = f'file:{quote(str(src.resolve()), safe="/:")}?mode=ro'
+        with closing(sqlite3.connect(source_uri, uri=True, timeout=30)) as source, \
+                closing(sqlite3.connect(str(staged))) as target:
+            source.backup(target)
 
-    with closing(sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=30)) as source, \
-            closing(sqlite3.connect(str(dest))) as target:
-        source.backup(target)
-
-    # Verify rather than assume: a backup nobody opened is a promise, not a copy.
-    with closing(sqlite3.connect(f"file:{dest}?mode=ro", uri=True)) as c:
-        integrity = c.execute("PRAGMA integrity_check").fetchone()[0]
-        counts = {}
-        for table in ("memories", "turn_log", "sessions", "entities",
-                      "goals", "reflections", "study_projects", "board_workspaces", "workspace_cards", "workspace_studies"):
-            try:
-                counts[table] = c.execute(
-                    f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
-            except sqlite3.OperationalError:
-                counts[table] = None
-    if integrity != "ok":
-        raise RuntimeError(f"backup failed integrity check: {integrity}")
-    return {"bytes": dest.stat().st_size, "counts": counts}
+        staged_uri = f'file:{quote(str(staged.resolve()), safe="/:")}?mode=ro'
+        with closing(sqlite3.connect(staged_uri, uri=True)) as c:
+            integrity = c.execute("PRAGMA integrity_check").fetchone()[0]
+            counts = {}
+            for table in ("memories", "turn_log", "sessions", "entities",
+                          "goals", "reflections", "study_projects", "board_workspaces", "workspace_cards", "workspace_studies"):
+                try:
+                    counts[table] = c.execute(
+                        f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                except sqlite3.OperationalError:
+                    counts[table] = None
+        if integrity != "ok":
+            raise RuntimeError(f"backup failed integrity check: {integrity}")
+        info = {"bytes": staged.stat().st_size, "counts": counts}
+        staged.replace(dest)
+        return info
 
 
 def main(argv=None) -> int:
