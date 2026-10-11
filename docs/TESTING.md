@@ -21,6 +21,12 @@ reported by the broad Windows run, start with:
 .\.venv\Scripts\python.exe -X utf8 scripts\run_tests.py tests/test_answers.py tests/test_autonomy.py tests/test_boot_stdin.py tests/test_command_layout.py tests/test_doctor.py tests/test_live_avatar.py tests/test_model_capabilities.py tests/test_relay_answer.py tests/test_research_boundaries.py tests/test_sandbox.py tests/test_smoke.py tests/test_wiring.py tests/test_prefs.py tests/test_test_runner.py
 ```
 
+Apex Code's **Run Checks** uses this launcher for the Apex project too. Its
+previous automatic pytest command upgrades when the project list loads; custom
+commands and other projects keep their configured runners. The checks run against
+the session's files, using that workspace's virtual environment or the original
+project's `.venv`. An exit code of zero without a test count remains unverified.
+
 The optional Chronicle replay tests require `requirements-research.txt`.
 Without it, those tests report skipped. IDE integration and real coding-plan
 acceptance have their own setup in `CODE-WINDOWS-ACCEPTANCE.md`; unit test results
