@@ -258,6 +258,22 @@ def boot(say: str = "", script: list[dict] | None = None,
         cwd=str(REPO), env=env, stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
     )
+    # Windows pipes can fill after only a few KB. Waiting until shutdown to
+    # communicate() leaves Apex blocked in print() before its turn can run.
+    # Keep consuming output during startup, model calls and the HTTP sweep.
+    captured: list[str] = []
+
+    def drain_output():
+        try:
+            for chunk in iter(lambda: proc.stdout.read(8192), ""):
+                captured.append(chunk)
+        except Exception as exc:
+            captured.append(f"\n[Smoke] Output capture failed: {exc}\n")
+        finally:
+            proc.stdout.close()
+
+    reader = threading.Thread(target=drain_output, daemon=True)
+    reader.start()
     dashboard_status = None
     sweep: list = []
     turn_seconds = 0.0
@@ -266,7 +282,6 @@ def boot(say: str = "", script: list[dict] | None = None,
             proc.stdin.write(say + "\n")
         proc.stdin.flush()
         proc.stdin.close()          # EOF -> Apex parks headless, keeps serving
-        # communicate() flushes stdin, which now raises on a closed handle.
         proc.stdin = None
 
         # Wait for the dashboard to answer, which also means boot finished.
@@ -325,10 +340,12 @@ def boot(say: str = "", script: list[dict] | None = None,
     finally:
         proc.terminate()
         try:
-            out = proc.communicate(timeout=20)[0] or ""
+            proc.wait(timeout=20)
         except subprocess.TimeoutExpired:
             proc.kill()
-            out = proc.communicate()[0] or ""
+            proc.wait()
+        reader.join(timeout=5)
+        out = "".join(captured)
         server.stop()
 
     return BootResult(
