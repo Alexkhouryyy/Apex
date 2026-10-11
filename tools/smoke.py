@@ -223,6 +223,15 @@ def boot(say: str = "", script: list[dict] | None = None,
 
     env.update({
         "DB_PATH": str(work / "apex.db"),
+        "VAULT_PATH": str(work / "vault"),
+        "SANDBOX_WORKDIR": str(work / "sandbox"),
+        "APEX_STUDY_DIR": str(work / "study"),
+        "PYTHON_DOTENV_DISABLED": "1",
+        "PYTHONUTF8": "1",
+        "AGENT_MODEL": "claude-opus-5",
+        "BACKGROUND_MODEL": "claude-opus-5",
+        "PROACTIVE_MODEL": "claude-haiku-4-5",
+        "SUBSCRIPTION_ENABLED": "false",
         "HOME": str(work),
         "USERPROFILE": str(work),          # Windows equivalent of HOME
         "ANTHROPIC_API_KEY": "sk-ant-smoke",
@@ -240,13 +249,14 @@ def boot(say: str = "", script: list[dict] | None = None,
         # that has none, or has one in use by something else.
         # no_silent_failures polices the "cleanly" half.
         "HANDTRACK_ENABLED": "true",
+        "CAMERA_DEVICE_INDEX": "99",
     })
     env.update(extra_env or {})
 
     proc = subprocess.Popen(
         [sys.executable, "-u", "main.py", "--text", *args],
         cwd=str(REPO), env=env, stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
     )
     dashboard_status = None
     sweep: list = []

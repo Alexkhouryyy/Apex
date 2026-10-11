@@ -302,7 +302,7 @@ def test_frontend_listens_for_the_events_the_engine_emits():
     handled. This pins the contract so that cannot silently happen again."""
     from pathlib import Path
     app_js = Path(__file__).resolve().parents[1] / "dashboard/static/app.js"
-    js = app_js.read_text()
+    js = app_js.read_text(encoding="utf-8")
     for phase in ("search", "sources", "reading", "source_done", "ranking",
                   "writing", "result", "error"):
         assert f"research_{phase}" in js, f"frontend ignores research_{phase}"
@@ -311,7 +311,7 @@ def test_frontend_listens_for_the_events_the_engine_emits():
 def test_research_tab_exists_in_the_shell():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1] / "dashboard/static"
-    html = (root / "index.html").read_text()
+    html = (root / "index.html").read_text(encoding="utf-8")
     assert 'data-tab="research"' in html and 'id="tab-research"' in html
     # Cache version must move with any frontend change or clients keep the old
     # bundle and the tab silently does not exist for them.
@@ -319,7 +319,7 @@ def test_research_tab_exists_in_the_shell():
     # the number made every legitimate bump (v30 → v34) fail this test.
     import re
     assert re.search(r"v=omni\d+", html)
-    shell = re.search(r"apex-shell-v(\d+)", (root / "sw.js").read_text())
+    shell = re.search(r"apex-shell-v(\d+)", (root / "sw.js").read_text(encoding="utf-8"))
     assert shell and int(shell.group(1)) >= 30
 
 
@@ -327,7 +327,7 @@ def test_answer_html_is_escaped_before_formatting():
     """The answer is synthesized from arbitrary web pages, so it is untrusted.
     marked.parse() emits raw HTML and must not be what renders it."""
     from pathlib import Path
-    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text(encoding="utf-8")
     fn = js[js.index("function _researchFormat"):]
     fn = fn[:fn.index("\nfunction ")]
     assert "escapeHTML" in fn
@@ -565,7 +565,7 @@ def test_first_turn_prompt_has_no_history_section(monkeypatch):
 
 def test_frontend_handles_the_rewrite_event():
     from pathlib import Path
-    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text(encoding="utf-8")
     assert "research_rewrite" in js
     assert "_researchThread" in js and "history:" in js
 
@@ -777,7 +777,7 @@ def test_format_markdown_lists_weak_claims_without_certifying_the_rest():
 
 def test_frontend_renders_weak_claims_and_never_a_pass_badge():
     from pathlib import Path
-    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text(encoding="utf-8")
     fn = js[js.index("function _researchResult"):]
     fn = fn[:fn.index("\nfunction ")]
     assert "weak_claims" in fn
@@ -898,7 +898,7 @@ def test_ordinal_resolves_end_to_end(monkeypatch):
 
 def test_frontend_sends_source_titles_in_history():
     from pathlib import Path
-    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text(encoding="utf-8")
     fn = js[js.index("async function runResearch"):]
     fn = fn[:fn.index("\nasync function ")]
     assert "sources:" in fn and "title: s.title" in fn
@@ -1107,7 +1107,7 @@ def test_a_broken_token_consumer_does_not_kill_generation(monkeypatch, test_db):
 def test_frontend_streams_via_textcontent_not_innerhtml():
     """Model text is untrusted until the final escaped render."""
     from pathlib import Path
-    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text()
+    js = (Path(__file__).resolve().parents[1] / "dashboard/static/app.js").read_text(encoding="utf-8")
     fn = js[js.index("function _researchToken"):]
     fn = fn[:fn.index("\nfunction ")]
     assert "textContent +=" in fn
@@ -1119,7 +1119,7 @@ def test_frontend_streams_via_textcontent_not_innerhtml():
 
 def _static(name):
     from pathlib import Path
-    return (Path(__file__).resolve().parents[1] / "dashboard/static" / name).read_text()
+    return (Path(__file__).resolve().parents[1] / "dashboard/static" / name).read_text(encoding="utf-8")
 
 
 def test_chat_settings_are_collapsed_not_occupying_the_page():
@@ -1181,7 +1181,7 @@ def test_every_tool_call_is_observable_from_one_seam():
 
 def _static_py(rel):
     from pathlib import Path
-    return (Path(__file__).resolve().parents[1] / rel).read_text()
+    return (Path(__file__).resolve().parents[1] / rel).read_text(encoding="utf-8")
 
 
 def test_a_broken_observer_cannot_break_a_tool_call():

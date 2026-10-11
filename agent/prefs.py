@@ -4,6 +4,7 @@ Runs as part of reflection.consolidate(). The digest is stored in the world_stat
 table under key 'user_prefs' and injected into the system prompt so every response
 benefits from accumulated preference signals.
 """
+import json
 import time
 from typing import Optional
 
@@ -12,6 +13,25 @@ from agent import longterm, telemetry
 
 _PREFS_KEY = "user_prefs"
 _DISTILL_INTERVAL = 7 * 86400  # only rebuild weekly
+
+
+def _turn_text(content: str | None) -> str:
+    """Extract text from the JSON blocks recorded by telemetry.log_turn."""
+    if not content:
+        return ""
+    try:
+        blocks = json.loads(content)
+    except (TypeError, ValueError):
+        return ""
+    if isinstance(blocks, str):
+        return blocks
+    if isinstance(blocks, dict):
+        blocks = [blocks]
+    if not isinstance(blocks, list):
+        return ""
+    return "\n".join(block["text"] for block in blocks
+                     if isinstance(block, dict) and block.get("type", "text") == "text"
+                     and isinstance(block.get("text"), str))
 
 
 def _last_distill_ts() -> float:
@@ -50,24 +70,21 @@ def distill(client, force: bool = False) -> str:
     cutoff = now - 90 * 86400  # last 90 days of feedback
     try:
         with longterm._conn() as c:
-            positives = c.execute(
-                """SELECT tf.comment, tl.user_text, tl.assistant_text
+            # Each turn has separate user/assistant rows containing JSON blocks.
+            # Pick the latest row of each role without duplicating the feedback
+            # when an assistant has made several tool calls during that turn.
+            query = """SELECT tf.comment,
+                       (SELECT tl.content_json FROM turn_log tl
+                        WHERE tl.session_id = tf.session_id AND tl.turn_index = tf.turn_index
+                          AND tl.role = 'user' ORDER BY tl.id DESC LIMIT 1),
+                       (SELECT tl.content_json FROM turn_log tl
+                        WHERE tl.session_id = tf.session_id AND tl.turn_index = tf.turn_index
+                          AND tl.role = 'assistant' ORDER BY tl.id DESC LIMIT 1)
                    FROM turn_feedback tf
-                   LEFT JOIN turn_log tl
-                     ON tl.session_id = tf.session_id AND tl.turn_index = tf.turn_index
-                   WHERE tf.rating = 1 AND tf.ts >= ?
-                   ORDER BY tf.ts DESC LIMIT 30""",
-                (cutoff,),
-            ).fetchall()
-            negatives = c.execute(
-                """SELECT tf.comment, tl.user_text, tl.assistant_text
-                   FROM turn_feedback tf
-                   LEFT JOIN turn_log tl
-                     ON tl.session_id = tf.session_id AND tl.turn_index = tf.turn_index
-                   WHERE tf.rating = -1 AND tf.ts >= ?
-                   ORDER BY tf.ts DESC LIMIT 30""",
-                (cutoff,),
-            ).fetchall()
+                   WHERE tf.rating = ? AND tf.ts >= ?
+                   ORDER BY tf.ts DESC LIMIT 30"""
+            positives = c.execute(query, (1, cutoff)).fetchall()
+            negatives = c.execute(query, (-1, cutoff)).fetchall()
     except Exception as e:
         print(f"[Prefs] DB query failed: {e}")
         return get()
@@ -78,6 +95,7 @@ def distill(client, force: bool = False) -> str:
     def _fmt(rows: list) -> str:
         lines = []
         for comment, user_text, asst_text in rows:
+            user_text, asst_text = _turn_text(user_text), _turn_text(asst_text)
             parts = []
             if user_text:
                 parts.append(f"Q: {str(user_text)[:100]}")

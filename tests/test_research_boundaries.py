@@ -76,11 +76,11 @@ def test_madbench_style_authority_attacks_hit_real_dispatch(family,payload,monke
 
 def test_committed_seeded_incidents_are_exactly_replayable():
     from pathlib import Path
-    from chronicle import session as sessions
+    pytest.importorskip('chronicle', reason='Optional research replay requires requirements-research.txt')
     import json
     root=Path('tests/fixtures/research/incidents')
     for directory in sorted(p for p in root.iterdir() if p.is_dir()):
-        envelope=json.loads((directory/'001-apex.memory_admission-1.json').read_text())
+        envelope=json.loads((directory/'001-apex.memory_admission-1.json').read_text(encoding="utf-8"))
         # Replay ignores live input arguments; shape and typed results stay stable.
         ctx=m.Context('owner','work','answer',20)
         with ir.replay(directory):
