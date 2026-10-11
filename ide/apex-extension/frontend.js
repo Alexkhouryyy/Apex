@@ -1,5 +1,5 @@
 'use strict';
-const { ContainerModule } = require('@theia/core/shared/inversify');
+const { ContainerModule, decorate, injectable } = require('@theia/core/shared/inversify');
 const { FrontendApplicationContribution } = require('@theia/core/lib/browser/frontend-application-contribution');
 const { ApplicationShell } = require('@theia/core/lib/browser/shell/application-shell');
 const { Saveable } = require('@theia/core/lib/browser/saveable');
@@ -7,6 +7,19 @@ const { EditorManager } = require('@theia/editor/lib/browser/editor-manager');
 const URI = require('@theia/core/lib/common/uri').default;
 const { WebviewEnvironment } = require('@theia/plugin-ext/lib/main/browser/webview/webview-environment');
 const { EnvVariablesServer } = require('@theia/core/lib/common/env-variables');
+const { OS } = require('@theia/core/lib/common/os');
+const { TerminalWidget } = require('@theia/terminal/lib/browser/base/terminal-widget');
+const { TerminalWidgetImpl } = require('@theia/terminal/lib/browser/terminal-widget-impl');
+class ApexTerminalWidget extends TerminalWidgetImpl {
+  async executeCommand(options) {
+    if (!OS.backend.isWindows) return super.executeCommand(options);
+    // cmd submits on CR; a following LF answers an interactive program early.
+    this.sendText(this.shellCommandBuilder.buildCommand(await this.processInfo, options) + '\r');
+    this.resetCommandOutputMarker();
+    this._commandHistoryState?.clearCommandCollectionState();
+  }
+}
+decorate(injectable(), ApexTerminalWidget);
 module.exports = new ContainerModule(bind => {
   bind(FrontendApplicationContribution).toDynamicValue(ctx => {
     const shell = ctx.container.get(ApplicationShell);
@@ -15,6 +28,7 @@ module.exports = new ContainerModule(bind => {
     const dirty = () => shell.widgets.some(w => Saveable.isDirty(w));
     return {
       async onStart() {
+        ctx.container.rebind(TerminalWidget).to(ApexTerminalWidget).inTransientScope();
         const webviews=ctx.container.get(WebviewEnvironment);
         const port=await ctx.container.get(EnvVariablesServer).getValue('APEX_IDE_WEBVIEW_PORT');
         const endpoint=await webviews.externalEndpointUrl();

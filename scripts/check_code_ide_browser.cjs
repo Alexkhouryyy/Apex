@@ -143,6 +143,7 @@ async function poll(check,description,timeout=45000){
    fs.mkdirSync(output,{recursive:true});await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});
    for(const f of page.frames())console.error('Frame:',f.url(),(await f.locator('body').innerText().catch(()=>'' )).slice(0,1800));
    for(const f of page.frames())if(f.url().includes('/code/ide/'))console.error('Editor service:',await f.evaluate(()=>({current:acceptance?.manager.currentEditor?.editor.uri.toString(),keys:Object.keys(acceptance?.manager||{}),widgets:acceptance?.manager.all?.map(w=>w.editor.uri.toString())})).catch(()=>null));
+   for(const f of page.frames())if(f.url().includes('/code/ide/'))console.error('Terminal buffer:',await f.evaluate(()=>{const b=acceptance?.terminal?.buffer;return b?b.getLines(0,b.length,true).join('\n'):null;}).catch(()=>null));
   }
   throw e;
  }finally{await browser.close();}
