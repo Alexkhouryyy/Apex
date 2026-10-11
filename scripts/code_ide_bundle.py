@@ -115,6 +115,9 @@ def _validate(archive: zipfile.ZipFile, app: Path, environment: dict) -> dict:
     files = metadata.get('files', {})
     if not isinstance(files, dict) or any(name not in files for name in REQUIRED):
         raise ValueError('Bundle is missing required IDE files.')
+    # Windows' ZIP reader normalizes backslashes; validate the raw manifest too.
+    for name in files:
+        _relative('runtime/' + name)
     if set(names) != {'bundle.json', *('runtime/' + name for name in files)}:
         raise ValueError('Bundle contents do not match its file manifest.')
     if sum(info.file_size for info in entries) > 4_000_000_000:
