@@ -6,7 +6,7 @@ name: Tests
 # manually and reported after the fact.
 on:
   push:
-    branches: [main]
+    branches: [main, apex/full-ide-update]
   pull_request:
     branches: [main]
   workflow_dispatch: {}
@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install -r requirements.txt
-          python scripts/setup_code_ide.py
+          python scripts/setup_code_ide.py --build
       - name: Audit the IDE runtime dependencies
         shell: bash
         run: npm audit --prefix ide --omit=dev --audit-level=moderate
@@ -42,12 +42,18 @@ jobs:
         shell: bash
         env:
           APEX_IDE_INTEGRATION: "1"
-        run: python -m pytest -q tests/test_code_ide.py tests/test_code_workspace.py tests/test_code_terminal.py
+        run: python -m pytest -q tests/test_code_ide.py tests/test_code_workspace.py tests/test_code_terminal.py tests/test_code_ide_bundle.py
       - name: Install browser acceptance dependencies
         shell: bash
         run: |
           npm install --prefix "$RUNNER_TEMP/ide-browser" --no-audit --no-fund playwright@1.64.0
           "$RUNNER_TEMP/ide-browser/node_modules/.bin/playwright" install chromium
+      - name: Package and install the Windows IDE bundle
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python scripts/code_ide_bundle.py --output "$RUNNER_TEMP/apex-code-ide-windows-node24.zip"
+          python scripts/setup_code_ide.py --from-build "$RUNNER_TEMP/apex-code-ide-windows-node24.zip"
       - name: Actual language services, debuggers, extensions and Save All
         shell: bash
         run: |
@@ -62,18 +68,10 @@ jobs:
         if: success() && runner.os == 'Windows'
         with:
           name: apex-code-ide-windows-node24
-          include-hidden-files: true
+          compression-level: 0
           path: |
-            ide/lib
-            ide/src-gen
-            ide/node_modules
-            ide/plugins
-            ide/apex-extension
-            ide/archive-adapter
-            ide/package.json
-            ide/package-lock.json
-            ide/plugins.lock.json
-            ide/README.md
+            ${{ runner.temp }}/apex-code-ide-windows-node24.zip
+            ${{ runner.temp }}/apex-code-ide-windows-node24.zip.sha256
 
   windows-code:
     runs-on: windows-latest

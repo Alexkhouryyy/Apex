@@ -14,13 +14,23 @@ model. Windows requires Git and `pywinpty`; the dependency list selects the
 Windows terminal package automatically. A Linux pass does not substitute for
 this Windows check. CI also runs this check on `windows-latest`.
 
-For Full IDE, install Node.js 22 or 24 LTS and run
-`Setup-Apex-Code-IDE.cmd`. Native builds can need Visual Studio Build Tools
-with Desktop development with C++. The `code-ide` CI job builds and tests the
-actual engine on Windows and Linux. Its successful Windows Node 24 artifact
-can alternatively be extracted into the repository's `ide` folder on a laptop
-using Node 24, so the native build need not be repeated. It contains generated
-runtime files, not your project or credentials.
+For Full IDE, use Node.js **24 LTS** and the prebuilt Windows bundle. Push your
+`apex/full-ide-update` branch; the Tests workflow now runs on that branch before
+you merge it. The `code-ide` job builds and tests the actual engine on Windows
+and Linux. A successful Windows job uploads **apex-code-ide-windows-node24**.
+Download and extract that artifact in Downloads, close Apex and its IDE windows,
+then install the inner zip:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts\setup_code_ide.py --from-build "$env:USERPROFILE\Downloads\apex-code-ide-windows-node24\apex-code-ide-windows-node24.zip"
+```
+
+This checks platform, Node version, source fingerprints and every file checksum
+before installing generated runtime files. It does not require npm or C++ build
+tools on your laptop. Your projects and source are preserved. The separate
+`--build` developer option requires a Windows C++ toolchain for native modules.
+Keep the branch separate until CI and laptop acceptance pass, then merge it
+into main on your laptop.
 
 After installing the IDE, also run its real access and lifecycle checks:
 

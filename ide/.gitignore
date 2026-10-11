@@ -5,3 +5,5 @@ plugins/
 .downloads/
 esbuild.mjs
 gen-esbuild.*.mjs
+.apex-bundle.json
+.apex-install-*/

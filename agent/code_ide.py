@@ -29,7 +29,8 @@ def installation() -> dict:
     plugins = (APP / 'plugins/.apex-ready.json').is_file()
     return {'installed': bool(node and built and plugins), 'node': bool(node), 'built': built,
             'plugins': plugins, 'engine': 'Eclipse Theia', 'version': '1.76.0',
-            'setup': 'Run Setup-Apex-Code-IDE.cmd once, then reopen Full IDE.'}
+            'setup': 'Install the Windows IDE bundle with scripts/setup_code_ide.py --from-build <ZIP>, then reopen Full IDE.'
+                     if os.name == 'nt' else 'Run python scripts/setup_code_ide.py once, then reopen Full IDE.'}
 
 
 class Runtime:

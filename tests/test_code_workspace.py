@@ -95,14 +95,18 @@ def test_editor_preserves_crlf_and_executable_mode(lab):
     assert (Path(s['worktree']) / 'win.py').read_bytes() == b'first\r\nchanged\r\n'
 
 
-def test_owner_can_explicitly_snapshot_uncommitted_files(lab):
-    (lab.root / 'README.md').write_text('my current work\n')
-    (lab.root / 'new.py').write_text('current = True\n')
+@pytest.mark.parametrize('newline', ['\n', '\r\n'], ids=['lf', 'crlf'])
+def test_owner_can_explicitly_snapshot_uncommitted_files(lab, newline):
+    readme = 'my current work' + newline
+    new_file = 'current = True' + newline
+    # Explicit bytes avoid the host OS translating the test's line endings.
+    (lab.root / 'README.md').write_bytes(readme.encode('utf-8'))
+    (lab.root / 'new.py').write_bytes(new_file.encode('utf-8'))
     git(lab.root, 'add', 'README.md')
     before = git(lab.root, 'diff', '--cached')
     s = studio.open_workspace(lab.pid, include_changes=True)
-    assert studio.read_file('README.md', s['id'])['text'] == 'my current work\n'
-    assert studio.read_file('new.py', s['id'])['text'] == 'current = True\n'
+    assert studio.read_file('README.md', s['id'])['text'] == readme
+    assert studio.read_file('new.py', s['id'])['text'] == new_file
     assert git(lab.root, 'diff', '--cached') == before
     assert not lab.calls('claude')
     assert any('uncommitted files' in e.get('text', '') for e in studio.events(s['id']))

@@ -8,15 +8,36 @@ agent conversations and review remain in Apex.
 
 ## Setup on Windows
 
-Merge/apply the Apex changes on your laptop first. Update the Python environment
-with `requirements.txt`, install Node.js 22 or 24 LTS, then run
-`Setup-Apex-Code-IDE.cmd` from the Apex folder. The setup installs the locked npm
-dependencies, downloads and checks the SHA-256 of the language/debugger extensions,
-and builds the workbench. Native compilation may require Visual Studio Build
-Tools with **Desktop development with C++**. Git and Python are also required.
-Close IDE sessions before updating the engine.
+Apply the Apex changes on your update branch and update the Python environment
+with `requirements.txt`. Install Node.js **24 LTS**, Git and Python. Push
+`apex/full-ide-update` to GitHub: the Tests workflow builds the IDE on Windows,
+tests its language services and debuggers, and packages a runtime bundle after
+those checks pass. You do not need a C++ compiler on your laptop to install it.
 
-On Linux, run `python scripts/setup_code_ide.py` from the repository root.
+In the successful run, download **apex-code-ide-windows-node24** under Artifacts.
+Extract that downloaded artifact into a folder in Downloads. It contains the
+actual IDE zip and its SHA-256 file. Close Apex and its IDE windows, then run:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts\setup_code_ide.py --from-build "$env:USERPROFILE\Downloads\apex-code-ide-windows-node24\apex-code-ide-windows-node24.zip"
+```
+
+The installer verifies the bundle's platform, Node major version, source
+fingerprints and file checksums before replacing generated runtime directories.
+It preserves the IDE source and your project files. An inaccessible directory
+stops installation and restores directories already replaced. The bundle
+materializes local npm package links so it can move between build and laptop
+folders. The bundled extension marker remains included.
+
+`Setup-Apex-Code-IDE.cmd` recognizes an installed matching bundle. If the
+source changes, install its new build. A Windows setup without a bundle explains
+the download step instead of attempting a native compilation automatically.
+Developers who choose to build locally can run
+`python scripts/setup_code_ide.py --build` with Node.js 22 or 24 and Visual Studio
+Build Tools with **Desktop development with C++**. The build installs locked
+dependencies and downloads hash-verified extensions before compiling the app.
+
+On Linux, run `python scripts/setup_code_ide.py --build` from the repository root.
 The initial bundles cover Windows x64 and Linux x64. Downloads and generated
 builds are excluded from Git; the patch contains their reproducible source and
 lock files. The full engine is about 800 MB installed, so installation is a
