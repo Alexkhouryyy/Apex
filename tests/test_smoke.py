@@ -68,6 +68,16 @@ def test_boot_output_is_drained_before_the_pipe_can_block(result):
     assert result.server.agent_requests(), "The turn must complete after the startup output burst."
 
 
+def test_smoke_uses_local_catalogues_and_no_desktop_screenshot(result):
+    assert {"/v1/models", "/ollama/v1/models"} <= set(result.server.model_requests)
+    for request in result.server.agent_requests():
+        for message in request.get("messages", []):
+            content = message.get("content", [])
+            if isinstance(content, list):
+                assert not any(block.get("type") == "image" for block in content
+                               if isinstance(block, dict))
+
+
 def test_every_check_ran(result):
     """Guard the guard: a suite whose checks silently stopped being collected
     passes forever."""

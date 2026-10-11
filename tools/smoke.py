@@ -94,6 +94,7 @@ class _ModelServer:
     def __init__(self, script: list[dict]):
         self.script = list(script)
         self.requests: list[dict] = []
+        self.model_requests: list[str] = []
         self.port = free_port()
         self._httpd = None
         self._thread = None
@@ -123,6 +124,28 @@ class _ModelServer:
             def log_message(self, *a):
                 pass
 
+            def do_GET(self):
+                path = self.path.split("?", 1)[0]
+                if path == "/v1/models":
+                    payload = {"data": [{"id": "claude-opus-5", "type": "model",
+                                         "display_name": "Smoke model",
+                                         "created_at": "2026-01-01T00:00:00Z"}],
+                               "has_more": False, "first_id": "claude-opus-5",
+                               "last_id": "claude-opus-5"}
+                elif path == "/ollama/v1/models":
+                    payload = {"object": "list", "data": [{"id": "smoke-local",
+                               "object": "model", "created": 0, "owned_by": "smoke"}]}
+                else:
+                    self.send_error(404)
+                    return
+                server.model_requests.append(path)
+                out = json.dumps(payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or "{}")
@@ -149,6 +172,7 @@ class _ModelServer:
     def stop(self):
         if self._httpd:
             self._httpd.shutdown()
+            self._httpd.server_close()
 
     # -- helpers the checks use ------------------------------------------------
 
@@ -193,7 +217,7 @@ class BootResult:
 
 def boot(say: str = "", script: list[dict] | None = None,
          timeout: float = 75.0, extra_env: dict | None = None,
-         args: tuple[str, ...] = ("--think",),
+         args: tuple[str, ...] = ("--think", "--no-screenshot"),
          turn_timeout: float = 45.0) -> BootResult:
     """Start main.py --text against the scripted model, say one thing, stop.
 
@@ -236,6 +260,7 @@ def boot(say: str = "", script: list[dict] | None = None,
         "USERPROFILE": str(work),          # Windows equivalent of HOME
         "ANTHROPIC_API_KEY": "sk-ant-smoke",
         "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.port}",
+        "OLLAMA_BASE_URL": f"http://127.0.0.1:{server.port}/ollama/v1",
         "DASHBOARD_PORT": str(port),
         "DASHBOARD_HOST": "127.0.0.1",
         "DASHBOARD_TOKEN": "smoke-token",
