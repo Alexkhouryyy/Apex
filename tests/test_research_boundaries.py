@@ -4,18 +4,17 @@ import pytest
 from agent import incident_replay as ir, memory_governance as m, telemetry
 
 
-def test_sdk_snapshot_replay_is_structural_without_live_provider(tmp_path,monkeypatch):
+def test_sdk_snapshot_replay_is_structural_without_live_provider(tmp_path,monkeypatch,test_db):
     pytest.importorskip('chronicle')
     final=S(content=[S(type='tool_use',id='c',name='read_file',input={'path':'x'})],usage=S(input_tokens=13,output_tokens=4),stop_reason='tool_use')
     client=S(messages=S(create=lambda **kw:final))
-    monkeypatch.setattr(telemetry,'record',lambda **kw:None)
     fixture=tmp_path/'fixture'
     with ir.record_turn(store=tmp_path/'trace.jsonl',export=fixture):
-        assert telemetry.create(client,call_site='fixture',model='test',messages=[]) is final
+        assert telemetry.create(client,call_site='fixture',model='claude-opus-5',messages=[]) is final
     client.messages.create=lambda **kw:pytest.fail('live API')
     for _ in range(20):
         with ir.replay(fixture):
-            result=telemetry.create(client,call_site='fixture',model='test',messages=[])
+            result=telemetry.create(client,call_site='fixture',model='claude-opus-5',messages=[])
             assert result.content[0].input.path=='x'
             assert result.usage.input_tokens==13
 
@@ -35,7 +34,7 @@ def test_memory_policy_cutpoint_runs_live_and_effects_remain_stubbed(tmp_path,te
     assert m.inspect('owner')==[]
 
 
-def test_stream_turn_records_terminal_result_not_ui_timing(tmp_path,monkeypatch):
+def test_stream_turn_records_terminal_result_not_ui_timing(tmp_path,monkeypatch,test_db):
     pytest.importorskip('chronicle')
     from agent.core import AgentCore
     final=S(content=[S(type='text',text='hello')],stop_reason='end_turn',usage=S(input_tokens=2,output_tokens=1))
@@ -45,15 +44,14 @@ def test_stream_turn_records_terminal_result_not_ui_timing(tmp_path,monkeypatch)
         def __iter__(self):return iter([S(type='content_block_delta',delta=S(type='text_delta',text='hello'))])
         def get_final_message(self):return final
     agent=object.__new__(AgentCore);agent._model='claude-sonnet-5';agent.client=S(messages=S(stream=lambda **kw:Stream()))
-    monkeypatch.setattr(telemetry,'record',lambda **kw:None)
     sink=S(feed=lambda text:None)
     fixture=tmp_path/'fixture'
     with ir.record_turn(store=tmp_path/'trace.jsonl',export=fixture):
-        expected=agent._stream_turn({'model':'test'},sink)
+        expected=agent._stream_turn({'model':'claude-sonnet-5'},sink)
     agent.client.messages.stream=lambda **kw:pytest.fail('live stream')
     sink.feed=lambda text:pytest.fail('UI effect replayed')
     with ir.replay(fixture):
-        content,reason,text=agent._stream_turn({'model':'test'},sink)
+        content,reason,text=agent._stream_turn({'model':'claude-sonnet-5'},sink)
     assert reason==expected[1] and text==expected[2] and content[0].text=='hello'
 
 

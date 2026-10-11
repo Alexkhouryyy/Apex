@@ -5,17 +5,21 @@
   <title>Apex · Code</title>
   <link rel="icon" href="/static/icons/apex-refined.svg">
   <link rel="stylesheet" href="/static/brand.css?v=brand40">
-  <link rel="stylesheet" href="/static/code.css?v=code-12">
+  <link rel="stylesheet" href="/static/code.css?v=code-ide-2">
+  <link rel="stylesheet" href="/static/vendor/xterm.css?v=code-ide-1">
+  <script src="/static/vendor/code-editor.js?v=code-ide-1" defer></script>
+  <script src="/static/code_ide.js?v=code-ide-2" defer></script>
+  <script src="/static/code_workspace.js?v=code-ide-2" defer></script>
   <script src="/static/code_usage.js?v=code-11" defer></script>
   <script src="/static/speech_queue.js?v=code-10" defer></script>
   <script src="/static/code_narration.js?v=code-10" defer></script>
-  <script src="/static/code.js?v=code-12" defer></script>
+  <script src="/static/code.js?v=code-ide-2" defer></script>
   <link rel="stylesheet" href="/static/theme.css">
 </head>
 <body class="view-home term">
 <div id="code-app">
   <header class="top">
-    <button type="button" class="icon only-narrow" id="open-rail" aria-label="Sessions" aria-controls="rail">☰</button>
+    <button type="button" class="icon only-narrow" id="open-rail" aria-label="Sessions" aria-controls="rail" aria-expanded="false">☰</button>
     <a href="/" class="brand apex-brand" aria-label="Open Apex dashboard"><span class="apex-logo" aria-hidden="true"></span><span class="apex-wordmark">APEX</span><small>CODE</small></a>
     <div class="plans" id="plans" aria-label="Your plans"></div>
     <span class="credits" id="credits" title="Coding here only ever uses your Claude and ChatGPT plans">$0 API credits</span>
@@ -30,6 +34,8 @@
       <label class="field">Project
         <select id="project" aria-label="Project"></select>
       </label>
+      <button type="button" id="open-workspace">Open workspace</button>
+      <label class="workspace-snapshot"><input type="checkbox" id="include-changes" checked> Include uncommitted files</label>
       <div class="rail-list" id="session-list"></div>
       <button type="button" class="ghost" id="add-project">＋ Add a project folder</button>
     </aside>
@@ -39,7 +45,7 @@
       <section id="home" class="home" aria-labelledby="greeting">
         <p class="eyebrow" id="today">APEX CODE</p>
         <h1 id="greeting">Good evening.</h1>
-        <p class="sub" id="greet-sub">Two plans. Zero API credits. What are we building?</p>
+        <p class="sub" id="greet-sub">Open a project to edit and run it. Ask the agent when you need help.</p>
         <section class="overnight" id="overnight" aria-labelledby="overnight-title" hidden>
           <h2 class="overnight-title" id="overnight-title">🌙 While you slept</h2>
           <p class="fine" id="overnight-sub">Apex built these from your Work list. Nothing is kept until you say so.</p>
@@ -65,13 +71,15 @@
             <p class="meta" id="s-meta"></p>
           </div>
           <button type="button" class="tokens ghost" id="s-tokens" aria-haspopup="dialog" title="Reported tokens for this session; separate from account limits"></button>
+          <details class="session-tools"><summary>More</summary><div class="session-tool-options">
           <button type="button" class="small celine-btn" id="celine-btn" title="Ask Celine about this session, out loud (Ctrl+Shift+Space). Press again when you're done." aria-label="Ask Celine">🎙<span class="wide"> Ask Celine</span></button>
           <select id="narrate" class="narrate" aria-label="Narration" title="Said out loud in your Voicebox voice, free on this PC. Without Voicebox running, Apex chimes instead; it never uses OpenAI's paid voice (tts-1) for this.">
             <option value="off">🔈 Off</option><option value="milestones">🔊 Milestones</option><option value="play">🔊 Play-by-play</option>
           </select>
           <button type="button" class="small" id="look-btn" title="Terminal or Studio look">Studio look</button>
           <button type="button" class="small" id="palette-btn" title="Everything you can do (Ctrl+K)">⌘ Ctrl K</button>
-          <button type="button" class="only-narrow" id="open-side" aria-controls="side">Changes <em id="side-count"></em></button>
+          </div></details>
+          <button type="button" class="only-narrow" id="open-side" aria-controls="side" aria-expanded="false">Files / changes <em id="side-count"></em></button>
         </div>
         <aside id="celine-card" class="celine-card" hidden aria-live="polite" aria-label="Celine's answer">
           <div class="ch"><b>🎙 Celine</b><span class="cs muted" id="celine-state"></span><span class="grow"></span>
@@ -82,6 +90,40 @@
           <p class="fine">She reads what Apex saw of this session. She can't keep, allow or send: you do.</p>
         </aside>
         <nav class="code-path" id="code-path" aria-label="Build, inspect, verify and keep" hidden></nav>
+        <nav id="workspace-views" class="workspace-views" aria-label="Workspace views">
+          <button type="button" data-workspace-view="agent" aria-pressed="true">Agent</button>
+          <button type="button" data-workspace-view="editor" aria-pressed="false">Editor</button>
+          <button type="button" data-workspace-view="ide" aria-pressed="false">Full IDE</button>
+          <button type="button" data-workspace-view="preview" aria-pressed="false">Preview</button>
+          <button type="button" id="workspace-terminal-toggle">Terminal</button>
+        </nav>
+        <section id="editor-workbench" class="editor-workbench" aria-label="Code editor" hidden>
+          <div class="editor-toolbar">
+            <button type="button" id="editor-new">New file</button>
+            <button type="button" id="editor-save" disabled>Save <kbd>Ctrl S</kbd></button>
+            <button type="button" id="editor-save-all" disabled>Save all</button>
+            <button type="button" id="editor-reload" disabled>Reload file</button>
+            <details class="editor-more"><summary>File actions</summary><button type="button" id="editor-rename">Rename</button><button type="button" id="editor-delete" class="danger">Delete</button></details>
+          </div>
+          <div id="editor-tabs" class="editor-tabs" role="tablist" aria-label="Open files"></div>
+          <div id="editor-surface" class="editor-surface"><p class="empty">Choose a file from Files, or press Ctrl+P. Open a workspace to create and edit files.</p></div>
+          <p id="editor-status" class="editor-status" role="status" aria-live="polite"></p>
+        </section>
+        <section id="workspace-ide" class="workspace-ide" aria-label="Full IDE" hidden>
+          <div class="ide-toolbar"><span id="ide-status" role="status">Open Full IDE for language intelligence, debugging and extensions.</span><button type="button" id="ide-focus">Focus IDE</button><button type="button" id="ide-retry">Open IDE</button><button type="button" id="ide-close" hidden>Save and close IDE</button></div>
+          <div id="ide-frames" class="ide-frames"></div>
+        </section>
+        <section id="workspace-preview" class="workspace-preview" aria-label="Project preview" hidden>
+          <div class="preview-toolbar"><label for="preview-url">Running app URL</label><input id="preview-url" type="url" placeholder="http://localhost:3000" spellcheck="false"><button type="button" id="preview-open">Load preview</button><a id="preview-external" target="_blank" rel="noopener noreferrer" hidden>Open in browser ↗</a></div>
+          <p class="fine">Start your app in the terminal below, then enter the URL printed by it. On your phone, use the laptop’s network address. Apps that block embedding can open in a browser tab.</p>
+          <iframe id="preview-frame" title="Your running project" sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer" hidden></iframe>
+        </section>
+        <section id="workspace-terminal" class="workspace-terminal" aria-label="Workspace terminal" hidden>
+          <div class="terminal-heading"><b>Terminal</b><button type="button" id="workspace-shell-start">Start shell</button><button type="button" id="workspace-shell-close" hidden>Close shell</button><button type="button" id="workspace-terminal-stop" hidden>Stop command</button><button type="button" id="workspace-terminal-hide">Hide</button></div>
+          <div id="workspace-pty" class="workspace-pty" hidden></div>
+          <form id="workspace-terminal-form" autocomplete="off"><input id="workspace-command" aria-label="Run a command in this workspace" placeholder="Run a command…" spellcheck="false"><button type="submit">Run</button></form>
+          <p id="workspace-terminal-where" class="fine"></p><pre id="workspace-terminal-output" tabindex="0" aria-label="Command output"></pre>
+        </section>
         <div class="feed" id="feed" aria-live="polite"></div>
         <section class="follow-ups" id="follow-ups" aria-labelledby="queue-title" hidden>
           <div class="queue-head"><b id="queue-title">Next steps</b><span class="grow"></span><button type="button" class="small" id="queue-toggle">Pause</button></div>
@@ -118,7 +160,6 @@
             </button>
             <button type="button" class="send stop" id="stop-run" hidden>Stop</button>
             <button type="submit" class="primary send" id="send">Build it <kbd>Ctrl ⏎</kbd></button>
-            <button type="button" class="stop" id="stop-run" hidden>■ Stop</button>
           </div>
         </div>
         <p class="hint" id="hint">Every session works on its own branch. Nothing touches your project until you press Keep.</p>
@@ -139,6 +180,7 @@
         <div id="c-files" class="files"></div>
       </section>
       <section class="box tab-pane" data-pane="files" hidden>
+        <div class="file-tools"><button type="button" id="files-new">New file</button><button type="button" id="files-refresh">Refresh</button><button type="button" id="files-search">Search text</button></div>
         <input id="f-filter" placeholder="Find a file…" aria-label="Find a file" spellcheck="false">
         <div id="f-list" class="files tall"></div>
         <p class="fine" id="f-count"></p>
@@ -256,6 +298,13 @@
     <button type="button" id="viewer-close" aria-label="Close">✕</button>
   </div>
   <div id="viewer-body" class="code-body"></div>
+</dialog>
+
+<dialog id="workspace-file-dialog" aria-labelledby="workspace-file-title">
+  <form id="workspace-file-form"><h2 id="workspace-file-title">New file</h2><label for="workspace-file-path">Path in this workspace</label><input id="workspace-file-path" required maxlength="500" spellcheck="false" placeholder="src/main.py"><p id="workspace-file-error" role="alert" hidden></p><div class="row end"><button type="button" id="workspace-file-cancel">Cancel</button><button type="submit" id="workspace-file-submit" class="primary">Create file</button></div></form>
+</dialog>
+<dialog id="workspace-search-dialog" aria-labelledby="workspace-search-title">
+  <h2 id="workspace-search-title">Search in files</h2><form id="workspace-search-form"><input id="workspace-search-query" required maxlength="200" aria-label="Text to find" spellcheck="false"><button>Search</button></form><div id="workspace-search-results" role="status"></div><button type="button" id="workspace-search-close">Close</button>
 </dialog>
 
 <dialog id="palette" aria-label="Command palette">

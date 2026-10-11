@@ -152,6 +152,9 @@ class ScriptedClient:
                                usage=SimpleNamespace(input_tokens=1200, output_tokens=300))
 
     def create(self, **kw):
+        from agent.command_review import _REVIEW_SYS
+        if kw['system'] == _REVIEW_SYS:
+            return self._reply([dict(type='text', text='SAFE: fixed task fixture action')], 'end_turn')
         if 'Summarize the actual outcome' in kw['system']:
             return self._reply([dict(type='text', text='Done; see the specialist evidence.')], 'end_turn')
         msgs = kw['messages']

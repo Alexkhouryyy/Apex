@@ -1,0 +1,9 @@
+node_modules/
+lib/
+src-gen/
+plugins/
+.downloads/
+esbuild.mjs
+gen-esbuild.*.mjs
+.apex-bundle.json
+.apex-install-*/

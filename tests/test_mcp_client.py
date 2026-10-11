@@ -243,14 +243,14 @@ class TestTheGateIsAtTheChokePoint:
     def test_an_allowed_read_does_reach_the_transport(self, registered, monkeypatch):
         """The other half. A gate that blocks everything passes the test above
         and is useless."""
-        monkeypatch.setattr(mcp_client, "_run", lambda coro: "three threads")
+        monkeypatch.setattr(mcp_client, "_run", lambda coro: (coro.close(), "three threads")[1])
         assert mcp_client.call("mcp__gmail__search_threads", {"q": "x"}) == "three threads"
 
     def test_an_unknown_tool_is_refused_before_the_policy_sees_it(self, registered):
         assert "Unknown MCP tool" in mcp_client.call("mcp__gmail__nope", {})
 
     def test_a_completed_call_is_audited(self, registered, monkeypatch):
-        monkeypatch.setattr(mcp_client, "_run", lambda coro: "ok")
+        monkeypatch.setattr(mcp_client, "_run", lambda coro: (coro.close(), "ok")[1])
         mcp_client.call("mcp__gmail__search_threads", {"q": "x"})
         decisions = [r["decision"] for r in registered.recent()]
         assert "completed" in decisions, \
@@ -258,6 +258,7 @@ class TestTheGateIsAtTheChokePoint:
 
     def test_a_transport_failure_is_audited_as_a_failure(self, registered, monkeypatch):
         def boom(coro):
+            coro.close()
             raise RuntimeError("server died")
         monkeypatch.setattr(mcp_client, "_run", boom)
         out = mcp_client.call("mcp__gmail__search_threads", {"q": "x"})

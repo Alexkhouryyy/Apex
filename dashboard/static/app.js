@@ -99,7 +99,7 @@ function fmtDate(t) {
   if (!t) return '—';
   return new Date(t * 1000).toLocaleDateString();
 }
-function fmtCost(c) { return '$' + (c || 0).toFixed(4); }
+function fmtCost(c) { return Number.isFinite(c) ? '$' + c.toFixed(4) : 'Unknown'; }
 function fmtNum(n) { return new Intl.NumberFormat().format(n || 0); }
 
 // === Tab switching ===
@@ -354,7 +354,7 @@ function renderPlanetSelector() {
   if (!sel || sel.dataset.inited) return;
   sel.dataset.inited = '1';
   sel.innerHTML = Object.entries(SOLAR_BODIES).map(([key, body]) =>
-    `<button class="planet-btn${key === currentBody ? ' active' : ''}" data-body="${key}" title="${body.label}">` +
+    `<button type="button" class="planet-btn${key === currentBody ? ' active' : ''}" data-body="${key}" title="${body.label}" aria-label="Select ${body.label}">` +
     `<span class="planet-btn-icon">${body.icon}</span>` +
     `<span class="planet-btn-label">${body.label}</span></button>`
   ).join('');
@@ -389,7 +389,8 @@ function buildFeatureOrbit() {
   const R = 284;   // one ring just outside the globe; the Ask bar sits below it
   FEATURES.forEach((f, i) => {
     const ang = (-90 + i * (360 / FEATURES.length)) * Math.PI / 180;
-    const node = document.createElement('div');
+    const node = document.createElement('button');
+    node.type = 'button';
     node.className = 'feat-node';
     node.style.left = (R * Math.cos(ang)) + 'px';
     node.style.top = (R * Math.sin(ang)) + 'px';
@@ -433,7 +434,7 @@ function initStarfield() {
       ctx.fillStyle = `rgba(170,210,255,${Math.max(0, a)})`;
       ctx.fill();
     }
-    requestAnimationFrame(draw);
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) requestAnimationFrame(draw);
   })();
 }
 
@@ -446,7 +447,7 @@ function initGlobe() {
   }
   try {
     globeInstance = Globe()(mount)
-      .width(460).height(460)
+      .width(mount.clientWidth || 460).height(mount.clientHeight || 460)
       .backgroundColor('rgba(0,0,0,0)')
       .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg')
       .bumpImageUrl('//unpkg.com/three-globe/example/img/earth-topology.png')
@@ -469,9 +470,14 @@ function initGlobe() {
       if (currentBody === 'earth') window.ApexWorldView?.openFromGlobe(event);
     });
     const ctrl = globeInstance.controls();
-    ctrl.autoRotate = true;
+    ctrl.autoRotate = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     ctrl.autoRotateSpeed = 0.7;
     ctrl.enableZoom = false;
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => {
+        if (mount.clientWidth && mount.clientHeight) globeInstance.width(mount.clientWidth).height(mount.clientHeight);
+      }).observe(mount);
+    }
   } catch (e) {
     console.error('globe init failed', e);
     mount.innerHTML = '<div class="globe-fallback"></div>';
@@ -1249,6 +1255,7 @@ async function loadTelemetry() {
   const days = parseInt(document.getElementById('tel-window').value);
   const t = await api('/api/telemetry?days=' + days);
   document.getElementById('tel-cost').textContent = fmtCost(t.total_cost_usd);
+  document.getElementById('tel-cost').title = `${t.estimated_cost_calls || 0} calls use conservative estimates because final usage was unavailable; ${t.unknown_cost_calls || 0} calls have unknown cost.`;
   document.getElementById('tel-calls').textContent = fmtNum(t.total_calls);
   document.getElementById('tel-cache').textContent = (t.cache_hit_rate * 100).toFixed(1) + '%';
   document.getElementById('tel-out').textContent = fmtNum(t.total_output_tokens);
@@ -1290,7 +1297,7 @@ async function loadTelemetry() {
       <td>${fmtNum(m.cache_read_tokens)}</td>
       <td>${fmtNum(m.output_tokens)}</td>
       <td>${m.avg_latency_ms} ms</td>
-      <td>${fmtCost(m.cost_usd)}</td>
+      <td>${fmtCost(m.cost_usd)}${m.estimated_cost_calls ? ' (estimated)' : ''}</td>
     </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:20px">No usage yet.</td></tr>';
 }
 document.getElementById('tel-refresh').addEventListener('click', loadTelemetry);
@@ -1300,16 +1307,22 @@ document.getElementById('tel-window').addEventListener('change', loadTelemetry);
 async function loadBudget() {
   const b = await api('/api/budget');
   const pct = (spent, limit) => limit > 0 ? Math.min(spent / limit * 100, 100).toFixed(1) : 0;
-  const lbl = (spent, limit) => '$' + spent.toFixed(2) + ' / $' + limit.toFixed(2);
+  const lbl = (spent, reserved, limit, unknown) => (unknown ? `Unknown total ($${spent.toFixed(2)} known)` : '$' + spent.toFixed(2)) + ' / $' + limit.toFixed(2)
+    + (reserved > 0 ? ` + $${reserved.toFixed(4)} reserved` : '')
+    + (unknown > 0 ? `; ${unknown} calls with unknown cost` : '');
+  const dailyTotal = b.today_spend + (b.daily_reserved || 0);
+  const sessionTotal = b.session_spend + (b.session_reserved || 0);
 
   const dailyBar = document.getElementById('budget-bar-daily');
   const sessBar  = document.getElementById('budget-bar-session');
-  dailyBar.style.width = pct(b.today_spend, b.daily_usd) + '%';
-  sessBar.style.width  = pct(b.session_spend, b.session_usd) + '%';
-  dailyBar.classList.toggle('over', b.daily_usd > 0 && b.today_spend / b.daily_usd >= 0.9);
-  sessBar.classList.toggle('over',  b.session_usd > 0 && b.session_spend / b.session_usd >= 0.9);
-  document.getElementById('budget-label-daily').textContent   = lbl(b.today_spend, b.daily_usd);
-  document.getElementById('budget-label-session').textContent = lbl(b.session_spend, b.session_usd);
+  dailyBar.parentElement.style.visibility = b.daily_unknown_calls ? 'hidden' : '';
+  sessBar.parentElement.style.visibility = b.session_unknown_calls ? 'hidden' : '';
+  dailyBar.style.width = pct(dailyTotal, b.daily_usd) + '%';
+  sessBar.style.width  = pct(sessionTotal, b.session_usd) + '%';
+  dailyBar.classList.toggle('over', b.daily_usd > 0 && dailyTotal / b.daily_usd >= 0.9);
+  sessBar.classList.toggle('over',  b.session_usd > 0 && sessionTotal / b.session_usd >= 0.9);
+  document.getElementById('budget-label-daily').textContent = lbl(b.today_spend, b.daily_reserved || 0, b.daily_usd, b.daily_unknown_calls || 0);
+  document.getElementById('budget-label-session').textContent = lbl(b.session_spend, b.session_reserved || 0, b.session_usd, b.session_unknown_calls || 0);
 
   const checkbox = document.getElementById('budget-enabled');
   checkbox.checked = b.enabled;

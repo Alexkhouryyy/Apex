@@ -3,15 +3,16 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const el = (tag, text, cls) => {const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
-  let audioUrl, loading = false, voiceProfile = 'celine';
+  let audioUrl, loading = false, voiceProfile = 'celine', accessConfigured = true;
   const token = () => {try{return localStorage.getItem('apex_token')||'';}catch(_){return '';}};
   const notice = text => {$('notice').hidden=!text;$('notice').textContent=text;};
   async function request(url, body, blob=false) {
     const r=await fetch(url,{method:body===undefined?'GET':'POST',credentials:'same-origin',cache:'no-store',
       headers:{Authorization:'Bearer '+token(),...(body===undefined?{}:{'Content-Type':'application/json'})},
       body:body===undefined?undefined:JSON.stringify(body)});
-    if(!r.ok){const d=await r.json().catch(()=>({}));if(r.status===401||r.status===403)$('login').hidden=false;
-      throw new Error(d.error||(typeof d.detail==='string'?d.detail:'Setup request failed. Refresh and try again.'));}
+    if(!r.ok){const d=await r.json().catch(()=>({}));if(r.status===401||r.status===403){$('login').hidden=false;$('setup-content').hidden=true;}
+      const guidance=r.status===401?'The dashboard token was not accepted. Enter the token configured for this Apex, or use the Windows reset steps below.':r.status===403?'Owner setup needs the master dashboard token. A paired-device token cannot unlock it.':null;
+      throw new Error(guidance||d.error||(typeof d.detail==='string'?d.detail:'Setup request failed. Refresh and try again.'));}
     return blob?r.blob():r.json();
   }
   async function busy(button, fn) {button.disabled=true;notice('');try{await fn();}catch(e){notice(e.message);}finally{button.disabled=false;}}
@@ -41,7 +42,12 @@
   }
   async function load(){
     if(loading)return;loading=true;$('refresh').disabled=true;
-    try{const d=await request('/api/setup/status');notice('');$('login').hidden=true;$('setup-content').hidden=false;
+    try{
+      const access=await request('/api/setup/access');accessConfigured=access.token_configured!==false;
+      $('owner-token').disabled=!accessConfigured;$('owner-unlock').disabled=!accessConfigured;
+      if(!accessConfigured){$('login').hidden=false;$('setup-content').hidden=true;$('access-help').textContent='This Apex has no owner token configured. Set DASHBOARD_TOKEN on the laptop and restart Apex using the steps below. Entering a token here cannot configure the server.';document.querySelector('.owner-guide').open=true;notice('Configure the owner token on your laptop, restart Apex, then refresh this page.');return;}
+      $('access-help').textContent='Enter the master dashboard token from your Apex configuration. A model API key or a paired-device token does not unlock owner setup.';
+      const d=await request('/api/setup/status');notice('');$('login').hidden=true;$('setup-content').hidden=false;
       $('engine-status').textContent=d.engine.installed?'Full engine installed · '+d.engine.revision.slice(0,7):'Engine setup needed. Run Setup-Apex-World.cmd once.';
       voiceProfile=d.voice.profile_id||'celine';$('voice-status').textContent=d.voice.detail;$('test-voice').disabled=d.voice.state!=='ready';
       $('model-status').textContent=d.model.name+' · '+(d.model.configured?'Provider configured · scene command not tested':'Provider key or local model setup needed');
@@ -51,7 +57,7 @@
       if(d.engine.installed)await providers();
     }catch(e){notice(e.message);}finally{loading=false;$('refresh').disabled=false;}
   }
-  $('login-form').addEventListener('submit',e=>{e.preventDefault();try{localStorage.setItem('apex_token',$('owner-token').value.trim());}catch(_){}$('owner-token').value='';load();});
+  $('login-form').addEventListener('submit',e=>{e.preventDefault();if(!accessConfigured)return;try{localStorage.setItem('apex_token',$('owner-token').value.trim());}catch(_){}$('owner-token').value='';load();});
   $('composio-form').addEventListener('submit',e=>{e.preventDefault();busy(e.submitter,async()=>{
     const pending=request('/api/apps/settings',{key:$('composio-key').value.trim()});$('composio-key').value='';await pending;await load();notice('Catalog connected. Open Apps and complete each account’s sign-in.');
   });});

@@ -1,6 +1,7 @@
 """Safety layer — intercepts dangerous tool calls and requires confirmation."""
 import re
 import threading
+import config
 from agent.incident_replay import boundary
 
 # (tool_name, input_key, pattern) → human-readable risk description
@@ -8,12 +9,13 @@ _RULES: list[tuple[str, str, re.Pattern, str]] = [
     # Code-execution tools: confirm on the user/core path. (Autonomous cortex/forge
     # paths route through the Docker sandbox instead — see tools/sandbox.autonomous_backend.)
     ("run_python", "code", re.compile(r".+", re.S), "running arbitrary Python on the host"),
+    ("python_exec", "code", re.compile(r".+", re.S), "running arbitrary Python in the persistent host kernel"),
     ("run_skill", "name", re.compile(r".+"), "running a skill (executes code) on the host"),
     ("bash", "command", re.compile(r"\brm\b.+(-rf?|--recursive)", re.I), "recursive delete"),
     ("bash", "command", re.compile(r"\bdd\b"), "disk overwrite (dd)"),
     ("bash", "command", re.compile(r">\s*/dev/(sd|nvme|disk)", re.I), "writing to raw device"),
     ("bash", "command", re.compile(r"(sudo\s+)?shutdown|reboot|halt", re.I), "system shutdown/reboot"),
-    ("bash", "command", re.compile(r"(curl|wget).+(sh|bash|zsh)\s*\|", re.I), "piping remote script to shell"),
+    ("bash", "command", re.compile(r"\b(curl|wget)\b[^|]*\|\s*(?:/\S*/)?(?:sh|bash|zsh)\b", re.I), "piping remote script to shell"),
     ("write_file", "path", re.compile(r"^/(etc|sys|proc|boot|usr/bin)"), "writing to system path"),
     ("write_file", "path", re.compile(r"\.ssh/(authorized_keys|config|id_)", re.I), "modifying SSH keys"),
     ("browser_click", "selector", re.compile(r"(submit|confirm|send|delete|pay|buy|purchase|place.order)", re.I), "form submission or purchase"),
@@ -106,8 +108,14 @@ def check(tool_name: str, inputs: dict) -> tuple[bool, str]:
     try:
         from agent import command_review
         risky, why = command_review.review(tool_name, inputs)
-    except Exception:
-        risky, why = False, ""   # review must never break tool dispatch
+    except Exception as exc:
+        # An unexpected reviewer failure must not become an implicit approval.
+        # Retain the explicit opt-out, but do not import the failing reviewer
+        # again: an import failure must also reach the confirmation gate.
+        risky = bool(config.SAFETY_REVIEW_REQUIRED)
+        why = f"safety review required but failed ({exc})" if risky else ""
+        if not risky:
+            print(f"[Safety] Review failed; proceeding without semantic review ({exc}).")
     if risky:
         reason = f"Flagged by safety review: {why}\nTool: {tool_name}"
         if _confirm_fn is None:

@@ -1,0 +1,258 @@
+{
+  "entries": {
+    "_review_loop": "Awareness schedules existing cortex and review helpers. Tool actions retain their own gates; this coarse graph merges function names.",
+    "tick": "Cortex only auto-dispatches its read-only allowlist; confirm-tier actions are persisted for authenticated owner approval.",
+    "check": "Guardian observes decision moments and requests model advice; name-based check collisions over-report unrelated tool paths.",
+    "consolidate_if_due": "Scheduled consolidation can refine skills, stage proposals and write Apex memory reports.",
+    "refine_skills": "Reflection proposes generated skill rewrites with _trigger=reflection; approval precedes installation.",
+    "propose": "Initiative gathers evidence and stages goal proposals; approval creates goals.",
+    "run_skill": "Installed skills are trusted executable code and run on the host. This entry is an inventory boundary, not a sandbox guarantee."
+  },
+  "edges": [
+    {
+      "entry": "_review_loop",
+      "capability": "complete",
+      "disposition": "Shared provider completions use durable budget reservations and usage accounting. The name-based graph is not a complete inventory of paid APIs or proof of a provider billing cap."
+    },
+    {
+      "entry": "_review_loop",
+      "capability": "create_skill",
+      "disposition": "Reflection passes a non-manual trigger to create_skill, which stages executable code through approvals. Validation parses without executing generated code. Trusted manual skill installation remains a separate host boundary."
+    },
+    {
+      "entry": "_review_loop",
+      "capability": "notify",
+      "disposition": "Existing notifications use restraint and source-specific cooldowns; Cortex confirmation notifications request approval rather than executing the staged action."
+    },
+    {
+      "entry": "_review_loop",
+      "capability": "run_shell",
+      "disposition": "Cortex run_python uses sandbox.autonomous_backend and refuses without Docker; confirm-tier bash requires approval and dispatcher safety. Installed skills can use the configured host backend; not every coarse path is sandboxed."
+    },
+    {
+      "entry": "_review_loop",
+      "capability": "set_goal",
+      "disposition": "Initiative only stages proposals; approvals._apply creates the proposed goal after approval. This is not a claim that every trusted installed skill is incapable of calling goals.set_goal directly."
+    },
+    {
+      "entry": "_review_loop",
+      "capability": "stage",
+      "disposition": "Reaching stage creates a pending item for approval; staging does not execute the proposed capability."
+    },
+    {
+      "entry": "_review_loop",
+      "capability": "write_text",
+      "disposition": "Existing reports and notes write files. This graph does not prove path confinement; destructive tools retain dispatcher safety and staged writes retain their approval settings."
+    },
+    {
+      "entry": "check",
+      "capability": "complete",
+      "disposition": "Shared provider completions use durable budget reservations and usage accounting. The name-based graph is not a complete inventory of paid APIs or proof of a provider billing cap."
+    },
+    {
+      "entry": "check",
+      "capability": "create_skill",
+      "disposition": "Reflection passes a non-manual trigger to create_skill, which stages executable code through approvals. Validation parses without executing generated code. Trusted manual skill installation remains a separate host boundary."
+    },
+    {
+      "entry": "check",
+      "capability": "notify",
+      "disposition": "Existing notifications use restraint and source-specific cooldowns; Cortex confirmation notifications request approval rather than executing the staged action."
+    },
+    {
+      "entry": "check",
+      "capability": "run_shell",
+      "disposition": "Cortex run_python uses sandbox.autonomous_backend and refuses without Docker; confirm-tier bash requires approval and dispatcher safety. Installed skills can use the configured host backend; not every coarse path is sandboxed."
+    },
+    {
+      "entry": "check",
+      "capability": "set_goal",
+      "disposition": "Initiative only stages proposals; approvals._apply creates the proposed goal after approval. This is not a claim that every trusted installed skill is incapable of calling goals.set_goal directly."
+    },
+    {
+      "entry": "check",
+      "capability": "stage",
+      "disposition": "Reaching stage creates a pending item for approval; staging does not execute the proposed capability."
+    },
+    {
+      "entry": "check",
+      "capability": "write_text",
+      "disposition": "Existing reports and notes write files. This graph does not prove path confinement; destructive tools retain dispatcher safety and staged writes retain their approval settings."
+    },
+    {
+      "entry": "consolidate_if_due",
+      "capability": "complete",
+      "disposition": "Shared provider completions use durable budget reservations and usage accounting. The name-based graph is not a complete inventory of paid APIs or proof of a provider billing cap."
+    },
+    {
+      "entry": "consolidate_if_due",
+      "capability": "create_skill",
+      "disposition": "Reflection passes a non-manual trigger to create_skill, which stages executable code through approvals. Validation parses without executing generated code. Trusted manual skill installation remains a separate host boundary."
+    },
+    {
+      "entry": "consolidate_if_due",
+      "capability": "notify",
+      "disposition": "Existing notifications use restraint and source-specific cooldowns; Cortex confirmation notifications request approval rather than executing the staged action."
+    },
+    {
+      "entry": "consolidate_if_due",
+      "capability": "run_shell",
+      "disposition": "Cortex run_python uses sandbox.autonomous_backend and refuses without Docker; confirm-tier bash requires approval and dispatcher safety. Installed skills can use the configured host backend; not every coarse path is sandboxed."
+    },
+    {
+      "entry": "consolidate_if_due",
+      "capability": "set_goal",
+      "disposition": "Initiative only stages proposals; approvals._apply creates the proposed goal after approval. This is not a claim that every trusted installed skill is incapable of calling goals.set_goal directly."
+    },
+    {
+      "entry": "consolidate_if_due",
+      "capability": "stage",
+      "disposition": "Reaching stage creates a pending item for approval; staging does not execute the proposed capability."
+    },
+    {
+      "entry": "consolidate_if_due",
+      "capability": "write_text",
+      "disposition": "Existing reports and notes write files. This graph does not prove path confinement; destructive tools retain dispatcher safety and staged writes retain their approval settings."
+    },
+    {
+      "entry": "propose",
+      "capability": "complete",
+      "disposition": "Shared provider completions use durable budget reservations and usage accounting. The name-based graph is not a complete inventory of paid APIs or proof of a provider billing cap."
+    },
+    {
+      "entry": "propose",
+      "capability": "create_skill",
+      "disposition": "Reflection passes a non-manual trigger to create_skill, which stages executable code through approvals. Validation parses without executing generated code. Trusted manual skill installation remains a separate host boundary."
+    },
+    {
+      "entry": "propose",
+      "capability": "notify",
+      "disposition": "Existing notifications use restraint and source-specific cooldowns; Cortex confirmation notifications request approval rather than executing the staged action."
+    },
+    {
+      "entry": "propose",
+      "capability": "run_shell",
+      "disposition": "Cortex run_python uses sandbox.autonomous_backend and refuses without Docker; confirm-tier bash requires approval and dispatcher safety. Installed skills can use the configured host backend; not every coarse path is sandboxed."
+    },
+    {
+      "entry": "propose",
+      "capability": "set_goal",
+      "disposition": "Initiative only stages proposals; approvals._apply creates the proposed goal after approval. This is not a claim that every trusted installed skill is incapable of calling goals.set_goal directly."
+    },
+    {
+      "entry": "propose",
+      "capability": "stage",
+      "disposition": "Reaching stage creates a pending item for approval; staging does not execute the proposed capability."
+    },
+    {
+      "entry": "propose",
+      "capability": "write_text",
+      "disposition": "Existing reports and notes write files. This graph does not prove path confinement; destructive tools retain dispatcher safety and staged writes retain their approval settings."
+    },
+    {
+      "entry": "refine_skills",
+      "capability": "complete",
+      "disposition": "Shared provider completions use durable budget reservations and usage accounting. The name-based graph is not a complete inventory of paid APIs or proof of a provider billing cap."
+    },
+    {
+      "entry": "refine_skills",
+      "capability": "create_skill",
+      "disposition": "Reflection passes a non-manual trigger to create_skill, which stages executable code through approvals. Validation parses without executing generated code. Trusted manual skill installation remains a separate host boundary."
+    },
+    {
+      "entry": "refine_skills",
+      "capability": "notify",
+      "disposition": "Existing notifications use restraint and source-specific cooldowns; Cortex confirmation notifications request approval rather than executing the staged action."
+    },
+    {
+      "entry": "refine_skills",
+      "capability": "run_shell",
+      "disposition": "Cortex run_python uses sandbox.autonomous_backend and refuses without Docker; confirm-tier bash requires approval and dispatcher safety. Installed skills can use the configured host backend; not every coarse path is sandboxed."
+    },
+    {
+      "entry": "refine_skills",
+      "capability": "set_goal",
+      "disposition": "Initiative only stages proposals; approvals._apply creates the proposed goal after approval. This is not a claim that every trusted installed skill is incapable of calling goals.set_goal directly."
+    },
+    {
+      "entry": "refine_skills",
+      "capability": "stage",
+      "disposition": "Reaching stage creates a pending item for approval; staging does not execute the proposed capability."
+    },
+    {
+      "entry": "refine_skills",
+      "capability": "write_text",
+      "disposition": "Existing reports and notes write files. This graph does not prove path confinement; destructive tools retain dispatcher safety and staged writes retain their approval settings."
+    },
+    {
+      "entry": "run_skill",
+      "capability": "complete",
+      "disposition": "Shared provider completions use durable budget reservations and usage accounting. The name-based graph is not a complete inventory of paid APIs or proof of a provider billing cap."
+    },
+    {
+      "entry": "run_skill",
+      "capability": "create_skill",
+      "disposition": "Reflection passes a non-manual trigger to create_skill, which stages executable code through approvals. Validation parses without executing generated code. Trusted manual skill installation remains a separate host boundary."
+    },
+    {
+      "entry": "run_skill",
+      "capability": "notify",
+      "disposition": "Existing notifications use restraint and source-specific cooldowns; Cortex confirmation notifications request approval rather than executing the staged action."
+    },
+    {
+      "entry": "run_skill",
+      "capability": "run_shell",
+      "disposition": "Cortex run_python uses sandbox.autonomous_backend and refuses without Docker; confirm-tier bash requires approval and dispatcher safety. Installed skills can use the configured host backend; not every coarse path is sandboxed."
+    },
+    {
+      "entry": "run_skill",
+      "capability": "set_goal",
+      "disposition": "Initiative only stages proposals; approvals._apply creates the proposed goal after approval. This is not a claim that every trusted installed skill is incapable of calling goals.set_goal directly."
+    },
+    {
+      "entry": "run_skill",
+      "capability": "stage",
+      "disposition": "Reaching stage creates a pending item for approval; staging does not execute the proposed capability."
+    },
+    {
+      "entry": "run_skill",
+      "capability": "write_text",
+      "disposition": "Existing reports and notes write files. This graph does not prove path confinement; destructive tools retain dispatcher safety and staged writes retain their approval settings."
+    },
+    {
+      "entry": "tick",
+      "capability": "complete",
+      "disposition": "Shared provider completions use durable budget reservations and usage accounting. The name-based graph is not a complete inventory of paid APIs or proof of a provider billing cap."
+    },
+    {
+      "entry": "tick",
+      "capability": "create_skill",
+      "disposition": "Reflection passes a non-manual trigger to create_skill, which stages executable code through approvals. Validation parses without executing generated code. Trusted manual skill installation remains a separate host boundary."
+    },
+    {
+      "entry": "tick",
+      "capability": "notify",
+      "disposition": "Existing notifications use restraint and source-specific cooldowns; Cortex confirmation notifications request approval rather than executing the staged action."
+    },
+    {
+      "entry": "tick",
+      "capability": "run_shell",
+      "disposition": "Cortex run_python uses sandbox.autonomous_backend and refuses without Docker; confirm-tier bash requires approval and dispatcher safety. Installed skills can use the configured host backend; not every coarse path is sandboxed."
+    },
+    {
+      "entry": "tick",
+      "capability": "set_goal",
+      "disposition": "Initiative only stages proposals; approvals._apply creates the proposed goal after approval. This is not a claim that every trusted installed skill is incapable of calling goals.set_goal directly."
+    },
+    {
+      "entry": "tick",
+      "capability": "stage",
+      "disposition": "Reaching stage creates a pending item for approval; staging does not execute the proposed capability."
+    },
+    {
+      "entry": "tick",
+      "capability": "write_text",
+      "disposition": "Existing reports and notes write files. This graph does not prove path confinement; destructive tools retain dispatcher safety and staged writes retain their approval settings."
+    }
+  ]
+}

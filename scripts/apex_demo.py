@@ -70,6 +70,9 @@ class ScriptedClient:
 
     def create(self, **kw):
         system, messages = kw.get('system', ''), kw['messages']
+        from agent.command_review import _REVIEW_SYS
+        if system == _REVIEW_SYS:
+            return self._reply([dict(type='text', text='SAFE: fixed demo fixture action')], 'end_turn')
         if ACTION_MARK in str(system):
             source = messages[0]['content']
             items = [line[2:].strip() for line in source.splitlines() if line.startswith('- ')][:4]

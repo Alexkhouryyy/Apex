@@ -201,9 +201,9 @@ RESEARCH_STREAM_ENABLED = os.getenv(
 # ollama/* model to make it free.
 SAFETY_LLM_REVIEW = os.getenv("SAFETY_LLM_REVIEW", "true").strip().lower() in ("1", "true", "yes")
 SAFETY_REVIEW_MODEL = os.getenv("SAFETY_REVIEW_MODEL", "")   # blank -> PROACTIVE_MODEL
-# If the reviewer can't run, fall back to blocklist-only (today's posture) unless
-# this is set, in which case treat an unavailable reviewer as risky.
-SAFETY_REVIEW_REQUIRED = os.getenv("SAFETY_REVIEW_REQUIRED", "false").strip().lower() in ("1", "true", "yes")
+# An unavailable reviewer requires confirmation by default. Set false explicitly
+# to accept the weaker pattern-only fallback.
+SAFETY_REVIEW_REQUIRED = os.getenv("SAFETY_REVIEW_REQUIRED", "true").strip().lower() in ("1", "true", "yes")
 
 # Screen
 SCREENSHOT_QUALITY = 85         # JPEG quality for screenshots sent to Claude
@@ -274,7 +274,7 @@ MODEL_PRICING = {
     "gemini-2.5-flash":          {"input": 0.30,  "output": 2.50,  "cache_read": 0.075,"cache_create": 0.0},
     "gemini-2.0-flash":          {"input": 0.10,  "output": 0.40,  "cache_read": 0.025,"cache_create": 0.0},
     # DeepSeek. Published rates at the time of writing; they change, and an
-    # unpriced model bills as $0, which silently understates spend. If these go
+    # unpriced model has unknown cost and cannot use enabled spend caps. If these go
     # stale, MODEL_PRICING_JSON overrides them without editing code.
     "deepseek-chat":     {"input": 0.28, "output": 0.42, "cache_read": 0.028, "cache_create": 0.28},
     # V4.1 Flash, conservative peak rates (USD/million tokens), 2026-09-14.
@@ -285,8 +285,7 @@ MODEL_PRICING = {
 }
 
 # Price a model this file has never heard of, without editing code — the
-# companion to EXTRA_MODELS. A discovered model with no price bills as $0, which
-# takes the budget cap offline for it, so this is how you put it back.
+# companion to EXTRA_MODELS. Remote models need valid pricing to use spend caps.
 #   MODEL_PRICING_JSON={"gpt-5.6-max": {"input": 5.0, "output": 25.0}}
 # Missing cache_read/cache_create default to 0.
 _pricing_json = os.getenv("MODEL_PRICING_JSON", "").strip()
@@ -295,8 +294,8 @@ if _pricing_json:
         import json as _json
         for _m, _p in _json.loads(_pricing_json).items():
             MODEL_PRICING[_m] = {
-                "input": float(_p.get("input", 0.0)),
-                "output": float(_p.get("output", 0.0)),
+                "input": float(_p["input"]),
+                "output": float(_p["output"]),
                 "cache_read": float(_p.get("cache_read", 0.0)),
                 "cache_create": float(_p.get("cache_create", 0.0)),
             }

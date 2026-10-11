@@ -181,27 +181,7 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_rel_to ON relations(to_id, kind)")
 
         # --- Tier-4: usage telemetry ---
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS usage_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts REAL NOT NULL,
-                session_id INTEGER,
-                turn_index INTEGER,
-                call_site TEXT NOT NULL,        -- agent.core/stream | agent.memory | agent.goals | ...
-                model TEXT NOT NULL,
-                input_tokens INTEGER DEFAULT 0,
-                cache_read_tokens INTEGER DEFAULT 0,
-                cache_creation_tokens INTEGER DEFAULT 0,
-                output_tokens INTEGER DEFAULT 0,
-                thinking_tokens INTEGER DEFAULT 0,
-                latency_ms INTEGER DEFAULT 0,
-                cost_usd REAL DEFAULT 0.0,
-                tool_calls_json TEXT DEFAULT '[]',
-                stop_reason TEXT DEFAULT ''
-            )
-        """)
-        c.execute("CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_log(ts DESC)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_log(session_id, turn_index)")
+        _ensure_usage_schema(c)
 
         # --- Tier-4: per-turn log for episode replay ---
         c.execute("""
@@ -288,6 +268,35 @@ def init_db():
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_rewrites_name ON skill_rewrites(name, ts DESC)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_rewrites_status ON skill_rewrites(status, ts DESC)")
+
+
+def _ensure_usage_schema(c):
+    """The ledger can initialize independently of the rest of the brain."""
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS usage_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts REAL NOT NULL,
+            session_id INTEGER,
+            turn_index INTEGER,
+            call_site TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER DEFAULT 0,
+            cache_read_tokens INTEGER DEFAULT 0,
+            cache_creation_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            thinking_tokens INTEGER DEFAULT 0,
+            latency_ms INTEGER DEFAULT 0,
+            cost_usd REAL DEFAULT 0.0,
+            tool_calls_json TEXT DEFAULT '[]',
+            stop_reason TEXT DEFAULT '',
+            cost_status TEXT NOT NULL DEFAULT 'usage'
+        )
+    """)
+    columns = {row[1] for row in c.execute("PRAGMA table_info(usage_log)")}
+    if "cost_status" not in columns:
+        c.execute("ALTER TABLE usage_log ADD COLUMN cost_status TEXT NOT NULL DEFAULT 'usage'")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_log(ts DESC)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_log(session_id, turn_index)")
 
 
 @contextmanager

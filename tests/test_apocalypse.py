@@ -132,7 +132,8 @@ def test_readiness_does_not_claim_live_verification(client,monkeypatch):
     assert data['model']['available']==['qwen3:4b']
     assert data['model']['downloaded'] is True and data['model']['response_verified'] is False
     assert data['offline_verified'] is False and data['voice']['audio_verified'] is False
-    assert len(calls)==3
+    assert len(calls)==4
+    assert all(not row['ready'] and row['state']=='unknown' for row in data['nomad']['readers'])
 
 
 def test_pinned_nomad_source_and_generated_compose(tmp_path):

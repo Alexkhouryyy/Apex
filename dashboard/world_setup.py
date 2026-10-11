@@ -26,6 +26,13 @@ def shell():
     return FileResponse(ROOT / 'dashboard/static/setup.html', headers={'Cache-Control': 'no-store'})
 
 
+@router.get('/api/setup/access')
+def access():
+    """Public boot guidance only: no token, account, key or private status."""
+    import config
+    return {'token_configured': bool(config.DASHBOARD_TOKEN)}
+
+
 @api.get('/status')
 async def status():
     import config

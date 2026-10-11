@@ -150,7 +150,9 @@ def test_large_existing_skill_is_not_silently_truncated(monkeypatch):
 
 def test_forged_registration_failure_is_reported_to_browser(monkeypatch):
     from dashboard.server import forged_tools_approve
+    from starlette.requests import Request
+    request = Request({"type": "http", "state": {"is_master": True}})
     monkeypatch.setattr(skill_forge, 'approve_forged', lambda tool_id: 'Registration failed; tool remains pending: invalid code')
-    response = forged_tools_approve(1)
+    response = forged_tools_approve(1, request)
     assert response.status_code == 409
     assert 'remains pending' in json.loads(response.body)['error']

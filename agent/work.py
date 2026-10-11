@@ -474,13 +474,21 @@ def give_to_apex(tid, agent, budget_usd=APEX_BUDGET, roles=('researcher', 'coder
                 result = work_engines.run(engine, prompt, folder, run_id=run_id)
             except Exception as exc:                     # never leave a run marked running
                 result = {'status': 'failed', 'summary': f'{type(exc).__name__}: {exc}'}
+            if result['status'] in UNAVAILABLE:
+                from agent import work_agent
+                try:
+                    # A poll can make this task retryable as soon as its run
+                    # is terminal. Save the plan's rest first, so the scheduler
+                    # cannot select that same unavailable plan in the gap.
+                    work_agent.mark_unavailable(engine, result['status'], result['summary'], until=result.get('reset_at'))
+                except Exception as exc:
+                    # Do not expose a retryable task without a recorded rest.
+                    result = {'status': 'failed', 'summary':
+                              f"Plan-unavailability handling failed: {exc}. {result['summary']}"}
             with longterm._conn() as db:
                 db.execute('UPDATE work_runs SET status=?, ended=?, summary=? WHERE id=?',
                            (result['status'], time.time(), result['summary'][:4000], run_id))
             _live_runs.discard(run_id)
-            if result['status'] in UNAVAILABLE:
-                from agent import work_agent
-                work_agent.mark_unavailable(engine, result['status'], result['summary'], until=result.get('reset_at'))
             sync_apex()
     with longterm._conn() as db:
         db.execute("UPDATE work_tasks SET apex_run=?, apex_state='queued', apex_folder=?, apex_summary='', apex_engine=?, "

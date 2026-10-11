@@ -39,6 +39,15 @@ def test_setup_shell_public_but_diagnostics_and_updates_owner_only(client, monke
     assert client.post('/api/setup/world-update', headers={**OWNER, 'Origin': 'https://foreign.test'}).status_code == 403
 
 
+def test_setup_access_is_public_boolean_only_and_tokenless_mode_explains_recovery(client, monkeypatch):
+    import config
+    assert client.get('/api/setup/access').json()=={'token_configured':True}
+    assert 'setup-owner' not in client.get('/api/setup/access').text
+    monkeypatch.setattr(config,'DASHBOARD_TOKEN','')
+    assert client.get('/api/setup/access').json()=={'token_configured':False}
+    assert client.get('/api/setup/status').status_code==403
+
+
 @pytest.mark.parametrize('latest, state', [('a' * 40, 'current'), ('b' * 40, 'update_available')])
 def test_update_check_is_bounded_read_only_and_cached(client, monkeypatch, latest, state):
     calls = []

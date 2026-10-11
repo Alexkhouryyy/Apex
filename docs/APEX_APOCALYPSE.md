@@ -32,6 +32,37 @@ Uploads store local files; they are not automatically indexed into Apex's
 knowledge base. Ask Apex to read them, or use NOMAD document RAG after its
 AI service is prepared.
 
+### Ask Qwen about the downloaded books
+
+The Apocalypse page has a saved-book explorer. Choose **Browse saved books**,
+select a book or search across the installed collection, then open an article
+result. It displays a bounded text excerpt, its archive date and a link to the
+full local article. **Read next section** fetches the next excerpt. These
+operations use the prepared local reader and do not require Qwen inference.
+
+**Attach excerpt to chat** stages the current section beside your question.
+Sending includes its text, title, date, section offset and local URL. It does
+not automatically send a question or ingest the entire book into the model.
+Only one excerpt is attached at a time; attaching another replaces it. Failed
+chat requests keep the question and attachment for retry. Switching projects
+clears the attachment. The combined question and source must fit the existing
+8,000-character message limit. Browsing does not start downloads, install a
+reader, or establish that an answer is correct.
+
+Apocalypse chat offers `library_list`, `library_search` and `library_read`.
+With NOMAD and its information library running, ask, for example:
+"Search the Python book for sorting techniques, read the article, and explain
+the difference between sorted() and list.sort(). Cite the local source."
+Search uses Kiwix's existing full-text indexes; article reading returns short
+sections and a continuation offset. Saved replies display source links to the
+currently configured local reader. This requires no embedding model, duplicate
+book download or wholesale indexing job.
+
+The tools consult only installed local books. If a drive, reader, book or search
+index is unavailable, Apex reports that limitation. Search snippets are previews;
+Qwen is instructed to read articles before citing them. Archived material is not
+live information, and downloaded books do not change the model's weights.
+
 Set `APEX_APOCALYPSE_HOME` in the launching terminal to choose another folder.
 `APEX_APOCALYPSE_MODEL` chooses another already-downloaded local model;
 `Setup-Apex-Apocalypse.cmd --model MODEL` prepares it first. Cloud Ollama
@@ -83,9 +114,13 @@ Once Docker is installed and its image storage is on a drive with room:
    TCP readiness, so the temporary initialization server cannot start NOMAD early.
    If an older setup reports MySQL unhealthy, inspect its logs and health first;
    once healthy, use `--nomad-start` to reuse built images without downloading.
-2. Run `Setup-Apex-Apocalypse.cmd --nomad-apps` to request Kiwix, Kolibri Gen 2,
-   CyberChef and FlatNotes, rescan saved books, and prepare map fonts/styles and
-   the world overview. Check app health in NOMAD after installation.
+2. Run `Setup-Apex-Apocalypse.cmd --nomad-readers` for Kiwix only, then rescan
+   the saved books and check its local catalog. A first Kiwix installation
+   downloads the reader image and NOMAD's small starter Wikipedia archive
+   (about 4.5 MB in the pinned version). It does not resume the large library
+   plan or request models, course imports or map downloads.
+   `--nomad-apps` installs all four reader/data-tool apps and rescans books;
+   it no longer bundles map preparation. Check each app before disconnecting.
 3. In Kolibri, finish its first-run setup and import the English channels you
    want. Video courses are not included in the ZIM preparation queue.
 4. Configure NOMAD AI/RAG and its embedding model separately. Its default
@@ -99,6 +134,41 @@ NOMAD child apps require the upstream `project-nomad_default` network. The
 generated Compose file names it explicitly. Child volume seeds use Linux
 placeholder paths so upstream can resolve the actual Docker storage mount;
 Windows drive-letter paths cannot be used in its Linux bind parser.
+
+### Resume the downloaded small library
+
+When the ADATA drive is connected as D:, open Docker Desktop and start the
+cached platform with `Start-Apex-Platform.cmd`. After NOMAD answers, run in
+a second Command Prompt:
+
+```cmd
+cd /d C:\Users\alexk\Apex
+set "APEX_APOCALYPSE_HOME=D:\Apex-Apocalypse"
+Setup-Apex-Apocalypse.cmd --nomad-readers
+```
+
+This leaves the deferred Wikipedia and worldwide map plan alone. Repeating
+the reader step reuses a running installation, or starts a stopped reader;
+it does not force a reinstall. The helper waits for the selected app to run,
+then rescans local ZIM files and checks Kiwix's catalog at the host port saved
+in NOMAD, including owner port remaps. A request accepted by NOMAD is not
+reported as a running reader. Open a reference and an article to verify the
+content itself. An empty catalog needs attention rather than another bulk download.
+
+Select another app explicitly, for example `--nomad-readers --reader courses`
+or `--nomad-readers --reader notes --reader tools`. Course installation is
+separate from importing channels. AI/RAG ingestion is separate from adding books.
+Map preparation now requires the explicit `--nomad-maps` option and stays
+deferred until selected.
+
+The Apocalypse screen distinguishes an installed app, a running app, an
+answering reader and a library catalog containing titles. Its reader refresh
+only makes local GET requests; it does not install apps, rescan content or
+start downloads. It shows links only to answering loopback readers, using
+NOMAD's current host ports. Owner credentials are not forwarded. Listed titles
+are readiness evidence, not a physical internet-disconnect test.
+
+Kiwix catalog API: [official documentation](https://github.com/kiwix/kiwix-tools/blob/3.8.1/docs/kiwix-serve.rst).
 
 ### Storage advice
 

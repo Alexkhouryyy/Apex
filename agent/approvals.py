@@ -139,6 +139,8 @@ def _apply(kind: str, payload: dict, by_owner: bool = True) -> str:
             in_reply_to=payload.get("in_reply_to"),
         )
     if kind == "skill_code":
+        if not by_owner:
+            raise PermissionError("Only the owner can approve executable skill code.")
         # The only path by which an autonomously-rewritten executable skill
         # reaches disk. _trigger="manual" bypasses staging entirely, so this
         # runs exclusively for code a model wrote and a human approved.

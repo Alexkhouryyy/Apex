@@ -1,0 +1,10 @@
+{
+  "name": "decompress",
+  "version": "4.2.2-apex.0",
+  "private": true,
+  "license": "MIT",
+  "main": "index.cjs",
+  "dependencies": {
+    "@xhmikosr/decompress": "11.1.4"
+  }
+}

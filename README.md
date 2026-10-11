@@ -13,6 +13,14 @@ into, not a chat log that forgets you between sessions.
 
 **Something not working?** `python -m tools.doctor` — it checks what is actually running on your machine and every failure says what to run next.
 
+**Work on code:** open `/code`, add a project and choose **Open workspace**.
+Edit files, run a persistent terminal and preview your app before keeping changes.
+The editor works without an AI account; agent builds use your connected coding
+plan. [Code guide](docs/CODE.md) · [Windows acceptance check](docs/CODE-WINDOWS-ACCEPTANCE.md).
+For language intelligence, debugging, tasks, Git and extensions, install the
+optional [Full IDE](ide/README.md) with `Setup-Apex-Code-IDE.cmd`, then choose
+**Full IDE** inside your workspace.
+
 **Use all of it:** one prompt that walks you through every part of Apex, station by station: **[docs/USE_ALL_OF_APEX.md](docs/USE_ALL_OF_APEX.md)**.
 
 Full write-up, feature map and honest state: **[docs/APEX_OVERVIEW.md](docs/APEX_OVERVIEW.md)**.
@@ -184,6 +192,48 @@ default). No port, no IP, proper TLS.
 
 API keys never belong in the repo. They live only in `.env`, which is
 gitignored. `.env.example` (placeholders only) is the template.
+
+Dashboard approvals for pending actions, forged tools, executable skills,
+skill instructions, outbound email, and bulk writes, plus self-modifications,
+require the master `DASHBOARD_TOKEN`. Configure it and sign in before using
+those controls. Individual data writes (memories, notes and goal proposals)
+can still be approved by paired devices without owner-approved provenance.
+Browser mutations must come from the dashboard's own origin. Authenticated
+browser extensions and individually authenticated inbound webhooks remain supported.
+
+`SAFETY_REVIEW_REQUIRED` defaults to `true`: if semantic review fails or is
+disabled, affected tool calls require explicit confirmation. Background tasks
+without a confirming user are refused. Setting it to `false` explicitly permits
+the weaker pattern-only fallback. Existing `.env` files keep their configured value.
+
+The persistent Python REPL runs on the host and requires
+`EXECUTION_BACKEND=local` with `SANDBOX_REQUIRE=false`. Under Docker or required
+isolation it refuses to start or execute, including reuse of an existing kernel.
+Use sandboxed `bash` for isolated Python instead.
+
+Model completions and streams share daily/session budget enforcement and usage
+recording. Parallel calls reserve a conservative request estimate before
+dispatch; reported usage replaces that reservation atomically. Failed or
+cancelled calls without final usage record a marked estimate instead of a free
+call. A ledger failure or process crash keeps its reservation held. These are
+token-price estimates, not a provider invoice or a hard billing guarantee.
+Large prompts and media can therefore require more remaining allowance.
+
+Unpriced remote models require `MODEL_PRICING_JSON` when caps are enabled;
+cost remains unknown if caps are explicitly disabled. Ollama calls remain free.
+The dashboard shows reserved allowance, estimated calls and unknown costs.
+Changing caps requires the master token. Text-completion streaming falls back to a blocking
+call only when unsupported before dispatch; a failed stream is not retried
+automatically. Historical rows are retained without retroactively repricing them.
+
+Native desktop control uses `xdotool` on Linux X11 and PyAutoGUI on Windows
+and macOS. Linux Wayland and hosts without an active desktop report control as
+unavailable. Failed or timed-out input commands propagate errors, and screen
+size detection never substitutes an invented resolution. Windows typing uses
+Unicode keyboard input without replacing the clipboard; macOS native typing
+supports ASCII and rejects unsupported characters before typing. Successful
+responses mean input was sent; inspect a fresh screenshot to verify the app's
+result. PyAutoGUI's fail-safe remains available.
 
 ### Pre-commit secret guard
 

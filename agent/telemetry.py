@@ -1,4 +1,4 @@
-"""Token usage, cost, latency telemetry for every Claude API call.
+"""Token usage, cost, latency telemetry for shared provider calls.
 
 Wraps `client.messages.create(...)` and `client.messages.stream(...)` to capture
 `resp.usage`, compute cost from MODEL_PRICING, persist a row to `usage_log`, and
@@ -12,6 +12,7 @@ Usage:
 """
 import json
 import time
+import math
 from contextlib import contextmanager
 from typing import Optional
 
@@ -45,34 +46,59 @@ _ZERO = {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_create": 0.0}
 _warned_unpriced: set = set()
 
 
-def _pricing(model: str) -> dict:
+def _pricing(model: str) -> dict | None:
+    if model.startswith("ollama/"):
+        return _ZERO
     prices = getattr(config, "MODEL_PRICING", {})
     if model in prices:
-        return prices[model]
-    # An unpriced model bills as $0, which does not merely mis-report a number —
-    # it takes the budget cap offline, silently, for that model. Local models
-    # really are free; anything else is a blind spot and has to say so. Once per
-    # model per process: this sits on the hot path of every API call.
-    if not model.startswith("ollama/") and model not in _warned_unpriced:
+        try:
+            p = {k: float(prices[model][k]) for k in _ZERO}
+            if all(math.isfinite(v) and v >= 0 for v in p.values()):
+                return p
+        except (ValueError, TypeError, KeyError):
+            pass
+    if model not in _warned_unpriced:
         _warned_unpriced.add(model)
-        print(f"[Cost] No price for '{model}' — its spend counts as $0 and the "
-              f"budget cap cannot see it. Add it to MODEL_PRICING_JSON in .env, "
+        print(f"[Cost] No price for '{model}' — its cost is unknown and the "
+              f"budget cap requires pricing. Add it to MODEL_PRICING_JSON in .env, "
               f"e.g. {{\"{model}\": {{\"input\": 5.0, \"output\": 25.0}}}}")
-    return _ZERO
+    return None
 
 
-def _compute_cost(model: str, usage) -> float:
+def _usage_counts(usage):
+    if usage is None:
+        return None
+    if any(getattr(usage, k, None) is None for k in ("input_tokens", "output_tokens")):
+        return None
+    values = {k: getattr(usage, k, 0)
+              for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
+    for key in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+        if values[key] is None:
+            values[key] = 0
+    if all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in values.values()):
+        return values
+    return None
+
+
+def _compute_cost(model: str, usage) -> float | None:
     p = _pricing(model)
-    inp = getattr(usage, "input_tokens", 0) or 0
-    out = getattr(usage, "output_tokens", 0) or 0
-    cr = getattr(usage, "cache_read_input_tokens", 0) or 0
-    cc = getattr(usage, "cache_creation_input_tokens", 0) or 0
-    return (
-        inp * p["input"] / 1_000_000
-        + out * p["output"] / 1_000_000
-        + cr * p["cache_read"] / 1_000_000
-        + cc * p["cache_create"] / 1_000_000
-    )
+    counts = _usage_counts(usage)
+    if p is None or counts is None:
+        return None
+    inp = counts["input_tokens"]
+    out = counts["output_tokens"]
+    cr = counts["cache_read_input_tokens"]
+    cc = counts["cache_creation_input_tokens"]
+    try:
+        cost = (
+            inp * p["input"] / 1_000_000
+            + out * p["output"] / 1_000_000
+            + cr * p["cache_read"] / 1_000_000
+            + cc * p["cache_create"] / 1_000_000
+        )
+    except OverflowError:
+        return None
+    return cost if math.isfinite(cost) else None
 
 
 def record(
@@ -83,39 +109,52 @@ def record(
     latency_ms: int,
     stop_reason: str = "",
     tool_calls: Optional[list] = None,
-) -> None:
-    """Persist one Claude call's usage. `usage` is the SDK's Usage object."""
-    if usage is None:
-        return
-    cost = _compute_cost(model, usage)
+    reservation=None,
+    incomplete: bool = False,
+) -> bool:
+    """Persist one provider call's usage. `usage` is the SDK's Usage object."""
+    cost = _compute_cost(model, usage) if not incomplete else None
+    counts = _usage_counts(usage) or {}
+    cost_status = "usage"
+    if cost is None:
+        cost = reservation.amount if reservation is not None else None
+        cost_status = "estimate" if cost is not None else "unknown"
     try:
         with longterm._write_conn() as c:
+            longterm._ensure_usage_schema(c)
             c.execute(
                 """INSERT INTO usage_log
                    (ts, session_id, turn_index, call_site, model,
                     input_tokens, cache_read_tokens, cache_creation_tokens,
                     output_tokens, thinking_tokens, latency_ms, cost_usd,
-                    tool_calls_json, stop_reason)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    tool_calls_json, stop_reason, cost_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     time.time(),
-                    _session_id,
-                    _turn_index,
+                    reservation.session_id if reservation is not None else _session_id,
+                    reservation.turn_index if reservation is not None else _turn_index,
                     call_site,
                     model,
-                    getattr(usage, "input_tokens", 0) or 0,
-                    getattr(usage, "cache_read_input_tokens", 0) or 0,
-                    getattr(usage, "cache_creation_input_tokens", 0) or 0,
-                    getattr(usage, "output_tokens", 0) or 0,
+                    counts.get("input_tokens", 0),
+                    counts.get("cache_read_input_tokens", 0),
+                    counts.get("cache_creation_input_tokens", 0),
+                    counts.get("output_tokens", 0),
                     0,  # thinking tokens not exposed separately yet
                     latency_ms,
                     cost,
                     json.dumps(tool_calls or []),
                     stop_reason,
+                    cost_status,
                 ),
             )
+            # Settlement and release share one transaction. A failed ledger
+            # write leaves the reservation held, rather than refunding unknown spend.
+            if reservation is not None:
+                c.execute("DELETE FROM budget_reservations WHERE id = ?", (reservation.id,))
+        return True
     except Exception as e:
         print(f"[Telemetry] record failed: {e}")
+        return False
 
 
 def log_turn(role: str, content_json: dict | list, tool_calls: Optional[list] = None) -> None:
@@ -175,8 +214,15 @@ def _resolve_call(client, call_site, kwargs):
 def create(client, *, call_site: str, **kwargs):
     """Drop-in replacement for client.messages.create with telemetry capture."""
     client, kwargs = _resolve_call(client, call_site, kwargs)
+    from agent import budget
+    ticket = budget.reserve(kwargs)
     start = time.time()
-    resp = client.messages.create(**kwargs)
+    try:
+        resp = client.messages.create(**kwargs)
+    except BaseException:
+        record(call_site=call_site, model=kwargs.get("model", "?"), usage=None,
+               latency_ms=int((time.time() - start) * 1000), stop_reason="request_error", reservation=ticket)
+        raise
     latency_ms = int((time.time() - start) * 1000)
     tool_calls = [
         {"name": getattr(b, "name", ""), "id": getattr(b, "id", "")}
@@ -190,36 +236,83 @@ def create(client, *, call_site: str, **kwargs):
         latency_ms=latency_ms,
         stop_reason=getattr(resp, "stop_reason", "") or "",
         tool_calls=tool_calls,
+        reservation=ticket,
     )
     return resp
 
 
+class StreamUnavailable(RuntimeError):
+    """Streaming is unsupported before dispatch; a blocking fallback is safe."""
+
+
+class _TrackedStream:
+    def __init__(self, source):
+        self.source = source
+        self.completed = False
+        self.final = None
+        self.final_attempted = False
+
+    def __iter__(self):
+        for event in self.source:
+            yield event
+        self.completed = True
+
+    def get_final_message(self):
+        if not self.final_attempted:
+            self.final_attempted = True
+            self.final = self.source.get_final_message()
+            self.completed = True
+        return self.final
+
+    def __getattr__(self, name):
+        return getattr(self.source, name)
+
+
 @contextmanager
 def stream(client, *, call_site: str, **kwargs):
-    """Drop-in replacement for client.messages.stream that records the final usage."""
+    """Record streams and interruptions without draining a cancelled request."""
+    from agent import budget
     client, kwargs = _resolve_call(client, call_site, kwargs)
+    ticket = budget.reserve(kwargs)
     start = time.time()
-    sm = client.messages.stream(**kwargs)
+    tracked = None
+    final = None
+    undispatched = False
     try:
-        with sm as s:
-            yield s
-            final = s.get_final_message()
-        latency_ms = int((time.time() - start) * 1000)
-        tool_calls = [
-            {"name": getattr(b, "name", ""), "id": getattr(b, "id", "")}
-            for b in getattr(final, "content", [])
-            if getattr(b, "type", "") == "tool_use"
-        ]
-        record(
-            call_site=call_site,
-            model=kwargs.get("model", "?"),
-            usage=getattr(final, "usage", None),
-            latency_ms=latency_ms,
-            stop_reason=getattr(final, "stop_reason", "") or "",
-            tool_calls=tool_calls,
-        )
-    except Exception:
-        raise
+        try:
+            method = getattr(client.messages, "stream", None)
+            if method is None:
+                raise NotImplementedError("stream method is unavailable")
+            sm = method(**kwargs)
+        except NotImplementedError as exc:
+            budget.release(ticket)
+            undispatched = True
+            raise StreamUnavailable(str(exc)) from exc
+        with sm as source:
+            tracked = _TrackedStream(source)
+            try:
+                yield tracked
+            finally:
+                # Only request a final message after exhaustion. Calling it on
+                # an interrupted stream can drain or re-dispatch the request.
+                if tracked.completed:
+                    final = tracked.get_final_message()
+    finally:
+        if not undispatched:
+            partial = None
+            if final is None and tracked is not None:
+                try:
+                    partial = getattr(tracked.source, "current_message_snapshot", None)
+                except Exception:
+                    pass
+            message = final if final is not None else partial
+            record(call_site=call_site, model=kwargs.get("model", "?"),
+                   usage=getattr(message, "usage", None),
+                   latency_ms=int((time.time() - start) * 1000),
+                   stop_reason=(getattr(final, "stop_reason", "") or "end_turn") if final is not None else "stream_interrupted",
+                   tool_calls=[{"name": getattr(b, "name", ""), "id": getattr(b, "id", "")}
+                               for b in getattr(message, "content", []) if getattr(b, "type", "") == "tool_use"],
+                   reservation=ticket, incomplete=final is None)
 
 
 # === Aggregation helpers (consumed by dashboard) ===
@@ -231,17 +324,19 @@ def summary(days: int = 7) -> dict:
             """SELECT model, COUNT(*) as calls,
                       SUM(input_tokens), SUM(cache_read_tokens),
                       SUM(cache_creation_tokens), SUM(output_tokens),
-                      SUM(cost_usd), AVG(latency_ms)
+                      SUM(cost_usd), AVG(latency_ms), COUNT(*) - COUNT(cost_usd),
+                      SUM(CASE WHEN cost_status = 'estimate' THEN 1 ELSE 0 END)
                FROM usage_log WHERE ts >= ? GROUP BY model""",
             (cutoff,),
         ).fetchall()
         totals = c.execute(
-            "SELECT COUNT(*), SUM(cost_usd), SUM(input_tokens), SUM(cache_read_tokens), SUM(output_tokens) "
+            "SELECT COUNT(*), SUM(cost_usd), SUM(input_tokens), SUM(cache_read_tokens), SUM(output_tokens), "
+            "COUNT(*) - COUNT(cost_usd), SUM(CASE WHEN cost_status = 'estimate' THEN 1 ELSE 0 END) "
             "FROM usage_log WHERE ts >= ?",
             (cutoff,),
         ).fetchone()
         daily = c.execute(
-            """SELECT CAST(ts/86400 AS INTEGER) * 86400 as day, SUM(cost_usd), COUNT(*)
+            """SELECT CAST(ts/86400 AS INTEGER) * 86400 as day, SUM(cost_usd), COUNT(*), COUNT(*) - COUNT(cost_usd)
                FROM usage_log WHERE ts >= ? GROUP BY day ORDER BY day""",
             (cutoff,),
         ).fetchall()
@@ -253,7 +348,10 @@ def summary(days: int = 7) -> dict:
     return {
         "days": days,
         "total_calls": totals[0] or 0,
-        "total_cost_usd": round(totals[1] or 0.0, 4),
+        "total_cost_usd": None if totals[5] else round(totals[1] or 0.0, 4),
+        "known_cost_usd": round(totals[1] or 0.0, 4),
+        "unknown_cost_calls": totals[5] or 0,
+        "estimated_cost_calls": totals[6] or 0,
         "total_input_tokens": total_input,
         "cache_read_tokens": cache_read,
         "total_output_tokens": totals[4] or 0,
@@ -263,12 +361,13 @@ def summary(days: int = 7) -> dict:
                 "model": r[0], "calls": r[1],
                 "input_tokens": r[2] or 0, "cache_read_tokens": r[3] or 0,
                 "cache_creation_tokens": r[4] or 0, "output_tokens": r[5] or 0,
-                "cost_usd": round(r[6] or 0.0, 4),
+                "cost_usd": None if r[8] else round(r[6] or 0.0, 4),
+                "unknown_cost_calls": r[8], "estimated_cost_calls": r[9],
                 "avg_latency_ms": int(r[7] or 0),
             }
             for r in rows
         ],
-        "by_day": [{"day": int(d[0]), "cost_usd": round(d[1] or 0.0, 4), "calls": d[2]} for d in daily],
+        "by_day": [{"day": int(d[0]), "cost_usd": None if d[3] else round(d[1] or 0.0, 4), "calls": d[2]} for d in daily],
     }
 
 
@@ -282,7 +381,7 @@ def replay_session(session_id: int) -> dict:
         ).fetchall()
         usage = c.execute(
             "SELECT ts, turn_index, call_site, model, input_tokens, cache_read_tokens, "
-            "output_tokens, latency_ms, cost_usd, stop_reason FROM usage_log "
+            "output_tokens, latency_ms, cost_usd, stop_reason, cost_status FROM usage_log "
             "WHERE session_id = ? ORDER BY ts",
             (session_id,),
         ).fetchall()
@@ -310,6 +409,7 @@ def replay_session(session_id: int) -> dict:
                 "ts": u[0], "turn_index": u[1], "call_site": u[2], "model": u[3],
                 "input_tokens": u[4], "cache_read_tokens": u[5], "output_tokens": u[6],
                 "latency_ms": u[7], "cost_usd": u[8], "stop_reason": u[9],
+                "cost_status": u[10],
             }
             for u in usage
         ],
@@ -321,7 +421,8 @@ def list_recent_sessions(limit: int = 20) -> list[dict]:
         rows = c.execute(
             """SELECT s.id, s.started_at, s.ended_at, s.summary,
                       (SELECT SUM(cost_usd) FROM usage_log WHERE session_id = s.id),
-                      (SELECT COUNT(*) FROM usage_log WHERE session_id = s.id)
+                      (SELECT COUNT(*) FROM usage_log WHERE session_id = s.id),
+                      (SELECT COUNT(*) - COUNT(cost_usd) FROM usage_log WHERE session_id = s.id)
                FROM sessions s ORDER BY s.started_at DESC LIMIT ?""",
             (limit,),
         ).fetchall()
@@ -329,7 +430,8 @@ def list_recent_sessions(limit: int = 20) -> list[dict]:
         {
             "id": r[0], "started_at": r[1], "ended_at": r[2],
             "summary": (r[3] or "")[:200],
-            "cost_usd": round(r[4] or 0.0, 4), "calls": r[5] or 0,
+            "cost_usd": None if r[6] else round(r[4] or 0.0, 4), "calls": r[5] or 0,
+            "unknown_cost_calls": r[6],
         }
         for r in rows
     ]

@@ -228,6 +228,8 @@ def run(data, agent, cancel):
                 if usage is None:
                     raise Halt('Provider returned no usage; stopped because spending cannot be measured.')
                 cost = telemetry._compute_cost(model, usage)
+                if cost is None:
+                    raise Halt('Provider cost is unknown; stopped because spending cannot be measured.')
                 step['cost_usd'] += cost
                 data['cost_usd'] += cost
                 blocks = []

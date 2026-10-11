@@ -565,7 +565,7 @@ async function phone() {
   // Home: Alex, both plans, the week, quick starts, recent work.
   assert.match($('greeting').textContent, /, Alex\.$/);
   assert.equal($('greeting').querySelector('.name').textContent, 'Alex');
-  assert.match($('greet-sub').textContent, /Both plans are ready/);
+  assert.match($('greet-sub').textContent, /Open a workspace to edit and run your project/);
   assert.deepEqual([...d.querySelectorAll('.plan b')].map(b => b.textContent), ['Claude', 'ChatGPT']);
   assert.match($('week').textContent, /\$0API credits/);
   // What tends to happen here, in counts: the week's proved, the track record strip, and the chosen plan's line.
@@ -640,7 +640,7 @@ async function phone() {
   key('Enter', {ctrlKey: true});
   await tick(); await tick(); await tick();
   const start = calls.find(c => c.url === '/api/code/sessions');
-  assert.deepEqual(start.body, {project_id: 1, prompt: 'Add Focus mode', engine: 'claude', mode: 'full', model: 'opus', effort: 'high', plan: false});
+  assert.deepEqual(start.body, {project_id: 1, prompt: 'Add Focus mode', engine: 'claude', mode: 'full', model: 'opus', effort: 'high', plan: false, include_changes: true});
   assert.ok(d.body.classList.contains('view-session') && d.body.classList.contains('term')); assert.equal(w.location.hash, '#s=9');
   assert.ok($('session-slot').contains($('brief-form')), 'the brief docks under the feed');
   // The session's plan is resting: the composer offers the ready one.

@@ -18,8 +18,9 @@ Two deliberate design choices:
   and conditional. It answers "what CAN be reached", never "what will run". For
   a safety inventory that is the correct direction of error: a false alarm costs
   a sentence of explanation, a miss costs what the heartbeat bug cost.
-- **It never decides whether a path is safe.** Each edge carries a human-written
-  disposition in tests/test_autonomy.py. A tool that inferred "this one's fine"
+- **It never decides whether a path is safe.** Explicit reviewed pairs and their
+  dispositions live in docs/autonomy_inventory.json and tests enforce them.
+  A tool that inferred "this one's fine"
   would be exactly the confident wrongness it exists to prevent.
 """
 from __future__ import annotations
@@ -86,16 +87,21 @@ def build_graph() -> dict[str, set[str]]:
 
 
 def _reachable(graph, start: str, seen=None, depth: int = 0) -> set[str]:
-    if seen is None:
-        seen = set()
-    if start in seen or depth > _MAX_DEPTH:
-        return set()
-    seen.add(start)
+    # Visit shortest paths first. A depth-first shared visited set can first
+    # encounter a node through a long path, hit the depth limit and then skip
+    # that same node's shorter path. Set iteration made edges vary between runs.
+    visited = set(seen or ())
+    pending = collections.deque([(start, depth)])
     hits = set()
-    for callee in graph.get(start, ()):
-        if callee in SINKS:
-            hits.add(callee)
-        hits |= _reachable(graph, callee, seen, depth + 1)
+    while pending:
+        node, distance = pending.popleft()
+        if node in visited or distance > _MAX_DEPTH:
+            continue
+        visited.add(node)
+        for callee in sorted(graph.get(node, ())):
+            if callee in SINKS:
+                hits.add(callee)
+            pending.append((callee, distance + 1))
     return hits
 
 

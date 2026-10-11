@@ -169,22 +169,34 @@ def test_saved_metadata_does_not_claim_offline_verification(tmp_path):
 
 def test_nomad_readers_use_original_endpoints_and_leave_existing_ai_alone(monkeypatch):
     calls=[];real=httpx.Client
+    services={
+        'nomad_kiwix_server':dict(service_name='nomad_kiwix_server',installed=True,
+                                 status='running',ui_location='9090'),
+        'nomad_flatnotes':dict(service_name='nomad_flatnotes',installed=True,status='exited'),
+    }
     def handle(request):
         payload=json.loads(request.content) if request.content else None
         calls.append((request.method,request.url.path,payload))
         assert request.url.host=='127.0.0.1' and 'authorization' not in request.headers
         if request.url.path=='/api/health':return httpx.Response(200,json={'status':'ok'})
-        if request.url.path=='/api/system/services':return httpx.Response(200,json=[
-            {'service_name':'nomad_kiwix_server','installed':True,'status':'running'},
-            {'service_name':'nomad_flatnotes','installed':True,'status':'exited'}])
+        if request.url.path=='/api/system/services':return httpx.Response(200,json=list(services.values()))
+        if request.url.path=='/api/system/services/install':
+            name=payload['service_name']
+            services[name]=dict(service_name=name,installed=True,status='running')
+        if request.url.path=='/api/system/services/affect':
+            services[payload['service_name']]['status']='running'
+        if request.url.path=='/catalog/v2/entries':
+            assert request.url.port==9090
+            return httpx.Response(200,text='<feed xmlns="http://www.w3.org/2005/Atom"/>')
         return httpx.Response(200,json={'success':True})
     monkeypatch.delenv('APEX_APOCALYPSE',raising=False)
     monkeypatch.setattr(setup.httpx,'Client',lambda **kw:real(transport=httpx.MockTransport(handle),**kw))
-    setup.prepare_nomad_readers()
+    setup.prepare_nomad_readers(list(setup.nomad_readers.READERS),maps=True)
     installed=[p['service_name'] for _,path,p in calls if path.endswith('/install')]
     assert installed==['nomad_kolibri_2','nomad_cyberchef']
     assert ('POST','/api/system/services/affect',{'service_name':'nomad_flatnotes','action':'start'}) in calls
     assert any(path=='/api/zim/rescan-library' for _,path,_ in calls)
+    assert any(path=='/catalog/v2/entries' for _,path,_ in calls)
     assert any(path=='/api/maps/setup-world-basemap' for _,path,_ in calls)
     assert not any('ollama' in path or (p and p.get('service_name')=='nomad_ollama') for _,path,p in calls)
 

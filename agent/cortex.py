@@ -82,21 +82,44 @@ def list_pending(status: str = "pending") -> list[dict]:
 
 
 def approve_action(action_id: int) -> str:
-    """Execute an approved pending action and mark it done."""
+    """Claim before dispatch so concurrent approvals cannot repeat an action.
+
+    Commit 'running' before invoking the tool. A crash leaves that claim in
+    place; a raised execution error becomes 'unknown', since the external
+    effect may already have happened. Neither state is automatically retryable.
+    'approved' means the executor returned, not proof of an external effect.
+    """
     with longterm._conn() as c:
+        claimed = c.execute(
+            "UPDATE pending_actions SET status = 'running' WHERE id = ? AND status = 'pending'",
+            (action_id,),
+        )
+        if claimed.rowcount != 1:
+            return f"Action #{action_id} not found or already processed."
         row = c.execute(
             "SELECT goal_id, tool, inputs_json, rationale FROM pending_actions "
-            "WHERE id = ? AND status = 'pending'",
+            "WHERE id = ?",
             (action_id,),
         ).fetchone()
-    if not row:
-        return f"Action #{action_id} not found or already processed."
     goal_id, tool, inputs_json, rationale = row
-    inputs = json.loads(inputs_json)
-    result = _execute_tool(tool, inputs)
+    try:
+        inputs = json.loads(inputs_json)
+        if not isinstance(inputs, dict):
+            raise ValueError("Action inputs must be a JSON object.")
+    except (ValueError, TypeError):
+        # Validation failed before dispatch, so there cannot be an external effect.
+        with longterm._conn() as c:
+            c.execute("UPDATE pending_actions SET status = 'failed' WHERE id = ? AND status = 'running'", (action_id,))
+        raise
+    try:
+        result = _execute_tool(tool, inputs, raise_errors=True)
+    except Exception:
+        with longterm._conn() as c:
+            c.execute("UPDATE pending_actions SET status = 'unknown' WHERE id = ? AND status = 'running'", (action_id,))
+        raise
     with longterm._conn() as c:
         c.execute(
-            "UPDATE pending_actions SET status = 'approved' WHERE id = ?", (action_id,)
+            "UPDATE pending_actions SET status = 'approved' WHERE id = ? AND status = 'running'", (action_id,)
         )
     if goal_id:
         try:
@@ -108,19 +131,21 @@ def approve_action(action_id: int) -> str:
 
 def reject_action(action_id: int) -> str:
     with longterm._conn() as c:
-        c.execute(
-            "UPDATE pending_actions SET status = 'rejected' WHERE id = ?", (action_id,)
+        rejected = c.execute(
+            "UPDATE pending_actions SET status = 'rejected' WHERE id = ? AND status = 'pending'", (action_id,)
         )
+        if rejected.rowcount != 1:
+            return f"Action #{action_id} not found or already processed."
     return f"Action #{action_id} rejected."
 
 
-def _execute_tool(tool: str, inputs: dict) -> str:
-    """Execute an allowlisted safe tool. Returns a short result string."""
+def _execute_tool(tool: str, inputs: dict, *, raise_errors: bool = False) -> str:
+    """Execute a tool; callers can preserve failures instead of treating them as output."""
     try:
         if tool in ("search_web", "query_web"):
-            from tools.search import web_search
-            results = web_search(inputs.get("query", ""), max_results=3)
-            return str(results)[:500]
+            from tools.research import search
+            results = search(inputs.get("query", ""), num_results=3)
+            return str(results)[:500] if results else "No web results found."
         elif tool == "read_file":
             path = inputs.get("path", "")
             with open(path) as f:
@@ -148,6 +173,8 @@ def _execute_tool(tool: str, inputs: dict) -> str:
             from agent.core import _execute_tool as _real_execute
             return _real_execute(tool, inputs)
     except Exception as e:
+        if raise_errors:
+            raise
         return f"[cortex] {tool} failed: {e}"
 
 
@@ -258,7 +285,15 @@ def tick(client, world_state: str, events: list[dict], force: bool = False) -> O
     rationale = decision.get("rationale", "")
 
     if level == "always":
-        result = _execute_tool(tool, inputs)
+        try:
+            result = _execute_tool(tool, inputs, raise_errors=True)
+        except Exception as e:
+            result = f"[cortex] {tool} failed: {e}"
+            print(f"[Cortex] Auto-execution failed for {tool!r}: {e}")
+            decision["result"] = result
+            decision["error"] = str(e)
+            decision["executed"] = False
+            return decision
         if goal_id:
             try:
                 goals_mod.update_goal(goal_id, progress_note=f"[auto] {result[:300]}")

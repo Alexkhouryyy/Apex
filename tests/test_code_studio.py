@@ -164,7 +164,8 @@ def lab(tmp_path, monkeypatch, test_db):
     code_studio.init_db()
     repo = tmp_path / 'project'; repo.mkdir()
     git(repo, 'init', '-q', '-b', 'main')
-    (repo / 'README.md').write_text('hello\n')
+    # Keep the committed fixture and worktree identical when autocrlf changes.
+    (repo / 'README.md').write_bytes(b'hello\n')
     git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'first')
     proj = code_studio.add_project(str(repo))
 

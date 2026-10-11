@@ -20,6 +20,7 @@ LOCAL_TOOLS = frozenset({
     'list_skills', 'document_read', 'document_list', 'document_write',
     'list_goals', 'set_goal', 'update_goal', 'skill_manage',
     'project_checkpoint',
+    'library_list', 'library_search', 'library_read',
 })
 
 

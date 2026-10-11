@@ -1030,7 +1030,7 @@ def test_streaming_is_optional(monkeypatch):
     assert out["answer"] == "An answer [1]."
 
 
-def test_provider_streaming_falls_back_to_blocking(monkeypatch):
+def test_provider_streaming_falls_back_to_blocking(monkeypatch, test_db):
     """A slow answer beats no answer."""
     from agent import provider
 
@@ -1038,16 +1038,16 @@ def test_provider_streaming_falls_back_to_blocking(monkeypatch):
         class messages:
             @staticmethod
             def stream(**kw):
-                raise RuntimeError("stream unsupported")
+                raise NotImplementedError("stream unsupported")
 
     monkeypatch.setattr(provider, "get_client", lambda m: _BadClient())
     monkeypatch.setattr(provider, "complete",
                         lambda m, s, u, max_tokens=0: "fallback answer")
-    got = provider.stream_complete("claude-x", "sys", "user", on_token=lambda t: None)
+    got = provider.stream_complete("claude-opus-5", "sys", "user", on_token=lambda t: None)
     assert got == "fallback answer"
 
 
-def test_provider_streaming_yields_tokens(monkeypatch):
+def test_provider_streaming_yields_tokens(monkeypatch, test_db):
     from agent import provider
     import types
 
@@ -1063,16 +1063,19 @@ def test_provider_streaming_yields_tokens(monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *a): return False
         def __iter__(self): return iter([_Ev("Hel"), _Ev("lo")])
+        def get_final_message(self):
+            return types.SimpleNamespace(content=[], stop_reason="end_turn",
+                usage=types.SimpleNamespace(input_tokens=10, output_tokens=2))
 
     client = types.SimpleNamespace(
         messages=types.SimpleNamespace(stream=lambda **kw: _Stream()))
     monkeypatch.setattr(provider, "get_client", lambda m: client)
     seen = []
-    got = provider.stream_complete("claude-x", "s", "u", on_token=seen.append)
+    got = provider.stream_complete("claude-opus-5", "s", "u", on_token=seen.append)
     assert got == "Hello" and seen == ["Hel", "lo"]
 
 
-def test_a_broken_token_consumer_does_not_kill_generation(monkeypatch):
+def test_a_broken_token_consumer_does_not_kill_generation(monkeypatch, test_db):
     from agent import provider
     import types
 
@@ -1088,12 +1091,15 @@ def test_a_broken_token_consumer_does_not_kill_generation(monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *a): return False
         def __iter__(self): return iter([_Ev("Hel"), _Ev("lo")])
+        def get_final_message(self):
+            return types.SimpleNamespace(content=[], stop_reason="end_turn",
+                usage=types.SimpleNamespace(input_tokens=10, output_tokens=2))
 
     client = types.SimpleNamespace(
         messages=types.SimpleNamespace(stream=lambda **kw: _Stream()))
     monkeypatch.setattr(provider, "get_client", lambda m: client)
     got = provider.stream_complete(
-        "claude-x", "s", "u",
+        "claude-opus-5", "s", "u",
         on_token=lambda t: (_ for _ in ()).throw(RuntimeError("ws gone")))
     assert got == "Hello"
 

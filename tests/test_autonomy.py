@@ -15,6 +15,9 @@ distinct `run` functions collapse into one node, and guards are invisible to it.
 That is the correct direction of error for a safety inventory, and it is why
 DISPOSITIONS describes the real gate rather than the tool inferring one.
 """
+import json
+from pathlib import Path
+
 import pytest
 
 from tools import autonomy_audit
@@ -24,9 +27,10 @@ from tools import autonomy_audit
 # be exactly the confident wrongness this file exists to prevent.
 DISPOSITIONS = {
     "run_shell":
-        "Gated by origin. Self-initiated execution goes through "
-        "sandbox.autonomous_backend(), which forces Docker and raises "
-        "SandboxUnavailable rather than falling back to the host.",
+        "Cortex run_python uses sandbox.autonomous_backend(), which forces "
+        "Docker and refuses host fallback. Confirm-tier bash requires approval "
+        "and dispatcher safety. Trusted installed skills can use the configured "
+        "host backend; this name-based inventory is not a universal sandbox.",
     "create_skill":
         "Gated by approval since 0c1e5e5. Any _trigger != 'manual' is staged "
         "through approvals; the only path to disk is approvals._apply, on a "
@@ -39,9 +43,9 @@ DISPOSITIONS = {
         "Ungated by design, but shaped by agent/restraint.py — non-urgent "
         "messages wait for a moment you respond in. Urgent always gets through.",
     "complete":
-        "Ungated model spend. Bounded by cadence rather than permission: "
-        "consolidation is 6-hourly, the cortex 5-minutely. agent/budget.py "
-        "tracks the cost.",
+        "Shared model calls reserve budget allowance before dispatch and "
+        "settle usage through agent/budget.py and agent/telemetry.py. "
+        "Cadence also bounds consolidation and Cortex decisions.",
     "set_goal":
         "Gated by approval. initiative only ever stages; approvals._apply is "
         "the sole path from a proposal to a real goal.",
@@ -49,9 +53,12 @@ DISPOSITIONS = {
         "This IS the gate — reaching it means the path defers to a human.",
 }
 
-# The edges that exist today. Regenerate deliberately, never reflexively:
-# a diff here is a change in what Apex can do while you are asleep.
-BASELINE = autonomy_audit.edges()
+# Fixed, version-controlled pairs. Never derive the approval inventory from the
+# code under test: a new edge must require an explicit reviewed file change.
+_INVENTORY = json.loads((Path(__file__).resolve().parents[1] / "docs/autonomy_inventory.json").read_text())
+REVIEWED_ENTRIES = _INVENTORY["entries"]
+BASELINE = {(record["entry"], record["capability"]): record["disposition"]
+            for record in _INVENTORY["edges"]}
 
 
 def test_every_capability_has_a_written_disposition():
@@ -67,13 +74,62 @@ def test_no_undeclared_autonomous_capability():
     Turning on a dormant path, or adding an autonomous trigger, changes what
     Apex can do unattended. That must be a deliberate, written decision.
     """
-    undeclared = [
-        (entry, sink) for entry, sink in autonomy_audit.edges()
-        if sink not in DISPOSITIONS
-    ]
+    unreviewed_entries = sorted(set(autonomy_audit.AUTONOMOUS_ENTRIES) - set(REVIEWED_ENTRIES))
+    assert unreviewed_entries == [], f"New unattended entries without review: {unreviewed_entries}"
+    undeclared = sorted(autonomy_audit.edges() - set(BASELINE))
     assert undeclared == [], (
         "New unattended capability with no disposition:\n  " +
         "\n  ".join(f"{e} -> {s}" for e, s in undeclared))
+
+
+def test_committed_inventory_has_unique_pairs_and_explicit_dispositions():
+    assert len(BASELINE) == len(_INVENTORY["edges"]), "duplicate inventory pairs"
+    for (entry, sink), disposition in BASELINE.items():
+        assert entry in REVIEWED_ENTRIES
+        assert sink in autonomy_audit.SINKS
+        assert len(disposition) > 40
+    assert all(len(context) > 40 for context in REVIEWED_ENTRIES.values())
+
+
+def test_new_entry_to_existing_dangerous_sink_is_rejected(monkeypatch):
+    actual = autonomy_audit.edges()
+    monkeypatch.setattr(autonomy_audit, "edges", lambda: actual | {("unreviewed_entry", "run_shell")})
+    with pytest.raises(AssertionError, match="unreviewed_entry -> run_shell"):
+        test_no_undeclared_autonomous_capability()
+
+
+def test_new_pair_from_existing_entry_is_rejected(monkeypatch):
+    # Simulate a detected pair with no corresponding review, even though both
+    # the entry and sink individually already have dispositions.
+    monkeypatch.delitem(BASELINE, ("propose", "create_skill"))
+    with pytest.raises(AssertionError, match="propose -> create_skill"):
+        test_no_undeclared_autonomous_capability()
+
+
+def test_reachability_keeps_the_short_path_when_a_long_path_hits_the_depth_limit(monkeypatch):
+    monkeypatch.setattr(autonomy_audit, "_MAX_DEPTH", 2)
+    graph = {"entry": ["long", "shared"], "long": ["shared"],
+             "shared": ["helper"], "helper": ["run_shell"]}
+    assert autonomy_audit._reachable(graph, "entry") == {"run_shell"}
+    graph["entry"].reverse()
+    assert autonomy_audit._reachable(graph, "entry") == {"run_shell"}
+
+
+def test_new_entry_without_detected_sinks_still_requires_review(monkeypatch):
+    monkeypatch.setitem(autonomy_audit.AUTONOMOUS_ENTRIES, "new_empty_entry", "new schedule")
+    with pytest.raises(AssertionError, match="new_empty_entry"):
+        test_no_undeclared_autonomous_capability()
+
+
+def test_actual_cortex_sandbox_guard_never_falls_back_to_host(monkeypatch):
+    from agent import cortex
+    from tools import sandbox
+    monkeypatch.setattr(sandbox.config, "EXECUTION_BACKEND", "local")
+    monkeypatch.setattr(sandbox, "docker_available", lambda refresh=False: False)
+    monkeypatch.setattr(sandbox.LocalBackend, "run_python",
+                        lambda *a, **kw: pytest.fail("autonomous code reached the host backend"))
+    result = cortex._execute_tool("run_python", {"code": "print('test')"}, raise_errors=True)
+    assert "unavailable" in result and "not run on host" in result
 
 
 def test_the_dangerous_sinks_are_gated_not_merely_noted():

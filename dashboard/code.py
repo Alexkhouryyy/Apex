@@ -51,6 +51,8 @@ async def _do(call, *args, **kwargs):
     """Run in a thread (git and the plan checks take a moment); errors in plain words."""
     try:
         return await asyncio.to_thread(call, *args, **kwargs)
+    except code_studio.FileConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
     except (code_studio.CodeError, code_brain.CodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -157,7 +159,17 @@ async def start_session(request: Request):
         raise HTTPException(400, 'Choose a project.')
     return await _do(code_studio.start, body['project_id'], body.get('prompt', ''),
                      body.get('engine', 'claude'), body.get('mode', 'safe'), body.get('model') or '',
-                     body.get('effort') or '', body.get('plan') is True)
+                     body.get('effort') or '', body.get('plan') is True,
+                     include_changes=body.get('include_changes') is True)
+
+
+@router.post('/api/code/workspaces')
+async def open_workspace(request: Request):
+    body = await _json(request)
+    if not isinstance(body.get('project_id'), int) or isinstance(body.get('project_id'), bool):
+        raise HTTPException(400, 'Choose a project.')
+    return await _do(code_studio.open_workspace, body['project_id'], body.get('engine', 'claude'),
+                     body.get('mode', 'safe'), body.get('include_changes') is True)
 
 
 @router.get('/api/code/sessions/{sid}')
@@ -270,6 +282,47 @@ async def terminal(sid: int, request: Request):
     return await _do(code_studio.terminal, sid, body.get('command', ''))
 
 
+@router.post('/api/code/sessions/{sid}/shell')
+async def start_shell(sid: int, request: Request):
+    body = await _json(request, limit=4096)
+    return await _do(code_studio.start_terminal, sid, body.get('rows',24), body.get('cols',80))
+
+
+@router.get('/api/code/sessions/{sid}/shell')
+async def shell_output(sid: int, request: Request, after: int = 0):
+    _owner(request)
+    await _do(code_studio.session, sid)
+    from agent import code_terminal
+    return code_terminal.read(sid, after)
+
+
+@router.post('/api/code/sessions/{sid}/shell-input')
+async def shell_input(sid: int, request: Request):
+    body = await _json(request, limit=100_000)
+    from agent import code_terminal
+    try:
+        return await asyncio.to_thread(code_terminal.write, sid, body.get('text'))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post('/api/code/sessions/{sid}/shell-resize')
+async def shell_resize(sid: int, request: Request):
+    body = await _json(request, limit=4096)
+    from agent import code_terminal
+    try:
+        return await asyncio.to_thread(code_terminal.resize, sid, body.get('rows'), body.get('cols'))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.delete('/api/code/sessions/{sid}/shell')
+async def close_shell(sid: int, request: Request):
+    await _json(request, limit=4096)
+    from agent import code_terminal
+    return await asyncio.to_thread(code_terminal.stop, sid)
+
+
 @router.get('/api/code/sessions/{sid}/live')
 async def live(sid: int, request: Request):
     _owner(request)
@@ -280,6 +333,12 @@ async def live(sid: int, request: Request):
 async def session_tree(sid: int, request: Request):
     _owner(request)
     return await _do(code_studio.tree, sid)
+
+
+@router.get('/api/code/sessions/{sid}/search')
+async def search_files(sid: int, request: Request, q: str = ''):
+    _owner(request)
+    return await _do(code_studio.search_files, sid, q)
 
 
 @router.get('/api/code/projects/{pid}/tree')
@@ -385,6 +444,25 @@ async def restore_decision_log(pid: int, request: Request):
 async def session_file(sid: int, request: Request, path: str = ''):
     _owner(request)
     return await _do(code_studio.read_file, path, sid)
+
+
+@router.put('/api/code/sessions/{sid}/file')
+async def save_file(sid: int, request: Request):
+    body = await _json(request, limit=code_studio.FILE_LIMIT * 6 + 4096)
+    return await _do(code_studio.write_file, sid, body.get('path'), body.get('text'),
+                     body.get('revision'), body.get('create') is True)
+
+
+@router.post('/api/code/sessions/{sid}/file-rename')
+async def rename_file(sid: int, request: Request):
+    body = await _json(request, limit=4096)
+    return await _do(code_studio.rename_file, sid, body.get('path'), body.get('destination'), body.get('revision'))
+
+
+@router.post('/api/code/sessions/{sid}/file-delete')
+async def delete_file(sid: int, request: Request):
+    body = await _json(request, limit=4096)
+    return await _do(code_studio.delete_file, sid, body.get('path'), body.get('revision'))
 
 
 @router.get('/api/code/projects/{pid}/file')

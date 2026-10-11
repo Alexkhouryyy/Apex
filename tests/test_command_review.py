@@ -107,15 +107,38 @@ def test_reviewer_unavailable_fails_closed_when_required(monkeypatch):
 
 def test_disabled_by_config_is_a_noop(monkeypatch):
     monkeypatch.setattr(config, "SAFETY_LLM_REVIEW", False, raising=False)
+    monkeypatch.setattr(config, "SAFETY_REVIEW_REQUIRED", False)
     assert cr.review("bash", {"command": "anything"}) == (False, "")
 
 
-def test_review_failure_never_breaks_dispatch(monkeypatch):
-    """If the whole review module explodes, tool dispatch must continue."""
+def test_review_failure_requires_confirmation(monkeypatch):
+    """An unexpected failure returns a refusal without crashing dispatch."""
+    monkeypatch.setattr(config, "SAFETY_REVIEW_REQUIRED", True)
     monkeypatch.setattr(cr, "review",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
-    proceed, _ = safety.check("bash", {"command": "echo hi"})
-    assert proceed is True
+    proceed, reason = safety.check("bash", {"command": "echo hi"})
+    assert proceed is False and "required but failed" in reason
+
+
+def test_disabled_required_reviewer_requires_confirmation(monkeypatch):
+    monkeypatch.setattr(config, "SAFETY_LLM_REVIEW", False)
+    monkeypatch.setattr(config, "SAFETY_REVIEW_REQUIRED", True)
+    assert cr.review("bash", {"command": "echo hi"})[0] is True
+    assert cr.review("read_file", {"path": "notes.txt"}) == (False, "")
+
+
+def test_explicit_opt_out_allows_unexpected_failure(monkeypatch):
+    monkeypatch.setattr(config, "SAFETY_REVIEW_REQUIRED", False)
+    monkeypatch.setattr(cr, "review", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert safety.check("bash", {"command": "echo hi"}) == (True, "")
+
+
+def test_unavailable_reviewer_can_be_explicitly_confirmed(monkeypatch):
+    monkeypatch.setattr(config, "SAFETY_LLM_REVIEW", False)
+    monkeypatch.setattr(config, "SAFETY_REVIEW_REQUIRED", True)
+    safety.set_confirm_fn(lambda _: True)
+    proceed, reason = safety.check("bash", {"command": "echo hi"})
+    assert proceed and "unavailable" in reason
 
 
 # --- caching -----------------------------------------------------------------

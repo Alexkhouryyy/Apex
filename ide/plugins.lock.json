@@ -1,0 +1,124 @@
+{
+  "registry": "https://open-vsx.org",
+  "extensions": [
+    {
+      "id": "ms-pyright.pyright",
+      "version": "1.1.402",
+      "platform": "universal",
+      "sha256": "7ffa5a8649fa800b282c25ad70ce290367e036238d52727da7cdcac3d57439e9",
+      "url": "https://open-vsx.org/api/ms-pyright/pyright/1.1.402/file/ms-pyright.pyright-1.1.402.vsix"
+    },
+    {
+      "id": "ms-python.debugpy",
+      "version": "2026.6.0",
+      "platform": "linux-x64",
+      "sha256": "c7744af4bf72978f5792624a71c80e2b622a1118574fada3a903d70ac03d5bca",
+      "url": "https://open-vsx.org/api/ms-python/debugpy/linux-x64/2026.6.0/file/ms-python.debugpy-2026.6.0@linux-x64.vsix"
+    },
+    {
+      "id": "ms-python.debugpy",
+      "version": "2026.6.0",
+      "platform": "win32-x64",
+      "sha256": "f4a8ba033acc9a1e14bf53f124d8d0848318702bbb161f2a5e47ae3d3d756a67",
+      "url": "https://open-vsx.org/api/ms-python/debugpy/win32-x64/2026.6.0/file/ms-python.debugpy-2026.6.0@win32-x64.vsix"
+    },
+    {
+      "id": "ms-python.python",
+      "version": "2026.4.0",
+      "platform": "universal",
+      "sha256": "232aeafb01f069824fdd92d3e628c1c442bbcfa1d3cc945ff97076340bb2b4a6",
+      "url": "https://open-vsx.org/api/ms-python/python/2026.4.0/file/ms-python.python-2026.4.0.vsix"
+    },
+    {
+      "id": "ms-vscode.js-debug",
+      "version": "1.140.0",
+      "platform": "universal",
+      "sha256": "d535f02a47031671f8c988bb7e79d6fec1a881883d9c9fa15ff81f28eae98500",
+      "url": "https://open-vsx.org/api/ms-vscode/js-debug/1.140.0/file/ms-vscode.js-debug-1.140.0.vsix"
+    },
+    {
+      "id": "vscode.css",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "843c1114e6b0b5b95173a28874a2614617dc7cc7d7cd95899f971fb625d46a60",
+      "url": "https://open-vsx.org/api/vscode/css/1.95.3/file/vscode.css-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.css-language-features",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "d4352f98bcffb5f27f4efabe797f9ce78042ec07a4037113c21e9d41348ed114",
+      "url": "https://open-vsx.org/api/vscode/css-language-features/1.95.3/file/vscode.css-language-features-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.html",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "193c7d03374f3f8b71f01dabae05c93b86069b28521cbb18fad0beab6eb42732",
+      "url": "https://open-vsx.org/api/vscode/html/1.95.3/file/vscode.html-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.html-language-features",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "1968c387c20036da0636c45a00863d4a4be980033870bfde864e6e097b033b12",
+      "url": "https://open-vsx.org/api/vscode/html-language-features/1.95.3/file/vscode.html-language-features-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.javascript",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "df55b5174c57ec057d78d4b9ddd225cc36095b6fc845f1a0df87f1e13dfb64b2",
+      "url": "https://open-vsx.org/api/vscode/javascript/1.95.3/file/vscode.javascript-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.json",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "53667e2cc9875c6872f8d7eff75314c46f8c0a30398efd9e7bec437b7cb928c3",
+      "url": "https://open-vsx.org/api/vscode/json/1.95.3/file/vscode.json-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.json-language-features",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "8436d6ffe294bfb93d517ca37c4913a40bb0e035883c7b6aed9daaf1a32f6b80",
+      "url": "https://open-vsx.org/api/vscode/json-language-features/1.95.3/file/vscode.json-language-features-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.python",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "37c2a0cdfa668bd4dc37265d7d172300a20350098651b1843ee220a30c5e2d88",
+      "url": "https://open-vsx.org/api/vscode/python/1.95.3/file/vscode.python-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.typescript",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "493019c0375ad6d46a8811e041d70f68eb57ed5e5a9698125e4691eaf6f2d8fc",
+      "url": "https://open-vsx.org/api/vscode/typescript/1.95.3/file/vscode.typescript-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.typescript-language-features",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "b1494642a46d1b139ab799e2ee0ae2453bdcef6ed1a718acca034445cfd9d87f",
+      "url": "https://open-vsx.org/api/vscode/typescript-language-features/1.95.3/file/vscode.typescript-language-features-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.git",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "44909b81d3266860f02733c08475ab5fc66c0c1d7259b3c1b164e783559d9291",
+      "url": "https://open-vsx.org/api/vscode/git/1.95.3/file/vscode.git-1.95.3.vsix"
+    },
+    {
+      "id": "vscode.git-base",
+      "version": "1.95.3",
+      "platform": "universal",
+      "sha256": "956c41e4e8377a6b113a6a64fcd5308deaad44a827288f6bfcd5cf1c83037483",
+      "url": "https://open-vsx.org/api/vscode/git-base/1.95.3/file/vscode.git-base-1.95.3.vsix"
+    }
+  ]
+}

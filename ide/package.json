@@ -1,0 +1,66 @@
+{
+  "name": "apex-code-ide",
+  "private": true,
+  "version": "1.0.0",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
+  },
+  "scripts": {
+    "build": "theia build --mode production",
+    "start": "theia start",
+    "plugins:download": "node scripts/plugins.mjs"
+  },
+  "dependencies": {
+    "@apex/ide-bridge": "file:apex-extension",
+    "@theia/bulk-edit": "1.76.0",
+    "@theia/console": "1.76.0",
+    "@theia/core": "1.76.0",
+    "@theia/debug": "1.76.0",
+    "@theia/editor": "1.76.0",
+    "@theia/file-search": "1.76.0",
+    "@theia/filesystem": "1.76.0",
+    "@theia/keymaps": "1.76.0",
+    "@theia/markers": "1.76.0",
+    "@theia/monaco": "1.76.0",
+    "@theia/navigator": "1.76.0",
+    "@theia/outline-view": "1.76.0",
+    "@theia/output": "1.76.0",
+    "@theia/plugin-ext": "1.76.0",
+    "@theia/plugin-ext-vscode": "1.76.0",
+    "@theia/preferences": "1.76.0",
+    "@theia/process": "1.76.0",
+    "@theia/scm": "1.76.0",
+    "@theia/search-in-workspace": "1.76.0",
+    "@theia/task": "1.76.0",
+    "@theia/terminal": "1.76.0",
+    "@theia/test": "1.76.0",
+    "@theia/userstorage": "1.76.0",
+    "@theia/vsx-registry": "1.76.0",
+    "@theia/workspace": "1.76.0",
+    "@xhmikosr/decompress": "11.1.4"
+  },
+  "devDependencies": {
+    "@theia/cli": "1.76.0"
+  },
+  "theia": {
+    "target": "browser",
+    "frontend": {
+      "config": {
+        "applicationName": "Apex Code IDE",
+        "preferences": {
+          "workbench.colorTheme": "dark",
+          "window.title": "Apex Code IDE",
+          "python.terminal.activateEnvironment": false,
+          "python.terminal.activateEnvInCurrentTerminal": false
+        }
+      }
+    }
+  },
+  "overrides": {
+    "decompress": "file:archive-adapter",
+    "dompurify": "3.4.16",
+    "uuid": "11.1.1",
+    "@tootallnate/once": "2.0.1"
+  }
+}
