@@ -124,6 +124,33 @@ class TestSnapshots:
             rows = c.execute("SELECT content FROM memories").fetchall()
         assert rows == [("call the dentist",)]
 
+    @pytest.mark.parametrize('integrity', ['ok', 'corrupt'])
+    def test_snapshot_releases_its_handles_even_when_verification_fails(self, db, monkeypatch, integrity):
+        connect = sqlite3.connect
+        opened = []
+
+        class Connection(sqlite3.Connection):
+            def execute(self, sql, *args, **kwargs):
+                if sql == 'PRAGMA integrity_check' and integrity != 'ok':
+                    sql = "SELECT 'corrupt'"
+                return super().execute(sql, *args, **kwargs)
+
+        def tracked(*args, **kwargs):
+            conn = connect(*args, factory=Connection, **kwargs)
+            opened.append(conn)  # Keep references so GC cannot conceal leaked handles.
+            return conn
+
+        monkeypatch.setattr(relay.sqlite3, 'connect', tracked)
+        if integrity == 'ok':
+            assert relay.snapshot_bytes().startswith(b'SQLite format')
+        else:
+            with pytest.raises(relay.RelayError, match='integrity check'):
+                relay.snapshot_bytes()
+        assert len(opened) == 3
+        for conn in opened:
+            with pytest.raises(sqlite3.ProgrammingError, match='closed'):
+                conn.execute('SELECT 1')
+
     def test_it_reads_uncommitted_wal_writes_a_file_copy_would_miss(self, db, tmp_path):
         """The reason this uses SQLite's backup API rather than reading the
         file. In WAL mode the newest writes live in a -wal sidecar; copying the

@@ -32,6 +32,10 @@ Without it, those tests report skipped. IDE integration and real coding-plan
 acceptance have their own setup in `CODE-WINDOWS-ACCEPTANCE.md`; unit test results
 do not establish the quality of your connected coding agent.
 
+The launcher preserves `APEX_IDE_INTEGRATION=1` when you explicitly opt into the
+real IDE lifecycle check after installing its bundle. Remove that flag afterward
+to return to the regular suite.
+
 Keep the run folder when investigating failures. Pytest owns only the fresh
 `pytest` subfolder selected for that invocation, so it cannot clear an older
 test run or project directory through this launcher.

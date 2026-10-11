@@ -34,6 +34,9 @@ def test_environment(run_dir: Path, inherited: dict[str, str]) -> dict[str, str]
         "SANDBOX_WORKDIR": str(run_dir / "sandbox"),
         "APEX_STUDY_DIR": str(run_dir / "study"),
     })
+    # This is an explicit test opt-in, not a live Apex setting.
+    if inherited.get("APEX_IDE_INTEGRATION") == "1":
+        env["APEX_IDE_INTEGRATION"] = "1"
     return env
 
 

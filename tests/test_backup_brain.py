@@ -11,6 +11,7 @@ online backup API instead of the filesystem.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import shutil
 import sqlite3
 
@@ -38,7 +39,7 @@ def test_a_plain_file_copy_of_a_live_db_is_unusable(tmp_path):
     try:
         naive = tmp_path / "naive.db"
         shutil.copy(src, naive)
-        with sqlite3.connect(naive) as c:
+        with closing(sqlite3.connect(naive)) as c:
             with pytest.raises(sqlite3.OperationalError):
                 c.execute("SELECT COUNT(*) FROM memories").fetchone()
     finally:
@@ -51,7 +52,7 @@ def test_backup_captures_everything_while_apex_runs(tmp_path):
     try:
         info = backup_brain.backup(src, tmp_path / "safe.db")
         assert info["counts"]["memories"] == 200
-        with sqlite3.connect(tmp_path / "safe.db") as c:
+        with closing(sqlite3.connect(tmp_path / "safe.db")) as c:
             assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
         conn.close()
@@ -76,3 +77,27 @@ def test_it_overwrites_a_previous_backup_cleanly(tmp_path):
         assert info["counts"]["memories"] == 11, "stale backup was left in place"
     finally:
         conn.close()
+
+
+def test_backup_releases_all_handles_before_returning(tmp_path, monkeypatch):
+    source = tmp_path / 'live.db'
+    writer = _live_db(source, rows=1)
+    connect = sqlite3.connect
+    opened = []
+
+    def tracked(*args, **kwargs):
+        conn = connect(*args, **kwargs)
+        opened.append(conn)  # Keep references so GC cannot hide a leaked verifier.
+        return conn
+
+    monkeypatch.setattr(backup_brain.sqlite3, 'connect', tracked)
+    try:
+        dest = tmp_path / 'backup.db'
+        assert backup_brain.backup(source, dest)['counts']['memories'] == 1
+        assert len(opened) == 3
+        for conn in opened:
+            with pytest.raises(sqlite3.ProgrammingError, match='closed'):
+                conn.execute('SELECT 1')
+        dest.unlink()
+    finally:
+        writer.close()

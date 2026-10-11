@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import os
 import sqlite3
 import sys
@@ -36,16 +37,12 @@ def backup(src: Path, dest: Path) -> dict:
     if dest.exists():
         dest.unlink()
 
-    source = sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=30)
-    target = sqlite3.connect(str(dest))
-    try:
+    with closing(sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=30)) as source, \
+            closing(sqlite3.connect(str(dest))) as target:
         source.backup(target)
-    finally:
-        target.close()
-        source.close()
 
     # Verify rather than assume: a backup nobody opened is a promise, not a copy.
-    with sqlite3.connect(f"file:{dest}?mode=ro", uri=True) as c:
+    with closing(sqlite3.connect(f"file:{dest}?mode=ro", uri=True)) as c:
         integrity = c.execute("PRAGMA integrity_check").fetchone()[0]
         counts = {}
         for table in ("memories", "turn_log", "sessions", "entities",
