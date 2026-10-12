@@ -1178,7 +1178,11 @@
       error('Click anywhere on this page once so Celine can listen and speak — then Ctrl+Alt+C starts a live session. This time she answers once.');
       return false;
     }
-    if (!voiceMode) { entering = enterVoiceMode(); await entering.catch(() => {}); }
+    if (!voiceMode) {
+      entering = enterVoiceMode();
+      try { await entering; }
+      catch (exc) { disableHands(); error(exc.message); }
+    }
     if (!voiceMode) return false;                  // no mic or no voice: one answer only
     liveScreen = {mode: $('mode').value};
     // Native screen help preserves the user's chosen mode. Drawing is
