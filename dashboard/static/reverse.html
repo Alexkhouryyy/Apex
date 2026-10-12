@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><script src="/static/theme.js"></script><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Apex · Reverse</title>
+  <link rel="icon" href="/static/icons/apex-refined.svg">
+  <link rel="stylesheet" href="/static/brand.css?v=brand40">
+  <link rel="stylesheet" href="/static/reverse.css?v=rev-1">
+  <script src="/static/reverse.js?v=rev-1" defer></script>
+  <link rel="stylesheet" href="/static/theme.css">
+</head>
+<body class="view-home">
+<div id="rev-app">
+  <header class="top">
+    <a href="/" class="brand apex-brand" aria-label="Open Apex dashboard"><span class="apex-logo" aria-hidden="true"></span><span class="apex-wordmark">APEX</span><small>REVERSE</small></a>
+    <nav class="links"><a href="/code">Code</a><a href="/">Dashboard</a></nav>
+  </header>
+
+  <main class="wrap">
+    <section class="intro" id="intro">
+      <h1>See how software works.</h1>
+      <p class="sub">Open a program, app, firmware or bundle you own, and Apex takes it apart with
+        REA — functions, strings, what it imports, and the decompiled code — without ever running it
+        or changing the file. Use it only on software you own or are allowed to examine.</p>
+      <form id="open-form" class="open" autocomplete="off">
+        <label for="path">File to open</label>
+        <div class="row">
+          <input id="path" name="path" spellcheck="false" placeholder="C:\Users\you\Downloads\app.exe" required>
+          <button type="submit" id="open-btn">Open</button>
+        </div>
+        <p class="hint" id="open-hint">A copy on your own drive (not a system folder). The first open imports it into Ghidra and can take a minute.</p>
+      </form>
+      <p class="warn" id="rea-warn" hidden></p>
+      <div id="open-sessions" class="sessions"></div>
+    </section>
+
+    <section class="work" id="work" hidden>
+      <div class="work-head">
+        <button type="button" class="small" id="back">← Open another</button>
+        <h2 id="w-name">—</h2>
+        <code id="w-path"></code>
+        <span class="spacer"></span>
+        <button type="button" class="small danger" id="w-close">Close</button>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="overview" role="tab">Overview</button>
+        <button type="button" class="tab" data-tab="functions" role="tab">Functions</button>
+        <button type="button" class="tab" data-tab="strings" role="tab">Strings</button>
+      </div>
+
+      <div class="panes">
+        <section class="pane active" data-pane="overview">
+          <div id="ov-body" class="cards"><p class="fine">Loading…</p></div>
+        </section>
+        <section class="pane" data-pane="functions">
+          <div class="search"><input id="fn-q" placeholder="Search functions…" spellcheck="false"><button type="button" class="small" id="fn-go">Search</button></div>
+          <div class="split">
+            <ul id="fn-list" class="list" aria-label="Functions"></ul>
+            <div id="fn-detail" class="detail"><p class="fine">Pick a function to see its decompiled code.</p></div>
+          </div>
+        </section>
+        <section class="pane" data-pane="strings">
+          <div class="search"><input id="str-q" placeholder="Search text in the file…" spellcheck="false"><button type="button" class="small" id="str-go">Search</button></div>
+          <ul id="str-list" class="list" aria-label="Strings"></ul>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</div>
+</body>
+</html>

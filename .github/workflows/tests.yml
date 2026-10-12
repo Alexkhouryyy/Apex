@@ -197,6 +197,8 @@ jobs:
           node --check dashboard/static/apps.js
           node scripts/check_code_narration.cjs
           node --check dashboard/static/code_narration.js
+          node scripts/check_reverse_ui.cjs
+          node --check dashboard/static/reverse.js
           node --check dashboard/static/live-avatar.js
           node --check dashboard/static/video-avatar.js
           node --check dashboard/static/avatar-pose.js

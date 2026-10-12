@@ -151,9 +151,11 @@ app.include_router(research_router)
 from dashboard.work import router as work_router
 app.include_router(work_router)
 from dashboard.code import router as code_router
+from dashboard.reverse import router as reverse_router
 from dashboard.code_ide import router as code_ide_router
 app.include_router(code_ide_router)
 app.include_router(code_router)
+app.include_router(reverse_router)
 from dashboard.environment import router as environment_router
 app.include_router(environment_router)
 from dashboard.voices import router as voices_router
