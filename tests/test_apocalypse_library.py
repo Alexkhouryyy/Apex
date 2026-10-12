@@ -297,3 +297,14 @@ def test_when_the_internet_stays_down_the_run_stops_instead_of_trying_every_arch
     assert 'internet connection keeps failing' in capsys.readouterr().out
     saved = json.loads((tmp_path / library.PLAN_NAME).read_text(encoding='utf-8'))
     assert [j['status'] for j in saved['jobs']] == ['needs_attention', 'pending', 'pending']
+
+
+def test_readers_say_plainly_when_nomad_is_not_running(monkeypatch):
+    real = httpx.Client
+
+    def refused(request):
+        raise httpx.ConnectError('[WinError 10061] No connection could be made because the target machine actively refused it')
+    monkeypatch.delenv('APEX_APOCALYPSE', raising=False)
+    monkeypatch.setattr(setup.httpx, 'Client', lambda **kw: real(transport=httpx.MockTransport(refused), **kw))
+    with pytest.raises(RuntimeError, match='NOMAD is not running.*Docker Desktop.*Start-Apex-Platform.cmd'):
+        setup.prepare_nomad_readers()

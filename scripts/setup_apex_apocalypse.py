@@ -272,6 +272,11 @@ def nomad(home, prepare=False):
     print('NOMAD started from cached images at http://127.0.0.1:8080. Download desired apps and content while online.',flush=True)
 
 
+NOMAD_NOT_RUNNING = ('NOMAD is not running ({base} did not answer). Open Docker Desktop and wait until it says '
+                     'it is running, then run Start-Apex-Platform.cmd and wait until NOMAD is up. Then run this '
+                     'step again in a second Command Prompt.')
+
+
 def prepare_nomad_readers(readers=None, maps=False):
     """Use original NOMAD APIs after Docker storage and the stack are ready."""
     if apocalypse.enabled():
@@ -288,7 +293,11 @@ def prepare_nomad_readers(readers=None, maps=False):
             if isinstance(data, dict) and data.get('success') is False:
                 raise RuntimeError(data.get('message', 'NOMAD preparation failed.'))
             return data
-        if call('GET', '/api/health').get('status') != 'ok':
+        try:
+            healthy = call('GET', '/api/health').get('status') == 'ok'
+        except httpx.TransportError as exc:      # WinError 10061: nothing is listening yet
+            raise RuntimeError(NOMAD_NOT_RUNNING.format(base=base)) from exc
+        if not healthy:
             raise RuntimeError('Start the prepared NOMAD Command Center first.')
         def services():
             data = call('GET', '/api/system/services')
