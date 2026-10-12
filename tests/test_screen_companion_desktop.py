@@ -330,6 +330,8 @@ def test_gpu_warmup_does_not_delay_resident_start(tmp_path,monkeypatch):
     monkeypatch.setattr(startup.Path,'home',staticmethod(lambda:tmp_path))
     monkeypatch.setattr(qwen_launcher,'port_in_use',lambda *args:False)
     monkeypatch.setattr(startup.subprocess,'CREATE_NO_WINDOW',0,raising=False)
+    console=tmp_path/'python.exe';console.touch()
+    monkeypatch.setattr(startup.sys,'executable',str(tmp_path/'pythonw.exe'))
     called=[];terminated=[]
     voice=SimpleNamespace(poll=lambda:None)
     resident=SimpleNamespace(poll=lambda:0,returncode=0)
@@ -339,6 +341,7 @@ def test_gpu_warmup_does_not_delay_resident_start(tmp_path,monkeypatch):
     monkeypatch.setattr(qwen_launcher,'stop',lambda proc:terminated.append(proc))
     assert startup.supervise({'COMPANION_DESKTOP_ENABLED':'true'},io.StringIO())==0
     assert len(called)==2 and called[1][0][-1]=='--resident'
+    assert called[1][0][0]==str(console),'the hidden resident needs redirected console handles for early errors'
     assert called[1][1]['env']['VOICEBOX_URL']=='http://127.0.0.1:17494'
     assert terminated==[resident,voice]
 

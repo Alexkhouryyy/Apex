@@ -99,6 +99,9 @@ def supervise(env, log):
             else:
                 logging.warning('Local voice port is occupied by another service; keeping existing voice settings.')
         env['APEX_SUPERVISED'] = '1'
+        resident_python = Path(sys.executable)
+        if resident_python.name.lower() == 'pythonw.exe':
+            resident_python = resident_python.with_name('python.exe')
         starts = []
         while True:
             now = time.monotonic()
@@ -107,7 +110,7 @@ def supervise(env, log):
                 raise RuntimeError('Too many Apex restarts in two minutes.')
             starts.append(now)
             env['APEX_LAUNCH_ID'] = uuid.uuid4().hex
-            child = subprocess.Popen([sys.executable, str(ROOT/'main.py'), '--resident'], cwd=ROOT, env=env,
+            child = subprocess.Popen([str(resident_python), str(ROOT/'main.py'), '--resident'], cwd=ROOT, env=env,
                                      stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
             voice_reported = False
             while child.poll() is None:

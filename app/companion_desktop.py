@@ -289,7 +289,6 @@ def main(argv=None):
         # WebView2 can defer script callbacks in a hidden Form. Let it finish
         # booting in a zero-opacity, click-through Form; ready() then hides it.
         window.native.Opacity = 0
-        window.native.ShowInTaskbar = False
         import ctypes
         from ctypes import wintypes
         user=ctypes.windll.user32
@@ -297,7 +296,9 @@ def main(argv=None):
         get.argtypes,get.restype=[wintypes.HWND,ctypes.c_int],ctypes.c_ssize_t
         put.argtypes,put.restype=[wintypes.HWND,ctypes.c_int,ctypes.c_ssize_t],ctypes.c_ssize_t
         hwnd=window.native.Handle.ToInt64()
-        put(hwnd,-20,get(hwnd,-20)|0x20)
+        # Change styles in place: ShowInTaskbar can recreate the Form handle
+        # while WebView2 is still initializing against it.
+        put(hwnd,-20,(get(hwnd,-20)&~0x00040000)|0x80|0x08000000|0x20)
     window.events.before_show += bootstrap
 
     def closing():
