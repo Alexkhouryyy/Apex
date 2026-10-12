@@ -13,8 +13,9 @@ async function scenario(native){
  Object.defineProperty(w.navigator,'userActivation',{value:{hasBeenActive:false}});
  w.TextDecoder=TextDecoder;
  w.speechSynthesis={cancel(){},speak(){}};
- w.pywebview=native?{api:{connect:async()=>({desktop:true,token:'owner-token',hotkey:'<f8>'}),
-                        ready:async()=>{ready++;},hide:async()=>{hidden++;}}}:undefined;
+ const nativeApi={connect:async()=>({desktop:true,token:'owner-token',hotkey:'<f8>'}),
+                  ready:async()=>{ready++;},hide:async()=>{hidden++;}};
+ w.pywebview=native?{api:{}}:undefined;
  w.ApexHandsFree=class{
   constructor(opts){this.opts=opts;this.enabled=false;this.epoch=1;}
   async start(){mics++;this.enabled=true;this.opts.onState('Listening · pause to send');}
@@ -36,6 +37,10 @@ async function scenario(native){
  };
  w.eval(fs.readFileSync(path.join(base,'speech_queue.js'),'utf8'));
  w.eval(fs.readFileSync(path.join(base,'companion.js'),'utf8'));
+ if(native){
+  await tick();assert.equal(ready,0,'an empty injected API is not the completed bridge');
+  w.pywebview.api=nativeApi;w.dispatchEvent(new w.Event('pywebviewready'));
+ }
  await tick();await tick();
  assert.equal(mics,0,'starting the app must not begin microphone capture');
  if(native){

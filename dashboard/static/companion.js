@@ -1313,8 +1313,10 @@
   // alone never bypasses browser activation or grants desktop credentials.
   async function desktopBoot() {
     if (desktopRequested) {
-      if (!window.pywebview?.api) await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('The desktop bridge did not connect. Restart Screen Companion.')), 15000);
+      if (typeof window.pywebview?.api?.connect !== 'function') await new Promise(resolve => {
+        // WebView creates api={} before it injects the callable methods. A
+        // cold start must wait for the completed bridge, not merely the object.
+        const timeout = setTimeout(() => state('', 'The native window is still starting…'), 15000);
         window.addEventListener('pywebviewready', () => { clearTimeout(timeout); resolve(); }, {once:true});
       });
       const info = await window.pywebview.api.connect();
@@ -1357,6 +1359,9 @@
     },
     stop: () => desktopConnected ? stop() : Promise.resolve(),
   };
-  desktopBoot().catch(exc => { state('', 'Apex is not connected yet.'); error(exc.message); });
+  desktopBoot().catch(exc => {
+    state('', 'Apex is not connected yet.'); error(exc.message);
+    if (desktopRequested) window.pywebview?.api?.report_error?.(exc.message).catch(() => {});
+  });
 })();
 

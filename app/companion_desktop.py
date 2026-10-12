@@ -122,6 +122,7 @@ class Bridge:
         if not self._trusted():
             raise ValueError('Desktop bridge is only available to the local Companion page.')
         import config
+        logging.info('Local Companion page connected to its native bridge.')
         return {'desktop': True, 'token': self._token, 'drawings': os.name == 'nt', 'hotkey': config.COMPANION_HOTKEY}
 
     def ready(self):
@@ -129,7 +130,13 @@ class Bridge:
             raise ValueError('Desktop bridge is only available to the local Companion page.')
         self._ipc.call(body={'action': 'ready'})
         self._ready.set()
+        logging.info('Companion authenticated and ready; microphone remains off.')
         return True
+
+    def report_error(self, message):
+        if not self._trusted():
+            raise ValueError('Desktop bridge is only available to the local Companion page.')
+        logging.error('Companion client boot: %s', str(message)[:500])
 
     def hide(self):
         if not self._trusted():
@@ -211,6 +218,8 @@ def main(argv=None):
     data.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=data / 'desktop.log', level=logging.INFO,
                         format='%(asctime)s %(levelname)s %(message)s')
+    logging.info('Starting native Companion window, parent %s.', args.parent_pid)
+    logging.getLogger('pywebview').propagate = True
     # Allow voice output after an OS hotkey; keep normal origin/web security.
     flags = os.environ.get('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '')
     os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = flags + ' --autoplay-policy=no-user-gesture-required'
@@ -246,6 +255,7 @@ def main(argv=None):
     def permissions():
         if os.name != 'nt':
             return
+        logging.info('Native WebView loaded; attaching microphone permission handling.')
         try:
             from app.window_capture import exclude_from_capture
             if not exclude_from_capture(window.native.Handle.ToInt64()):
