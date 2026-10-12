@@ -374,6 +374,16 @@ def main():
             for job in selected:
                 try:
                     download_with_retries(client, home, job, lambda: save_plan(output, plan))
+                except httpx.TransportError as exc:
+                    # Still failing after every retry: the line is down (often "getaddrinfo
+                    # failed"). Trying each remaining archive would only spend minutes apiece.
+                    job.update(status='needs_attention', error=str(exc), checksum_verified=False)
+                    save_plan(output, plan)
+                    print('Pending '+job['title']+': '+str(exc), flush=True)
+                    print('The internet connection keeps failing, so this run stops here. '
+                          'Rerun when it is back: every finished archive and partial file is kept.', flush=True)
+                    failed = True
+                    break
                 except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
                     job.update(status='needs_attention', error=str(exc), checksum_verified=False)
                     save_plan(output, plan)

@@ -274,3 +274,26 @@ def test_a_bad_checksum_is_never_retried(tmp_path):
     with httpx.Client(transport=httpx.MockTransport(handle)) as client, pytest.raises(RuntimeError):
         library.download_with_retries(client, tmp_path, job, lambda: None, sleep=lambda s: pytest.fail('no retry'))
     assert len(calls) == 1
+
+
+def test_when_the_internet_stays_down_the_run_stops_instead_of_trying_every_archive(monkeypatch, tmp_path, capsys):
+    jobs = [dict(archive(b'one'), id='a', title='A'), dict(archive(b'two'), id='b', title='B'),
+            dict(archive(b'three'), id='c', title='C')]
+    (tmp_path / library.PLAN_NAME).write_text(json.dumps(
+        {'profile': 'english-worldwide', 'jobs': jobs, 'remaining_setup': []}), encoding='utf-8')
+    monkeypatch.setattr(library.apocalypse, 'enabled', lambda: False)
+    monkeypatch.setattr(library.apocalypse, 'library_root', lambda: tmp_path)
+    monkeypatch.setattr(library.shutil, 'disk_usage', lambda _: SimpleNamespace(free=10**13))
+    monkeypatch.setattr(library.sys, 'argv', ['prepare_apocalypse_library.py'])
+    tried = []
+
+    def down(client, home, job, checkpoint, **kwargs):
+        tried.append(job['id'])
+        raise httpx.ConnectError('[Errno 11001] getaddrinfo failed')
+    monkeypatch.setattr(library, 'download_with_retries', down)
+    with pytest.raises(RuntimeError, match='Rerun to resume'):
+        library.main()
+    assert tried == ['a'], 'one archive used its retries; the others were not each tried for minutes'
+    assert 'internet connection keeps failing' in capsys.readouterr().out
+    saved = json.loads((tmp_path / library.PLAN_NAME).read_text(encoding='utf-8'))
+    assert [j['status'] for j in saved['jobs']] == ['needs_attention', 'pending', 'pending']
