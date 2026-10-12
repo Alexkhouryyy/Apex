@@ -16,6 +16,9 @@ the optional pinned native window and registers **current-user login startup**;
 administrator privileges and Visual Studio Build Tools are not required.
 An existing Apex resident startup entry is backed up and restored on uninstall.
 The setup does not edit your `.env` or download a new voice model.
+It checks that Apex, the native window and the hotkey actually become ready;
+registration alone is not reported as a working Companion. Its launch profile
+enables the required local dashboard without editing your saved configuration.
 
 - **F8** opens a compact, always-on-top Screen Companion and starts screen help.
   Press F8 again from any application to stop and hide it. A laptop with media

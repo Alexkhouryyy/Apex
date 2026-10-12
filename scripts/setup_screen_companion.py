@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import json
+import time
+import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -18,6 +21,39 @@ def startup_command(python: str) -> str:
     if windowed.is_file():
         path = windowed
     return subprocess.list2cmdline([str(path), str(ROOT / 'scripts' / 'start_screen_companion.py')])
+
+
+def readiness(env):
+    from scripts.run_apex_qwen import dashboard_address
+    _, _, url = dashboard_address(env)
+    headers = {}
+    if env.get('DASHBOARD_TOKEN'):
+        headers['Authorization'] = 'Bearer ' + env['DASHBOARD_TOKEN']
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(url + '/health', timeout=2) as response:
+        health = json.load(response)
+    if health.get('service') != 'apex' or health.get('agent_ready') is not True:
+        return False
+    request = urllib.request.Request(url + '/api/companion/desktop/status', headers=headers)
+    with opener.open(request, timeout=2) as response:
+        state = json.load(response)
+    if state.get('ready') and not state.get('hotkey_ready'):
+        raise RuntimeError('The window loaded, but its hotkey could not register. Choose another COMPANION_HOTKEY in .env and restart Apex.')
+    return state.get('ready') is True and state.get('running') is True
+
+
+def wait_ready(env, timeout=45):
+    print('Waiting for Apex and the native window (up to 45 seconds; microphone stays off)...', flush=True)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if readiness(env):
+                print('Screen Companion is ready for its hotkey.', flush=True)
+                return
+        except (OSError, ValueError):
+            pass
+        time.sleep(1)
+    raise RuntimeError(r'Login startup is registered, but the native window is not ready yet. See %LOCALAPPDATA%\Apex\Companion\startup.log and desktop.log; an older running Apex may need restarting.')
 
 
 def install(command: str):
@@ -83,6 +119,9 @@ def main(argv=None):
     print('First use asks for microphone permission. Voice and vision follow your current Apex configuration.')
     print(r'Logs: %LOCALAPPDATA%\Apex\Companion\startup.log and desktop.log')
     print('Remove login startup: Setup-Apex-Screen-Companion.cmd --uninstall')
+    if not args.no_start:
+        from scripts.start_screen_companion import environment
+        wait_ready(environment())
     return 0
 
 

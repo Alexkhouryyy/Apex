@@ -405,3 +405,15 @@ def test_real_native_window_authenticates_boots_silently_and_exits(tmp_path,monk
     finally:
         desktop.stop();server.should_exit=True;thread.join(5)
     assert not desktop.running()
+    assert 'Microphone permission hook unavailable' not in log.read_text(errors='replace')
+
+
+def test_setup_does_not_report_an_unregistered_hotkey_as_ready(monkeypatch):
+    import io
+    from scripts import setup_screen_companion as setup
+    replies = iter([{'service':'apex','agent_ready':True},
+                    {'running':True,'ready':True,'hotkey_ready':False}])
+    opener=SimpleNamespace(open=lambda *args,**kwargs:io.BytesIO(json.dumps(next(replies)).encode()))
+    monkeypatch.setattr(setup.urllib.request,'build_opener',lambda *args:opener)
+    with pytest.raises(RuntimeError,match='hotkey could not register'):
+        setup.readiness({})
