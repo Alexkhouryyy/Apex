@@ -140,6 +140,7 @@ class TestStartBindsTheRealHotkeys:
         pkg = types.ModuleType("pynput"); pkg.keyboard = keyboard
         monkeypatch.setitem(sys.modules, "pynput", pkg)
         monkeypatch.setitem(sys.modules, "pynput.keyboard", keyboard)
+        monkeypatch.setenv('DISPLAY', ':test')  # the fixture provides a simulated display listener
         return bound
 
     def test_both_hotkeys_bind_and_do_their_jobs(self, pynput, monkeypatch):

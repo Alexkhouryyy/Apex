@@ -31,6 +31,45 @@ def position(height):
     return None, None
 
 
+def interactive(window, enabled):
+    """Voice help leaves app focus alone; expanded Chat must accept typing."""
+    window.focus = enabled
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+        user = ctypes.windll.user32
+        get = user.GetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user.GetWindowLongW
+        put = user.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user.SetWindowLongW
+        get.argtypes, get.restype = [wintypes.HWND, ctypes.c_int], ctypes.c_ssize_t
+        put.argtypes, put.restype = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t], ctypes.c_ssize_t
+        hwnd = window.native.Handle.ToInt64()
+        style = get(hwnd, -20)
+        put(hwnd, -20, style & ~0x08000000 if enabled else style | 0x08000000)
+
+
+def gui_call(window, callback):
+    if os.name == 'nt' and window.native.InvokeRequired:
+        from System import Action
+        window.native.Invoke(Action(callback))
+    else:
+        callback()
+
+
+def reveal(window):
+    if os.name == 'nt':
+        def restore():
+            import ctypes
+            from ctypes import wintypes
+            user = ctypes.windll.user32
+            get, put = user.GetWindowLongPtrW, user.SetWindowLongPtrW
+            get.argtypes, get.restype = [wintypes.HWND, ctypes.c_int], ctypes.c_ssize_t
+            put.argtypes, put.restype = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t], ctypes.c_ssize_t
+            hwnd = window.native.Handle.ToInt64()
+            put(hwnd, -20, get(hwnd, -20) & ~0x20)
+            window.native.Opacity = 1
+        gui_call(window, restore)
+
+
 class IPC:
     def __init__(self, url, token, session):
         self.url = local_url(url)
@@ -128,6 +167,9 @@ class Bridge:
     def ready(self):
         if not self._trusted():
             raise ValueError('Desktop bridge is only available to the local Companion page.')
+        if not self._ready.is_set():
+            self._window.hide()
+            reveal(self._window)
         self._ipc.call(body={'action': 'ready'})
         self._ready.set()
         logging.info('Companion authenticated and ready; microphone remains off.')
@@ -150,10 +192,12 @@ class Bridge:
         if not self._trusted():
             raise ValueError('Desktop bridge is only available to the local Companion page.')
         self._ipc.call(body={'action': 'view'})
+        interactive(self._window, True)
         self._window.resize(420, 640)
         x, y = position(640)
         if x is not None:
             self._window.move(x, y)
+        self._window.show()
         return True
 
 
@@ -222,18 +266,39 @@ def main(argv=None):
     logging.getLogger('pywebview').propagate = True
     # Allow voice output after an OS hotkey; keep normal origin/web security.
     flags = os.environ.get('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '')
-    os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = flags + ' --autoplay-policy=no-user-gesture-required'
+    os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = flags + (
+        ' --autoplay-policy=no-user-gesture-required'
+        ' --disable-background-timer-throttling --disable-renderer-backgrounding'
+        ' --disable-backgrounding-occluded-windows'
+        ' --disable-features=ElasticOverscroll,CalculateNativeWinOcclusion')
     import config
     import webview
     ipc = IPC(url, config.DASHBOARD_TOKEN, session)
     bridge, overlay = Bridge(ipc, config.DASHBOARD_TOKEN), Overlay()
     x, y = position(300)
     window = webview.create_window('Apex Screen Companion', url + '/companion?desktop=1',
-                                   width=420, height=300, x=x, y=y, hidden=True, on_top=True, focus=False,
+                                   width=420, height=300, x=x, y=y, hidden=os.name != 'nt', on_top=True, focus=False,
                                    js_api=bridge, background_color='#101318')
     bridge._window = window
     permission = MicrophonePermission(bridge, data / 'permissions.json')
     shutting_down = threading.Event()
+
+    def bootstrap():
+        if os.name != 'nt':
+            return
+        # WebView2 can defer script callbacks in a hidden Form. Let it finish
+        # booting in a zero-opacity, click-through Form; ready() then hides it.
+        window.native.Opacity = 0
+        window.native.ShowInTaskbar = False
+        import ctypes
+        from ctypes import wintypes
+        user=ctypes.windll.user32
+        get,put=user.GetWindowLongPtrW,user.SetWindowLongPtrW
+        get.argtypes,get.restype=[wintypes.HWND,ctypes.c_int],ctypes.c_ssize_t
+        put.argtypes,put.restype=[wintypes.HWND,ctypes.c_int,ctypes.c_ssize_t],ctypes.c_ssize_t
+        hwnd=window.native.Handle.ToInt64()
+        put(hwnd,-20,get(hwnd,-20)|0x20)
+    window.events.before_show += bootstrap
 
     def closing():
         if shutting_down.is_set():
@@ -279,9 +344,10 @@ def main(argv=None):
                     event.State = CoreWebView2PermissionState.Deny
                     logging.exception('Microphone permission failed')
             window.native.webview.CoreWebView2.PermissionRequested += requested
+            logging.info('Microphone permission hook attached on the GUI thread.')
         except Exception:
             logging.exception('Microphone permission hook unavailable')
-    window.events.loaded += permissions
+    window.events.loaded += lambda: gui_call(window, permissions)
 
     def commands():
         after, failures = 0, 0
@@ -291,12 +357,15 @@ def main(argv=None):
                 failures = 0
                 for item in commands:
                     if not bridge._ready.is_set() and item['kind'] == 'activate':
+                        reveal(window)
                         window.show()
                         break  # keep the first hotkey until page authentication/boot completes
                     if item['kind'] == 'quit':
                         shutting_down.set()
                         break
                     if item['kind'] == 'show':
+                        reveal(window)
+                        interactive(window, True)
                         window.resize(420, 640)
                         x, y = position(640)
                         if x is not None:
@@ -308,6 +377,8 @@ def main(argv=None):
                             bridge._ready.clear()
                             break
                         if item['item'].get('kind') != 'stop':
+                            reveal(window)
+                            interactive(window, False)
                             window.resize(420, 300)
                             x, y = position(300)
                             if x is not None:

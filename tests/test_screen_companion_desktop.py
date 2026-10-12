@@ -404,6 +404,38 @@ def test_real_native_window_authenticates_boots_silently_and_exits(tmp_path,monk
         assert desktop.status()['ready'],log.read_text(errors='replace')if log.exists()else desktop.status()
         assert not desktop.status()['shown']and desktop.status()['mode']=='idle'
         assert desktop.status()['hotkey_ready']
+        # Opening Chat must remove NOACTIVATE. A real click focuses the native
+        # WebView, and Esc then reaches the page and hides it (no microphone).
+        from ctypes import wintypes
+        user=ctypes.windll.user32
+        user.FindWindowW.argtypes=[wintypes.LPCWSTR,wintypes.LPCWSTR]
+        user.FindWindowW.restype=wintypes.HWND
+        user.IsWindowVisible.argtypes=[wintypes.HWND]
+        user.GetWindowLongPtrW.argtypes=[wintypes.HWND,ctypes.c_int]
+        user.GetWindowLongPtrW.restype=ctypes.c_ssize_t
+        user.GetForegroundWindow.restype=wintypes.HWND
+        hwnd=user.FindWindowW(None,'Apex Screen Companion')
+        assert hwnd and not user.IsWindowVisible(hwnd),'ready startup must leave its actual window hidden'
+        desktop.publish('show')
+        deadline=time.monotonic()+10;hwnd=None
+        while time.monotonic()<deadline:
+            hwnd=user.FindWindowW(None,'Apex Screen Companion')
+            if hwnd and user.IsWindowVisible(hwnd) and not user.GetWindowLongPtrW(hwnd,-20)&0x08000000:break
+            time.sleep(.1)
+        assert hwnd and user.IsWindowVisible(hwnd)
+        assert not user.GetWindowLongPtrW(hwnd,-20)&0x08000000
+        point=wintypes.POINT(200,160)
+        user.ClientToScreen.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.POINT)]
+        assert user.ClientToScreen(hwnd,ctypes.byref(point))
+        user.SetCursorPos(point.x,point.y)
+        user.mouse_event(0x0002,0,0,0,0);user.mouse_event(0x0004,0,0,0,0)
+        deadline=time.monotonic()+3
+        while user.GetForegroundWindow()!=hwnd and time.monotonic()<deadline:time.sleep(.05)
+        assert user.GetForegroundWindow()==hwnd,'expanded Chat must accept keyboard input'
+        user.keybd_event(0x1b,0,0,0);user.keybd_event(0x1b,0,2,0)
+        deadline=time.monotonic()+5
+        while desktop.status()['shown']and time.monotonic()<deadline:time.sleep(.05)
+        assert not desktop.status()['shown'],'Esc must reach the actual native Companion page'
     finally:
         desktop.stop();server.should_exit=True;thread.join(5)
     assert not desktop.running()
