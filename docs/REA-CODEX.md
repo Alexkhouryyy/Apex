@@ -12,6 +12,9 @@ features absent from this release.
 
 ## Windows Codex
 
+If `Get-Command codex` cannot find the client, install it with
+`npm install --global @openai/codex`, then open a new PowerShell window.
+
 In Windows PowerShell:
 
 ```powershell

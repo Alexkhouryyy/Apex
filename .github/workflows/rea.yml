@@ -7,12 +7,14 @@ on:
   push:
     branches: [main, apex/rea-codex-integration]
     paths:
+      - .gitattributes
       - integrations/rea/**
       - .agents/skills/reverse-engineer-anything/**
       - scripts/setup_rea_cloud.sh
       - .github/workflows/rea.yml
   pull_request:
     paths:
+      - .gitattributes
       - integrations/rea/**
       - .agents/skills/reverse-engineer-anything/**
       - scripts/setup_rea_cloud.sh

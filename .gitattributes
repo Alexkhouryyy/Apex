@@ -7,3 +7,6 @@
 
 # Preserve pinned upstream Git blob bytes on Windows.
 integrations/gods-eye-view/** -text -whitespace
+# Preserve the exact released REA instructions on Windows checkouts.
+.agents/skills/reverse-engineer-anything/** text eol=lf
+scripts/setup_rea_cloud.sh text eol=lf
