@@ -1,0 +1,1 @@
+REA workflow instructions are copied from the published rea-agents 6.4.0 npm package, https://github.com/morluto/rea. Copyright (c) 2026 morluto. The MIT license is included at ../../.agents/skills/reverse-engineer-anything/LICENSE.rea. The runtime is installed from npm using the locked package integrity; it is not vendored here.

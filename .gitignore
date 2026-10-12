@@ -45,6 +45,10 @@ integrations/gods-eye-view/dist/
 integrations/gods-eye-view/APEX_BUILD.json
 integrations/gods-eye-view/APEX_TEST_RESULTS.log
 
+# REA is installed locally from its pinned npm release.
+integrations/rea/node_modules/
+.apex-rea-cache/
+
 # Browser speech model, fetched by scripts/fetch_speech_model.py (pinned + hash-checked).
 dashboard/static/vendor/speech/
 
