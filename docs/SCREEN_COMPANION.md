@@ -1,4 +1,4 @@
-# Apex screen companion — first version
+# Apex screen companion
 
 The companion brings conversation, a shared screen, evidence from tools, and
 task execution into one compact view. It connects to the existing Apex agent;
@@ -8,6 +8,81 @@ The integrated [car browser and spatial workspace](CAR_AND_SPATIAL.md) add
 reconnectable host tasks, gesture-selected voice context and export downloads.
 
 ## Start on your laptop
+
+### Windows: background startup and F8
+
+Run `Setup-Apex-Screen-Companion.cmd` once from your Apex checkout. It installs
+the optional pinned native window and registers **current-user login startup**;
+administrator privileges and Visual Studio Build Tools are not required.
+An existing Apex resident startup entry is backed up and restored on uninstall.
+The setup does not edit your `.env` or download a new voice model.
+
+- **F8** opens a compact, always-on-top Screen Companion and starts screen help.
+  Press F8 again from any application to stop and hide it. A laptop with media
+  keys may require Fn+F8; `COMPANION_HOTKEY=<f7>` in `.env`, for example, selects
+  another key on the next Apex start. The older Celine/browser shortcuts remain
+  available separately.
+- The native window loads silently. It does not capture the screen or begin
+  recording at login. The first voice activation asks for microphone permission.
+  Windows microphone privacy settings still apply. The decision is stored in
+  `%LOCALAPPDATA%\Apex\Companion\permissions.json`; removing that file lets you
+  make the decision again.
+- **Chat** expands the native window for typed questions and full history.
+  When screen help is active, a fresh host snapshot accompanies each question,
+  including typed questions in Chat. This is snapshot-based assistance, not a
+  continuous video feed. F8, Stop, or Esc in the Companion ends it.
+- When the prepared `apex-qwen-fast-env` exists, login starts the local Celine
+  voice service in parallel with Apex. GPU warm-up does not hold back the
+  dashboard or hotkey. Until local voice is available, native voice mode prefers
+  the device voice and says so. Otherwise your existing voice settings apply.
+- The resident tray includes **Screen Companion** for opening the full window
+  without starting the microphone. **Quit Apex** shuts down its owned desktop
+  window and drawing surface. Closing the native window stops/hides it while
+  leaving Apex ready for the next hotkey.
+
+The new native window runs on its own main GUI thread; the older optional orb
+is not started alongside it. An already running, updated Apex can be attached
+through its local authenticated desktop endpoint. Startup refuses unrelated
+services on the dashboard port and does not kill or replace existing processes.
+Normal Apex background features still follow your existing settings.
+
+To remove login startup:
+
+```cmd
+Setup-Apex-Screen-Companion.cmd --uninstall
+```
+
+To install startup without starting it immediately, add `--no-start`.
+Startup and native-window errors are recorded in
+`%LOCALAPPDATA%\Apex\Companion\startup.log` and `desktop.log`.
+
+### Visual explanations on your Windows screen
+
+During an owner screen-help turn, `screen_draw` can point to a visible control
+or draw a short explanation using arrows, lines, rectangles, ellipses,
+polygons, curves and labels. The marks sit on a transparent **click-through**
+Windows overlay, so the user can still interact with the application beneath.
+They expire after 2–30 seconds and are cleared on Stop/hide or replacement.
+
+Coordinates are normalized against the particular host screenshot, then mapped
+to the captured monitor's physical bounds. The renderer uses Windows DPI
+awareness and supports negative monitor origins. The tool requires that exact,
+fresh frame ID and confirmation from the native renderer. A queued command is
+not reported as a verified drawing. Browser/phone images and ordinary chat
+cannot draw on the host desktop through this tool.
+
+Native screen help preserves the selected **Discuss/Work** mode. Discuss can
+draw explanatory marks but cannot click, type, run commands or edit user files.
+Select Work for requested actions, with Apex's existing safety gates. Drawings
+do not themselves execute an action or authorize one. Their location and the
+explanation still depend on the vision model: an acknowledged drawing is not
+proof that the model identified the correct control.
+
+Vision turns use your existing Apex model/provider and budget configuration.
+They do not become subscription-backed Codex/Claude coding turns. Use a
+vision-capable model for screen questions.
+
+### Browser Companion
 
 1. Start Apex using your normal launcher and configuration.
 2. Open the dashboard and select **Screen companion** in the sidebar. The path
@@ -22,7 +97,7 @@ reconnectable host tasks, gesture-selected voice context and export downloads.
 
 Use a supported desktop browser over HTTPS or localhost. Phone and embedded
 WebView screen-sharing support varies; the UI reports when a capability is
-unavailable. The existing native pywebview orb is not changed by this patch.
+unavailable. The browser view remains available independently of the native window.
 
 ## What each control means
 
@@ -31,7 +106,7 @@ unavailable. The existing native pywebview orb is not changed by this patch.
 | Share screen | Browser permission selects the source. One JPEG snapshot is sent with each message; no host screenshot is automatically substituted. |
 | Stop sharing | Ends this page's capture tracks and disables its check-ins. Historical context remains in the conversation. This does not switch off other independently configured Apex awareness services. |
 | Look at this | Sends a fresh snapshot with a request to explain what matters and recommend a next step. |
-| Discuss | Restricts the model's tool list to explicit read/research tools and checks the boundary again at execution. Commands, clicks, file edits, memory-write tools and delegation are unavailable. Ordinary conversation persistence still occurs. |
+| Discuss | Restricts the model to its explicit Discuss tools, including temporary native screen marks for an owner host snapshot. Commands, clicks, file edits and delegation are unavailable. Conversation persistence and approved companion memory behavior remain in effect. |
 | Work | Uses Apex's existing tools and safety gates for the task you request. Tools operate on the Apex host, which can differ from the shared device. |
 | Stop | Stops spoken playback immediately and requests agent cancellation. Further tool calls are skipped. A tool already executing can finish; completed actions are not undone. |
 | Speak replies | Device speech by default, with optional OpenAI TTS. Turning it off also invalidates pending audio responses. |
@@ -104,6 +179,16 @@ Run the focused suite with:
 python -m pytest tests/test_companion.py tests/test_persona.py tests/test_tui.py tests/test_provider_routing.py tests/test_resilience.py tests/test_memory.py tests/test_conversations.py -q
 node --check dashboard/static/companion.js
 ```
+
+The desktop regression suite is `tests/test_screen_companion_desktop.py`.
+On Windows it also creates a real transparent Tk overlay, checks click-through
+styles and expiry, exercises global function-key registration/release, and
+boots/stops the real WebView2 shell against a local test service. No provider
+call, microphone capture or user screen capture is needed for those checks.
+`scripts/check_companion_desktop_ui.cjs` covers silent boot, native authentication,
+activation without a previous page click, Discuss preservation and Stop/hide.
+These controlled checks do not replace laptop microphone, mixed-DPI/multi-monitor,
+vision accuracy or live speech-latency acceptance.
 
 The client DOM simulation in `scripts/check_companion_ui.cjs` also checks
 stream delivery, thread reuse, mode selection, safe tool-text rendering,

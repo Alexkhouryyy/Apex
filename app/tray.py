@@ -56,12 +56,14 @@ class Tray:
         on_open_dashboard: Callable[[], None],
         on_show_recent: Callable[[], None],
         on_quit: Callable[[], None],
+        on_companion: Optional[Callable[[], None]] = None,
     ):
         self._on_wake_now = on_wake_now
         self._on_mute = on_mute
         self._on_open_dashboard = on_open_dashboard
         self._on_show_recent = on_show_recent
         self._on_quit = on_quit
+        self._on_companion = on_companion
         self._icon = None
         self._state = "idle"
 
@@ -79,6 +81,8 @@ class Tray:
                 icon=_make_icon_image(self._state),
                 title="Apex (idle)",
                 menu=pystray.Menu(
+                    *([pystray.MenuItem('Screen Companion', lambda _i, _m: self._on_companion())]
+                      if self._on_companion else []),
                     pystray.MenuItem("Wake now", lambda _i, _m: self._on_wake_now()),
                     pystray.Menu.SEPARATOR,
                     pystray.MenuItem("Mute 15 min", lambda _i, _m: self._on_mute(15)),
