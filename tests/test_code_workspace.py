@@ -1,5 +1,6 @@
 """Real Git/file operations without any coding account or model request."""
 import sys
+import os
 from pathlib import Path
 import pytest
 from fastapi import FastAPI
@@ -22,6 +23,64 @@ def test_workspace_opens_without_calling_a_provider(lab, monkeypatch):
     assert not s['working'] and s['status'] == 'ready'
     assert studio.read_file('README.md', s['id'])['text'] == 'hello\n'
     assert not lab.calls('claude') and not lab.calls('codex')
+
+
+@pytest.mark.parametrize('previous', [studio.PYTEST_CHECKS, 'python custom_checks.py', ''])
+def test_apex_checks_upgrade_preserves_custom_commands(lab, monkeypatch, previous):
+    studio.update_project(lab.pid, checks=previous)
+    monkeypatch.setattr(studio, 'APEX_ROOT', lab.root)
+    expected = studio.APEX_CHECKS if previous == studio.PYTEST_CHECKS else previous
+    assert studio.project(lab.pid)['checks'] == expected
+    assert studio.project(lab.pid)['checks'] == expected
+
+
+def test_generic_python_project_keeps_its_own_runner(lab, monkeypatch):
+    (lab.root / 'pytest.ini').write_text('[pytest]\n', encoding='utf-8')
+    assert studio._default_checks(lab.root) == studio.PYTEST_CHECKS
+    monkeypatch.setattr(studio, 'APEX_ROOT', lab.root)
+    assert studio._default_checks(lab.root) == studio.APEX_CHECKS
+
+
+def test_isolated_launcher_requires_test_counts_for_proof():
+    project = {'checks': studio.APEX_CHECKS}
+    assert studio._check_result(project, 0, 'nothing ran', False, False)[0] == 'unknown'
+    assert studio._check_result(project, 0, '1 passed in 0.1s', False, False)[0] == 'passed'
+    assert studio._check_result(project, 1, '1 failed in 0.1s', False, False)[0] == 'failed'
+
+
+def test_apex_run_checks_uses_session_files_and_isolated_settings(lab, monkeypatch):
+    from tests.test_code_studio import wait
+    launcher = (studio.APEX_ROOT / 'scripts' / 'run_tests.py').read_bytes()
+    (lab.root / 'scripts').mkdir()
+    (lab.root / 'scripts' / 'run_tests.py').write_bytes(launcher)
+    (lab.root / 'config.py').write_text('import os\nMODEL = os.getenv("AGENT_MODEL")\n', encoding='utf-8')
+    (lab.root / 'marker.txt').write_text('main', encoding='utf-8')
+    (lab.root / 'test_isolated.py').write_text('''import os
+from pathlib import Path
+from dotenv import load_dotenv
+def test_isolated():
+    assert Path("marker.txt").read_text(encoding="utf-8") == "session"
+    assert load_dotenv() is False
+    assert os.getenv("AGENT_MODEL") is None
+    assert os.getenv("DEEPSEEK_API_KEY") is None
+    assert os.getenv("PYTHON_DOTENV_DISABLED") == "1"
+    assert Path(os.environ["DB_PATH"]).parent != Path.cwd()
+''', encoding='utf-8')
+    git(lab.root, 'add', '-A'); git(lab.root, 'commit', '-q', '-m', 'isolated checks')
+    studio.update_project(lab.pid, checks=studio.PYTEST_CHECKS)
+    monkeypatch.setattr(studio, 'APEX_ROOT', lab.root)
+    monkeypatch.setenv('AGENT_MODEL', 'owner-model')
+    monkeypatch.setenv('DEEPSEEK_API_KEY', 'owner-key-for-test')
+    monkeypatch.setenv('PATH', str(Path(sys.executable).parent) + os.pathsep + os.environ.get('PATH', ''))
+    sid = studio.open_workspace(lab.pid)['id']
+    marker = studio.read_file('marker.txt', sid)
+    studio.write_file(sid, 'marker.txt', 'session', marker['revision'])
+    studio.run_checks(sid)
+    result = wait(sid, timeout=45)
+    assert result['check_state'] == 'passed', result['check_output']
+    assert result['check_evidence'] == '1 passed'
+    assert (lab.root / 'marker.txt').read_text(encoding='utf-8') == 'main'
+    assert os.environ['AGENT_MODEL'] == 'owner-model'
 
 
 def test_handoff_keeps_original_requirements_after_many_long_followups(lab):

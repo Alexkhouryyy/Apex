@@ -16,11 +16,11 @@ Modes:
   full    any command, in the worktree. For when Safe gets in the way.
   review  read-only: the second opinion on someone else's change.
 
-Apex's own memory server (agent/mcp_server.py) is the one MCP server a session
-gets: its reading tools in every mode, and `remember`, which only stages a
-memory for the owner's approval, never in review. Claude Code loads it from a
-file (--mcp-config, with --strict-mcp-config so nothing else loads); Codex gets
-the same server as config overrides.
+Apex's memory server (agent/mcp_server.py) exposes its reading tools in every
+mode, and `remember`, which only stages a memory for the owner's approval,
+never in review. Claude Code loads it from a file (--mcp-config, with
+--strict-mcp-config so nothing else loads). Codex adds the same server as
+config overrides and keeps the user's other MCP registrations, including REA.
 
 As with Work tasks, the prompt goes in on stdin (never through cmd.exe), Apex's
 API keys are removed from the tool's environment, and Stop or the time limit

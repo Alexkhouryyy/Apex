@@ -8,7 +8,7 @@ STATIC = Path(__file__).resolve().parents[1] / "dashboard/static"
 
 
 def _command_html():
-    html = (STATIC / "index.html").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
     start = html.index('<section id="tab-overview"')
     return html[start:html.index("</section>", start)]
 
@@ -25,7 +25,7 @@ def test_every_readout_and_control_is_still_on_the_command_screen():
 
 
 def test_all_orbit_buttons_and_planets_are_kept():
-    js = (STATIC / "app.js").read_text()
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
     features = js[js.index("const FEATURES = ["):js.index("];", js.index("const FEATURES = ["))]
     assert len(re.findall(r"\{ tab: '", features)) == 11
     bodies = js[js.index("const SOLAR_BODIES = {"):js.index("};", js.index("const SOLAR_BODIES = {"))]
@@ -34,7 +34,7 @@ def test_all_orbit_buttons_and_planets_are_kept():
 
 def test_command_text_does_not_use_theme_text_colours():
     """The Command background is always dark; Daylight's dark text vanished on it."""
-    css = (STATIC / "styles.css").read_text()
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
     section = css[css.index("/* --- Command, minimal:"):css.index("/* --- Sidebar brand polish --- */")]
     assert "--cmd-text" in section and not re.search(r"var\(--text(-mute|-dim)?\)", section)
     ask = css[css.index(".cst-quickask input {"):css.index(".cst-quickask button {")]
@@ -43,9 +43,9 @@ def test_command_text_does_not_use_theme_text_colours():
 
 def test_sidebar_brand_and_page_links_are_readable_on_daylight():
     """Daylight is the only light theme; a white title and pale-teal links vanished on it."""
-    html = (STATIC / "index.html").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
     # Every page link uses the themed class (new ones too), never a hard-coded colour.
     assert "color:#90e6cb" not in html and html.count('class="nav-link-ext"') >= 5
-    css = (STATIC / "styles.css").read_text()
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
     assert ':root[data-theme="daylight"] .brand-title { color: var(--text); }' in css
     assert ':root[data-theme="daylight"] :is(.nav-link-ext, .nav-link-ext-inline) { color: var(--accent); }' in css

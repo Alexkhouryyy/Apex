@@ -117,7 +117,9 @@ def test_bundle_is_vendored_and_pinned():
     from pathlib import Path
     import hashlib
     root = Path(__file__).resolve().parents[1] / 'dashboard' / 'static' / 'vendor' / 'simli'
-    readme = (root / 'README.md').read_text()
-    digest = hashlib.sha256((root / 'simli.bundle.js').read_bytes()).hexdigest()
+    readme = (root / 'README.md').read_text(encoding="utf-8")
+    # Compare the pinned Git content even when autocrlf changes the checkout.
+    content = (root / 'simli.bundle.js').read_bytes().replace(b'\r\n', b'\n')
+    digest = hashlib.sha256(content).hexdigest()
     assert digest in readme, 'the bundle changed without its README being updated'
-    assert 'simli-client' in (root / 'package-lock.json').read_text()
+    assert 'simli-client' in (root / 'package-lock.json').read_text(encoding="utf-8")

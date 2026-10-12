@@ -81,6 +81,7 @@ def test_calls_reach_the_pc_through_the_tailscale_proxy(tmp_path):
         proxy.shutdown()
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='Linux relay entrypoint uses POSIX shell executables')
 def test_start_script_joins_the_tailnet_and_serves(tmp_path):
     """start.sh for real, with stand-in tailscale binaries that record their arguments."""
     bin_ = tmp_path / 'bin'

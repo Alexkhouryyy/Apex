@@ -1,0 +1,46 @@
+name: REA integration
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, apex/rea-codex-integration]
+    paths:
+      - .gitattributes
+      - integrations/rea/**
+      - .agents/skills/reverse-engineer-anything/**
+      - scripts/setup_rea_cloud.sh
+      - .github/workflows/rea.yml
+  pull_request:
+    paths:
+      - .gitattributes
+      - integrations/rea/**
+      - .agents/skills/reverse-engineer-anything/**
+      - scripts/setup_rea_cloud.sh
+      - .github/workflows/rea.yml
+  workflow_dispatch:
+
+jobs:
+  released-server:
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: integrations/rea/package-lock.json
+      - name: Install the pinned release on Windows
+        if: runner.os == 'Windows'
+        run: npm ci --prefix integrations/rea --no-audit --no-fund
+      - name: Windows MCP handshake, static analysis, scoped setup and skill alignment
+        if: runner.os == 'Windows'
+        run: npm run check --prefix integrations/rea
+      - name: Cloud setup and MCP acceptance on Linux
+        if: runner.os == 'Linux'
+        run: bash scripts/setup_rea_cloud.sh

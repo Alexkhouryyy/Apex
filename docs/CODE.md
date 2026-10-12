@@ -29,6 +29,10 @@ Claude plan (Claude Code) or your ChatGPT plan (Codex) does the work, and you
 watch every step as it happens. It never uses API credits: only the two plans
 signed in on your PC (see "Set it up" below).
 
+For artifact analysis with your Codex plan, see [REA integration](REA-CODEX.md).
+The personal REA MCP registration is also available to Apex's Codex engine;
+cloud tasks have a separate, verified CLI setup.
+
 ## Why it's safe to let it loose
 
 Every session works on **its own branch, in its own copy** of the project (a

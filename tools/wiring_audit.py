@@ -33,7 +33,7 @@ def _py_sources(include_tests: bool = False) -> dict[Path, str]:
         if not include_tests and rel.startswith("tests/"):
             continue
         try:
-            out[p] = p.read_text()
+            out[p] = p.read_text(encoding="utf-8")
         except Exception:
             pass
     return out
@@ -114,7 +114,7 @@ def orphan_init_db() -> list[str]:
         )
         if not called:
             findings.append(
-                f"{path.relative_to(ROOT)}: init_db() is never called and the "
+                f"{path.relative_to(ROOT).as_posix()}: init_db() is never called and the "
                 f"module has no lazy _ensure_db — its tables will not exist")
     return findings
 
@@ -123,7 +123,7 @@ def orphan_init_db() -> list[str]:
 # Caught: MAX_SUBAGENTS, a documented safety cap that nothing enforced.
 
 def dead_config_flags() -> list[str]:
-    cfg = (ROOT / "config.py").read_text()
+    cfg = (ROOT / "config.py").read_text(encoding="utf-8")
     flags = re.findall(r"^([A-Z][A-Z0-9_]{3,})\s*=", cfg, re.M)
     # Production code only. A flag referenced solely from tests is still dead
     # where it matters — and including tests made this check self-defeating: the
@@ -134,7 +134,7 @@ def dead_config_flags() -> list[str]:
     for ext in ("*.js", "*.html"):
         for p in (ROOT / "dashboard").rglob(ext):
             try:
-                haystack += p.read_text()
+                haystack += p.read_text(encoding="utf-8")
             except Exception:
                 pass
     return [f"config.{f} is defined but never read anywhere"
@@ -146,7 +146,7 @@ def dead_config_flags() -> list[str]:
 
 def orphan_ws_events() -> list[str]:
     try:
-        js = (ROOT / "dashboard/static/app.js").read_text()
+        js = (ROOT / "dashboard/static/app.js").read_text(encoding="utf-8")
     except Exception:
         return []
     findings = []
@@ -157,7 +157,7 @@ def orphan_ws_events() -> list[str]:
             for t in re.findall(r'"type":\s*"([a-z][a-z0-9_]*)"', call):
                 if t not in js:
                     findings.append(
-                        f"{path.relative_to(ROOT)}: broadcasts {t!r} but no "
+                        f"{path.relative_to(ROOT).as_posix()}: broadcasts {t!r} but no "
                         f"frontend handler exists")
     return sorted(set(findings))
 
@@ -173,7 +173,7 @@ def write_only_tables() -> list[str]:
         for table in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", src):
             if not re.search(rf"(?:FROM|JOIN)\s+{table}\b", blob):
                 findings.append(
-                    f"{path.relative_to(ROOT)}: table {table!r} is created and "
+                    f"{path.relative_to(ROOT).as_posix()}: table {table!r} is created and "
                     f"written but never read back")
     return sorted(set(findings))
 

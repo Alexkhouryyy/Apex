@@ -82,7 +82,13 @@ def test_thinking_omitted_rather_than_none():
 # --- the defaults actually shipped -------------------------------------------
 
 def test_default_model_is_current():
-    assert config.AGENT_MODEL == "claude-opus-5"
+    # The shipped fallback is independent of the owner's configured model.
+    tree = ast.parse(pathlib.Path(config.__file__).read_text(encoding="utf-8"))
+    declaration = next(node for node in tree.body
+                       if isinstance(node, ast.Assign)
+                       and any(isinstance(target, ast.Name) and target.id == "AGENT_MODEL"
+                               for target in node.targets))
+    assert declaration.value.args[1].value == "claude-opus-5"
 
 
 def test_every_configured_model_is_known():
@@ -152,7 +158,7 @@ def test_no_source_hardcodes_budget_tokens():
     offenders = []
     for path in _sources():
         try:
-            tree = ast.parse(path.read_text())
+            tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
             continue
         # thinking_params() is the one place allowed to spell it — it is the
