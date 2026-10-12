@@ -228,3 +228,49 @@ def test_progress_is_snapshot_and_does_not_claim_ready_readers(monkeypatch,tmp_p
     assert report['remaining_setup'][0]['id']=='courses'
     (tmp_path/library.PLAN_NAME).write_text('{broken')
     assert 'error' in api.preparation()
+
+
+def test_a_dropped_connection_resumes_by_itself_from_the_partial_file(tmp_path, capsys):
+    data = bytes(range(256)) * (3 * 4096)               # 3 MiB: written to disk 1 MiB at a time
+    job = archive(data); target = library.destination(tmp_path, job)
+    requests, waits = [], []
+
+    def dropped():
+        yield data[:1024 * 1024]; yield data[1024 * 1024:2 * 1024 * 1024]
+        raise httpx.RemoteProtocolError('peer closed connection without sending complete message body')
+
+    def handle(request):
+        requests.append(request.headers.get('range'))
+        if len(requests) == 1:
+            return httpx.Response(200, content=dropped(), headers={'Content-Length': str(len(data))})
+        start = int(request.headers['range'][6:-1])
+        return httpx.Response(206, content=data[start:], headers={
+            'Content-Range': f'bytes {start}-{len(data)-1}/{len(data)}', 'Content-Length': str(len(data) - start)})
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        library.download_with_retries(client, tmp_path, job, lambda: None, sleep=waits.append)
+    assert target.read_bytes() == data and job['status'] == 'downloaded'
+    assert requests == [None, f'bytes={2 * 1024 * 1024}-'], 'the retry asks only for what is missing'
+    assert waits == [library.RETRY_WAIT] and 'connection dropped' in capsys.readouterr().out
+
+
+def test_a_line_that_keeps_dropping_gives_up_and_keeps_the_partial(tmp_path):
+    job = archive(b'x' * 100); waits = []
+
+    def handle(request):
+        raise httpx.ReadTimeout('timed out', request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client, pytest.raises(httpx.TransportError):
+        library.download_with_retries(client, tmp_path, job, lambda: None, sleep=waits.append)
+    assert len(waits) == library.RETRIES and waits[-1] == library.RETRY_WAIT * 2 ** (library.RETRIES - 1)
+
+
+def test_a_bad_checksum_is_never_retried(tmp_path):
+    job = archive(b'complete archive'); job['hash'] = '0' * 64; calls = []
+
+    def handle(request):
+        calls.append(1); return httpx.Response(200, content=b'complete archive')
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client, pytest.raises(RuntimeError):
+        library.download_with_retries(client, tmp_path, job, lambda: None, sleep=lambda s: pytest.fail('no retry'))
+    assert len(calls) == 1

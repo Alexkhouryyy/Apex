@@ -284,6 +284,28 @@ def download_archive(client, home, job, checkpoint):
     print('Downloaded and checksum verified: '+job['title'], flush=True)
 
 
+RETRIES = 6            # a dropped connection is retried this many times per archive
+RETRY_WAIT = 5         # seconds before the first retry, doubled after each one
+
+
+def download_with_retries(client, home, job, checkpoint, *, sleep=time.sleep):
+    """Long downloads on a shaky line get cut ("peer closed connection without
+    sending complete message body"). Each retry resumes from the .part file
+    with a Range request, so nothing already downloaded is fetched again.
+    Only network drops are retried; a checksum, size or space problem stops."""
+    for attempt in range(RETRIES + 1):
+        try:
+            return download_archive(client, home, job, checkpoint)
+        except httpx.TransportError as exc:
+            if attempt == RETRIES:
+                raise
+            wait = RETRY_WAIT * 2 ** attempt
+            done = job.get('downloaded_bytes') or 0
+            print(f'{job["title"]}: the connection dropped at {done/job["bytes"]:.1%} ({type(exc).__name__}). '
+                  f'Resuming in {wait} s (retry {attempt+1} of {RETRIES}).', flush=True)
+            sleep(wait)
+
+
 def select_jobs(jobs, identifiers=None, max_download_gb=None):
     """Choose whole archives within a decimal-GB budget; never start a huge partial."""
     identifiers = set(identifiers or [])
@@ -351,7 +373,7 @@ def main():
             failed = False
             for job in selected:
                 try:
-                    download_archive(client, home, job, lambda: save_plan(output, plan))
+                    download_with_retries(client, home, job, lambda: save_plan(output, plan))
                 except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
                     job.update(status='needs_attention', error=str(exc), checksum_verified=False)
                     save_plan(output, plan)
