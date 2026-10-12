@@ -228,3 +228,83 @@ def test_progress_is_snapshot_and_does_not_claim_ready_readers(monkeypatch,tmp_p
     assert report['remaining_setup'][0]['id']=='courses'
     (tmp_path/library.PLAN_NAME).write_text('{broken')
     assert 'error' in api.preparation()
+
+
+def test_a_dropped_connection_resumes_by_itself_from_the_partial_file(tmp_path, capsys):
+    data = bytes(range(256)) * (3 * 4096)               # 3 MiB: written to disk 1 MiB at a time
+    job = archive(data); target = library.destination(tmp_path, job)
+    requests, waits = [], []
+
+    def dropped():
+        yield data[:1024 * 1024]; yield data[1024 * 1024:2 * 1024 * 1024]
+        raise httpx.RemoteProtocolError('peer closed connection without sending complete message body')
+
+    def handle(request):
+        requests.append(request.headers.get('range'))
+        if len(requests) == 1:
+            return httpx.Response(200, content=dropped(), headers={'Content-Length': str(len(data))})
+        start = int(request.headers['range'][6:-1])
+        return httpx.Response(206, content=data[start:], headers={
+            'Content-Range': f'bytes {start}-{len(data)-1}/{len(data)}', 'Content-Length': str(len(data) - start)})
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        library.download_with_retries(client, tmp_path, job, lambda: None, sleep=waits.append)
+    assert target.read_bytes() == data and job['status'] == 'downloaded'
+    assert requests == [None, f'bytes={2 * 1024 * 1024}-'], 'the retry asks only for what is missing'
+    assert waits == [library.RETRY_WAIT] and 'connection dropped' in capsys.readouterr().out
+
+
+def test_a_line_that_keeps_dropping_gives_up_and_keeps_the_partial(tmp_path):
+    job = archive(b'x' * 100); waits = []
+
+    def handle(request):
+        raise httpx.ReadTimeout('timed out', request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client, pytest.raises(httpx.TransportError):
+        library.download_with_retries(client, tmp_path, job, lambda: None, sleep=waits.append)
+    assert len(waits) == library.RETRIES and waits[-1] == library.RETRY_WAIT * 2 ** (library.RETRIES - 1)
+
+
+def test_a_bad_checksum_is_never_retried(tmp_path):
+    job = archive(b'complete archive'); job['hash'] = '0' * 64; calls = []
+
+    def handle(request):
+        calls.append(1); return httpx.Response(200, content=b'complete archive')
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client, pytest.raises(RuntimeError):
+        library.download_with_retries(client, tmp_path, job, lambda: None, sleep=lambda s: pytest.fail('no retry'))
+    assert len(calls) == 1
+
+
+def test_when_the_internet_stays_down_the_run_stops_instead_of_trying_every_archive(monkeypatch, tmp_path, capsys):
+    jobs = [dict(archive(b'one'), id='a', title='A'), dict(archive(b'two'), id='b', title='B'),
+            dict(archive(b'three'), id='c', title='C')]
+    (tmp_path / library.PLAN_NAME).write_text(json.dumps(
+        {'profile': 'english-worldwide', 'jobs': jobs, 'remaining_setup': []}), encoding='utf-8')
+    monkeypatch.setattr(library.apocalypse, 'enabled', lambda: False)
+    monkeypatch.setattr(library.apocalypse, 'library_root', lambda: tmp_path)
+    monkeypatch.setattr(library.shutil, 'disk_usage', lambda _: SimpleNamespace(free=10**13))
+    monkeypatch.setattr(library.sys, 'argv', ['prepare_apocalypse_library.py'])
+    tried = []
+
+    def down(client, home, job, checkpoint, **kwargs):
+        tried.append(job['id'])
+        raise httpx.ConnectError('[Errno 11001] getaddrinfo failed')
+    monkeypatch.setattr(library, 'download_with_retries', down)
+    with pytest.raises(RuntimeError, match='Rerun to resume'):
+        library.main()
+    assert tried == ['a'], 'one archive used its retries; the others were not each tried for minutes'
+    assert 'internet connection keeps failing' in capsys.readouterr().out
+    saved = json.loads((tmp_path / library.PLAN_NAME).read_text(encoding='utf-8'))
+    assert [j['status'] for j in saved['jobs']] == ['needs_attention', 'pending', 'pending']
+
+
+def test_readers_say_plainly_when_nomad_is_not_running(monkeypatch):
+    real = httpx.Client
+
+    def refused(request):
+        raise httpx.ConnectError('[WinError 10061] No connection could be made because the target machine actively refused it')
+    monkeypatch.delenv('APEX_APOCALYPSE', raising=False)
+    monkeypatch.setattr(setup.httpx, 'Client', lambda **kw: real(transport=httpx.MockTransport(refused), **kw))
+    with pytest.raises(RuntimeError, match='NOMAD is not running.*Docker Desktop.*Start-Apex-Platform.cmd'):
+        setup.prepare_nomad_readers()

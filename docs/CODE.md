@@ -261,7 +261,7 @@ It works like Claude Code or Codex, in a page.
 | | Claude plan (Claude Code) | ChatGPT plan (Codex) |
 |---|---|---|
 | **Safe** (default) | Reads, writes and edits files, searches the web. Runs only `git status/diff/log/show`, `ls`, tests (`python -m pytest`, `pytest`, `npm test`, `npm run test/lint`) and syntax checks (`python -m py_compile`, `node --check`, `node scripts/…`). Anything else is blocked, and the feed says what. Only Apex's own memory server: read-only tools, plus remember, which waits for your approval. No other MCP servers or claude.ai connectors. | Its workspace-write sandbox: writes only inside the session's copy, no network. |
-| **Full** | Any command, in the session's copy. | Full access. |
+| **Full** | Any command, in the session's copy. Plus REA's tools when the project switched REA on (below). | Full access. Plus REA when switched on. |
 | **Second opinion** | Read-only: it can't change a thing. | Read-only sandbox. |
 
 In both modes the agent is told not to commit, push or switch branches,
@@ -269,6 +269,25 @@ because Apex records its work. Your project's own `.venv` comes first on its
 PATH, so `python` runs your tests with your dependencies. On Windows, the
 message goes to the tool on stdin, never on the command line (the same
 protection as Work tasks).
+
+### REA: reverse-engineering tools (per project, Full mode)
+
+[REA (Reverse Engineer Anything)](https://github.com/morluto/rea), MIT-licensed, gives the plan
+tools to take apart software you own or may examine: Windows/Linux binaries (with Ghidra),
+Electron and JavaScript apps, .NET, Android APKs, websites and saved traffic, firmware.
+- **Switch it on per project:** the checkbox "REA reverse-engineering tools" under Checks in a
+  session's side panel. It's off by default.
+- **Full mode only.** REA can run the program it analyses, so it joins Full-mode steps on either
+  plan and never Safe mode or a second opinion. A Safe step in a project that has it on says so in
+  the feed.
+- **Pinned:** Apex starts `npx -y rea-agents@6.4.0 mcp` (change with `CODE_REA_PACKAGE` in
+  `.env`; only `rea-agents@<version>` is accepted). It needs Node.js 22.19 or newer. Without
+  `npx` the session runs without REA.
+- **Settings it gets:** only `GHIDRA_INSTALL_DIR`, `JAVA_HOME`, `REA_ANALYSIS_PROVIDER`,
+  `GHIDRA_HEADLESS_MAXMEM`, `REA_GHIDRA_STARTUP_TIMEOUT_MS` and `REA_MCP_MAX_RESPONSE_BYTES` from
+  Apex's `.env`, never your keys. Windows `.exe`/`.dll` analysis needs Ghidra and a JDK 21
+  (REA's Windows Ghidra support is read-only and new).
+- Use it only on software you own or are authorised to examine; REA's own terms say the same.
 
 ## The second opinion
 

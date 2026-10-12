@@ -1282,6 +1282,8 @@
     $('k-save').hidden = !proj || $('k-cmd').value === proj.checks;
     $('k-exit').checked = !!(proj && proj.checks_exit_ok);
     $('k-exit').disabled = !proj;
+    $('k-rea').checked = !!(proj && proj.rea);
+    $('k-rea').disabled = !proj;
     const ks = $('k-state'), why = s.check_evidence || '';
     const older = s.check_state === 'passed' && proof && proof.checks && proof.checks.stale;
     ks.className = 'k-state' + (older ? ' warn' : {passed: ' ok', failed: ' bad', unknown: ' warn'}[s.check_state] || '');
@@ -1380,6 +1382,13 @@
       await api(`/api/code/projects/${detail.project_id}`, {method: 'PATCH', body: JSON.stringify({exit_ok: on})}); await loadOverview(); renderDetail();
       say(on ? 'Exit 0 now counts as a pass for this project, even without a test count.' : 'Exit 0 without a test count is Unknown again.', 'good');
     } catch (err) { $('k-exit').checked = !on; say(err.message, 'error'); }
+  };
+  $('k-rea').onchange = async () => {
+    const on = $('k-rea').checked;
+    try {
+      await api(`/api/code/projects/${detail.project_id}`, {method: 'PATCH', body: JSON.stringify({rea: on})}); await loadOverview(); renderDetail();
+      say(on ? 'REA joins this project\'s Full-mode steps from the next message.' : 'REA is off for this project.', 'good');
+    } catch (err) { $('k-rea').checked = !on; say(err.message, 'error'); }
   };
   $('k-save').onclick = async () => {
     try { await api(`/api/code/projects/${detail.project_id}`, {method: 'PATCH', body: JSON.stringify({checks: $('k-cmd').value})}); await loadOverview(); renderDetail(); say('Checks command saved.', 'good'); }

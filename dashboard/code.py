@@ -149,7 +149,8 @@ async def edit_project(pid: int, request: Request):
     body = await _json(request)
     if isinstance(body.get('forget_allowed'), str):
         return await _do(code_studio.forget_allowed, pid, body['forget_allowed'])
-    return await _do(code_studio.update_project, pid, body.get('name'), body.get('checks'), body.get('exit_ok'))
+    return await _do(code_studio.update_project, pid, body.get('name'), body.get('checks'), body.get('exit_ok'),
+                     body.get('rea'))
 
 
 @router.post('/api/code/sessions')

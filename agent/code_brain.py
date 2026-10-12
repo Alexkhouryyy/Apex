@@ -336,16 +336,49 @@ def mcp_path(sid: int) -> Path:
     return Path(work.WORK_DIR).resolve() / 'code' / '.apex' / f'{int(sid)}-mcp.json'
 
 
-def mcp_file(sid: int, pid: int, *, read_only=False) -> Path:
-    """Apex's memory server for one session, in the shape Claude Code's --mcp-config
-    reads (Codex gets the same server as config overrides, agent/code_engines.py).
-    The server learns which code project and session it serves from its
+# What REA's server is handed from Apex's own environment (.env): where Ghidra and
+# Java live, and which engine to prefer. Nothing else of Apex's environment goes.
+REA_ENV = ('GHIDRA_INSTALL_DIR', 'JAVA_HOME', 'REA_ANALYSIS_PROVIDER', 'GHIDRA_HEADLESS_MAXMEM',
+           'REA_GHIDRA_STARTUP_TIMEOUT_MS', 'REA_MCP_MAX_RESPONSE_BYTES')
+REA_PACKAGE = re.compile(r'rea-agents@[0-9][0-9A-Za-z.+-]*')
+
+
+def _npx() -> str | None:
+    import shutil
+    return shutil.which('npx')
+
+
+def rea_server(package: str) -> dict | None:
+    """REA's MCP server (github.com/morluto/rea), started the way its docs register it:
+    npx -y <pinned package> mcp. On Windows npx is a .cmd script, which a plain
+    process start can't run, so it goes through cmd /c (as Claude Code's docs say).
+    None when npx isn't installed or the package isn't a pinned rea-agents version."""
+    npx = _npx()
+    if not npx or not REA_PACKAGE.fullmatch(package or ''):
+        return None
+    env = {'REA_MCP_INPUT_SCHEMA_PROFILE': 'compact'}
+    env.update({k: os.environ[k] for k in REA_ENV if os.environ.get(k)})
+    if os.name == 'nt':
+        return {'command': 'cmd', 'args': ['/c', 'npx', '-y', package, 'mcp'], 'env': env}
+    return {'command': npx, 'args': ['-y', package, 'mcp'], 'env': env}
+
+
+def mcp_file(sid: int, pid: int, *, read_only=False, apex=True, rea: dict | None = None) -> Path:
+    """The MCP servers for one session, in the shape Claude Code's --mcp-config
+    reads (Codex gets the same servers as config overrides, agent/code_engines.py):
+    Apex's memory server, and REA when the project switched it on (rea_server()).
+    The memory server learns which code project and session it serves from its
     environment, and uses the same database as this Apex."""
     env = {'APEX_CODE_PROJECT': str(int(pid)), 'APEX_CODE_SESSION': str(int(sid)),
            'DB_PATH': os.path.abspath(str(longterm.DB_PATH))}
     if read_only:
         env['APEX_CODE_READ_ONLY'] = '1'
-    config = {'mcpServers': {'apex': {'command': sys.executable, 'args': [str(MCP_SCRIPT)], 'env': env}}}
+    servers = {}
+    if apex:
+        servers['apex'] = {'command': sys.executable, 'args': [str(MCP_SCRIPT)], 'env': env}
+    if rea:
+        servers['rea'] = rea
+    config = {'mcpServers': servers}
     path = mcp_path(sid)
     if read_only:
         path = path.with_name(path.stem + '-review' + path.suffix)

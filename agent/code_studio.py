@@ -221,7 +221,9 @@ def init_db() -> None:
                 db.execute(f'ALTER TABLE code_sessions ADD COLUMN {col} {ddl}')
         # checks_exit_ok: this project's test runner prints no count, so exit 0 is taken as a pass.
         have = {r[1] for r in db.execute('PRAGMA table_info(code_projects)')}
-        for col, ddl in (('allow', "TEXT NOT NULL DEFAULT '[]'"), ('checks_exit_ok', 'INTEGER NOT NULL DEFAULT 0')):
+        # rea: REA's reverse-engineering tools join this project's Full-mode sessions.
+        for col, ddl in (('allow', "TEXT NOT NULL DEFAULT '[]'"), ('checks_exit_ok', 'INTEGER NOT NULL DEFAULT 0'),
+                         ('rea', 'INTEGER NOT NULL DEFAULT 0')):
             if col not in have:
                 db.execute(f'ALTER TABLE code_projects ADD COLUMN {col} {ddl}')
     if not _recovered:
@@ -426,11 +428,16 @@ def create_project(path: str, name: str = '') -> dict:
         raise CodeError(f'Project preparation stopped in {folder}: {exc}. The folder is kept so you can inspect it.') from exc
 
 
-def update_project(pid: int, name=None, checks=None, exit_ok=None) -> dict:
+def update_project(pid: int, name=None, checks=None, exit_ok=None, rea=None) -> dict:
     """exit_ok: count a test run that exits 0 without printing a count as passed
-    (for a runner that never prints one); otherwise that is 'unknown'."""
+    (for a runner that never prints one); otherwise that is 'unknown'.
+    rea: REA's reverse-engineering tools in this project's Full-mode sessions."""
     project(pid)
     fields = {}
+    if rea is not None:
+        if not isinstance(rea, bool):
+            raise CodeError('REA tools are on or off.')
+        fields['rea'] = int(rea)
     if exit_ok is not None:
         if not isinstance(exit_ok, bool):
             raise CodeError('"Exit 0 counts as a pass" is on or off.')
@@ -887,15 +894,20 @@ def _brain(s: dict, prompt: str) -> dict | None:
     return block
 
 
-def _memory_server(s: dict, *, read_only=False) -> str:
-    """Apex's memory server for this session (agent/code_brain.mcp_file), written
-    afresh each time: '' when it is turned off (CODE_APEX_MCP=false) or the file
-    can't be written. A session never fails for want of it."""
+def _memory_server(s: dict, *, read_only=False, rea=False) -> str:
+    """The session's MCP servers (agent/code_brain.mcp_file), written afresh each
+    time: Apex's memory server unless it is turned off (CODE_APEX_MCP=false), and
+    REA when `rea` (the project switched it on and this is a Full-mode step; it can
+    run the program it analyses, so never Safe mode or a review) and npx exists.
+    '' when there are none or the file can't be written. A session never fails for
+    want of it."""
     import config
-    if not getattr(config, 'CODE_APEX_MCP', True):
+    apex = bool(getattr(config, 'CODE_APEX_MCP', True))
+    server = code_brain.rea_server(getattr(config, 'CODE_REA_PACKAGE', '')) if rea and not read_only else None
+    if not apex and not server:
         return ''
     try:
-        return str(code_brain.mcp_file(s['id'], s['project_id'], read_only=read_only))
+        return str(code_brain.mcp_file(s['id'], s['project_id'], read_only=read_only, apex=apex, rea=server))
     except OSError as exc:
         print(f"[Code] could not set up Apex's memory server for session {s['id']}: {exc}")
         return ''
@@ -1009,7 +1021,11 @@ def send(sid: int, prompt: str, engine: str | None = None, mode: str | None = No
         about = block['text'] if block and engine == 'chatgpt' else ''
         if engine == 'claude':
             options['system_file'] = _system_file(sid, block, fresh)
-        options['mcp_file'] = _memory_server(s)
+        rea = bool(project(s['project_id']).get('rea'))
+        options['mcp_file'] = _memory_server(s, rea=rea and mode == 'full')
+        if rea and mode != 'full':
+            _notes = (*_notes, 'REA is on for this project, but it can run the program it analyses, '
+                      'so it only joins Full-mode steps. Switch to Full to use it.')
         options['images'] = code_engines.wants_images(prompt)   # the owner's words only
         if first:
             text = _brief(s, prompt, about, memory=bool(options['mcp_file']))
