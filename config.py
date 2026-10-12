@@ -692,6 +692,10 @@ OWNER_NAME = os.getenv("OWNER_NAME", "Alex").strip()
 # Apex's own memory server (scripts/apex_mcp.py) inside every Apex Code session: the plan can
 # ask Apex's memory while it works, and `remember` only suggests a memory for your OK. false: off.
 CODE_APEX_MCP = os.getenv("CODE_APEX_MCP", "true").lower() in {"1", "true", "yes"}
+# REA (Reverse Engineer Anything, github.com/morluto/rea, MIT): its MCP server joins
+# a session only for a project where you switched it on, and only in Full mode (it
+# can run the program it analyses). Pinned, as REA's own docs ask; started with npx.
+CODE_REA_PACKAGE = os.getenv("CODE_REA_PACKAGE", "rea-agents@6.4.0").strip()
 
 # Local Qwen speech via the Voicebox desktop application.
 VOICEBOX_URL = os.getenv("VOICEBOX_URL", "http://127.0.0.1:17493")

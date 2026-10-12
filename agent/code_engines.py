@@ -70,6 +70,7 @@ DIFF_CAP = 12000
 # Apex's memory server: these only read (and what they return is redacted); remember stages for approval.
 APEX_MCP_READ = ['mcp__apex__context', 'mcp__apex__recall', 'mcp__apex__lessons', 'mcp__apex__search_files']
 APEX_MCP_WRITE = ['mcp__apex__remember']
+REA_MCP = ['mcp__rea']                       # every REA tool: it only joins a Full-mode session
 ENV_NAME = re.compile(r'^[A-Z][A-Z0-9_]{0,63}$')     # a bare TOML key, and a plain environment name
 
 
@@ -133,8 +134,11 @@ def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None =
         if mode != 'review':                 # Allow once: exactly that command. Always: it, with any arguments.
             tools += [f'Bash({c})' for c in o['allow']]
             tools += [f'Bash({c}:*)' for c in o['always']]
-        if o['mcp_file']:                    # Apex's memory: reading always; suggesting a memory, not in a review
+        servers = mcp_servers(o['mcp_file']) if o['mcp_file'] else {}
+        if 'apex' in servers:                # Apex's memory: reading always; suggesting a memory, not in a review
             tools += APEX_MCP_READ + (APEX_MCP_WRITE if mode != 'review' else [])
+        if 'rea' in servers and mode == 'full':
+            tools += REA_MCP
         cmd = [exe, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
                '--permission-mode', 'plan' if o['plan'] or mode == 'review' else 'acceptEdits', '--allowedTools', *tools, '--strict-mcp-config']
         if o['mcp_file']:
@@ -176,24 +180,42 @@ def command(engine: str, exe: str, folder: Path, mode: str, resume: str | None =
     return cmd + ['-']                         # '-': the message comes in on stdin
 
 
-def _codex_mcp(path: str, mode: str) -> list[str]:
-    """Apex's memory server for Codex, from the same file Claude Code reads, as
-    config overrides. json.dumps writes a valid TOML basic string (Windows
-    backslashes included); ensure_ascii=False keeps an accent in a path as it is.
-    In a review the server itself refuses to suggest a memory."""
+def mcp_servers(path: str) -> dict:
+    """The servers a session's MCP file names."""
     try:
-        server = json.loads(Path(path).read_text(encoding='utf-8'))['mcpServers']['apex']
-        command, args, env = str(server['command']), [str(a) for a in server['args']], dict(server.get('env') or {})
+        servers = json.loads(Path(path).read_text(encoding='utf-8'))['mcpServers']
+        if not isinstance(servers, dict):
+            raise TypeError('mcpServers is not a table')
+        return servers
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise ValueError(f"Apex's memory server file can't be read: {exc}") from exc
-    if mode == 'review':
-        env['APEX_CODE_READ_ONLY'] = '1'
-    if any(not ENV_NAME.match(str(k)) for k in env):
-        raise ValueError("Apex's memory server file names an environment variable Apex does not pass on.")
-    table = ', '.join(f'{k}={json.dumps(str(v), ensure_ascii=False)}' for k, v in env.items())
-    return ['-c', f'mcp_servers.apex.command={json.dumps(command, ensure_ascii=False)}',
-            '-c', f'mcp_servers.apex.args={json.dumps(args, ensure_ascii=False)}',
-            '-c', f'mcp_servers.apex.env={{{table}}}']
+
+
+def _codex_mcp(path: str, mode: str) -> list[str]:
+    """The session's MCP servers for Codex, from the same file Claude Code reads, as
+    config overrides. json.dumps writes a valid TOML basic string (Windows
+    backslashes included); ensure_ascii=False keeps an accent in a path as it is.
+    In a review the memory server itself refuses to suggest a memory, and REA
+    only ever joins a Full-mode session."""
+    out = []
+    for name, server in mcp_servers(path).items():
+        if name not in ('apex', 'rea') or (name == 'rea' and mode != 'full'):
+            continue
+        try:
+            command, args, env = str(server['command']), [str(a) for a in server['args']], dict(server.get('env') or {})
+        except (KeyError, TypeError) as exc:
+            raise ValueError(f"Apex's memory server file can't be read: {exc}") from exc
+        if name == 'apex' and mode == 'review':
+            env['APEX_CODE_READ_ONLY'] = '1'
+        if any(not ENV_NAME.match(str(k)) for k in env):
+            raise ValueError("Apex's memory server file names an environment variable Apex does not pass on.")
+        table = ', '.join(f'{k}={json.dumps(str(v), ensure_ascii=False)}' for k, v in env.items())
+        out += ['-c', f'mcp_servers.{name}.command={json.dumps(command, ensure_ascii=False)}',
+                '-c', f'mcp_servers.{name}.args={json.dumps(args, ensure_ascii=False)}',
+                '-c', f'mcp_servers.{name}.env={{{table}}}']
+        if name == 'rea':                  # npx fetches REA on first use; its docs give it 30 s
+            out += ['-c', 'mcp_servers.rea.startup_timeout_sec=30']
+    return out
 
 
 # ---------------------------------------------------------------- the feed

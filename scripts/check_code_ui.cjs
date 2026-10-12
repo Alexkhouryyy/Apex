@@ -44,7 +44,7 @@ w.ReadableStream = ReadableStream; w.TextDecoder = TextDecoder; w.AbortControlle
 w.CSS = w.CSS || {escape: x => String(x).replace(/["\\]/g, '\\$&')};
 const now = Date.now() / 1000;
 let plans = [{id: 'claude', name: 'Claude plan', ready: true, why: '', how: ''}, {id: 'chatgpt', name: 'ChatGPT plan', ready: true, why: '', how: ''}];
-let exitOk = 0, extraSessions = [];
+let exitOk = 0, reaOn = 0, extraSessions = [];
 // What the night shift built (agent/code_studio.overnight), for the morning's strip.
 const NIGHT = (id, title, extra = {}) => ({id, title, project: 'Apex', project_id: 1, origin: 'night', task: {id: id - 20, title}, engine: 'claude',
   engine_name: 'Claude plan', last_status: 'done', working: false, verdict: 'unverified', reasons: [], checks: 'none', why: '', claimed: false,
@@ -54,7 +54,7 @@ let nightDoc = [];
 const CLAUDE_LINE = {key: 'engine:claude', text: 'Claude plan here: kept 7 of 9, 6 with proof', n: 9, hits: 7, rate: 0.778};
 let recordDoc = {lines: [{key: 'no_checks', text: 'thrown away 4 of 6 when no checks ran', n: 6, hits: 4, rate: 0.667}, CLAUDE_LINE],
   engines: {claude: CLAUDE_LINE}, decided: 15, note: 'Counted from 15 finished sessions in the last 90 days.'};
-const overview = () => ({owner: 'Alex', projects: [{id: 1, name: 'Apex', path: 'C:\\Apex', checks: 'python -m pytest -q', branch: 'main', checks_exit_ok: exitOk}],
+const overview = () => ({owner: 'Alex', projects: [{id: 1, name: 'Apex', path: 'C:\\Apex', checks: 'python -m pytest -q', branch: 'main', checks_exit_ok: exitOk, rea: reaOn}],
   sessions: [{id: 7, project_id: 1, title: 'Add Focus mode', engine: 'claude', mode: 'safe', status: 'ready', last_status: 'done', files_changed: 2, review_rating: 8, updated: now - 120, working: false},
              {id: 3, project_id: 1, title: 'Old try', engine: 'chatgpt', mode: 'safe', status: 'discarded', last_status: 'done', files_changed: 0, review_rating: null, updated: now - 9000, working: false},
              ...extraSessions],
@@ -199,7 +199,7 @@ w.fetch = async (url, opts = {}) => {
       reasons: [...proofDoc.reasons, `You reported ${output}: noted, but Apex didn't see it run.`]};
     return Response.json(proofDoc);
   }
-  if (url === '/api/code/projects/1' && opts.method === 'PATCH') { exitOk = JSON.parse(opts.body).exit_ok ? 1 : 0; return Response.json(overview().projects[0]); }
+  if (url === '/api/code/projects/1' && opts.method === 'PATCH') { const b = JSON.parse(opts.body); if ('exit_ok' in b) exitOk = b.exit_ok ? 1 : 0; if ('rea' in b) reaOn = b.rea ? 1 : 0; return Response.json(overview().projects[0]); }
   let m = url.match(/^\/api\/code\/sessions\/(\d+)\/events\?after=(.*)$/);
   if (m) { assert.match(m[2], /^\d+$/, 'the feed always asks with a real number'); return Response.json({events: feed.filter(e => e.id > Number(m[2]))}); }
   m = url.match(/^\/api\/code\/sessions\/(\d+)\/stream\?after=(.*)$/);
@@ -995,6 +995,12 @@ async function phone() {
   $('k-exit').checked = true; $('k-exit').dispatchEvent(new w.Event('change')); await tick(); await tick();
   assert.deepEqual(calls.filter(c => c.url === '/api/code/projects/1' && c.method === 'PATCH').at(-1).body, {exit_ok: true});
   assert.match($('toast').textContent, /^Exit 0 now counts as a pass/); assert.equal($('k-exit').checked, true);
+  // REA: a project setting too, and it says it joins Full-mode steps only.
+  assert.equal($('k-rea').checked, false); assert.match($('k-rea').parentElement.textContent, /Full mode/);
+  $('k-rea').checked = true; $('k-rea').dispatchEvent(new w.Event('change')); await tick(); await tick();
+  assert.deepEqual(calls.filter(c => c.url === '/api/code/projects/1' && c.method === 'PATCH').at(-1).body, {rea: true});
+  assert.match($('toast').textContent, /^REA joins this project's Full-mode steps/); assert.equal($('k-rea').checked, true);
+  assert.equal($('k-exit').checked, true, 'switching REA leaves Exit 0 alone');
   // A pass on an older checkpoint, a change that edits tests, and a second opinion that disagrees.
   session = {...session, check_state: 'passed', check_evidence: '212 passed'};
   proofDoc = PROOF({checks: {state: 'passed', why: '212 passed', sha: 'd'.repeat(40), checkpoint: 4, command: 'python -m pytest -q', stale: true, changed_since: ['a.py', 'b.py']},

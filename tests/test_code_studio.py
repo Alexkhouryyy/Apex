@@ -2059,6 +2059,75 @@ def test_the_memory_server_on_both_plans_command_lines(tmp_path):
         code_engines.command('chatgpt', 'codex', tmp_path, 'safe', options={'mcp_file': str(broken)})
 
 
+# ---------------------------------------------------------------- REA: reverse-engineering tools, per project, Full mode only
+
+def _rea_config(tmp_path):
+    path = tmp_path / 'mcp-rea.json'
+    path.write_text(json.dumps({'mcpServers': {
+        'apex': {'command': '/usr/bin/python3', 'args': ['/apex/scripts/apex_mcp.py'], 'env': {'APEX_CODE_PROJECT': '3'}},
+        'rea': {'command': '/usr/bin/npx', 'args': ['-y', 'rea-agents@6.4.0', 'mcp'],
+                'env': {'REA_MCP_INPUT_SCHEMA_PROFILE': 'compact', 'GHIDRA_INSTALL_DIR': 'C:\\tools\\ghidra'}}}}))
+    return path
+
+
+def test_rea_tools_reach_full_mode_only_on_both_plans(tmp_path):
+    import tomllib
+    cfg = _rea_config(tmp_path)
+    allowed = lambda argv: argv[argv.index('--allowedTools') + 1:argv.index('--strict-mcp-config')]
+    full = code_engines.command('claude', 'claude', tmp_path, 'full', options={'mcp_file': str(cfg)})
+    assert 'mcp__rea' in allowed(full) and 'mcp__apex__recall' in allowed(full)
+    for mode in ('safe', 'review'):             # it can run what it analyses: never allowed there
+        argv = code_engines.command('claude', 'claude', tmp_path, mode, options={'mcp_file': str(cfg)})
+        assert not any(t.startswith('mcp__rea') for t in allowed(argv)), mode
+    codex = code_engines.command('chatgpt', 'codex', tmp_path, 'full', options={'mcp_file': str(cfg)})
+    sets = dict(codex[i + 1].split('=', 1) for i, a in enumerate(codex) if a == '-c')
+    assert tomllib.loads(f"v = {sets['mcp_servers.rea.args']}")['v'] == ['-y', 'rea-agents@6.4.0', 'mcp']
+    assert tomllib.loads(f"v = {sets['mcp_servers.rea.env']}")['v']['GHIDRA_INSTALL_DIR'] == 'C:\\tools\\ghidra'
+    assert sets['mcp_servers.rea.startup_timeout_sec'] == '30' and 'mcp_servers.apex.command' in sets
+    for mode in ('safe', 'review'):
+        argv = code_engines.command('chatgpt', 'codex', tmp_path, mode, options={'mcp_file': str(cfg)})
+        assert not any('mcp_servers.rea' in a for a in argv) and any('mcp_servers.apex' in a for a in argv), mode
+
+
+def test_rea_server_is_pinned_started_with_npx_and_gets_only_its_settings(monkeypatch):
+    from agent import code_brain
+    monkeypatch.setattr(code_brain, '_npx', lambda: None)
+    assert code_brain.rea_server('rea-agents@6.4.0') is None, 'no npx: no REA, the session still runs'
+    monkeypatch.setattr(code_brain, '_npx', lambda: '/usr/bin/npx')
+    for name in code_brain.REA_ENV:
+        monkeypatch.delenv(name, raising=False)
+    for bad in ('rea-agents', 'rea-agents@latest', 'evil-package@1.0.0', 'rea-agents@6.4.0 && calc', ''):
+        assert code_brain.rea_server(bad) is None, bad
+    monkeypatch.setenv('GHIDRA_INSTALL_DIR', '/opt/ghidra')
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'sk-ant-secret')
+    server = code_brain.rea_server('rea-agents@6.4.0')
+    assert server['args'][-3:] == ['-y', 'rea-agents@6.4.0', 'mcp'] or server['args'][-2:] == ['rea-agents@6.4.0', 'mcp']
+    assert server['env'] == {'REA_MCP_INPUT_SCHEMA_PROFILE': 'compact', 'GHIDRA_INSTALL_DIR': '/opt/ghidra'}
+    monkeypatch.setattr(code_brain.os, 'name', 'nt')
+    assert code_brain.rea_server('rea-agents@6.4.0')['command'] == 'cmd'   # npx.cmd needs cmd /c on Windows
+
+
+def test_a_project_switches_rea_on_for_its_full_mode_steps(lab, monkeypatch):
+    from agent import code_brain
+    monkeypatch.setattr(code_brain, '_npx', lambda: '/usr/bin/npx')
+    assert code_studio.project(lab.pid)['rea'] == 0
+    with pytest.raises(code_studio.CodeError):
+        code_studio.update_project(lab.pid, rea='yes')
+    assert code_studio.update_project(lab.pid, rea=True)['rea'] == 1
+    sid = wait(code_studio.start(lab.pid, 'Look at this binary', 'claude', mode='full')['id'])['id']
+    argv = lab.calls('claude')[-1]['argv']
+    servers = json.loads(Path(argv[argv.index('--mcp-config') + 1]).read_text())['mcpServers']
+    assert set(servers) == {'apex', 'rea'} and 'mcp__rea' in argv
+    code_studio.send(sid, 'Now in Safe', mode='safe'); wait(sid)
+    argv = lab.calls('claude')[-1]['argv']
+    assert 'rea' not in json.loads(Path(argv[argv.index('--mcp-config') + 1]).read_text())['mcpServers']
+    assert any(e['kind'] == 'note' and 'REA' in e['text'] for e in code_studio.events(sid)), 'Safe mode says why'
+    code_studio.update_project(lab.pid, rea=False)
+    code_studio.send(sid, 'Full again, REA off', mode='full'); wait(sid)
+    argv = lab.calls('claude')[-1]['argv']
+    assert 'rea' not in json.loads(Path(argv[argv.index('--mcp-config') + 1]).read_text())['mcpServers']
+
+
 def test_calls_to_apex_memory_show_as_memory_steps(tmp_path):
     assert code_engines._claude_tool('mcp__apex__recall', {'query': 'logging'}, tmp_path) == \
         [{'kind': 'tool', 'tool': 'memory', 'title': "Checked Apex's memory: logging"}]
