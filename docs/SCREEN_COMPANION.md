@@ -42,6 +42,8 @@ enables the required local dashboard without editing your saved configuration.
   without starting the microphone. **Quit Apex** shuts down its owned desktop
   window and drawing surface. Closing the native window stops/hides it while
   leaving Apex ready for the next hotkey.
+  Tray mute stops native help and prevents F8 from starting a new capture until
+  you unmute.
 
 The new native window runs on its own main GUI thread; the older optional orb
 is not started alongside it. An already running, updated Apex can be attached
@@ -58,6 +60,24 @@ Setup-Apex-Screen-Companion.cmd --uninstall
 To install startup without starting it immediately, add `--no-start`.
 Startup and native-window errors are recorded in
 `%LOCALAPPDATA%\Apex\Companion\startup.log` and `desktop.log`.
+
+For this feature branch, update a clean laptop checkout from Command Prompt:
+
+```cmd
+cd /d "%USERPROFILE%\Apex"
+git status --short
+git fetch origin
+git switch apex/screen-companion-hotkey
+git pull --ff-only
+```
+
+Save any changes shown by `git status` before switching. Quit the older Apex
+instance from its tray and close its launcher, then run
+`Setup-Apex-Screen-Companion.cmd`. Verify F8 opens help over another application,
+first-use microphone consent, accurate arrows, F8/Stop/Esc during a reply, and
+typed follow-ups in Chat. Sign out and back in to verify silent login startup
+and that the next F8 works without opening a browser. After those checks,
+remember to merge the branch on your laptop.
 
 ### Visual explanations on your Windows screen
 
@@ -227,10 +247,10 @@ laptop:
 - Reload the page and restart Apex; ask about a recent decision and verify
   continuity. Try an optional check-in and then disable it.
 
-The cloud browser available during implementation could not reach the local
-preview server (`ERR_BLOCKED_BY_CLIENT`). Visual layout, native media capture,
-floating-window behavior, and live provider behavior therefore remain desktop
-acceptance checks; they are not claimed as verified.
+The native compact and expanded layouts were rendered in controlled Chromium
+previews. Windows CI checks the actual native shell and overlay. Actual laptop
+microphone capture, browser floating-window behavior, mixed display scaling,
+login startup and live provider quality remain hands-on acceptance checks.
 
 ## Platform references
 

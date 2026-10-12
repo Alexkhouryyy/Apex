@@ -417,3 +417,18 @@ def test_setup_does_not_report_an_unregistered_hotkey_as_ready(monkeypatch):
     monkeypatch.setattr(setup.urllib.request,'build_opener',lambda *args:opener)
     with pytest.raises(RuntimeError,match='hotkey could not register'):
         setup.readiness({})
+
+
+def test_tray_mute_stops_native_help_and_prevents_new_capture(native,monkeypatch):
+    from app.resident import ResidentState
+    monkeypatch.setattr(desktop,'_is_muted',lambda:False)
+    state=ResidentState();desktop.bind_resident(state)
+    captures=[]
+    monkeypatch.setattr(look_now,'on_hotkey',lambda:captures.append(True))
+    state.mute(-1)
+    assert desktop.status()['mode']=='idle'
+    assert desktop.poll(0)[-1]['item']['kind']=='stop'
+    desktop.on_hotkey()
+    assert captures==[],'muted F8 must not take a screenshot or activate voice'
+    state.mute(0);desktop.on_hotkey()
+    assert captures==[True]

@@ -217,6 +217,8 @@ def run_resident(model_override: Optional[str] = None) -> None:
 
     # Scheduler — pass a thin speak that goes through the state machine
     state = ResidentState()
+    from agent import desktop_companion
+    desktop_companion.bind_resident(state)
     sched.init(agent_run_fn=agent.run, speak_fn=lambda t: _speak_with_state(state, t))
 
     # Autonomous cortex — BUG FIX: resident mode previously built no AwarenessMonitor,

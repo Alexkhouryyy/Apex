@@ -28,6 +28,25 @@ _shown = False
 _mode = 'idle'
 _url = ''
 _keys = None
+_is_muted = lambda: False
+
+
+def bind_resident(state):
+    """The desktop hotkey honors the same tray mute as resident wake controls."""
+    global _is_muted
+    _is_muted = state.is_muted
+    def changed(value):
+        if value == state.MUTED and running():
+            clear()
+            activate({'kind': 'stop', 'source': 'mute'})
+    state.add_listener(changed)
+
+
+def on_hotkey():
+    from agent import look_now
+    # A stop must remain possible while muted; a new capture must not start.
+    if status()['mode'] == 'screen' or not _is_muted():
+        look_now.on_hotkey()
 
 
 def local_url(url: str) -> str:
@@ -82,10 +101,9 @@ def start(url: str) -> dict:
         if _keys is not None:
             _keys.stop()
         from app.hotkey import GlobalHotkeys
-        from agent import look_now
         import config
         keys = GlobalHotkeys()
-        keys.bind(config.COMPANION_HOTKEY, look_now.on_hotkey)
+        keys.bind(config.COMPANION_HOTKEY, on_hotkey)
         _keys = keys if keys.start() else None
         return status()
 
