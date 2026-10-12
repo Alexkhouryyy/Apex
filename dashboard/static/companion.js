@@ -1211,8 +1211,14 @@
     }
     if (busy()) { error('Celine was busy and could not look — press the hotkey again.'); return; }
     if (desktopConnected && invocation !== desktopEpoch) return;
-    await startLive();
+    const listening = await startLive();
     if (desktopConnected && invocation !== desktopEpoch) return;
+    if (desktopConnected && !listening) {
+      // Screen help can still answer in text when microphone access fails.
+      // The compact voice window is too short for the full chat composer.
+      await window.pywebview.api.expand();
+      if (invocation !== desktopEpoch) return;
+    }
     await send(item.question || LOOK_DEFAULT, false, null, Boolean(hands?.enabled), {seq: item.seq});
   }
   async function boot() {

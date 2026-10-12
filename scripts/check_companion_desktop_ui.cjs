@@ -5,20 +5,20 @@ const path=require('path');
 const assert=require('node:assert/strict');
 const base=path.join(__dirname,'..','dashboard','static');
 const tick=()=>new Promise(resolve=>setTimeout(resolve,25));
-async function scenario(native){
+async function scenario(native,noMicrophone=false){
  const dom=new JSDOM(fs.readFileSync(path.join(base,'companion.html'),'utf8'),{
   url:'http://127.0.0.1:7860/companion'+(native?'?desktop=1':''),runScripts:'outside-only'});
  const w=dom.window,$=id=>w.document.getElementById(id);
- let ready=0,hidden=0,mics=0,stops=0,streams=[],requests=[];
+ let ready=0,hidden=0,mics=0,stops=0,expanded=0,streams=[],requests=[];
  Object.defineProperty(w.navigator,'userActivation',{value:{hasBeenActive:false}});
  w.TextDecoder=TextDecoder;
  w.speechSynthesis={cancel(){},speak(){}};
  const nativeApi={connect:async()=>({desktop:true,token:'owner-token',hotkey:'<f8>'}),
-                  ready:async()=>{ready++;},hide:async()=>{hidden++;}};
+                  ready:async()=>{ready++;},hide:async()=>{hidden++;},expand:async()=>{expanded++;}};
  w.pywebview=native?{api:{}}:undefined;
  w.ApexHandsFree=class{
   constructor(opts){this.opts=opts;this.enabled=false;this.epoch=1;}
-  async start(){mics++;this.enabled=true;this.opts.onState('Listening · pause to send');}
+  async start(){mics++;if(noMicrophone)throw new Error('Microphone permission denied');this.enabled=true;this.opts.onState('Listening · pause to send');}
   pause(){}resume(){}stop(){stops++;this.enabled=false;this.epoch++;}
  };
  w.fetch=async(url,opts={})=>{
@@ -50,6 +50,7 @@ async function scenario(native){
   w.ApexDesktop.activate({kind:'look',source:'hotkey',seq:4});
   await tick();await tick();
   assert.equal(mics,1,'native hotkey works without a previous browser click');
+  if(noMicrophone)assert.equal(expanded,1,'denied microphone must leave a usable full text window');
   const call=requests.find(r=>r.url==='/api/companion/chat');assert(call);
   const body=JSON.parse(call.opts.body);
   assert.equal(body.look_id,4);assert.equal(body.mode,'discuss','screen help preserves Discuss');
@@ -75,6 +76,6 @@ async function scenario(native){
  dom.window.close();
 }
 (async()=>{
- await scenario(true);await scenario(false);
+ await scenario(true);await scenario(true,true);await scenario(false);
  console.log('PASS: silent native boot, F8 hint, owner authentication, click-free native activation, Discuss guidance, no competing browser claim, and stop/hide/cancel.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
