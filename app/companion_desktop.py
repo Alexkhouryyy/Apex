@@ -247,6 +247,12 @@ def main(argv=None):
         if os.name != 'nt':
             return
         try:
+            from app.window_capture import exclude_from_capture
+            if not exclude_from_capture(window.native.Handle.ToInt64()):
+                logging.warning('Windows could not exclude the Companion window from screen capture.')
+        except Exception:
+            logging.exception('Native capture exclusion unavailable')
+        try:
             from Microsoft.Web.WebView2.Core import CoreWebView2PermissionState
             def requested(sender, event):
                 try:

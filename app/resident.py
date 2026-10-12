@@ -289,7 +289,7 @@ def run_resident(model_override: Optional[str] = None) -> None:
         try:
             from agent import desktop_companion
             desktop_companion.start(_dashboard_url)
-            logging.info('Desktop Companion started hidden; use the Celine hotkey to open it.')
+            logging.info('Desktop Companion started hidden; use %s to open it.', config.COMPANION_HOTKEY)
         except Exception as e:
             logging.error(f'Desktop Companion unavailable: {e}')
     elif getattr(config, "ORB_ENABLED", False):

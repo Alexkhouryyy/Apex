@@ -37,6 +37,8 @@ def configure_window(window):
     put.argtypes, put.restype = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t], ctypes.c_ssize_t
     hwnd = user.GetParent(window.winfo_id()) or window.winfo_id()
     put(hwnd, -20, get(hwnd, -20) | CLICK_THROUGH)
+    from app.window_capture import exclude_from_capture
+    exclude_from_capture(hwnd)
     return hwnd
 
 

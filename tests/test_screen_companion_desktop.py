@@ -242,6 +242,10 @@ def test_real_windows_overlay_acknowledges_click_through_and_expiry():
         hwnd=result['hwnd']
         assert user.IsWindowVisible(hwnd)
         assert user.GetWindowLongPtrW(hwnd,-20)&CLICK_THROUGH==CLICK_THROUGH
+        affinity=wintypes.DWORD()
+        user.GetWindowDisplayAffinity.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.DWORD)]
+        assert user.GetWindowDisplayAffinity(hwnd,ctypes.byref(affinity))
+        assert affinity.value==0x11,'our own guidance must not feed back into screen capture'
         time.sleep(2.3)
         assert not user.IsWindowVisible(hwnd),'expired marks must disappear'
         proc.stdin.write('{"kind":"quit"}\n');proc.stdin.flush();proc.wait(timeout=5)

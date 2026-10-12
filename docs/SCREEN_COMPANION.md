@@ -70,6 +70,8 @@ awareness and supports negative monitor origins. The tool requires that exact,
 fresh frame ID and confirmation from the native renderer. A queued command is
 not reported as a verified drawing. Browser/phone images and ordinary chat
 cannot draw on the host desktop through this tool.
+On supported Windows versions, the native window and marks request capture
+exclusion so subsequent snapshots focus on the application being explained.
 
 Native screen help preserves the selected **Discuss/Work** mode. Discuss can
 draw explanatory marks but cannot click, type, run commands or edit user files.
@@ -130,7 +132,8 @@ on the wording of a reply.
 - Microphone transcription and the optional OpenAI voice reuse the dashboard's
   `/api/transcribe` and `/api/speak` endpoints. They require `OPENAI_API_KEY`.
   Device speech does not require the OpenAI TTS endpoint.
-- Replies stream as text. Voice output begins after the completed reply; this
+- Replies stream as text. With **Speak as it writes**, voice can begin with the
+  first phrase or sentence; otherwise it waits for the completed reply. This
   is not a real-time voice-to-voice implementation. Tap Talk to interrupt
   playback; use Stop while the agent is thinking or working.
 - A stable `companion:<thread_id>` channel retains context across turns. Text
