@@ -21,6 +21,9 @@ For language intelligence, debugging, tasks, Git and extensions, install the
 optional [Full IDE](ide/README.md) with `Setup-Apex-Code-IDE.cmd`, then choose
 **Full IDE** inside your workspace.
 
+Take apart software you own to see how it works (REA reverse engineering, owner-only, read-only):
+**[docs/REVERSE.md](docs/REVERSE.md)**.
+
 **Use all of it:** one prompt that walks you through every part of Apex, station by station: **[docs/USE_ALL_OF_APEX.md](docs/USE_ALL_OF_APEX.md)**.
 
 Full write-up, feature map and honest state: **[docs/APEX_OVERVIEW.md](docs/APEX_OVERVIEW.md)**.

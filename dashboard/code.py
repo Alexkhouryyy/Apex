@@ -18,6 +18,11 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 
 import config
 from agent import board_workspaces, code_brain, code_studio
+
+
+def _reverse_error():
+    from agent.reverse import ReverseError
+    return ReverseError
 from dashboard.companion import _check_origin
 
 router = APIRouter()
@@ -54,6 +59,8 @@ async def _do(call, *args, **kwargs):
     except code_studio.FileConflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except (code_studio.CodeError, code_brain.CodeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except _reverse_error() as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
