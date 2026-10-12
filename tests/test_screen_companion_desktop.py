@@ -151,6 +151,7 @@ def test_keyboard_callback_returns_while_action_is_blocked(monkeypatch):
         def start(self): pass
         def stop(self): stopped.set()
     monkeypatch.setitem(sys.modules, 'pynput', SimpleNamespace(keyboard=SimpleNamespace(GlobalHotKeys=Listener)))
+    monkeypatch.setenv('DISPLAY', ':test')  # this test deliberately supplies a mock display listener
     def capture():
         started.set(); release.wait(3)
     keys = GlobalHotkeys(); keys.bind('<ctrl>+<alt>+c', capture)
@@ -371,6 +372,7 @@ def test_model_only_receives_drawing_for_an_owner_host_frame(core_agent,native,m
 
 @pytest.mark.skipif(os.name!='nt',reason='real native WebView2 window')
 def test_real_native_window_authenticates_boots_silently_and_exits(tmp_path,monkeypatch):
+    pytest.importorskip('webview',reason='optional native window; dedicated desktop CI installs it')
     import socket
     import uvicorn
     from fastapi import FastAPI

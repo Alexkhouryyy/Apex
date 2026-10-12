@@ -12,6 +12,7 @@ import queue
 import threading
 import os
 import re
+import sys
 
 
 class WindowsFunctionHotkey:
@@ -83,6 +84,9 @@ class GlobalHotkeys:
 
     def start(self) -> bool:
         if not self._bindings:
+            return False
+        if sys.platform.startswith('linux') and not os.environ.get('DISPLAY'):
+            print('[Hotkey] Not available: no X11 DISPLAY on this headless host.')
             return False
         try:
             # Windows removes slow keyboard hooks. Capture/GUI/model work must
