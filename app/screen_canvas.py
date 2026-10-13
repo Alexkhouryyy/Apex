@@ -86,7 +86,7 @@ def main(argv=None):
     backdrop = None
 
     def capture_backdrop():
-        nonlocal backdrop
+        nonlocal backdrop, hwnd
         # Color-keyed blank pixels cannot receive mouse input on Windows.
         # Edit over a frozen screen image, then Done restores the live,
         # click-through desktop with just the user-created marks visible.
@@ -97,6 +97,8 @@ def main(argv=None):
             shot = screen.grab({k:frame[k] for k in ('left','top','width','height')})
             backdrop = ImageTk.PhotoImage(Image.frombytes('RGB',shot.size,shot.rgb))
         root.deiconify()
+        hwnd = set_editing(root, editing)
+        user.SetWindowPos(hwnd,wintypes.HWND(-1),frame['left'],frame['top'],frame['width'],frame['height'],0x10 | 0x40)
         toolbar.lift()
 
     def redraw(preview=None):
