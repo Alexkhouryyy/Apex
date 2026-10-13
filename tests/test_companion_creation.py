@@ -149,6 +149,16 @@ def test_real_windows_canvas_edit_done_and_capture():
     import ctypes, json, queue, subprocess, sys, threading, time
     from ctypes import wintypes
     import mss
+    from app.screen_overlay import configure_dpi
+    configure_dpi()
+    artifact_dir=os.environ.get('APEX_GUI_ARTIFACTS')
+    def screenshot(name):
+        if artifact_dir:
+            from pathlib import Path
+            from mss.tools import to_png
+            path=Path(artifact_dir);path.mkdir(parents=True,exist_ok=True)
+            with mss.MSS() as screen:image=screen.grab({'left':0,'top':0,'width':640,'height':480})
+            to_png(image.rgb,image.size,output=str(path/name))
     child=subprocess.Popen([sys.executable,'-u','-m','app.screen_canvas','--frame',
                             json.dumps({'left':0,'top':0,'width':640,'height':480}),
                             '--parent-pid',str(os.getpid())],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
@@ -174,6 +184,7 @@ def test_real_windows_canvas_edit_done_and_capture():
         move(200,200);time.sleep(.1)
         user.mouse_event(0x4,0,0,0,0)
         time.sleep(.15)
+        screenshot('canvas-edit.png')
         rect=wintypes.RECT();user.GetWindowRect.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.RECT)]
         assert user.GetWindowRect(ready['done'],ctypes.byref(rect))
         user.SetCursorPos(rect.left+10,rect.top+10)
@@ -181,11 +192,12 @@ def test_real_windows_canvas_edit_done_and_capture():
         user.mouse_event(0x2,0,0,0,0);user.mouse_event(0x4,0,0,0,0)
         deadline=time.monotonic()+3
         while time.monotonic()<deadline and not get(ready['window'],-20)&0x20:time.sleep(.05)
+        screenshot('canvas-done.png')
         assert get(ready['window'],-20)&0x20,'Done must pass mouse input back to the app'
         assert user.GetWindowDisplayAffinity(ready['window'],ctypes.byref(affinity))
         assert affinity.value==0,'User marks must be visible in Companion screen questions'
         time.sleep(.2)
-        with mss.mss() as screen:shot=screen.grab({'left':148,'top':148,'width':5,'height':5})
+        with mss.MSS() as screen:shot=screen.grab({'left':148,'top':148,'width':5,'height':5})
         assert any(abs(r-103)<8 and abs(g-232)<8 and abs(b-249)<8 for r,g,b in
                    zip(shot.rgb[::3],shot.rgb[1::3],shot.rgb[2::3])),'The actual captured screen must contain the user pen stroke'
     finally:

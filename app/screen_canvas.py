@@ -73,6 +73,7 @@ def main(argv=None):
     user.SetWindowPos(hwnd, wintypes.HWND(-1), frame['left'], frame['top'], frame['width'], frame['height'], 0x10 | 0x40)
     # A second, excluded toolbar remains clickable when marks become click-through.
     toolbar = tk.Toplevel(root); toolbar.title('Apex drawing tools'); toolbar.attributes('-topmost', True)
+    toolbar.transient(root)
     toolbar.resizable(False, False)
     toolbar.geometry(f'+{max(0, frame["left"]+20)}+{max(0, frame["top"]+20)}')
     toolbar.update_idletasks()
@@ -99,7 +100,9 @@ def main(argv=None):
         root.deiconify()
         hwnd = set_editing(root, editing)
         user.SetWindowPos(hwnd,wintypes.HWND(-1),frame['left'],frame['top'],frame['width'],frame['height'],0x10 | 0x40)
-        toolbar.lift()
+        toolbar.deiconify()
+        toolbar.lift(); toolbar.update_idletasks()
+        exclude_from_capture(user.GetParent(toolbar.winfo_id()) or toolbar.winfo_id())
 
     def redraw(preview=None):
         canvas.delete('all')
@@ -178,6 +181,7 @@ def main(argv=None):
     root.bind('<Escape>',lambda event: toggle() if editing else root.destroy())
     canvas.bind('<ButtonPress-1>',press); canvas.bind('<B1-Motion>',drag); canvas.bind('<ButtonRelease-1>',release)
     toolbar.protocol('WM_DELETE_WINDOW',root.destroy)
+    root.bind('<FocusIn>',lambda event:toolbar.lift(),add=True)
     def watch():
         from app.companion_desktop import parent_alive
         if not parent_alive(args.parent_pid): root.destroy()
