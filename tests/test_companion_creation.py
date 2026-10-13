@@ -164,11 +164,15 @@ def test_real_windows_canvas_edit_done_and_capture():
         assert user.GetWindowDisplayAffinity(ready['toolbar'],ctypes.byref(affinity))
         assert affinity.value==0x11,'Toolbar must stay out of questions'
         assert not get(ready['window'],-20)&0x20,'Edit must accept mouse strokes'
-        user.PostMessageW.argtypes=[wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM]
-        def mouse(hwnd,message,x,y,down=0):user.PostMessageW(hwnd,message,down,x|(y<<16))
-        mouse(ready['canvas'],0x201,100,100,1)
-        mouse(ready['canvas'],0x200,200,200,1)
-        mouse(ready['canvas'],0x202,200,200)
+        user.ClientToScreen.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.POINT)]
+        def move(x,y):
+            point=wintypes.POINT(x,y)
+            assert user.ClientToScreen(ready['canvas'],ctypes.byref(point))
+            user.SetCursorPos(point.x,point.y)
+        move(100,100);time.sleep(.05)
+        user.mouse_event(0x2,0,0,0,0);time.sleep(.05)
+        move(200,200);time.sleep(.1)
+        user.mouse_event(0x4,0,0,0,0)
         time.sleep(.15)
         rect=wintypes.RECT();user.GetWindowRect.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.RECT)]
         assert user.GetWindowRect(ready['done'],ctypes.byref(rect))

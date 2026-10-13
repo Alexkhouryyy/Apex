@@ -105,6 +105,7 @@
       if (dictationSession) $('spoken').checked=dictationSession.spoken;
       dictationSession=null;
     }
+    controls();
   }
   // --- Inside the board (/board's partner panel) ----------------------------
   // The board turns voice on and off, and hushes her on a swipe down, by
@@ -212,6 +213,7 @@
     $('stop').disabled = !(busy || audio || speechBusy || hands?.enabled || $('check-in').checked || root.classList.contains('speaking'));
     $('recover').disabled = Boolean(active);
     $('jobs').disabled = Boolean(active) || Boolean(pendingRemote);
+    $('voice-mode').disabled = Boolean(dictationSession);
   }
   async function request(path, opts = {}) {
     const response = await fetch(path, {...opts, headers: {...headers(), ...opts.headers}});

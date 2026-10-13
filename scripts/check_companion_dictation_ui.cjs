@@ -34,6 +34,7 @@ async function scenario(failed=false,cancelled=false,restarted=false){
  $('desktop-task').value='dictate';await $('desktop-task').onchange();
  w.ApexDesktop.activate({kind:'dictate',generation:17,target:{title:'Notes'}});
  await tick();await tick();assert(hands.enabled);
+ assert($('voice-mode').disabled,'Conversation cannot start a second microphone during dictation');
  assert.match($('screen-status').textContent,/snapshots off/);
  const task=hands.opts.onSegment(new w.Blob(['voice']),hands.epoch);
  if(cancelled){
@@ -50,6 +51,7 @@ async function scenario(failed=false,cancelled=false,restarted=false){
  }else if(cancelled){assert.equal(insertions.length,0,'A late transcript cannot write after Stop');}
  else{assert.deepEqual(insertions,[{text:'Hello café 😀 ',generation:17}]);assert(hands.enabled);}
  w.ApexDesktop.activate({kind:'stop'});await tick();assert(!hands.enabled);
+ assert.equal($('voice-mode').disabled,false,'Stop restores conversation controls');
  assert.notEqual(w.document.getElementById('companion').dataset.view,'voice','Stop restores Chat');
  await $('desktop-draw').onclick();assert.equal(drawn,1);
  dom.window.close();
