@@ -2,12 +2,14 @@ name: Screen Companion
 
 on:
   push:
-    branches: [apex/screen-companion-hotkey]
+    branches: [apex/screen-companion-hotkey, apex/companion-dictation-canvas]
   pull_request:
     paths:
       - 'agent/desktop_companion.py'
       - 'agent/screen_guidance.py'
       - 'agent/look_now.py'
+      - 'tools/windows_input.py'
+      - 'tools/computer.py'
       - 'agent/core.py'
       - 'agent/companion.py'
       - 'app/**'
@@ -16,6 +18,7 @@ on:
       - 'scripts/*screen_companion.py'
       - 'scripts/check_companion_desktop_ui.cjs'
       - 'tests/test_screen_companion_desktop.py'
+      - 'tests/test_companion_creation.py'
       - 'requirements-screen-companion.txt'
       - '.github/workflows/screen-companion.yml'
   workflow_dispatch: {}
@@ -47,12 +50,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Real Windows creation acceptance before the full dependency install
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python -m pip install -r requirements-screen-companion.txt pytest python-dotenv mss Pillow
+          export COMPANION_GUI_ARTIFACTS="$RUNNER_TEMP/apex-canvas-acceptance"
+          python -X utf8 scripts/run_tests.py --noconftest tests/test_companion_creation.py -k test_real_windows
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'Windows'
+        with:
+          name: screen-canvas-windows-acceptance
+          path: ${{ runner.temp }}/apex-canvas-acceptance
       - name: Install Apex and the native Companion window
         shell: bash
         run: python -m pip install -r requirements.txt -r requirements-screen-companion.txt
       - name: Companion ownership, startup, hotkeys and voice regressions
         shell: bash
-        run: python -X utf8 scripts/run_tests.py tests/test_screen_companion_desktop.py tests/test_companion.py tests/test_look_now.py tests/test_resident.py tests/test_apex_launcher.py
+        run: python -X utf8 scripts/run_tests.py tests/test_screen_companion_desktop.py tests/test_companion_creation.py tests/test_companion.py tests/test_look_now.py tests/test_resident.py tests/test_apex_launcher.py
       - name: Client voice, native activation and cancellation
         shell: bash
         run: |
@@ -61,3 +76,4 @@ jobs:
           node scripts/check_companion_ui.cjs
           node scripts/check_companion_voice_ui.cjs
           node scripts/check_companion_desktop_ui.cjs
+          node scripts/check_companion_dictation_ui.cjs

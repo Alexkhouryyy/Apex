@@ -12,6 +12,7 @@ const html = fs.readFileSync(base + 'companion.html', 'utf8');
 const css = fs.readFileSync(base + 'companion.css', 'utf8');
 const dom = new JSDOM(html, {url: 'http://localhost:7860/companion', runScripts: 'outside-only'});
 const w = dom.window, $ = id => w.document.getElementById(id);
+const style = w.document.createElement('style'); style.textContent = css; w.document.head.append(style);
 w.TextDecoder = TextDecoder;
 w.localStorage.setItem('apex_token', 'tok');
 w.speechSynthesis = {cancel() {}, speak() {}};
@@ -54,9 +55,14 @@ const esc = () => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: 
 
 (async () => {
   await sleep(80);
-  assert.match(html, /companion\.js\?v=desktop-3/, 'bump the cache-bust so browsers load the new page');
-  assert.match(css, /#companion\[data-view=voice\]>:not\(header\):not\(\.presence\):not\(#messages\):not\(#error\)\{display:none\}/,
-    'voice mode must hide the chat chrome but keep the orb, captions and errors');
+  assert.match(html, /companion\.js\?v=desktop-4/, 'bump the cache-bust so browsers load the new page');
+  root.dataset.view = 'voice';
+  assert.equal(w.getComputedStyle($('composer')).display,'none','voice mode hides the chat composer');
+  assert.notEqual(w.getComputedStyle(root.querySelector('.presence')).display,'none','voice mode keeps the orb');
+  assert.notEqual(w.getComputedStyle($('messages')).display,'none','voice mode keeps captions');
+  $('error').hidden=false;
+  assert.notEqual(w.getComputedStyle($('error')).display,'none','voice mode keeps errors');
+  $('error').hidden=true;delete root.dataset.view;
   assert.equal($('voice-exit').hidden, true, 'the exit button is only for voice mode');
 
   // The user's own settings, to be put back afterwards.

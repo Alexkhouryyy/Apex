@@ -9,11 +9,13 @@ async function scenario(native,noMicrophone=false){
  const dom=new JSDOM(fs.readFileSync(path.join(base,'companion.html'),'utf8'),{
   url:'http://127.0.0.1:7860/companion'+(native?'?desktop=1':''),runScripts:'outside-only'});
  const w=dom.window,$=id=>w.document.getElementById(id);
+ const style=w.document.createElement('style');style.textContent=fs.readFileSync(path.join(base,'companion.css'),'utf8');w.document.head.append(style);
  let ready=0,hidden=0,mics=0,stops=0,expanded=0,streams=[],requests=[];
  Object.defineProperty(w.navigator,'userActivation',{value:{hasBeenActive:false}});
  w.TextDecoder=TextDecoder;
  w.speechSynthesis={cancel(){},speak(){}};
  const nativeApi={connect:async()=>({desktop:true,token:'owner-token',hotkey:'<f8>'}),
+                  choose_mode:async()=>true,sketch:async()=>({open:true}),
                   ready:async()=>{ready++;},hide:async()=>{hidden++;},expand:async()=>{expanded++;}};
  w.pywebview=native?{api:{}}:undefined;
  w.ApexHandsFree=class{
@@ -46,10 +48,12 @@ async function scenario(native,noMicrophone=false){
  if(native){
   assert.equal(ready,1);assert.equal(w.localStorage.getItem('apex_token'),'owner-token');
   assert.match(w.document.querySelector('.desktop-hotkey-hint').textContent,/F8/);
+  assert($('desktop-task'));assert($('desktop-draw'));
   assert(!requests.some(r=>r.url.includes('/api/companion/look')),'a browser poll must not steal a native hotkey');
   w.ApexDesktop.activate({kind:'look',source:'hotkey',seq:4});
   await tick();await tick();
   assert.equal(mics,1,'native hotkey works without a previous browser click');
+  assert.notEqual(w.getComputedStyle($('desktop-task').parentElement).display,'none','Draw and the action picker remain available during screen conversation');
   if(noMicrophone)assert.equal(expanded,1,'denied microphone must leave a usable full text window');
   const call=requests.find(r=>r.url==='/api/companion/chat');assert(call);
   const body=JSON.parse(call.opts.body);
