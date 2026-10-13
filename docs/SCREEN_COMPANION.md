@@ -93,8 +93,8 @@ rewrite your words. For discussion, corrections or design reasoning, select
 Screen help and talk with Companion instead. OpenAI transcription has its
 usual API cost; local Whisper may download its model on first use.
 
-The foreground window, process and focused control are pinned at activation
-and checked before each character. Changing fields stops the insertion; if
+The foreground window, process, native control and UI Automation field identity are pinned at activation
+and checked before each small input batch. Changing fields stops the insertion; if
 some text was already inserted, review it before starting again. An insertion
 failure leaves the transcript in Chat for recovery. Apex does not move focus,
 change the clipboard, press Enter or Tab, submit a form, or automatically retry

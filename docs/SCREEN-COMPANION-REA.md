@@ -34,7 +34,7 @@ decompilation evidence.
 Previously the voice transcript was submitted as a Companion chat turn. The
 new explicit Dictate action reuses the transcription path and routes each
 utterance to a native, user-started session pinned to a foreground window,
-process and focused control. It rejects changed focus, stale generations and
+process, native control and UI Automation field identity. It rejects changed focus, password fields, stale generations and
 control keys that could submit forms. It never requests an agent reply or host
 screenshot for that utterance. A cancelled or replaced microphone session
 cannot reuse a late transcript.

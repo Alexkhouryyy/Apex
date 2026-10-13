@@ -39,13 +39,20 @@ def _events(text):
                    for i in range(0, len(units), 2) for flags in (4, 6)]
 
 
-def type_unicode(text: str, delay_ms: int, *, check_abort=None) -> None:
+def type_unicode(text: str, delay_ms: int, *, check_abort=None, batch_size=1) -> None:
     from tools.computer import ComputerControlError
+    if type(batch_size) is not int or not 1 <= batch_size <= 32:
+        raise ValueError('Keyboard input batches must contain 1–32 characters.')
+    if delay_ms and batch_size != 1:
+        raise ValueError('Delayed typing requires individual character batches.')
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     send = user32.SendInput
     send.argtypes = [ctypes.c_uint32, ctypes.POINTER(_Input), ctypes.c_int]
     send.restype = ctypes.c_uint32
-    for keys in _events(text):
+    from itertools import islice
+    events_iter = iter(_events(text))
+    while chunk := list(islice(events_iter, batch_size)):
+        keys = [key for char in chunk for key in char]
         if check_abort is not None:
             check_abort()
         events = (_Input * len(keys))(*[_Input(1, _InputUnion(ki=key)) for key in keys])

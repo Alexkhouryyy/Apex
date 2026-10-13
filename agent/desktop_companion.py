@@ -65,11 +65,13 @@ def on_hotkey():
 
 
 def choose_mode(mode):
-    global _preferred_mode
+    global _preferred_mode, _mode
     if mode not in {'screen', 'dictate'}:
         raise ValueError('Choose Screen help or Dictate.')
     with _condition:
         _preferred_mode = mode
+        _mode = 'idle'
+        clear()
 
 
 def local_url(url: str) -> str:

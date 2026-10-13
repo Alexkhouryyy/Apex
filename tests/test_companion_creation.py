@@ -9,13 +9,14 @@ from app.companion_desktop import Bridge
 from app.screen_canvas import export_svg
 
 
-TARGET = {'window':123,'focus':456,'pid':789,'title':'Notes'}
+TARGET = {'window':123,'focus':456,'pid':789,'element_id':[1,2,3],'title':'Notes'}
 
 
 def test_dictation_pins_the_field_and_never_sends_enter_tab_or_clipboard(monkeypatch):
     sent=[]
     monkeypatch.setattr(dictation,'current_target',lambda:TARGET)
-    def type_text(text,delay_ms,check_abort):
+    def type_text(text,delay_ms,check_abort,batch_size):
+        assert batch_size==32
         check_abort();sent.append(text)
     monkeypatch.setattr('tools.windows_input.type_unicode',type_text)
     session=dictation.Session(TARGET,7)
@@ -26,7 +27,7 @@ def test_dictation_pins_the_field_and_never_sends_enter_tab_or_clipboard(monkeyp
     assert len(sent)==1
 
 
-@pytest.mark.parametrize('field',['window','focus','pid'])
+@pytest.mark.parametrize('field',['window','focus','pid','element_id'])
 def test_focus_changes_refuse_insertion_and_cancel_session(field,monkeypatch):
     monkeypatch.setattr(dictation,'current_target',lambda:{**TARGET,field:999})
     monkeypatch.setattr('tools.windows_input.type_unicode',lambda *a,**kw:pytest.fail('Must not type'))
@@ -38,7 +39,7 @@ def test_focus_changes_refuse_insertion_and_cancel_session(field,monkeypatch):
 def test_focus_change_mid_segment_stops_remaining_characters(monkeypatch):
     sent=[]
     monkeypatch.setattr(dictation,'current_target',lambda:TARGET if not sent else {**TARGET,'focus':999})
-    def type_text(text,delay_ms,check_abort):
+    def type_text(text,delay_ms,check_abort,batch_size):
         for char in text:check_abort();sent.append(char)
     monkeypatch.setattr('tools.windows_input.type_unicode',type_text)
     with pytest.raises(RuntimeError,match='partial'):dictation.Session(TARGET,7).insert('hello',7)
@@ -81,6 +82,7 @@ def test_sketch_svg_escapes_text_and_uses_only_marks():
 @pytest.mark.skipif(os.name!='nt',reason='Real Windows GUI and Unicode input')
 def test_real_windows_dictation_writes_unicode_into_selected_field(tmp_path):
     """Owned Tk app, actual foreground HWND, actual SendInput; no provider."""
+    pytest.importorskip('clr',reason='Desktop Companion optional Windows dependency')
     import json, subprocess, sys, time
     script=tmp_path/'field.py'; result=tmp_path/'text.json'
     script.write_text('''import tkinter as tk,json,sys,ctypes

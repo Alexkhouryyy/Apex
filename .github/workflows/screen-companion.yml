@@ -8,6 +8,7 @@ on:
       - 'agent/desktop_companion.py'
       - 'agent/screen_guidance.py'
       - 'agent/look_now.py'
+      - 'tools/windows_input.py'
       - 'agent/core.py'
       - 'agent/companion.py'
       - 'app/**'

@@ -30,8 +30,23 @@ def current_target():
         raise RuntimeError('Click the field you want to write in, then press F8.')
     title = ctypes.create_unicode_buffer(256)
     user.GetWindowTextW(hwnd, title, len(title))
+    # A browser can switch HTML inputs while keeping the same native HWND.
+    # UI Automation distinguishes those fields and identifies password input.
+    try:
+        import clr
+        clr.AddReference('UIAutomationClient'); clr.AddReference('UIAutomationTypes')
+        from System.Windows.Automation import AutomationElement
+        element = AutomationElement.FocusedElement
+        if element is None or element.Current.IsPassword:
+            raise RuntimeError('Select a regular text field before starting dictation.')
+        element_id = [int(part) for part in element.GetRuntimeId()]
+        if not element_id: raise RuntimeError('The selected field could not be identified.')
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError('Windows could not identify the selected field. Reopen the app and try again.') from exc
     return {'window': int(hwnd), 'focus': int(info.focus), 'pid': pid.value,
-            'title': title.value or 'Selected app'}
+            'element_id':element_id, 'title': title.value or 'Selected app'}
 
 
 def safe_text(text):
@@ -55,15 +70,17 @@ class Session:
 
     def insert(self, text, generation):
         text = safe_text(text)
+        if type(generation) is not int:
+            raise ValueError('Invalid dictation session.')
         def check():
             if self.cancelled.is_set() or generation != self.generation:
                 raise RuntimeError('Dictation was stopped. The remaining text was not inserted.')
             now = current_target()
-            if any(now[k] != self.target[k] for k in ('window', 'focus', 'pid')):
+            if any(now[k] != self.target[k] for k in ('window', 'focus', 'pid', 'element_id')):
                 self.stop()
                 raise RuntimeError('The selected field changed. Text may be partial; review it before starting dictation again.')
         with self.lock:
             check()
             from tools.windows_input import type_unicode
-            type_unicode(text, 0, check_abort=check)
+            type_unicode(text, 0, check_abort=check, batch_size=32)
         return {'inserted': True, 'characters': len(text)}

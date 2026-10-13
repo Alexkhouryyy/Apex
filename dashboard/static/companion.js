@@ -1371,6 +1371,7 @@
       task.value = localStorage.getItem('apex_desktop_task') === 'dictate' ? 'dictate' : 'screen';
       task.onchange = async () => {
         desktopEpoch++; disableHands(); stopSpeech();
+        desktopShareEnabled = false;
         try {
           await window.pywebview.api.choose_mode(task.value);
           localStorage.setItem('apex_desktop_task',task.value);
