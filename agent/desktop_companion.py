@@ -69,6 +69,8 @@ def choose_mode(mode):
     if mode not in {'screen', 'dictate'}:
         raise ValueError('Choose Screen help or Dictate.')
     with _condition:
+        if mode == _preferred_mode:
+            return  # a reconnect must not erase an already queued F8 activation
         _preferred_mode = mode
         _mode = 'idle'
         clear()

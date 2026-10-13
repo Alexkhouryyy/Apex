@@ -12,6 +12,17 @@ from app.screen_canvas import export_svg
 TARGET = {'window':123,'focus':456,'pid':789,'element_id':[1,2,3],'title':'Notes'}
 
 
+def test_restoring_action_during_cold_boot_preserves_queued_hotkey(monkeypatch):
+    from agent import desktop_companion as desktop
+    monkeypatch.setattr(desktop,'_preferred_mode','screen')
+    monkeypatch.setattr(desktop,'_mode','screen')
+    clears=[];monkeypatch.setattr(desktop,'clear',lambda:clears.append(True))
+    desktop.choose_mode('screen')
+    assert desktop._mode=='screen' and clears==[]
+    desktop.choose_mode('dictate')
+    assert desktop._mode=='idle' and clears==[True]
+
+
 def test_dictation_pins_the_field_and_never_sends_enter_tab_or_clipboard(monkeypatch):
     sent=[]
     monkeypatch.setattr(dictation,'current_target',lambda:TARGET)
