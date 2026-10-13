@@ -77,6 +77,8 @@ async def desktop_event(request: Request):
             desktop_companion.hidden()
         elif body.get('action') == 'view':
             desktop_companion.expanded()
+        elif body.get('action') == 'mode':
+            desktop_companion.choose_mode(body.get('mode'))
         elif body.get('action') == 'ack' and type(body.get('seq')) is int and isinstance(body.get('result'), dict):
             desktop_companion.acknowledge(body['seq'], body['result'])
         else:

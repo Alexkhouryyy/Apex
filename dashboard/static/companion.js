@@ -42,6 +42,7 @@
   let desktopEpoch = 0;
   let desktopKeyLabel = 'F8';
   let desktopShareEnabled = false;
+  let dictationSession = null;
   const requestedWorkspace = new URLSearchParams(location.search).get('workspace');
   const workspace = ['board', 'assembly'].includes(requestedWorkspace) ? requestedWorkspace : null;
   const studySession = workspace === 'assembly' ? new URLSearchParams(location.search).get('study_session') : null;
@@ -99,6 +100,11 @@
     // Voice mode IS hands-free: whatever turned listening off — Stop, Esc, an
     // error, the page closing — also ends the talk-only view.
     leaveVoiceMode();
+    if (root.dataset.task === 'dictate') {
+      delete root.dataset.task; delete root.dataset.view; $('voice-exit').hidden=true;
+      if (dictationSession) $('spoken').checked=dictationSession.spoken;
+      dictationSession=null;
+    }
   }
   // --- Inside the board (/board's partner panel) ----------------------------
   // The board turns voice on and off, and hushes her on a swipe down, by
@@ -1055,7 +1061,7 @@
   $('hands-free').onchange = async () => {
     if (!$('hands-free').checked) { disableHands(); state('', 'Hands-free off.'); return; }
     if (speechBusy || speechDraining || active || recorder || pendingRemote) { $('hands-free').checked=false; error('Wait for the current turn to finish, then enable hands-free.'); return; }
-    error(); stopSpeech(); $('spoken').checked=true;
+    error(); stopSpeech(); $('spoken').checked=!dictationSession;
     if (!window.ApexHandsFree) { $('hands-free').checked=false; error('Reload the companion to load hands-free controls.'); return; }
     hands = new window.ApexHandsFree({
       threshold: () => Number($('mic-threshold').value),
@@ -1081,9 +1087,25 @@
         // 1.2 s silence timer fired — that wait is part of what you feel.
         timingStart('hands_free', hands.lastVoice || performance.now());
         timing.detector = hands.detector;
+        const mic = hands, dictation = dictationSession;
         handsRequest=new AbortController();
         const text=await transcribeBlob(blob,handsRequest.signal);
-        if (!hands.enabled || hands.epoch!==epoch) return;
+        if (hands !== mic || !mic.enabled || mic.epoch!==epoch || dictationSession !== dictation) return;
+        if (dictationSession) {
+          const session = dictationSession;
+          if (!text.trim()) return;
+          bubble('user', text);
+          try {
+            await window.pywebview.api.dictate(text.trim() + ' ', session.generation);
+            if (dictationSession === session) state('listening', `Written in ${session.title} · keep talking or ${desktopKeyLabel} to stop`);
+          } catch (exc) {
+            disableHands();
+            $('message').value = text; error(exc.message);
+            await window.pywebview.api.expand();
+          }
+          timing = null;
+          return;
+        }
         const cut = barged; barged = null;
         if (cut && soundsLike(text, cut.said)) {
           // Her own voice through the speakers, not you: say so, send nothing.
@@ -1344,6 +1366,26 @@
       nav.querySelectorAll('a').forEach(link => { link.hidden = true; });
       [...nav.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).forEach(node => node.remove());
       nav.append(expand);
+      const task = document.createElement('select'); task.id = 'desktop-task'; task.setAttribute('aria-label','F8 action');
+      task.innerHTML = '<option value="screen">Screen help</option><option value="dictate">Dictate</option>';
+      task.value = localStorage.getItem('apex_desktop_task') === 'dictate' ? 'dictate' : 'screen';
+      task.onchange = async () => {
+        desktopEpoch++; disableHands(); stopSpeech();
+        try {
+          await window.pywebview.api.choose_mode(task.value);
+          localStorage.setItem('apex_desktop_task',task.value);
+          state('', task.value === 'dictate' ? `Click a field in your app, then press ${desktopKeyLabel} to dictate.` : `${desktopKeyLabel} opens screen help.`);
+        } catch (exc) { error(exc.message); }
+      };
+      await window.pywebview.api.choose_mode(task.value);
+      const draw = document.createElement('button'); draw.id = 'desktop-draw'; draw.textContent = 'Draw';
+      draw.onclick = async () => {
+        if (dictationSession) disableHands();
+        try { await window.pywebview.api.sketch(); state('', 'Draw, write or sketch · Done keeps your marks on the live screen.'); }
+        catch (exc) { error(exc.message); }
+      };
+      const tasks = document.createElement('div'); tasks.className = 'desktop-actions'; tasks.append(task,draw);
+      root.querySelector('header').after(tasks);
       const settings = document.createElement('details'); settings.id = 'desktop-settings';
       const summary = document.createElement('summary'); summary.textContent = 'Voice and behavior settings';
       settings.append(summary);
@@ -1352,7 +1394,7 @@
       const hint = document.createElement('p'); hint.className = 'desktop-hotkey-hint';
       const key = (info.hotkey || '<f8>').replace(/[<>]/g, '').toUpperCase();
       desktopKeyLabel = key;
-      hint.textContent = `${key}: screen help · Esc: stop and hide`;
+      hint.textContent = `${key}: selected action / stop · Esc: stop and hide`;
       root.querySelector('header').after(hint);
     }
     await boot();
@@ -1362,13 +1404,36 @@
     activate(item) {
       if (!desktopConnected) return;
       desktopEpoch++;
+      if (dictationSession && item.kind !== 'dictate') disableHands();
       if (item.kind !== 'stop') desktopShareEnabled = item.kind === 'look';
       $('screen-status').textContent = desktopShareEnabled ? 'Your screen is included with each question.' : 'Screen help is off.';
-      const task = item.kind === 'stop' ? stop() : item.kind === 'talk' ? talkHotkey() : answerLook(item);
+      const task = item.kind === 'stop' ? stop() : item.kind === 'dictate' ? startDictation(item)
+        : item.kind === 'dictation_error' ? Promise.resolve(error(item.error)) : item.kind === 'talk' ? talkHotkey() : answerLook(item);
       Promise.resolve(task).catch(exc => error(exc.message));
     },
     stop: () => desktopConnected ? stop() : Promise.resolve(),
   };
+  async function startDictation(item) {
+    const invocation = desktopEpoch;
+    disableHands(); stopSpeech();
+    if (active) interrupt(performance.now());
+    for (let i=0; i<100 && (active || recorder || speechBusy || speechDraining); i++) await new Promise(resolve=>setTimeout(resolve,100));
+    if (invocation !== desktopEpoch) return;
+    if (active || recorder || speechBusy || speechDraining) { error('The earlier conversation is still stopping. Press F8 to stop, then start dictation again.'); return; }
+    dictationSession = {generation:item.generation,title:item.target.title,spoken:$('spoken').checked};
+    root.dataset.task='dictate';
+    desktopShareEnabled = false;
+    $('screen-status').textContent = `Writing into ${item.target.title} · screen snapshots off`;
+    $('hands-free').checked = true;
+    try { await $('hands-free').onchange(); }
+    catch (exc) { disableHands(); dictationSession = null; error(exc.message); await window.pywebview.api.expand(); return; }
+    if (invocation !== desktopEpoch) { disableHands(); return; }
+    if (hands?.enabled) {
+      root.dataset.view = 'voice'; $('voice-exit').hidden=false;
+      $('voice-exit').textContent = `● Dictating · ${desktopKeyLabel} / Stop`;
+      state('listening',`Dictating into ${item.target.title} · pause to write`);
+    } else { disableHands(); await window.pywebview.api.expand(); }
+  }
   desktopBoot().catch(exc => {
     state('', 'Apex is not connected yet.'); error(exc.message);
     if (desktopRequested) window.pywebview?.api?.report_error?.(exc.message).catch(() => {});

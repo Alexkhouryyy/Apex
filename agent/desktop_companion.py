@@ -29,6 +29,7 @@ _mode = 'idle'
 _url = ''
 _keys = None
 _is_muted = lambda: False
+_preferred_mode = 'screen'
 
 
 def bind_resident(state):
@@ -44,9 +45,31 @@ def bind_resident(state):
 
 def on_hotkey():
     from agent import look_now
+    if status()['mode'] == 'dictate':
+        activate({'kind': 'stop', 'source': 'hotkey'})
+        return
+    if _preferred_mode == 'dictate' and status()['mode'] != 'screen' and not _is_muted():
+        from app.desktop_dictation import current_target
+        if ensure():
+            try:
+                target = current_target()
+                if target['pid'] in {os.getpid(), _process.pid}:
+                    raise RuntimeError('Click a field in your other app before pressing F8.')
+                activate({'kind': 'dictate', 'target': target, 'source': 'hotkey'})
+            except RuntimeError as exc:
+                publish('activate', item={'kind': 'dictation_error', 'error': str(exc)})
+        return
     # A stop must remain possible while muted; a new capture must not start.
     if status()['mode'] == 'screen' or not _is_muted():
         look_now.on_hotkey()
+
+
+def choose_mode(mode):
+    global _preferred_mode
+    if mode not in {'screen', 'dictate'}:
+        raise ValueError('Choose Screen help or Dictate.')
+    with _condition:
+        _preferred_mode = mode
 
 
 def local_url(url: str) -> str:
@@ -143,7 +166,7 @@ def publish(kind: str, **payload) -> int:
 def activate(item: dict) -> None:
     global _mode
     with _condition:
-        _mode = {'look': 'screen', 'talk': 'voice', 'stop': 'idle'}.get(item.get('kind'), 'idle')
+        _mode = {'look': 'screen', 'talk': 'voice', 'dictate': 'dictate', 'stop': 'idle'}.get(item.get('kind'), 'idle')
     publish('activate', item=item)
 
 

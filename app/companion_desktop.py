@@ -150,6 +150,8 @@ class Bridge:
         self._window = None
         self._ready = threading.Event()
         self._activation = False
+        self._dictation = None
+        self._canvas = None
 
     def _trusted(self):
         current = urlsplit(self._window.get_current_url() or '')
@@ -185,8 +187,64 @@ class Bridge:
             raise ValueError('Desktop bridge is only available to the local Companion page.')
         self._ipc.call(body={'action': 'hidden'})
         self._activation = False
+        self._stop_dictation()
+        self._close_canvas()
         self._window.hide()
         return True
+
+    def _stop_dictation(self):
+        if self._dictation is not None:
+            self._dictation.stop()
+
+    def _close_canvas(self):
+        if self._canvas is not None and self._canvas.poll() is None:
+            from scripts.run_apex_qwen import stop as stop_process
+            stop_process(self._canvas)
+        self._canvas = None
+
+    def choose_mode(self, mode):
+        if not self._trusted():
+            raise ValueError('Open the local Companion page.')
+        self._stop_dictation()
+        self._ipc.call(body={'action':'mode', 'mode':mode})
+        return True
+
+    def dictate(self, text, generation):
+        if not self._trusted() or not self._activation or self._dictation is None:
+            raise ValueError('Start dictation with F8 in your selected app first.')
+        return self._dictation.insert(text, generation)
+
+    def sketch(self):
+        if not self._trusted() or os.name != 'nt':
+            raise ValueError('Screen drawing requires the local Windows Companion.')
+        self._stop_dictation()
+        if self._canvas is not None and self._canvas.poll() is None:
+            return {'open':True}
+        from agent.look_now import capture_frame
+        _, frame = capture_frame()
+        python = Path(sys.executable)
+        if python.name.lower() == 'pythonw.exe': python = python.with_name('python.exe')
+        self._canvas = subprocess.Popen([str(python),'-u','-m','app.screen_canvas','--frame',json.dumps(frame),
+                                         '--parent-pid',str(os.getpid())], cwd=ROOT,
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, text=True, encoding='utf-8',
+                                        creationflags=subprocess.CREATE_NO_WINDOW)
+        process, ready = self._canvas, queue.Queue()
+        def read():
+            try: ready.put(json.loads(process.stdout.readline()))
+            except (ValueError,OSError): ready.put({'ready':False})
+            finally: process.stdout.close()
+        def errors():
+            for line in process.stderr: logging.error('Screen canvas: %s',line.strip()[:500])
+            process.stderr.close()
+        threading.Thread(target=read,daemon=True).start()
+        threading.Thread(target=errors,daemon=True).start()
+        try: result = ready.get(timeout=8)
+        except queue.Empty: result = {'ready':False}
+        if result.get('ready') is not True:
+            self._close_canvas()
+            raise RuntimeError('The drawing surface could not open. See Companion desktop.log.')
+        return {'open':True}
 
     def expand(self):
         if not self._trusted():
@@ -305,6 +363,8 @@ def main(argv=None):
         if shutting_down.is_set():
             return True
         bridge._activation = False
+        bridge._stop_dictation()
+        bridge._close_canvas()
         def stop_page():
             try:
                 if bridge._trusted():
@@ -377,6 +437,13 @@ def main(argv=None):
                             window.load_url(url + '/companion?desktop=1')
                             bridge._ready.clear()
                             break
+                        bridge._stop_dictation()
+                        if item['item'].get('kind') == 'stop': bridge._close_canvas()
+                        if item['item'].get('kind') == 'dictate':
+                            from app.desktop_dictation import Session
+                            item['item']['generation'] = item['seq']
+                            bridge._dictation = Session(item['item']['target'], item['seq'])
+                            item['item']['target'] = {'title':item['item']['target']['title']}
                         if item['item'].get('kind') != 'stop':
                             reveal(window)
                             interactive(window, False)
@@ -391,6 +458,8 @@ def main(argv=None):
                         overlay.send({'kind': 'clear'})
                         if item['kind'] == 'hide':
                             bridge._activation = False
+                            bridge._stop_dictation()
+                            bridge._close_canvas()
                             if bridge._trusted():
                                 window.evaluate_js('void window.ApexDesktop?.stop()')
                             window.hide()
@@ -409,6 +478,8 @@ def main(argv=None):
                     break
             shutting_down.wait(.25)
         shutting_down.set()
+        bridge._stop_dictation()
+        bridge._close_canvas()
         overlay.stop()
         window.destroy()
 
@@ -417,6 +488,8 @@ def main(argv=None):
                       gui='edgechromium' if os.name == 'nt' else None)
     finally:
         shutting_down.set()
+        bridge._stop_dictation()
+        bridge._close_canvas()
         overlay.stop()
 
 

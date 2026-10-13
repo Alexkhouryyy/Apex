@@ -2,7 +2,7 @@ name: Screen Companion
 
 on:
   push:
-    branches: [apex/screen-companion-hotkey]
+    branches: [apex/screen-companion-hotkey, apex/companion-dictation-canvas]
   pull_request:
     paths:
       - 'agent/desktop_companion.py'
@@ -16,6 +16,7 @@ on:
       - 'scripts/*screen_companion.py'
       - 'scripts/check_companion_desktop_ui.cjs'
       - 'tests/test_screen_companion_desktop.py'
+      - 'tests/test_companion_creation.py'
       - 'requirements-screen-companion.txt'
       - '.github/workflows/screen-companion.yml'
   workflow_dispatch: {}
@@ -52,7 +53,7 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-screen-companion.txt
       - name: Companion ownership, startup, hotkeys and voice regressions
         shell: bash
-        run: python -X utf8 scripts/run_tests.py tests/test_screen_companion_desktop.py tests/test_companion.py tests/test_look_now.py tests/test_resident.py tests/test_apex_launcher.py
+        run: python -X utf8 scripts/run_tests.py tests/test_screen_companion_desktop.py tests/test_companion_creation.py tests/test_companion.py tests/test_look_now.py tests/test_resident.py tests/test_apex_launcher.py
       - name: Client voice, native activation and cancellation
         shell: bash
         run: |
@@ -61,3 +62,4 @@ jobs:
           node scripts/check_companion_ui.cjs
           node scripts/check_companion_voice_ui.cjs
           node scripts/check_companion_desktop_ui.cjs
+          node scripts/check_companion_dictation_ui.cjs

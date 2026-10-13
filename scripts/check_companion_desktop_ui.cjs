@@ -14,6 +14,7 @@ async function scenario(native,noMicrophone=false){
  w.TextDecoder=TextDecoder;
  w.speechSynthesis={cancel(){},speak(){}};
  const nativeApi={connect:async()=>({desktop:true,token:'owner-token',hotkey:'<f8>'}),
+                  choose_mode:async()=>true,sketch:async()=>({open:true}),
                   ready:async()=>{ready++;},hide:async()=>{hidden++;},expand:async()=>{expanded++;}};
  w.pywebview=native?{api:{}}:undefined;
  w.ApexHandsFree=class{
@@ -46,6 +47,7 @@ async function scenario(native,noMicrophone=false){
  if(native){
   assert.equal(ready,1);assert.equal(w.localStorage.getItem('apex_token'),'owner-token');
   assert.match(w.document.querySelector('.desktop-hotkey-hint').textContent,/F8/);
+  assert($('desktop-task'));assert($('desktop-draw'));
   assert(!requests.some(r=>r.url.includes('/api/companion/look')),'a browser poll must not steal a native hotkey');
   w.ApexDesktop.activate({kind:'look',source:'hotkey',seq:4});
   await tick();await tick();

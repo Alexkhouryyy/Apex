@@ -91,6 +91,9 @@ body.desktop-companion #desktop-settings[open] {max-height:40dvh;overflow:auto}
 body.desktop-companion #desktop-settings summary {padding:5px 0}
 body.desktop-companion #desktop-settings .settings {padding:8px 0}
 .desktop-hotkey-hint { margin: 0; padding: 8px 16px; color: var(--muted, #aab4c1); font-size: 12px; }
+.desktop-actions {display:flex;align-items:center;gap:8px;flex-shrink:0}
+.desktop-actions select {flex:1;min-width:0}
+.desktop-actions button,.desktop-actions select {min-height:32px}
 
 /* Native hotkey view keeps the working application visible. */
 body.desktop-companion #companion[data-view=voice] {padding:10px 14px;gap:8px;min-height:0;height:100dvh;overflow:hidden}

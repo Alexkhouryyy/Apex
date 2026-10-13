@@ -20,7 +20,8 @@ It checks that Apex, the native window and the hotkey actually become ready;
 registration alone is not reported as a working Companion. Its launch profile
 enables the required local dashboard without editing your saved configuration.
 
-- **F8** opens a compact, always-on-top Screen Companion and starts screen help.
+- **F8** opens a compact, always-on-top Screen Companion and starts the selected
+  action: **Screen help** by default, or **Dictate** after you choose it.
   Press F8 again from any application to stop and hide it. A laptop with media
   keys may require Fn+F8; `COMPANION_HOTKEY=<f7>` in `.env`, for example, selects
   another key on the next Apex start. The older Celine/browser shortcuts remain
@@ -77,7 +78,56 @@ instance from its tray and close its launcher, then run
 first-use microphone consent, accurate arrows, F8/Stop/Esc during a reply, and
 typed follow-ups in Chat. Sign out and back in to verify silent login startup
 and that the next F8 works without opening a browser. After those checks,
-remember to merge the branch on your laptop.
+then update your laptop from the merged branch.
+
+### Dictate into a Windows app
+
+Open Companion from the tray, select **Dictate**, then click the text field in
+your other app. Press F8 and speak. Each pause sends an utterance to your chosen
+transcription engine and writes the transcript into that field. F8 again stops.
+The selected action is remembered for the next login.
+
+This path uses the existing local Whisper or OpenAI transcription choice. It
+does not send screen snapshots or request an agent answer, and it does not
+rewrite your words. For discussion, corrections or design reasoning, select
+Screen help and talk with Companion instead. OpenAI transcription has its
+usual API cost; local Whisper may download its model on first use.
+
+The foreground window, process and focused control are pinned at activation
+and checked before each character. Changing fields stops the insertion; if
+some text was already inserted, review it before starting again. An insertion
+failure leaves the transcript in Chat for recovery. Apex does not move focus,
+change the clipboard, press Enter or Tab, submit a form, or automatically retry
+a partial insertion. Dictation can therefore write a command into a terminal
+without executing it. Some apps, including elevated windows, may reject
+Windows Unicode input. Microphone denial offers text Chat instead.
+
+### Write, draw and design together
+
+The native **Draw** button opens a user-controlled sketch surface on the monitor
+under your pointer. **Pen**, **Box**, **Arrow** and **Text** create your own marks;
+colors, Undo, Redo and Clear are local controls. Edit shows a frozen screen image
+so drawing on blank pixels works reliably. **Done** returns to the live screen
+with only your marks visible and mouse clicks passing through to your app.
+**Edit** resumes drawing against a new screen image. **Save SVG** opens a file
+picker and exports just your marks as an editable vector drawing.
+
+Your marks are included in screen questions, while the separate drawing toolbar
+and AI guidance overlay remain excluded from captures. With Screen help active,
+you can keep talking while sketching and ask Companion about what you drew.
+This is a shared annotation surface, not a complete illustration or CAD editor.
+It does not automatically turn an annotation into a working application. For
+implementation, use Apex Code; for the existing persistent design workspace,
+open `/board`. Voice can already build, transform and inspect that board through
+Companion's existing board tools.
+
+Closing the sketch toolbar discards unsaved marks. Stop, closing Companion,
+or quitting Apex also closes the owned sketch surface. Saved SVGs remain.
+Draw cancels an active dictation session so typing text labels cannot also
+write into your previous app. Select Screen help for screen discussion.
+
+See [the REA interaction findings](SCREEN-COMPANION-REA.md) for the evidence
+and the boundary between source analysis, controlled tests and laptop testing.
 
 ### Visual explanations on your Windows screen
 

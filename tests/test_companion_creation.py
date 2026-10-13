@@ -1,0 +1,154 @@
+"""Dictation refuses changed fields; sketch exports remain inert and local."""
+import os
+from types import SimpleNamespace
+
+import pytest
+
+from app import desktop_dictation as dictation
+from app.companion_desktop import Bridge
+from app.screen_canvas import export_svg
+
+
+TARGET = {'window':123,'focus':456,'pid':789,'title':'Notes'}
+
+
+def test_dictation_pins_the_field_and_never_sends_enter_tab_or_clipboard(monkeypatch):
+    sent=[]
+    monkeypatch.setattr(dictation,'current_target',lambda:TARGET)
+    def type_text(text,delay_ms,check_abort):
+        check_abort();sent.append(text)
+    monkeypatch.setattr('tools.windows_input.type_unicode',type_text)
+    session=dictation.Session(TARGET,7)
+    assert session.insert('Hello 😀\r\nworld\t',7)=={'inserted':True,'characters':14}
+    assert sent==['Hello 😀 world ']
+    session.stop()
+    with pytest.raises(RuntimeError,match='stopped'):session.insert('later',7)
+    assert len(sent)==1
+
+
+@pytest.mark.parametrize('field',['window','focus','pid'])
+def test_focus_changes_refuse_insertion_and_cancel_session(field,monkeypatch):
+    monkeypatch.setattr(dictation,'current_target',lambda:{**TARGET,field:999})
+    monkeypatch.setattr('tools.windows_input.type_unicode',lambda *a,**kw:pytest.fail('Must not type'))
+    session=dictation.Session(TARGET,7)
+    with pytest.raises(RuntimeError,match='field changed'):session.insert('private text',7)
+    assert session.cancelled.is_set()
+
+
+def test_focus_change_mid_segment_stops_remaining_characters(monkeypatch):
+    sent=[]
+    monkeypatch.setattr(dictation,'current_target',lambda:TARGET if not sent else {**TARGET,'focus':999})
+    def type_text(text,delay_ms,check_abort):
+        for char in text:check_abort();sent.append(char)
+    monkeypatch.setattr('tools.windows_input.type_unicode',type_text)
+    with pytest.raises(RuntimeError,match='partial'):dictation.Session(TARGET,7).insert('hello',7)
+    assert sent==['h']
+
+
+@pytest.mark.parametrize('text',['','\x00oops','\x1b[31m','x'*20001,'\ud800'])
+def test_invalid_dictation_cannot_reach_the_keyboard(text):
+    with pytest.raises(ValueError):dictation.safe_text(text)
+
+
+def test_stale_generation_cannot_write(monkeypatch):
+    monkeypatch.setattr(dictation,'current_target',lambda:TARGET)
+    with pytest.raises(RuntimeError,match='stopped'):dictation.Session(TARGET,7).insert('old transcript',6)
+
+
+def test_bridge_dictation_is_private_and_requires_user_activation(monkeypatch):
+    bridge=Bridge(SimpleNamespace(url='http://127.0.0.1:7860'),'secret')
+    bridge._window=SimpleNamespace(get_current_url=lambda:'http://127.0.0.1:7860/companion')
+    bridge._dictation=SimpleNamespace(insert=lambda text,generation:{'inserted':True},stop=lambda:None)
+    with pytest.raises(ValueError):bridge.dictate('hello',3)
+    bridge._activation=True
+    assert bridge.dictate('hello',3)['inserted']
+    bridge._window.get_current_url=lambda:'https://other.example/companion'
+    with pytest.raises(ValueError):bridge.dictate('hello',3)
+
+
+def test_sketch_svg_escapes_text_and_uses_only_marks():
+    from xml.etree import ElementTree as ET
+    svg=export_svg(1920,1080,[{'kind':'text','points':[(10,20)],'color':'cyan','text':'<script>alert("x")</script>'},
+                              {'kind':'box','points':[(80,90),(10,20)],'color':'yellow'},
+                              {'kind':'arrow','points':[(1,2),(3,4)],'color':'pink'}])
+    root=ET.fromstring(svg)
+    assert root.find('{http://www.w3.org/2000/svg}text').text=='<script>alert("x")</script>'
+    box=root.find('{http://www.w3.org/2000/svg}rect')
+    assert box.attrib['width']=='70' and box.attrib['x']=='10'
+    assert '<script>' not in svg and '<image' not in svg
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Real Windows GUI and Unicode input')
+def test_real_windows_dictation_writes_unicode_into_selected_field(tmp_path):
+    """Owned Tk app, actual foreground HWND, actual SendInput; no provider."""
+    import json, subprocess, sys, time
+    script=tmp_path/'field.py'; result=tmp_path/'text.json'
+    script.write_text('''import tkinter as tk,json,sys,ctypes
+from ctypes import wintypes
+r=tk.Tk();r.title("Apex dictation acceptance field");r.attributes("-topmost",True)
+e=tk.Entry(r);e.pack();r.update();r.deiconify();r.lift();e.focus_force();r.update()
+u=ctypes.WinDLL("user32");u.GetParent.argtypes=[wintypes.HWND];u.GetParent.restype=wintypes.HWND
+h=u.GetParent(r.winfo_id()) or r.winfo_id();u.SetForegroundWindow.argtypes=[wintypes.HWND];u.SetForegroundWindow(h)
+print("ready",flush=True)
+def save():
+ open(sys.argv[1],"w",encoding="utf-8").write(json.dumps(e.get()));r.after(100,save)
+r.after(100,save);r.mainloop()
+''',encoding='utf-8')
+    child=subprocess.Popen([sys.executable,'-u',str(script),str(result)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    try:
+        assert child.stdout.readline().strip()=='ready'
+        deadline=time.monotonic()+5
+        while time.monotonic()<deadline:
+            target=dictation.current_target()
+            if target['pid']==child.pid:break
+            time.sleep(.05)
+        assert target['pid']==child.pid,'Windows did not focus the acceptance field'
+        dictation.Session(target,1).insert('Hello café 😀',1)
+        while time.monotonic()<deadline:
+            try:
+                if json.loads(result.read_text())=='Hello café 😀':break
+            except (OSError,ValueError):pass
+            time.sleep(.05)
+        assert json.loads(result.read_text())=='Hello café 😀'
+    finally:
+        child.terminate();child.wait(timeout=5)
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Real transparent Windows canvas')
+def test_real_windows_canvas_edit_done_and_capture():
+    import ctypes, json, queue, subprocess, sys, threading, time
+    from ctypes import wintypes
+    import mss
+    child=subprocess.Popen([sys.executable,'-u','-m','app.screen_canvas','--frame',
+                            json.dumps({'left':0,'top':0,'width':640,'height':480}),
+                            '--parent-pid',str(os.getpid())],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    replies=queue.Queue()
+    threading.Thread(target=lambda:replies.put(child.stdout.readline()),daemon=True).start()
+    try:
+        ready=json.loads(replies.get(timeout=15));assert ready['ready']
+        user=ctypes.WinDLL('user32')
+        get=user.GetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p)==8 else user.GetWindowLongW
+        get.argtypes,get.restype=[wintypes.HWND,ctypes.c_int],ctypes.c_ssize_t
+        user.GetWindowDisplayAffinity.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.DWORD)]
+        affinity=wintypes.DWORD()
+        assert user.GetWindowDisplayAffinity(ready['toolbar'],ctypes.byref(affinity))
+        assert affinity.value==0x11,'Toolbar must stay out of questions'
+        assert not get(ready['window'],-20)&0x20,'Edit must accept mouse strokes'
+        user.PostMessageW.argtypes=[wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM]
+        def mouse(hwnd,message,x,y,down=0):user.PostMessageW(hwnd,message,down,x|(y<<16))
+        mouse(ready['canvas'],0x201,100,100,1)
+        mouse(ready['canvas'],0x200,200,200,1)
+        mouse(ready['canvas'],0x202,200,200)
+        time.sleep(.15)
+        mouse(ready['done'],0x201,10,10,1);mouse(ready['done'],0x202,10,10)
+        deadline=time.monotonic()+3
+        while time.monotonic()<deadline and not get(ready['window'],-20)&0x20:time.sleep(.05)
+        assert get(ready['window'],-20)&0x20,'Done must pass mouse input back to the app'
+        assert user.GetWindowDisplayAffinity(ready['window'],ctypes.byref(affinity))
+        assert affinity.value==0,'User marks must be visible in Companion screen questions'
+        time.sleep(.2)
+        with mss.mss() as screen:shot=screen.grab({'left':148,'top':148,'width':5,'height':5})
+        assert any(abs(r-103)<8 and abs(g-232)<8 and abs(b-249)<8 for r,g,b in
+                   zip(shot.rgb[::3],shot.rgb[1::3],shot.rgb[2::3])),'The actual captured screen must contain the user pen stroke'
+    finally:
+        child.terminate();child.wait(timeout=5)
