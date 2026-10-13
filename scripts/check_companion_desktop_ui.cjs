@@ -9,6 +9,7 @@ async function scenario(native,noMicrophone=false){
  const dom=new JSDOM(fs.readFileSync(path.join(base,'companion.html'),'utf8'),{
   url:'http://127.0.0.1:7860/companion'+(native?'?desktop=1':''),runScripts:'outside-only'});
  const w=dom.window,$=id=>w.document.getElementById(id);
+ const style=w.document.createElement('style');style.textContent=fs.readFileSync(path.join(base,'companion.css'),'utf8');w.document.head.append(style);
  let ready=0,hidden=0,mics=0,stops=0,expanded=0,streams=[],requests=[];
  Object.defineProperty(w.navigator,'userActivation',{value:{hasBeenActive:false}});
  w.TextDecoder=TextDecoder;
@@ -52,6 +53,7 @@ async function scenario(native,noMicrophone=false){
   w.ApexDesktop.activate({kind:'look',source:'hotkey',seq:4});
   await tick();await tick();
   assert.equal(mics,1,'native hotkey works without a previous browser click');
+  assert.notEqual(w.getComputedStyle($('desktop-task').parentElement).display,'none','Draw and the action picker remain available during screen conversation');
   if(noMicrophone)assert.equal(expanded,1,'denied microphone must leave a usable full text window');
   const call=requests.find(r=>r.url==='/api/companion/chat');assert(call);
   const body=JSON.parse(call.opts.body);

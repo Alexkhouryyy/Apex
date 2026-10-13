@@ -5,6 +5,7 @@ import ctypes
 from ctypes import wintypes
 import os
 import threading
+from functools import lru_cache
 
 
 class FocusInfo(ctypes.Structure):
@@ -12,6 +13,14 @@ class FocusInfo(ctypes.Structure):
                 ('active', wintypes.HWND), ('focus', wintypes.HWND),
                 ('capture', wintypes.HWND), ('menu', wintypes.HWND),
                 ('move', wintypes.HWND), ('caret', wintypes.HWND), ('rect', wintypes.RECT)]
+
+
+@lru_cache(maxsize=1)
+def _automation_class():
+    import clr
+    clr.AddReference('UIAutomationClient'); clr.AddReference('UIAutomationTypes')
+    from System.Windows.Automation import AutomationElement
+    return AutomationElement
 
 
 def current_target():
@@ -33,10 +42,7 @@ def current_target():
     # A browser can switch HTML inputs while keeping the same native HWND.
     # UI Automation distinguishes those fields and identifies password input.
     try:
-        import clr
-        clr.AddReference('UIAutomationClient'); clr.AddReference('UIAutomationTypes')
-        from System.Windows.Automation import AutomationElement
-        element = AutomationElement.FocusedElement
+        element = _automation_class().FocusedElement
         if element is None or element.Current.IsPassword:
             raise RuntimeError('Select a regular text field before starting dictation.')
         element_id = [int(part) for part in element.GetRuntimeId()]

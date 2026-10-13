@@ -67,6 +67,23 @@ def test_bridge_dictation_is_private_and_requires_user_activation(monkeypatch):
     with pytest.raises(ValueError):bridge.dictate('hello',3)
 
 
+@pytest.mark.parametrize('password',[False,True])
+def test_window_target_uses_accessibility_identity_and_refuses_passwords(monkeypatch,password):
+    def pid(hwnd,ref):ref._obj.value=123;return 9
+    def info(thread,ref):ref._obj.focus=456;return True
+    def title(hwnd,buffer,size):buffer.value='Notes';return 5
+    user=SimpleNamespace(GetForegroundWindow=lambda:789,GetWindowThreadProcessId=pid,
+                         GetGUIThreadInfo=info,GetWindowTextW=title)
+    monkeypatch.setattr(dictation,'os',SimpleNamespace(name='nt'))
+    monkeypatch.setattr(dictation.ctypes,'WinDLL',lambda *args,**kw:user,raising=False)
+    element=SimpleNamespace(Current=SimpleNamespace(IsPassword=password),GetRuntimeId=lambda:[42,17])
+    monkeypatch.setattr(dictation,'_automation_class',lambda:SimpleNamespace(FocusedElement=element))
+    if password:
+        with pytest.raises(RuntimeError,match='regular text'):dictation.current_target()
+    else:
+        assert dictation.current_target()=={'window':789,'focus':456,'pid':123,'element_id':[42,17],'title':'Notes'}
+
+
 def test_sketch_svg_escapes_text_and_uses_only_marks():
     from xml.etree import ElementTree as ET
     svg=export_svg(1920,1080,[{'kind':'text','points':[(10,20)],'color':'cyan','text':'<script>alert("x")</script>'},
@@ -142,7 +159,11 @@ def test_real_windows_canvas_edit_done_and_capture():
         mouse(ready['canvas'],0x200,200,200,1)
         mouse(ready['canvas'],0x202,200,200)
         time.sleep(.15)
-        mouse(ready['done'],0x201,10,10,1);mouse(ready['done'],0x202,10,10)
+        rect=wintypes.RECT();user.GetWindowRect.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.RECT)]
+        assert user.GetWindowRect(ready['done'],ctypes.byref(rect))
+        user.SetCursorPos(rect.left+10,rect.top+10)
+        time.sleep(.05)
+        user.mouse_event(0x2,0,0,0,0);user.mouse_event(0x4,0,0,0,0)
         deadline=time.monotonic()+3
         while time.monotonic()<deadline and not get(ready['window'],-20)&0x20:time.sleep(.05)
         assert get(ready['window'],-20)&0x20,'Done must pass mouse input back to the app'

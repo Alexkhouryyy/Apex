@@ -207,6 +207,23 @@ def test_unicode_typing_can_be_aborted_between_characters(monkeypatch):
     assert send.call_count == 1
 
 
+def test_unicode_batches_keep_surrogate_pairs_together_and_check_cancellation(monkeypatch):
+    calls=[]
+    def send(count,events,size):
+        calls.append([(e.data.ki.wScan,e.data.ki.dwFlags) for e in events]);return count
+    monkeypatch.setattr(ctypes,'WinDLL',lambda *a,**kw:NS(SendInput=Mock(side_effect=send)),raising=False)
+    abort=Mock(side_effect=[None,RuntimeError('session stopped')])
+    with pytest.raises(RuntimeError,match='session stopped'):
+        windows_input.type_unicode('a'*31+'😊'+'later',0,check_abort=abort,batch_size=32)
+    assert len(calls)==1 and len(calls[0])==66
+    assert [scan for scan,flags in calls[0][-4:] if flags==4]==[0xd83d,0xde0a]
+
+
+@pytest.mark.parametrize('size',[0,33,True])
+def test_unicode_input_refuses_unbounded_batches(size):
+    with pytest.raises(ValueError):windows_input.type_unicode('text',0,batch_size=size)
+
+
 def test_agent_dispatch_does_not_claim_failed_click(monkeypatch):
     from agent import core
     monkeypatch.setattr(core.safety, "check", lambda *a, **kw: (True, ""))
