@@ -74,6 +74,7 @@ def _hidden_surfaces(handles,root_pid,restore):
     user.ShowWindowAsync.argtypes=[wintypes.HWND,ctypes.c_int]
     user.GetForegroundWindow.restype=wintypes.HWND
     user.SetForegroundWindow.argtypes=[wintypes.HWND]
+    user.SetWindowPos.argtypes=[wintypes.HWND,wintypes.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.UINT]
     parents=process_parents();hidden=[];foreground=user.GetForegroundWindow()
     try:
         for hwnd in dict.fromkeys(handles):
@@ -93,7 +94,8 @@ def _hidden_surfaces(handles,root_pid,restore):
             visible=[]
             for hwnd,pid in hidden:
                 if user.IsWindow(hwnd) and window_pid(hwnd)==pid:
-                    user.ShowWindowAsync(hwnd,4);visible.append(hwnd)
+                    user.SetWindowPos(hwnd,wintypes.HWND(-1),0,0,0,0,0x10 | 0x01 | 0x02 | 0x40)
+                    visible.append(hwnd)
             deadline=time.monotonic()+1
             while any(not user.IsWindowVisible(hwnd) for hwnd in visible) and time.monotonic()<deadline:
                 time.sleep(.01)

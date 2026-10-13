@@ -233,6 +233,7 @@ def test_real_windows_canvas_edit_done_and_capture():
                    zip(shot.rgb[::3],shot.rgb[1::3],shot.rgb[2::3])),'The actual captured screen must contain the user pen stroke'
         deadline=time.monotonic()+3
         while time.monotonic()<deadline and not user.IsWindowVisible(ready['toolbar']):time.sleep(.05)
-        assert user.IsWindowVisible(ready['toolbar']),'Capture must restore the owned toolbar'
+        from app.window_capture import window_pid
+        assert user.IsWindowVisible(ready['toolbar']),f'Capture must restore toolbar {ready}: alive={child.poll()}, pid={window_pid(ready["toolbar"])}'
     finally:
         child.terminate();child.wait(timeout=5)
