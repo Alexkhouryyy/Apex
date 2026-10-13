@@ -249,6 +249,7 @@ class Bridge:
     def expand(self):
         if not self._trusted():
             raise ValueError('Desktop bridge is only available to the local Companion page.')
+        self._stop_dictation()
         self._ipc.call(body={'action': 'view'})
         interactive(self._window, True)
         self._window.resize(420, 640)

@@ -226,7 +226,10 @@ def hidden() -> None:
 
 
 def expanded() -> None:
+    global _mode
     with _condition:
+        if _mode == 'dictate':
+            _mode = 'idle'
         clear()
 
 

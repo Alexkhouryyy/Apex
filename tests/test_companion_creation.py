@@ -23,6 +23,15 @@ def test_restoring_action_during_cold_boot_preserves_queued_hotkey(monkeypatch):
     assert desktop._mode=='idle' and clears==[True]
 
 
+@pytest.mark.parametrize('mode,expected',[('dictate','idle'),('screen','screen')])
+def test_chat_ends_dictation_but_keeps_screen_question_context(monkeypatch,mode,expected):
+    from agent import desktop_companion as desktop
+    monkeypatch.setattr(desktop,'_mode',mode)
+    monkeypatch.setattr(desktop,'clear',lambda:None)
+    desktop.expanded()
+    assert desktop._mode==expected
+
+
 def test_dictation_pins_the_field_and_never_sends_enter_tab_or_clipboard(monkeypatch):
     sent=[]
     monkeypatch.setattr(dictation,'current_target',lambda:TARGET)
