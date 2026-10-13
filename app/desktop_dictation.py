@@ -6,6 +6,7 @@ from ctypes import wintypes
 import os
 import threading
 from functools import lru_cache
+from pathlib import Path
 
 
 class FocusInfo(ctypes.Structure):
@@ -18,7 +19,16 @@ class FocusInfo(ctypes.Structure):
 @lru_cache(maxsize=1)
 def _automation_class():
     import clr
-    clr.AddReference('UIAutomationClient'); clr.AddReference('UIAutomationTypes')
+    from System.Runtime.InteropServices import RuntimeEnvironment
+    for name in ('UIAutomationTypes','UIAutomationClient'):
+        try:
+            clr.AddReference(name)
+        except Exception:
+            # WPF assemblies need not be in the GAC/search path of a WinForms
+            # host. Load the existing Framework copy, never download a DLL.
+            assembly = Path(str(RuntimeEnvironment.GetRuntimeDirectory())) / 'WPF' / (name + '.dll')
+            if not assembly.is_file(): raise
+            clr.AddReference(str(assembly))
     from System.Windows.Automation import AutomationElement
     return AutomationElement
 

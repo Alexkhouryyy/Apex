@@ -97,6 +97,7 @@ def main(argv=None):
             shot = screen.grab({k:frame[k] for k in ('left','top','width','height')})
             backdrop = ImageTk.PhotoImage(Image.frombytes('RGB',shot.size,shot.rgb))
         root.deiconify()
+        toolbar.lift()
 
     def redraw(preview=None):
         canvas.delete('all')
@@ -181,6 +182,7 @@ def main(argv=None):
         else: root.after(1000,watch)
     root.after(1000,watch)
     capture_backdrop(); redraw(); root.update_idletasks()
+    toolbar.lift(); toolbar.focus_force(); toolbar.update_idletasks()
     print(json.dumps({'ready':True,'window':int(hwnd),'toolbar':int(user.GetParent(toolbar.winfo_id()) or toolbar.winfo_id()),
                       'canvas':canvas.winfo_id(),'done':done.winfo_id()}),flush=True)
     root.mainloop()
