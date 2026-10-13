@@ -191,6 +191,7 @@ def main(argv=None):
     root.after(1000,watch)
     capture_backdrop(); redraw(); root.update_idletasks()
     toolbar.lift(); toolbar.focus_force(); toolbar.update_idletasks()
+    exclude_from_capture(user.GetParent(toolbar.winfo_id()) or toolbar.winfo_id())
     print(json.dumps({'ready':True,'window':int(hwnd),'toolbar':int(user.GetParent(toolbar.winfo_id()) or toolbar.winfo_id()),
                       'canvas':canvas.winfo_id(),'done':done.winfo_id()}),flush=True)
     root.mainloop()
