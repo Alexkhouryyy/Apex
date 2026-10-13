@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install -r requirements-screen-companion.txt pytest python-dotenv mss Pillow
-          export APEX_GUI_ARTIFACTS="$RUNNER_TEMP/apex-canvas-acceptance"
+          export COMPANION_GUI_ARTIFACTS="$RUNNER_TEMP/apex-canvas-acceptance"
           python -X utf8 scripts/run_tests.py --noconftest tests/test_companion_creation.py -k test_real_windows
       - uses: actions/upload-artifact@v4
         if: always() && runner.os == 'Windows'

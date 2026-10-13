@@ -160,7 +160,7 @@ def test_real_windows_canvas_edit_done_and_capture():
     import mss
     from app.screen_overlay import configure_dpi
     configure_dpi()
-    artifact_dir=os.environ.get('APEX_GUI_ARTIFACTS')
+    artifact_dir=os.environ.get('COMPANION_GUI_ARTIFACTS')
     def screenshot(name):
         if artifact_dir:
             from pathlib import Path
