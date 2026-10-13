@@ -172,6 +172,10 @@ class Bridge:
         if not self._ready.is_set():
             self._window.hide()
             reveal(self._window)
+        if os.name=='nt':
+            handles=[]
+            gui_call(self._window,lambda:handles.append(self._window.native.Handle.ToInt64()))
+            self._ipc.call(body={'action':'surface','role':'companion','hwnd':handles[0]})
         self._ipc.call(body={'action': 'ready'})
         self._ready.set()
         logging.info('Companion authenticated and ready; microphone remains off.')
@@ -224,8 +228,10 @@ class Bridge:
         _, frame = capture_frame()
         python = Path(sys.executable)
         if python.name.lower() == 'pythonw.exe': python = python.with_name('python.exe')
+        handles=[]
+        gui_call(self._window,lambda:handles.append(self._window.native.Handle.ToInt64()))
         self._canvas = subprocess.Popen([str(python),'-u','-m','app.screen_canvas','--frame',json.dumps(frame),
-                                         '--parent-pid',str(os.getpid())], cwd=ROOT,
+                                         '--parent-pid',str(os.getpid()),'--companion-hwnd',str(handles[0])], cwd=ROOT,
                                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, text=True, encoding='utf-8',
                                         creationflags=subprocess.CREATE_NO_WINDOW)
@@ -244,6 +250,7 @@ class Bridge:
         if result.get('ready') is not True:
             self._close_canvas()
             raise RuntimeError('The drawing surface could not open. See Companion desktop.log.')
+        self._ipc.call(body={'action':'surface','role':'toolbar','hwnd':result['toolbar']})
         return {'open':True}
 
     def expand(self):
@@ -467,6 +474,8 @@ def main(argv=None):
                     elif item['kind'] == 'draw':
                         try:
                             result = overlay.send(item, wait=True)
+                            if result.get('ok') and result.get('hwnd'):
+                                ipc.call(body={'action':'surface','role':'guidance','hwnd':result['hwnd']})
                         except Exception as exc:
                             result = {'ok': False, 'error': str(exc)}
                         ipc.call(body={'action': 'ack', 'seq': item['seq'], 'result': result})

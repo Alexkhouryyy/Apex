@@ -32,6 +32,7 @@ def native(monkeypatch):
     monkeypatch.setattr(desktop, '_shown', True)
     monkeypatch.setattr(desktop, '_mode', 'screen')
     monkeypatch.setattr(desktop, '_url', '')
+    monkeypatch.setattr(desktop, '_surfaces', {})
     desktop.connected()
     yield
     look_now.reset()

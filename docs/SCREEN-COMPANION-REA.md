@@ -46,6 +46,13 @@ screen question. Its controls and the AI guidance surface stay excluded from
 captures. Discuss retains its existing restrictions on host actions; user
 drawing is direct manipulation rather than an agent command.
 
+Native acceptance screenshots showed that display-affinity flags alone did
+not exclude the toolbar on the Windows runner's GDI capture path. The host
+snapshot path therefore hides only registered windows verified as members of
+its owned UI process tree, captures the application and user marks, and restores
+the help surfaces. The canvas's editing backdrop also hides the toolbar before
+copying pixels, avoiding a frozen copy of its controls in the drawing surface.
+
 ## Verification and remaining unknowns
 
 `tests/test_companion_creation.py` includes real Windows acceptance for Unicode

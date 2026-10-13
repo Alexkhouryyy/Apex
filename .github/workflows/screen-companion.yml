@@ -9,6 +9,7 @@ on:
       - 'agent/screen_guidance.py'
       - 'agent/look_now.py'
       - 'tools/windows_input.py'
+      - 'tools/computer.py'
       - 'agent/core.py'
       - 'agent/companion.py'
       - 'app/**'

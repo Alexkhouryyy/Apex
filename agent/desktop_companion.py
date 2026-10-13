@@ -30,6 +30,7 @@ _url = ''
 _keys = None
 _is_muted = lambda: False
 _preferred_mode = 'screen'
+_surfaces = {}
 
 
 def bind_resident(state):
@@ -121,6 +122,7 @@ def start(url: str) -> dict:
         _url, _mode = url, 'idle'
         _events.clear()
         _results.clear()
+        _surfaces.clear()
         kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
         _process = subprocess.Popen([str(python), '-m', 'app.companion_desktop', '--url', url,
                                      '--parent-pid', str(os.getpid())], cwd=ROOT, env=env,
@@ -147,6 +149,28 @@ def connected() -> None:
     with _condition:
         _ready, _heartbeat = True, time.monotonic()
         _condition.notify_all()
+
+
+def register_surface(role,hwnd):
+    if role not in {'companion','toolbar','guidance'} or type(hwnd) is not int or not 0<hwnd<2**64:
+        raise ValueError('Invalid native capture surface.')
+    from app.window_capture import owned_window
+    with _condition:
+        if not running() or not owned_window(hwnd,_process.pid):
+            raise ValueError('Capture surfaces must belong to the owned desktop UI process tree.')
+        _surfaces[role]=hwnd
+
+
+def capture_surfaces():
+    from app.window_capture import without_surfaces
+    with _condition:
+        root=getattr(_process,'pid',None) if running() else None
+        handles=list(_surfaces.values());before=_seq
+    def restore():
+        with _condition:
+            return running() and not any(e['seq']>before and
+                (e['kind'] in {'hide','quit'} or e['kind']=='activate' and e['item'].get('kind')=='stop') for e in _events)
+    return without_surfaces(handles,root,restore)
 
 
 def publish(kind: str, **payload) -> int:
@@ -236,6 +260,7 @@ def expanded() -> None:
 def stop() -> None:
     global _process, _session, _ready, _shown, _url, _mode, _keys
     with _condition:
+        _surfaces.clear()
         process = _process
         if _keys:
             _keys.stop()

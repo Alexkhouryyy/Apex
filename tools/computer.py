@@ -60,7 +60,8 @@ def screenshot(region=None) -> tuple[str, tuple[int, int]]:
     import mss
     from PIL import Image
 
-    with mss.mss() as sct:
+    from agent import desktop_companion
+    with desktop_companion.capture_surfaces(), mss.mss() as sct:
         monitor = sct.monitors[1] if region is None else region
         raw = sct.grab(monitor)
         img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")

@@ -116,6 +116,23 @@ def test_sketch_svg_escapes_text_and_uses_only_marks():
     assert '<script>' not in svg and '<image' not in svg
 
 
+def test_capture_process_ownership_rejects_foreign_and_cyclic_trees():
+    from app.window_capture import belongs_to
+    parents={12:11,11:10,99:98,98:99}
+    assert belongs_to(12,10,parents)
+    assert not belongs_to(12,20,parents)
+    assert not belongs_to(99,10,parents)
+
+
+def test_native_surface_registration_refuses_another_apps_window(monkeypatch):
+    from agent import desktop_companion as desktop
+    monkeypatch.setattr(desktop,'_process',SimpleNamespace(pid=123,poll=lambda:None))
+    monkeypatch.setattr(desktop,'_surfaces',{})
+    monkeypatch.setattr('app.window_capture.owned_window',lambda hwnd,pid:False)
+    with pytest.raises(ValueError,match='owned'):desktop.register_surface('toolbar',777)
+    assert desktop._surfaces=={}
+
+
 @pytest.mark.skipif(os.name!='nt',reason='Real Windows GUI and Unicode input')
 def test_real_windows_dictation_writes_unicode_into_selected_field(tmp_path):
     """Owned Tk app, actual foreground HWND, actual SendInput; no provider."""
@@ -179,6 +196,7 @@ def test_real_windows_canvas_edit_done_and_capture():
         get=user.GetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p)==8 else user.GetWindowLongW
         get.argtypes,get.restype=[wintypes.HWND,ctypes.c_int],ctypes.c_ssize_t
         user.GetWindowDisplayAffinity.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.DWORD)]
+        user.IsWindowVisible.argtypes=[wintypes.HWND]
         affinity=wintypes.DWORD()
         assert user.GetWindowDisplayAffinity(ready['toolbar'],ctypes.byref(affinity))
         assert affinity.value==0x11,'Toolbar must stay out of questions'
@@ -206,8 +224,15 @@ def test_real_windows_canvas_edit_done_and_capture():
         assert user.GetWindowDisplayAffinity(ready['window'],ctypes.byref(affinity))
         assert affinity.value==0,'User marks must be visible in Companion screen questions'
         time.sleep(.2)
-        with mss.MSS() as screen:shot=screen.grab({'left':148,'top':148,'width':5,'height':5})
+        from app.window_capture import without_surfaces
+        with without_surfaces([ready['toolbar']],child.pid):
+            assert not user.IsWindowVisible(ready['toolbar'])
+            screenshot('canvas-captured-without-toolbar.png')
+            with mss.MSS() as screen:shot=screen.grab({'left':148,'top':148,'width':5,'height':5})
         assert any(abs(r-103)<8 and abs(g-232)<8 and abs(b-249)<8 for r,g,b in
                    zip(shot.rgb[::3],shot.rgb[1::3],shot.rgb[2::3])),'The actual captured screen must contain the user pen stroke'
+        deadline=time.monotonic()+3
+        while time.monotonic()<deadline and not user.IsWindowVisible(ready['toolbar']):time.sleep(.05)
+        assert user.IsWindowVisible(ready['toolbar']),'Capture must restore the owned toolbar'
     finally:
         child.terminate();child.wait(timeout=5)

@@ -68,7 +68,8 @@ def capture_frame() -> tuple[str, dict]:
     import mss
     from PIL import Image
     from agent import screen_guidance
-    with mss.mss() as sct:
+    from agent import desktop_companion
+    with desktop_companion.capture_surfaces(), mss.mss() as sct:
         monitor = _monitor_under_cursor(sct.monitors)
         raw = sct.grab(monitor)
         img = Image.frombytes('RGB', raw.size, raw.bgra, 'raw', 'BGRX')

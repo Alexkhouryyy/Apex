@@ -121,6 +121,11 @@ implementation, use Apex Code; for the existing persistent design workspace,
 open `/board`. Voice can already build, transform and inspect that board through
 Companion's existing board tools.
 
+For host snapshots, Apex verifies that registered help surfaces belong to its
+owned UI process tree, briefly hides them for capture, and restores them without
+reopening a stopped session. Your sketch canvas stays visible. This supplements
+Windows display-affinity requests, which are not honored by every capture path.
+
 Closing the sketch toolbar discards unsaved marks. Stop, closing Companion,
 or quitting Apex also closes the owned sketch surface. Saved SVGs remain.
 Draw cancels an active dictation session so typing text labels cannot also

@@ -52,6 +52,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--frame', required=True)
     parser.add_argument('--parent-pid', type=int, required=True)
+    parser.add_argument('--companion-hwnd',type=int,default=0)
     args = parser.parse_args(argv)
     if os.name != 'nt':
         raise RuntimeError('The transparent sketch surface requires Windows.')
@@ -91,10 +92,11 @@ def main(argv=None):
         # Color-keyed blank pixels cannot receive mouse input on Windows.
         # Edit over a frozen screen image, then Done restores the live,
         # click-through desktop with just the user-created marks visible.
-        root.withdraw(); root.update_idletasks()
+        toolbar.withdraw(); root.withdraw(); root.update_idletasks()
         import mss
         from PIL import Image, ImageTk
-        with mss.mss() as screen:
+        from app.window_capture import without_surfaces
+        with without_surfaces([args.companion_hwnd] if args.companion_hwnd else [],args.parent_pid), mss.mss() as screen:
             shot = screen.grab({k:frame[k] for k in ('left','top','width','height')})
             backdrop = ImageTk.PhotoImage(Image.frombytes('RGB',shot.size,shot.rgb))
         root.deiconify()
