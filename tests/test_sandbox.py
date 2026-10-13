@@ -1,4 +1,9 @@
 """Tests for the execution-backend sandbox seam (tools/sandbox.py)."""
+import os
+import shlex
+import subprocess
+import sys
+
 import pytest
 
 import config
@@ -38,7 +43,9 @@ def test_local_shell_nonzero_exit():
 
 
 def test_local_shell_timeout():
-    res = LocalBackend().run_shell("sleep 5", timeout=1)
+    argv = [sys.executable, "-c", "import time; time.sleep(5)"]
+    command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+    res = LocalBackend().run_shell(command, timeout=1)
     assert res["success"] is False
     assert "timed out" in res["stderr"]
 

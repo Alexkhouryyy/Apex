@@ -518,6 +518,25 @@ TOOLS = [*offline_library.DEFINITIONS,
         "input_schema":{"type":"object", "properties":{"id":{"type":"string"}}, "required":["id"]}
     },
     {
+        "name": "screen_draw",
+        "description": "Draw temporary click-through guidance on the current owner host screenshot. Requires its exact frame ID. Shapes use normalized coordinates 0..1. Can point at a control or explain with arrows, rectangles, ellipses, polygons, curves and labels. Does not click or type. Only claim drawing when the returned result confirms it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "frame_id": {"type": "string"},
+                "shapes": {"type": "array", "minItems": 1, "maxItems": 24,
+                           "items": {"type": "object", "properties": {
+                               "type": {"type": "string", "enum": ["arrow", "line", "rectangle", "ellipse", "polygon", "curve", "label"]},
+                               "points": {"type": "array", "minItems": 1, "maxItems": 128,
+                                          "items": {"type": "array", "minItems": 2, "maxItems": 2,
+                                                    "items": {"type": "number", "minimum": 0, "maximum": 1}}},
+                               "color": {"type": "string", "enum": ["cyan", "red", "yellow", "green", "white"]},
+                               "label": {"type": "string", "maxLength": 100}}, "required": ["type", "points"], "additionalProperties": False}},
+                "seconds": {"type": "number", "minimum": 2, "maximum": 30}},
+            "required": ["frame_id", "shapes"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "screenshot",
         "description": "Capture the current state of the user's screen. Always call this before interacting with the UI.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
@@ -2468,6 +2487,9 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
     try:
         if name.startswith('plugin__'):
             return plugins.call(name, inputs)
+        if name == 'screen_draw':
+            from agent import screen_guidance
+            return json.dumps(screen_guidance.draw(**inputs))
         if name == "screenshot":
             b64, size = computer.screenshot()
             # Return as a special marker — handled in run() to inject image content
@@ -3918,7 +3940,7 @@ class AgentCore:
         Pass channel_id=None (default) for the main voice/text conversation.
         """
         incident_replay.require_live_turn()
-        from agent import companion
+        from agent import companion, screen_guidance
         if withhold is None:
             withhold = companion.OWNER_TOOLS
         if companion_mode is not None and companion_mode not in {"discuss", "work", "observe"}:
@@ -4064,7 +4086,9 @@ class AgentCore:
                     tools=[t for t in self._all_tools()
                            if companion_mode != "observe" and (companion_mode != "discuss" or t["name"] in companion.DISCUSS_TOOLS)
                            and (companion_mode == "work" or t["name"] not in companion.WORK_ONLY_TOOLS)
-                           and t["name"] not in withhold],
+                           and t["name"] not in withhold
+                           and (t['name'] != 'screen_draw' or (by_owner and bool(screen_b64) and screen_origin == 'host'
+                                and companion_mode in {'discuss', 'work'} and screen_guidance.available()))],
                     messages=memory.get_messages(),
                 )
 

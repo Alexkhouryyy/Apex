@@ -186,7 +186,7 @@ class TestTheAnswererIsSeparate:
     inside one that a config you did not write could flip."""
 
     def test_the_mailbox_holds_no_model_key(self):
-        src = (ROOT / "relay" / "server.py").read_text()
+        src = (ROOT / "relay" / "server.py").read_text(encoding="utf-8")
         for forbidden in ("ANTHROPIC_API_KEY", "api.anthropic.com", "x-api-key"):
             assert forbidden not in src, (
                 f"relay/server.py mentions {forbidden}. The mailbox must not "
@@ -195,7 +195,7 @@ class TestTheAnswererIsSeparate:
     def test_the_answerer_imports_nothing_from_apex(self):
         """It runs on the rented box, not on the laptop."""
         import ast
-        tree = ast.parse((ROOT / "relay" / "answer.py").read_text())
+        tree = ast.parse((ROOT / "relay" / "answer.py").read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 mod = (getattr(node, "module", "") or "") or \
@@ -209,6 +209,7 @@ class TestTheAnswererIsSeparate:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         mod.TOKEN, mod.API_KEY = "tok", ""
+        mod.DEEPSEEK_API_KEY, mod.PROVIDER = "", ""
         assert mod.main(["answer.py", "hello"]) == 2
 
     def test_a_chatty_model_answer_is_still_an_answer(self):

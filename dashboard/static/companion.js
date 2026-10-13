@@ -37,6 +37,11 @@
     } catch (_) { /* Measurement must never break a turn. */ }
   }
   const drive = location.pathname === '/drive';
+  const desktopRequested = new URLSearchParams(location.search).get('desktop') === '1';
+  let desktopConnected = false;
+  let desktopEpoch = 0;
+  let desktopKeyLabel = 'F8';
+  let desktopShareEnabled = false;
   const requestedWorkspace = new URLSearchParams(location.search).get('workspace');
   const workspace = ['board', 'assembly'].includes(requestedWorkspace) ? requestedWorkspace : null;
   const studySession = workspace === 'assembly' ? new URLSearchParams(location.search).get('study_session') : null;
@@ -154,11 +159,13 @@
     if (!$('voice-note').hidden) {
       // No Celine server here (a cloud Apex has no GPU voice): talk in the cloud
       // voice, or the device's own, rather than not at all.
-      const fallback = serverStatus?.voices?.openai ? 'openai' : window.speechSynthesis ? 'browser' : null;
+      const fallback = desktopConnected && window.speechSynthesis ? 'browser'
+        : serverStatus?.voices?.openai ? 'openai' : window.speechSynthesis ? 'browser' : null;
       if (!fallback) { const why = $('voice-note').textContent; leaveVoiceMode(); error(why); return; }
       $('voice').value = fallback; $('voice-note').hidden = true;
       voiceFallback = fallback === 'openai' ? "Celine's voice isn't on this Apex, so I'm using the cloud voice."
-                                            : "Celine's voice isn't on this Apex, so I'm using this device's voice.";
+        : desktopConnected ? "Local Celine voice isn't ready yet, so I'm using this device's voice."
+        : "Celine's voice isn't on this Apex, so I'm using this device's voice.";
     } else voiceFallback = '';
     $('spoken').checked = true;
     $('hands-free').checked = true;
@@ -858,7 +865,7 @@
     let image = null;
     // A live screen turn's picture is taken by the server as the words
     // arrive; the browser sends none of its own.
-    const liveTurn = Boolean(liveScreen) && !look && !automatic && !recovery;
+    const liveTurn = Boolean(liveScreen || desktopShareEnabled) && !look && !automatic && !recovery;
     if (!look && !liveTurn) { try { image = snapshot(); } catch (exc) { error(exc.message); return; } }
     const turn = {id: recovery?.turn_id || crypto.randomUUID(), stopped: false, done: false, text: '', automatic};
     active = turn; controls(); state('thinking', automatic ? 'Checking in on your screen…' : 'Thinking with you…');
@@ -982,6 +989,8 @@
     return h.filter(w => s.has(w)).length / h.length >= 0.7;
   }
   async function stop() {
+    desktopEpoch++;
+    desktopShareEnabled = false;
     disableHands(); $('check-in').checked=false;
     stopSpeech();
     if (recorder) { recordingEpoch++; if (recorder.state === 'recording') recorder.stop(); }
@@ -995,11 +1004,14 @@
         error(result.cancel_requested ? 'Stop requested. Reconnect to retrieve the final result.' : 'No running task found. Reconnect to check whether it finished.');
       } catch (exc) { error(exc.message); }
     }
+    if (desktopConnected) {
+      try { await window.pywebview.api.hide(); } catch (exc) { error(exc.message); }
+    }
   }
   $('stop').onclick = stop;
   $('voice-exit').onclick = stop;
   $('voice-mode').onclick = () => { if (voiceMode) stop(); else enterVoiceMode().catch(exc => { leaveVoiceMode(); error(exc.message); }); };
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && voiceMode && !$('login').open) { event.preventDefault(); stop(); } });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && (voiceMode || desktopConnected) && !$('login').open) { event.preventDefault(); stop(); } });
   $('spoken').onchange = () => { if (!$('spoken').checked) stopSpeech(); };
   $('composer').onsubmit = event => { event.preventDefault(); send($('message').value); };
   $('message').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); send($('message').value); } };
@@ -1123,7 +1135,7 @@
   const LOOK_DEFAULT = 'Look at my screen right now and help me with what I\'m doing.';
   let lookAfter = -1, looking = false;
   async function lookLoop() {
-    if (looking || drive) return;
+    if (looking || drive || desktopConnected) return;
     looking = true;
     while (true) {
       try {
@@ -1143,7 +1155,7 @@
     if (voiceMode) { stop(); return; }
     // A key pressed in another window is not a click on this page: until the
     // page has had one, the browser keeps its microphone and sound shut.
-    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+    if (!desktopConnected && navigator.userActivation && !navigator.userActivation.hasBeenActive) {
       error('Click anywhere on this page once, then press Ctrl+Alt+T again — the browser needs one click before Celine can listen and speak.');
       return;
     }
@@ -1162,16 +1174,22 @@
   let liveScreen = null;          // {mode}: what to put back afterwards
   async function startLive() {
     if (liveScreen) return true;
-    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+    if (!desktopConnected && navigator.userActivation && !navigator.userActivation.hasBeenActive) {
       error('Click anywhere on this page once so Celine can listen and speak — then Ctrl+Alt+C starts a live session. This time she answers once.');
       return false;
     }
-    if (!voiceMode) { entering = enterVoiceMode(); await entering.catch(() => {}); }
+    if (!voiceMode) {
+      entering = enterVoiceMode();
+      try { await entering; }
+      catch (exc) { disableHands(); error(exc.message); }
+    }
     if (!voiceMode) return false;                  // no mic or no voice: one answer only
     liveScreen = {mode: $('mode').value};
-    $('mode').value = 'work'; $('mode').onchange();
+    // Native screen help preserves the user's chosen mode. Drawing is
+    // available in Discuss; controlling apps still requires selecting Work.
+    $('mode').value = desktopConnected ? liveScreen.mode : 'work'; $('mode').onchange();
     root.dataset.live = '1';
-    $('voice-exit').textContent = '● Live screen · Stop · Esc';
+    $('voice-exit').textContent = desktopConnected ? `● Screen help · ${desktopKeyLabel} / Stop` : '● Live screen · Stop · Esc';
     return true;
   }
   function endLive() {
@@ -1182,6 +1200,7 @@
     $('voice-exit').textContent = 'Stop · Esc';
   }
   async function answerLook(item) {
+    const invocation = desktopEpoch;
     // Pressed again during a session: that ends it. ("Hey Celly" inside a
     // session is a question, not an off switch.)
     if (liveScreen && item.source === 'hotkey') { stop(); return; }
@@ -1190,9 +1209,20 @@
     // Stopping speech finishes asynchronously; send() refuses while any of
     // this is still true, and would drop the request without a word.
     const busy = () => active || recorder || speechBusy || speechDraining;
-    for (let i = 0; i < 600 && busy(); i++) await new Promise(r => setTimeout(r, 100));
+    for (let i = 0; i < 600 && busy(); i++) {
+      if (desktopConnected && invocation !== desktopEpoch) return;
+      await new Promise(r => setTimeout(r, 100));
+    }
     if (busy()) { error('Celine was busy and could not look — press the hotkey again.'); return; }
-    await startLive();
+    if (desktopConnected && invocation !== desktopEpoch) return;
+    const listening = await startLive();
+    if (desktopConnected && invocation !== desktopEpoch) return;
+    if (desktopConnected && !listening) {
+      // Screen help can still answer in text when microphone access fails.
+      // The compact voice window is too short for the full chat composer.
+      await window.pywebview.api.expand();
+      if (invocation !== desktopEpoch) return;
+    }
     await send(item.question || LOOK_DEFAULT, false, null, Boolean(hands?.enabled), {seq: item.seq});
   }
   async function boot() {
@@ -1213,7 +1243,7 @@
     state('', status.agent_ready === false ? 'Apex agent is not connected yet. Start Apex, then try a message.' : 'Ready when you are.'); controls();
     loadVoiceboxProfiles();
     probeStreaming();
-    lookLoop();
+    if (!desktopConnected) lookLoop();
     toParent({apex: 'ready'});
     if (drive) {
       await refreshJobs();
@@ -1289,6 +1319,59 @@
     root.querySelector('h1').textContent = 'Let’s shape it together.';
     $('screen-status').textContent = workspace === 'assembly' ? 'Your selected study component is attached to each message.' : 'Your selected board object is attached to each message.';
   }
-  boot().catch(exc => { state('', 'Apex is not connected yet.'); error(exc.message); });
+  // A native bridge is authenticated to this exact local page. A URL query
+  // alone never bypasses browser activation or grants desktop credentials.
+  async function desktopBoot() {
+    if (desktopRequested) {
+      if (typeof window.pywebview?.api?.connect !== 'function') await new Promise(resolve => {
+        // WebView creates api={} before it injects the callable methods. A
+        // cold start must wait for the completed bridge, not merely the object.
+        const timeout = setTimeout(() => state('', 'The native window is still starting…'), 15000);
+        window.addEventListener('pywebviewready', () => { clearTimeout(timeout); resolve(); }, {once:true});
+      });
+      const info = await window.pywebview.api.connect();
+      if (info.desktop !== true) throw new Error('Desktop Companion could not authenticate.');
+      if (info.token) localStorage.setItem('apex_token', info.token);
+      desktopConnected = true; document.body.classList.add('desktop-companion');
+      $('float').hidden = true;
+      $('share').hidden = true; $('review').hidden = true;
+      const expand = document.createElement('button'); expand.id = 'desktop-chat'; expand.textContent = 'Chat';
+      expand.onclick = async () => {
+        desktopEpoch++; disableHands();
+        try { await window.pywebview.api.expand(); } catch (exc) { error(exc.message); }
+      };
+      const nav = root.querySelector('header nav');
+      nav.querySelectorAll('a').forEach(link => { link.hidden = true; });
+      [...nav.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).forEach(node => node.remove());
+      nav.append(expand);
+      const settings = document.createElement('details'); settings.id = 'desktop-settings';
+      const summary = document.createElement('summary'); summary.textContent = 'Voice and behavior settings';
+      settings.append(summary);
+      const controls = root.querySelector('.settings'); controls.before(settings);
+      settings.append(root.querySelector('.toolbar'), controls, $('hands-note'));
+      const hint = document.createElement('p'); hint.className = 'desktop-hotkey-hint';
+      const key = (info.hotkey || '<f8>').replace(/[<>]/g, '').toUpperCase();
+      desktopKeyLabel = key;
+      hint.textContent = `${key}: screen help · Esc: stop and hide`;
+      root.querySelector('header').after(hint);
+    }
+    await boot();
+    if (desktopConnected) await window.pywebview.api.ready();
+  }
+  window.ApexDesktop = {
+    activate(item) {
+      if (!desktopConnected) return;
+      desktopEpoch++;
+      if (item.kind !== 'stop') desktopShareEnabled = item.kind === 'look';
+      $('screen-status').textContent = desktopShareEnabled ? 'Your screen is included with each question.' : 'Screen help is off.';
+      const task = item.kind === 'stop' ? stop() : item.kind === 'talk' ? talkHotkey() : answerLook(item);
+      Promise.resolve(task).catch(exc => error(exc.message));
+    },
+    stop: () => desktopConnected ? stop() : Promise.resolve(),
+  };
+  desktopBoot().catch(exc => {
+    state('', 'Apex is not connected yet.'); error(exc.message);
+    if (desktopRequested) window.pywebview?.api?.report_error?.(exc.message).catch(() => {});
+  });
 })();
 

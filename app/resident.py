@@ -217,6 +217,8 @@ def run_resident(model_override: Optional[str] = None) -> None:
 
     # Scheduler — pass a thin speak that goes through the state machine
     state = ResidentState()
+    from agent import desktop_companion
+    desktop_companion.bind_resident(state)
     sched.init(agent_run_fn=agent.run, speak_fn=lambda t: _speak_with_state(state, t))
 
     # Autonomous cortex — BUG FIX: resident mode previously built no AwarenessMonitor,
@@ -285,7 +287,14 @@ def run_resident(model_override: Optional[str] = None) -> None:
             logging.error(f"Dashboard NOT running — {e}")
 
     # Jarvis: desktop orb (opt-in via ORB_ENABLED=true in .env)
-    if getattr(config, "ORB_ENABLED", False):
+    if getattr(config, 'COMPANION_DESKTOP_ENABLED', False):
+        try:
+            from agent import desktop_companion
+            desktop_companion.start(_dashboard_url)
+            logging.info('Desktop Companion started hidden; use %s to open it.', config.COMPANION_HOTKEY)
+        except Exception as e:
+            logging.error(f'Desktop Companion unavailable: {e}')
+    elif getattr(config, "ORB_ENABLED", False):
         try:
             from app.orb import run_orb
             hotkey = getattr(config, "DESKTOP_SHELL_HOTKEY", "<ctrl>+<shift>+\\")
@@ -499,11 +508,22 @@ def run_resident(model_override: Optional[str] = None) -> None:
         if tray_obj:
             tray_obj.stop()
 
+    def _open_companion() -> None:
+        def show():
+            from agent import desktop_companion
+            if desktop_companion.ensure():
+                desktop_companion.show()
+            else:
+                import webbrowser
+                webbrowser.open(_dashboard_url + '/companion')
+        threading.Thread(target=show, daemon=True, name='ApexShowCompanion').start()
+
     tray_obj = tray_mod.Tray(
         on_wake_now=_on_hotkey_wake,
         on_mute=_do_mute,
         on_open_dashboard=_open_dashboard,
         on_show_recent=_show_recent,
+        on_companion=_open_companion,
         on_quit=_quit,
     )
     tray_started = tray_obj.start()
@@ -547,6 +567,11 @@ def run_resident(model_override: Optional[str] = None) -> None:
         if wake_listener:
             wake_listener.stop()
         hotkeys.stop()
+        try:
+            from agent import desktop_companion
+            desktop_companion.stop()
+        except Exception as e:
+            logging.warning(f'Desktop Companion shutdown: {e}')
         if tray_started:
             tray_obj.stop()
         try:

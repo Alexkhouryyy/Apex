@@ -23,6 +23,8 @@ this suite exists to catch.
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from tools import smoke
@@ -31,10 +33,16 @@ pytestmark = pytest.mark.slow
 
 
 @pytest.fixture(scope="module")
-def result():
+def result(tmp_path_factory):
     """One real boot of main.py --text --think against a scripted model."""
+    startup = tmp_path_factory.mktemp("smoke-startup")
+    (startup / "sitecustomize.py").write_text(
+        'print("SMOKE OUTPUT BURST " + "x" * (128 * 1024), flush=True)\n', encoding="utf-8")
+    pythonpath = os.pathsep.join([str(startup), *([os.environ["PYTHONPATH"]]
+                                                 if os.environ.get("PYTHONPATH") else [])])
     return smoke.boot(
         say="remember that my name is Alex",
+        extra_env={"PYTHONPATH": pythonpath},
         script=[
             {"content": [
                 {"type": "text", "text": "Noting that."},
@@ -51,7 +59,23 @@ def result():
 @pytest.mark.parametrize("check", smoke.CHECKS, ids=lambda c: c.__name__)
 def test_smoke_check(check, result):
     finding = check(result)
-    assert finding.ok, f"{finding.check}: {finding.detail}"
+    assert finding.ok, f"{finding.check}: {finding.detail}\n{result.stdout[-6000:]}"
+
+
+def test_boot_output_is_drained_before_the_pipe_can_block(result):
+    assert "SMOKE OUTPUT BURST " in result.stdout
+    assert result.log_bytes > 128 * 1024
+    assert result.server.agent_requests(), "The turn must complete after the startup output burst."
+
+
+def test_smoke_uses_local_catalogues_and_no_desktop_screenshot(result):
+    assert {"/v1/models", "/ollama/v1/models"} <= set(result.server.model_requests)
+    for request in result.server.agent_requests():
+        for message in request.get("messages", []):
+            content = message.get("content", [])
+            if isinstance(content, list):
+                assert not any(block.get("type") == "image" for block in content
+                               if isinstance(block, dict))
 
 
 def test_every_check_ran(result):

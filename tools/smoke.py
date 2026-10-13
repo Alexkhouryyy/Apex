@@ -94,6 +94,7 @@ class _ModelServer:
     def __init__(self, script: list[dict]):
         self.script = list(script)
         self.requests: list[dict] = []
+        self.model_requests: list[str] = []
         self.port = free_port()
         self._httpd = None
         self._thread = None
@@ -123,6 +124,28 @@ class _ModelServer:
             def log_message(self, *a):
                 pass
 
+            def do_GET(self):
+                path = self.path.split("?", 1)[0]
+                if path == "/v1/models":
+                    payload = {"data": [{"id": "claude-opus-5", "type": "model",
+                                         "display_name": "Smoke model",
+                                         "created_at": "2026-01-01T00:00:00Z"}],
+                               "has_more": False, "first_id": "claude-opus-5",
+                               "last_id": "claude-opus-5"}
+                elif path == "/ollama/v1/models":
+                    payload = {"object": "list", "data": [{"id": "smoke-local",
+                               "object": "model", "created": 0, "owned_by": "smoke"}]}
+                else:
+                    self.send_error(404)
+                    return
+                server.model_requests.append(path)
+                out = json.dumps(payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or "{}")
@@ -149,6 +172,7 @@ class _ModelServer:
     def stop(self):
         if self._httpd:
             self._httpd.shutdown()
+            self._httpd.server_close()
 
     # -- helpers the checks use ------------------------------------------------
 
@@ -193,7 +217,7 @@ class BootResult:
 
 def boot(say: str = "", script: list[dict] | None = None,
          timeout: float = 75.0, extra_env: dict | None = None,
-         args: tuple[str, ...] = ("--think",),
+         args: tuple[str, ...] = ("--think", "--no-screenshot"),
          turn_timeout: float = 45.0) -> BootResult:
     """Start main.py --text against the scripted model, say one thing, stop.
 
@@ -223,10 +247,20 @@ def boot(say: str = "", script: list[dict] | None = None,
 
     env.update({
         "DB_PATH": str(work / "apex.db"),
+        "VAULT_PATH": str(work / "vault"),
+        "SANDBOX_WORKDIR": str(work / "sandbox"),
+        "APEX_STUDY_DIR": str(work / "study"),
+        "PYTHON_DOTENV_DISABLED": "1",
+        "PYTHONUTF8": "1",
+        "AGENT_MODEL": "claude-opus-5",
+        "BACKGROUND_MODEL": "claude-opus-5",
+        "PROACTIVE_MODEL": "claude-haiku-4-5",
+        "SUBSCRIPTION_ENABLED": "false",
         "HOME": str(work),
         "USERPROFILE": str(work),          # Windows equivalent of HOME
         "ANTHROPIC_API_KEY": "sk-ant-smoke",
         "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.port}",
+        "OLLAMA_BASE_URL": f"http://127.0.0.1:{server.port}/ollama/v1",
         "DASHBOARD_PORT": str(port),
         "DASHBOARD_HOST": "127.0.0.1",
         "DASHBOARD_TOKEN": "smoke-token",
@@ -240,14 +274,31 @@ def boot(say: str = "", script: list[dict] | None = None,
         # that has none, or has one in use by something else.
         # no_silent_failures polices the "cleanly" half.
         "HANDTRACK_ENABLED": "true",
+        "CAMERA_DEVICE_INDEX": "99",
     })
     env.update(extra_env or {})
 
     proc = subprocess.Popen(
         [sys.executable, "-u", "main.py", "--text", *args],
         cwd=str(REPO), env=env, stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
     )
+    # Windows pipes can fill after only a few KB. Waiting until shutdown to
+    # communicate() leaves Apex blocked in print() before its turn can run.
+    # Keep consuming output during startup, model calls and the HTTP sweep.
+    captured: list[str] = []
+
+    def drain_output():
+        try:
+            for chunk in iter(lambda: proc.stdout.read(8192), ""):
+                captured.append(chunk)
+        except Exception as exc:
+            captured.append(f"\n[Smoke] Output capture failed: {exc}\n")
+        finally:
+            proc.stdout.close()
+
+    reader = threading.Thread(target=drain_output, daemon=True)
+    reader.start()
     dashboard_status = None
     sweep: list = []
     turn_seconds = 0.0
@@ -256,7 +307,6 @@ def boot(say: str = "", script: list[dict] | None = None,
             proc.stdin.write(say + "\n")
         proc.stdin.flush()
         proc.stdin.close()          # EOF -> Apex parks headless, keeps serving
-        # communicate() flushes stdin, which now raises on a closed handle.
         proc.stdin = None
 
         # Wait for the dashboard to answer, which also means boot finished.
@@ -315,10 +365,12 @@ def boot(say: str = "", script: list[dict] | None = None,
     finally:
         proc.terminate()
         try:
-            out = proc.communicate(timeout=20)[0] or ""
+            proc.wait(timeout=20)
         except subprocess.TimeoutExpired:
             proc.kill()
-            out = proc.communicate()[0] or ""
+            proc.wait()
+        reader.join(timeout=5)
+        out = "".join(captured)
         server.stop()
 
     return BootResult(

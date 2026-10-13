@@ -73,7 +73,8 @@ DIFF_LIMIT = 400_000                  # characters of one file's diff shown
 ALLOW_TTL = 7200                      # seconds a blocked command can be answered from your phone
 NIGHT_ALLOW_TTL = 12 * 3600           # ... from a night-shift session: you answer in the morning
 MAX_ASKS = 3                          # phone asks for blocked commands, at most, per turn
-APEX_CHECKS = 'python -m pytest -q -x -p no:cacheprovider'
+PYTEST_CHECKS = 'python -m pytest -q -x -p no:cacheprovider'
+APEX_CHECKS = 'python -X utf8 scripts/run_tests.py -x'
 CONFLICT_MARK = re.compile(r'^(<{7}|>{7})( |$)', re.M)
 RATING = re.compile(r'rating\s*[:\-]?\s*\**\s*(\d{1,2})(?:\.\d+)?\s*/\s*10', re.I)
 ANY_RATING = re.compile(r'\b(\d{1,2})(?:\.\d+)?\s*/\s*10\b')
@@ -346,8 +347,10 @@ def _slug(text: str, n: int = 24) -> str:
 # ---------------------------------------------------------------- projects
 
 def _default_checks(root: Path) -> str:
-    if (root / 'pytest.ini').exists() or (root / 'tests').is_dir() and any(root.glob('*.py')):
+    if root.resolve() == APEX_ROOT:
         return APEX_CHECKS
+    if (root / 'pytest.ini').exists() or (root / 'tests').is_dir() and any(root.glob('*.py')):
+        return PYTEST_CHECKS
     pkg = root / 'package.json'
     if pkg.exists():
         try:
@@ -364,6 +367,11 @@ def projects() -> list[dict]:
         with longterm._conn() as db:
             db.execute('INSERT OR IGNORE INTO code_projects (name, path, checks, created) VALUES (?,?,?,?)',
                        ('Apex', str(APEX_ROOT), APEX_CHECKS, time.time()))
+    # Upgrade only Apex's previous automatic default; keep custom commands
+    # and other projects' runners exactly as the owner configured them.
+    with longterm._conn() as db:
+        db.execute('UPDATE code_projects SET checks=? WHERE path=? AND checks=?',
+                   (APEX_CHECKS, str(APEX_ROOT), PYTEST_CHECKS))
     out = []
     for p in _rows('SELECT * FROM code_projects ORDER BY path = ? DESC, id', (str(APEX_ROOT),)):
         r = _git(p['path'], 'rev-parse', '--abbrev-ref', 'HEAD', check=False) if Path(p['path']).is_dir() else None
@@ -1922,6 +1930,9 @@ def _runs_tests(command: str, depth: int = 0) -> bool:
     if name.lower() in SHELL_FLAG and depth < 2:
         inner = _wrapped(name.lower(), rest)
         return inner is not None and _runs_tests(inner, depth + 1)
+    if re.fullmatch(r'python[\d.]*', name, re.I) and re.match(
+            r'(?:-X\s+utf8\s+)?scripts[/\\]run_tests\.py(?:\s|$)', rest):
+        return True
     named = [' '.join(x for x in _program(part) if x) for part in re.split(r'&&|\|\||;', str(command or ''))]
     return observed.looks_like_tests(' && '.join(named))
 

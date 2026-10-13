@@ -55,7 +55,7 @@ DISPOSITIONS = {
 
 # Fixed, version-controlled pairs. Never derive the approval inventory from the
 # code under test: a new edge must require an explicit reviewed file change.
-_INVENTORY = json.loads((Path(__file__).resolve().parents[1] / "docs/autonomy_inventory.json").read_text())
+_INVENTORY = json.loads((Path(__file__).resolve().parents[1] / "docs/autonomy_inventory.json").read_text(encoding="utf-8"))
 REVIEWED_ENTRIES = _INVENTORY["entries"]
 BASELINE = {(record["entry"], record["capability"]): record["disposition"]
             for record in _INVENTORY["edges"]}

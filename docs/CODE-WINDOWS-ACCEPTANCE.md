@@ -6,7 +6,7 @@ the usual environment in the repository, run from PowerShell in the Apex folder:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m pytest -q tests/test_code_terminal.py tests/test_code_workspace.py
+.\.venv\Scripts\python.exe -X utf8 scripts\run_tests.py tests/test_code_terminal.py tests/test_code_workspace.py
 ```
 
 These tests use scratch projects and real local shells. They do not call a
@@ -36,7 +36,8 @@ After installing the IDE, also run its real access and lifecycle checks:
 
 ```powershell
 $env:APEX_IDE_INTEGRATION = '1'
-.\.venv\Scripts\python.exe -m pytest -q tests/test_code_ide.py
+.\.venv\Scripts\python.exe -X utf8 scripts\run_tests.py tests/test_code_ide.py
+Remove-Item Env:APEX_IDE_INTEGRATION
 ```
 
 Choose Full IDE in a scratch workspace and trust that working copy. Check

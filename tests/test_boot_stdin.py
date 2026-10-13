@@ -64,7 +64,7 @@ def test_sentinel_is_not_reachable_by_typing(monkeypatch):
 
 def _text_branch() -> ast.If:
     """The `if args.text:` branch inside the main input loop."""
-    tree = ast.parse(MAIN_PY.read_text())
+    tree = ast.parse(MAIN_PY.read_text(encoding="utf-8"))
     fn = next(n for n in tree.body
               if isinstance(n, ast.FunctionDef) and n.name == "main")
     # The main loop is the `while` whose test mentions shutdown_event.
@@ -104,7 +104,7 @@ def test_tui_mode_also_leaves_on_eof():
     """`--tui` has its own input loop and got this right from the start.
     Pinned so a future refactor cannot regress it back to `continue`."""
     src = pathlib.Path(main.__file__).parent / "tui" / "app.py"
-    tree = ast.parse(src.read_text())
+    tree = ast.parse(src.read_text(encoding="utf-8"))
     handlers = [h for h in ast.walk(tree)
                 if isinstance(h, ast.ExceptHandler)
                 and "EOFError" in ast.dump(h.type or ast.Constant(None))]

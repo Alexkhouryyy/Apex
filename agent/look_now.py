@@ -63,6 +63,19 @@ def capture() -> str:
     return encode(img)
 
 
+def capture_frame() -> tuple[str, dict]:
+    """Capture and geometry together; normalized marks map back to this monitor."""
+    import mss
+    from PIL import Image
+    from agent import screen_guidance
+    with mss.mss() as sct:
+        monitor = _monitor_under_cursor(sct.monitors)
+        raw = sct.grab(monitor)
+        img = Image.frombytes('RGB', raw.size, raw.bgra, 'raw', 'BGRX')
+        frame = screen_guidance.frame_info(monitor)
+    return encode(img), frame
+
+
 def encode(img) -> str:
     img = img.convert("RGB")
     img.thumbnail((MAX_SIDE, MAX_SIDE))
@@ -95,15 +108,25 @@ def request(source: str, question: str = "", image: Optional[str] = None,
     Returns the item without its image, plus whether a page is there to take it."""
     global _seq
     now = now if now is not None else time.time()
+    from agent import desktop_companion
+    native = desktop_companion.running()
+    frame = None
     if kind == "look" and image is None:
-        image = capture()
+        if native:
+            image, frame = capture_frame()
+        else:
+            image = capture()
     with _cond:
         _seq += 1
         item = {"seq": _seq, "ts": now, "kind": kind, "source": source,
-                "question": (question or "").strip()[:2000], "image": image, "claimed": False}
+                "question": (question or "").strip()[:2000], "image": image, "claimed": False,
+                "frame": frame, "desktop": native}
         _items[:] = [i for i in _items if now - i["ts"] < KEEP_SECONDS][-4:] + [item]
         _cond.notify_all()
-    return {**_public(item), "page_listening": page_listening(now)}
+    result = {**_public(item), "page_listening": native or page_listening(now)}
+    if native:
+        desktop_companion.activate(_public(item))
+    return result
 
 
 def _public(item: dict) -> dict:
@@ -118,7 +141,7 @@ def wait(after: int, timeout: float = 25.0) -> Optional[dict]:
     with _cond:
         while True:
             _last_poll = time.time()
-            fresh = [i for i in _items if i["seq"] > after and not i["claimed"]
+            fresh = [i for i in _items if i["seq"] > after and not i["claimed"] and not i.get('desktop')
                      and _last_poll - i["ts"] < KEEP_SECONDS]
             if fresh:
                 fresh[0]["claimed"] = True        # one page answers, not every open one
@@ -140,7 +163,16 @@ def image_for(seq: int) -> Optional[str]:
         for i, item in enumerate(_items):
             if item["seq"] == seq:
                 _items.pop(i)
-                return item["image"]
+                return item['image'] if time.time() - item['ts'] < KEEP_SECONDS else None
+    return None
+
+
+def frame_for(seq: int) -> Optional[dict]:
+    """Read geometry before image_for consumes the one-use capture."""
+    with _cond:
+        for item in _items:
+            if item['seq'] == seq and time.time() - item['ts'] < KEEP_SECONDS:
+                return item.get('frame')
     return None
 
 
@@ -167,12 +199,20 @@ def _announce(result: dict) -> None:
 
 def on_hotkey() -> None:
     try:
+        from agent import desktop_companion
+        if desktop_companion.ensure() and desktop_companion.status()['mode'] == 'screen':
+            desktop_companion.activate({'kind': 'stop', 'source': 'hotkey'})
+            return
         _announce(request("hotkey"))
     except Exception as e:
         print(f"[Celine] Could not capture the screen: {type(e).__name__}: {e}", flush=True)
 
 
 def on_talk_hotkey() -> None:
+    from agent import desktop_companion
+    if desktop_companion.ensure() and desktop_companion.status()['mode'] != 'idle':
+        desktop_companion.activate({'kind': 'stop', 'source': 'hotkey'})
+        return
     r = request("hotkey", kind="talk")
     if r["page_listening"]:
         print("[Celine] Talk hotkey: Voice mode on/off in the companion page.", flush=True)

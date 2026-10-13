@@ -1,0 +1,2 @@
+# Native Windows Companion is optional; no IDE compiler toolchain is required.
+pywebview==6.1

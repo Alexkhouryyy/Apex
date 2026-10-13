@@ -26,6 +26,66 @@ async def companion_page():
     return FileResponse(STATIC_DIR / "companion.html")
 
 
+def _desktop_owner(request: Request, private: bool = False) -> None:
+    from agent import desktop_companion
+    if not _is_owner(request) or not request.client or request.client.host not in {'127.0.0.1', '::1'}:
+        raise HTTPException(403, 'Desktop Companion is controlled by its local owner.')
+    if private and not desktop_companion.authorize(request.headers.get('X-Apex-Desktop-Session', '')):
+        raise HTTPException(403, 'Desktop Companion session is not active.')
+
+
+@router.get('/api/companion/desktop/status')
+async def desktop_status(request: Request):
+    _desktop_owner(request)
+    from agent import desktop_companion
+    return desktop_companion.status()
+
+
+@router.post('/api/companion/desktop/start')
+async def start_desktop(request: Request):
+    _check_origin(request)
+    _desktop_owner(request)
+    from agent import desktop_companion
+    try:
+        return await asyncio.to_thread(desktop_companion.start, str(request.base_url).rstrip('/'))
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@router.get('/api/companion/desktop/events')
+async def desktop_events(request: Request, after: int = 0):
+    _desktop_owner(request, private=True)
+    from agent import desktop_companion
+    return {'events': desktop_companion.poll(after)}
+
+
+@router.post('/api/companion/desktop')
+async def desktop_event(request: Request):
+    _check_origin(request)
+    _desktop_owner(request, private=True)
+    raw = await request.body()
+    if len(raw) > 4000:
+        raise HTTPException(413, 'Desktop message is too large.')
+    try:
+        body = json.loads(raw)
+        if not isinstance(body, dict):
+            raise ValueError('Expected an object.')
+        from agent import desktop_companion
+        if body.get('action') == 'ready':
+            desktop_companion.connected()
+        elif body.get('action') == 'hidden':
+            desktop_companion.hidden()
+        elif body.get('action') == 'view':
+            desktop_companion.expanded()
+        elif body.get('action') == 'ack' and type(body.get('seq')) is int and isinstance(body.get('result'), dict):
+            desktop_companion.acknowledge(body['seq'], body['result'])
+        else:
+            raise ValueError('Unknown desktop message.')
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'ok': True}
+
+
 def _is_owner(request: Request) -> bool:
     return not config.DASHBOARD_TOKEN or getattr(request.state, "is_master", False)
 
@@ -384,11 +444,15 @@ async def companion_chat(request: Request, durable: bool = False):
         # Look now: the page refers to a screen the server captured on the
         # hotkey or wake phrase; the image itself never went to the browser.
         screen_origin = "browser"
+        screen_frame = None
         look_id = body.get("look_id")
+        if (look_id is not None or body.get('look_live') is not None) and not owner:
+            raise HTTPException(403, 'Host screen capture is for the owner only.')
         if look_id is not None:
             if type(look_id) is not int or body.get("screen_image") or durable:
                 raise ValueError("Invalid look request.")
             from agent import look_now
+            screen_frame = look_now.frame_for(look_id) if owner else None
             image = look_now.image_for(look_id)
             if image is None:
                 raise ValueError("That screen capture has expired or was already used. Press the hotkey again.")
@@ -401,7 +465,11 @@ async def companion_chat(request: Request, durable: bool = False):
                 raise ValueError("Invalid live screen request.")
             from agent import look_now
             try:
-                image = await asyncio.get_running_loop().run_in_executor(None, look_now.capture)
+                from agent import desktop_companion
+                if owner and desktop_companion.running():
+                    image, screen_frame = await asyncio.to_thread(look_now.capture_frame)
+                else:
+                    image = await asyncio.get_running_loop().run_in_executor(None, look_now.capture)
             except Exception as exc:
                 raise ValueError(f"Could not see the screen ({type(exc).__name__}). Is Apex running on this laptop's desktop?") from exc
             body["screen_image"], screen_origin = image, "host"
@@ -502,14 +570,16 @@ async def companion_chat(request: Request, durable: bool = False):
                             memory.add_assistant([{"type": "text", "text": item["text"]}])
             if not proactive:
                 conversations.add_message(thread_id, "user", message.strip())
-            response = agent.run(
-                agent_message, include_screenshot=False, streamer=Streamer(),
-                channel_id=channel_id, cancel_event=cancel,
-                companion_mode=mode, screen_image=body.get("screen_image"),
-                max_iterations=1 if proactive else None, persona=persona,
-                screen_origin=screen_origin, withhold=frozenset() if owner else companion.OWNER_TOOLS,
-                stage_memories=code_stage, by_owner=owner,
-            )
+            from agent import screen_guidance
+            with screen_guidance.turn(screen_frame if owner and screen_origin == 'host' else None):
+                response = agent.run(
+                    agent_message + screen_guidance.instructions(), include_screenshot=False, streamer=Streamer(),
+                    channel_id=channel_id, cancel_event=cancel,
+                    companion_mode=mode, screen_image=body.get("screen_image"),
+                    max_iterations=1 if proactive else None, persona=persona,
+                    screen_origin=screen_origin, withhold=frozenset() if owner else companion.OWNER_TOOLS,
+                    stage_memories=code_stage, by_owner=owner,
+                )
             if cancel.is_set():
                 response = (response or "") + "\n[Interrupted; any completed actions remain in effect.]"
             if not proactive or response.strip() != "NOTHING_TO_ADD":

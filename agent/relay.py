@@ -42,10 +42,12 @@ snapshot fail to open instead of opening as something else.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 import tempfile
 import time
+from urllib.parse import quote
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -135,14 +137,14 @@ def snapshot_bytes(db_path: Optional[str] = None) -> bytes:
 
     with tempfile.TemporaryDirectory(prefix="apex_snap_") as tmp:
         dest = Path(tmp) / "snapshot.db"
-        source = sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=30)
-        target = sqlite3.connect(str(dest))
-        try:
+        source_uri = f'file:{quote(str(src.resolve()), safe="/:")}?mode=ro'
+        with closing(sqlite3.connect(source_uri, uri=True, timeout=30)) as source, \
+                closing(sqlite3.connect(str(dest))) as target:
             source.backup(target)
-        finally:
-            target.close()
-            source.close()
-        with sqlite3.connect(f"file:{dest}?mode=ro", uri=True) as c:
+        # SQLite's transaction context manager does not close the connection.
+        # Release the verification handle before Windows removes the temp file.
+        dest_uri = f'file:{quote(str(dest.resolve()), safe="/:")}?mode=ro'
+        with closing(sqlite3.connect(dest_uri, uri=True)) as c:
             ok = c.execute("PRAGMA integrity_check").fetchone()[0]
         if ok != "ok":
             raise RelayError(f"snapshot failed its integrity check: {ok}")

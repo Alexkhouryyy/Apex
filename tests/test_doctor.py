@@ -20,6 +20,10 @@ class TestConfiguredIsNotWorking:
     settings and pronounced them healthy would be the fail-open shape in its
     purest form — an instrument that agrees with you."""
 
+    @pytest.fixture(autouse=True)
+    def anthropic_model(self, monkeypatch):
+        monkeypatch.setattr(config, "AGENT_MODEL", "claude-opus-5")
+
     def test_the_model_check_makes_a_real_call(self, monkeypatch):
         monkeypatch.setattr(config, "SUBSCRIPTION_ENABLED", False, raising=False)
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-looks-real-enough")

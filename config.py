@@ -401,6 +401,9 @@ CELINE_WAKE_PHRASES = [p.strip().lower() for p in os.getenv(
 ).split(",") if p.strip()]
 DESKTOP_SHELL_HOTKEY = os.getenv("DESKTOP_SHELL_HOTKEY", "<ctrl>+<shift>+\\")
 ORB_ENABLED = os.getenv("ORB_ENABLED", "false").lower() in {"1", "true", "yes"}
+# Optional native Companion: installed once, starts hidden, activated by Celine's hotkeys.
+COMPANION_DESKTOP_ENABLED = os.getenv("COMPANION_DESKTOP_ENABLED", "false").lower() in {"1", "true", "yes"}
+COMPANION_HOTKEY = os.getenv('COMPANION_HOTKEY', '<f8>')
 PROFILE_DIGEST_ENABLED = os.getenv("PROFILE_DIGEST_ENABLED", "true").lower() in {"1", "true", "yes"}
 PROFILE_DIGEST_INTERVAL_SECONDS = int(os.getenv("PROFILE_DIGEST_INTERVAL_SECONDS", "3600"))
 

@@ -7,6 +7,8 @@ import io
 
 MAX_IMAGE_CHARS = 3_000_000
 DISCUSS_TOOLS = frozenset({
+    # Ephemeral click-through explanations, bound to the current owner host frame.
+    "screen_draw",
     # `remember` is allowed in Discuss: saving what the user tells you about
     # themselves is a note in Apex's own memory, not an action on the machine.
     "recall", "remember", "kb_search", "web_search", "web_browse", "research",
@@ -38,7 +40,7 @@ WORK_ONLY_TOOLS = frozenset({"code_act"})
 CODE_TOOLS = frozenset({"code_status", "code_act"})
 # Withheld from every turn the owner didn't start (device tokens, channels, background):
 # Apex Code, and image generation, which runs an agent on the owner's ChatGPT plan.
-OWNER_TOOLS = CODE_TOOLS | {"generate_image"}
+OWNER_TOOLS = CODE_TOOLS | {"generate_image", "screen_draw"}
 
 
 def validate_screen_image(value: str | None) -> str | None:
@@ -100,7 +102,8 @@ Ask a short clarifying question when 'this' has more than one plausible target.
         if has_image else
         "No fresh screen snapshot is attached. Older images are historical; ask for a new share when needed.\n"
     ) + (
-        "DISCUSS mode: only the supplied read/research tools are available. Explain, investigate, "
+        "DISCUSS mode: the supplied read/research tools and temporary screen_draw explanations are available. "
+        "Screen marks only explain; they do not click or change the application underneath. Explain, investigate, "
         "and recommend. You may inspect a repository and draft a skill with develop_skill; "
         "its isolated validation and pending approval are not activation. Report the returned status. "
         "Do not execute host commands, edit user files, control devices, or run installed skills. "
