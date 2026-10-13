@@ -154,11 +154,11 @@ def connected() -> None:
 def register_surface(role,hwnd):
     if role not in {'companion','toolbar','guidance'} or type(hwnd) is not int or not 0<hwnd<2**64:
         raise ValueError('Invalid native capture surface.')
-    from app.window_capture import owned_window
+    from app.window_capture import owned_window,describe_surface
     with _condition:
         if not running() or not owned_window(hwnd,_process.pid):
             raise ValueError('Capture surfaces must belong to the owned desktop UI process tree.')
-        _surfaces[role]=hwnd
+        _surfaces[role]=describe_surface(hwnd)
 
 
 def capture_surfaces():

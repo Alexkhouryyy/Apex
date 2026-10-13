@@ -198,6 +198,8 @@ def test_real_windows_canvas_edit_done_and_capture():
         user.GetWindowDisplayAffinity.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.DWORD)]
         user.IsWindowVisible.argtypes=[wintypes.HWND]
         affinity=wintypes.DWORD()
+        from app.window_capture import describe_surface,resolve_surface
+        toolbar_surface=describe_surface(ready['toolbar'])
         assert user.GetWindowDisplayAffinity(ready['toolbar'],ctypes.byref(affinity))
         assert affinity.value==0x11,'Toolbar must stay out of questions'
         assert not get(ready['window'],-20)&0x20,'Edit must accept mouse strokes'
@@ -225,15 +227,17 @@ def test_real_windows_canvas_edit_done_and_capture():
         assert affinity.value==0,'User marks must be visible in Companion screen questions'
         time.sleep(.2)
         from app.window_capture import without_surfaces
-        with without_surfaces([ready['toolbar']],child.pid):
-            assert not user.IsWindowVisible(ready['toolbar'])
+        with without_surfaces([toolbar_surface],child.pid):
+            toolbar=resolve_surface(toolbar_surface)
+            assert toolbar and not user.IsWindowVisible(toolbar)
             screenshot('canvas-captured-without-toolbar.png')
             with mss.MSS() as screen:shot=screen.grab({'left':148,'top':148,'width':5,'height':5})
         assert any(abs(r-103)<8 and abs(g-232)<8 and abs(b-249)<8 for r,g,b in
                    zip(shot.rgb[::3],shot.rgb[1::3],shot.rgb[2::3])),'The actual captured screen must contain the user pen stroke'
         deadline=time.monotonic()+3
-        while time.monotonic()<deadline and not user.IsWindowVisible(ready['toolbar']):time.sleep(.05)
+        toolbar=resolve_surface(toolbar_surface)
+        while time.monotonic()<deadline and toolbar and not user.IsWindowVisible(toolbar):time.sleep(.05)
         from app.window_capture import window_pid
-        assert user.IsWindowVisible(ready['toolbar']),f'Capture must restore toolbar {ready}: alive={child.poll()}, pid={window_pid(ready["toolbar"])}'
+        assert toolbar and user.IsWindowVisible(toolbar),f'Capture must restore toolbar {toolbar_surface}: alive={child.poll()}, resolved={toolbar}'
     finally:
         child.terminate();child.wait(timeout=5)
