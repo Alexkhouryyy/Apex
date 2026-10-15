@@ -102,11 +102,30 @@ a partial insertion. Dictation can therefore write a command into a terminal
 without executing it. Some apps, including elevated windows, may reject
 Windows Unicode input. Microphone denial offers text Chat instead.
 
+### Follow: a bubble beside your cursor
+
+**Follow** (beside Draw on the Windows Companion) shrinks Companion to a small
+always-on-top bubble that rides next to your mouse pointer: below and to the
+right of it, flipping to the other side near a screen edge, never covering the
+pointer, and staying inside the work area of the monitor the pointer is on (so
+not under the taskbar). It eases toward the pointer rather than jumping, and
+holds still while the pointer does.
+
+It follows only while the bubble is compact. Expanding to **Chat**, hiding the
+window, or a full-size view stops it moving, so it never chases you while you
+type; it picks up again the next time the compact bubble opens. Click **Follow**
+again to send it back to the corner. `COMPANION_FOLLOW_CURSOR=true` in `.env`
+starts it following. Windows only; the browser companion's **Bubble ⊙** is the
+always-on-top, non-following version.
+
 ### Write, draw and design together
 
 The native **Draw** button opens a user-controlled sketch surface on the monitor
-under your pointer. **Pen**, **Box**, **Arrow** and **Text** create your own marks;
-colors, Undo, Redo and Clear are local controls. Edit shows a frozen screen image
+under your pointer. **Pen**, **Box**, **Circle**, **Arrow** and **Text** create your
+own marks, and **Eraser** removes the one mark you click (the topmost first).
+Colors, Undo, Redo and Clear are local controls; Undo also brings back an
+erased mark, and Clear can be undone. (There is no highlighter: Windows Tk
+can't draw see-through ink, so a highlight would hide what it marks.) Edit shows a frozen screen image
 so drawing on blank pixels works reliably. **Done** returns to the live screen
 with only your marks visible and mouse clicks passing through to your app.
 **Edit** resumes drawing against a new screen image. **Save SVG** opens a file

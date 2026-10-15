@@ -10,11 +10,12 @@ async function scenario(native,noMicrophone=false){
   url:'http://127.0.0.1:7860/companion'+(native?'?desktop=1':''),runScripts:'outside-only'});
  const w=dom.window,$=id=>w.document.getElementById(id);
  const style=w.document.createElement('style');style.textContent=fs.readFileSync(path.join(base,'companion.css'),'utf8');w.document.head.append(style);
- let ready=0,hidden=0,mics=0,stops=0,expanded=0,streams=[],requests=[];
+ let ready=0,hidden=0,mics=0,stops=0,expanded=0,streams=[],requests=[],follows=[];
  Object.defineProperty(w.navigator,'userActivation',{value:{hasBeenActive:false}});
  w.TextDecoder=TextDecoder;
  w.speechSynthesis={cancel(){},speak(){}};
- const nativeApi={connect:async()=>({desktop:true,token:'owner-token',hotkey:'<f8>'}),
+ const nativeApi={connect:async()=>({desktop:true,token:'owner-token',hotkey:'<f8>',can_follow:true,follow:false}),
+                  follow:async on=>{follows.push(on);return {follow:on};},
                   choose_mode:async()=>true,sketch:async()=>({open:true}),
                   ready:async()=>{ready++;},hide:async()=>{hidden++;},expand:async()=>{expanded++;}};
  w.pywebview=native?{api:{}}:undefined;
@@ -49,6 +50,14 @@ async function scenario(native,noMicrophone=false){
   assert.equal(ready,1);assert.equal(w.localStorage.getItem('apex_token'),'owner-token');
   assert.match(w.document.querySelector('.desktop-hotkey-hint').textContent,/F8/);
   assert($('desktop-task'));assert($('desktop-draw'));
+  // Follow: the bubble rides beside the cursor, in the compact layout.
+  const follow=$('desktop-follow');assert(follow,'a Follow toggle on the Windows Companion');
+  assert.equal(follow.getAttribute('aria-pressed'),'false');assert.equal($('bubble-mode').hidden,true,'native Follow replaces the browser Bubble');
+  follow.click();await tick();await tick();
+  assert.deepEqual(follows,[true]);assert.equal(follow.getAttribute('aria-pressed'),'true');
+  assert.equal($('companion').dataset.compact,'1','following uses the compact bubble layout');
+  follow.click();await tick();await tick();
+  assert.deepEqual(follows,[true,false]);assert.ok(!$('companion').dataset.compact,'back to the full layout');
   assert(!requests.some(r=>r.url.includes('/api/companion/look')),'a browser poll must not steal a native hotkey');
   w.ApexDesktop.activate({kind:'look',source:'hotkey',seq:4});
   await tick();await tick();
@@ -81,5 +90,5 @@ async function scenario(native,noMicrophone=false){
 }
 (async()=>{
  await scenario(true);await scenario(true,true);await scenario(false);
- console.log('PASS: silent native boot, F8 hint, owner authentication, click-free native activation, Discuss guidance, no competing browser claim, and stop/hide/cancel.');
+ console.log('PASS: silent native boot, F8 hint, owner authentication, Follow toggles the cursor bubble, click-free native activation, Discuss guidance, no competing browser claim, and stop/hide/cancel.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -31,6 +31,9 @@ def position(height):
     return None, None
 
 
+FOLLOW_SIZE = (320, 220)   # the compact bubble while it rides beside the cursor
+
+
 def interactive(window, enabled):
     """Voice help leaves app focus alone; expanded Chat must accept typing."""
     window.focus = enabled
@@ -164,7 +167,9 @@ class Bridge:
             raise ValueError('Desktop bridge is only available to the local Companion page.')
         import config
         logging.info('Local Companion page connected to its native bridge.')
-        return {'desktop': True, 'token': self._token, 'drawings': os.name == 'nt', 'hotkey': config.COMPANION_HOTKEY}
+        follower = getattr(self, '_follower', None)
+        return {'desktop': True, 'token': self._token, 'drawings': os.name == 'nt', 'hotkey': config.COMPANION_HOTKEY,
+                'follow': bool(follower and follower.enabled), 'can_follow': bool(follower)}
 
     def ready(self):
         if not self._trusted():
@@ -253,11 +258,31 @@ class Bridge:
         self._ipc.call(body={'action':'surface','role':'toolbar','hwnd':result['toolbar']})
         return {'open':True}
 
+    def follow(self, on):
+        """Ride beside the cursor (on) or go back to the corner (off)."""
+        if not self._trusted():
+            raise ValueError('Desktop bridge is only available to the local Companion page.')
+        follower = getattr(self, '_follower', None)
+        if follower is None:
+            raise ValueError('Following the cursor needs the Windows Companion.')
+        follower.set_enabled(bool(on))
+        follower.paused = False
+        if on:
+            self._window.resize(*FOLLOW_SIZE)
+        else:
+            self._window.resize(420, 300)
+            x, y = position(300)
+            if x is not None:
+                self._window.move(x, y)
+        return {'follow': follower.enabled}
+
     def expand(self):
         if not self._trusted():
             raise ValueError('Desktop bridge is only available to the local Companion page.')
         self._stop_dictation()
         self._ipc.call(body={'action': 'view'})
+        if getattr(self, '_follower', None):
+            self._follower.paused = True
         interactive(self._window, True)
         self._window.resize(420, 640)
         x, y = position(640)
@@ -346,6 +371,14 @@ def main(argv=None):
                                    width=420, height=300, x=x, y=y, hidden=os.name != 'nt', on_top=True, focus=False,
                                    js_api=bridge, background_color='#101318')
     bridge._window = window
+    if os.name == 'nt':
+        from app import follow as follow_mod
+        follower = follow_mod.Follower(follow_mod.windows_cursor, follow_mod.windows_work_area,
+                                       lambda: FOLLOW_SIZE, lambda x, y: window.move(x, y),
+                                       enabled=getattr(config, 'COMPANION_FOLLOW_CURSOR', False))
+        follower.paused = True        # nothing to follow until the bubble is shown
+        bridge._follower = follower
+        follower.start()
     permission = MicrophonePermission(bridge, data / 'permissions.json')
     shutting_down = threading.Event()
 
@@ -433,6 +466,8 @@ def main(argv=None):
                         shutting_down.set()
                         break
                     if item['kind'] == 'show':
+                        if getattr(bridge, '_follower', None):
+                            bridge._follower.paused = True
                         reveal(window)
                         interactive(window, True)
                         window.resize(420, 640)
@@ -455,16 +490,23 @@ def main(argv=None):
                         if item['item'].get('kind') != 'stop':
                             reveal(window)
                             interactive(window, False)
-                            window.resize(420, 300)
-                            x, y = position(300)
-                            if x is not None:
-                                window.move(x, y)
+                            follower = getattr(bridge, '_follower', None)
+                            if follower and follower.enabled:
+                                window.resize(*FOLLOW_SIZE)          # the bubble rides the cursor
+                                follower.paused = False
+                            else:
+                                window.resize(420, 300)
+                                x, y = position(300)
+                                if x is not None:
+                                    window.move(x, y)
                             window.show()
                         bridge._activation = item['item'].get('kind') != 'stop'
                         window.evaluate_js('void window.ApexDesktop.activate(' + json.dumps(item['item']) + ')')
                     elif item['kind'] in {'clear', 'hide'}:
                         overlay.send({'kind': 'clear'})
                         if item['kind'] == 'hide':
+                            if getattr(bridge, '_follower', None):
+                                bridge._follower.paused = True
                             bridge._activation = False
                             bridge._stop_dictation()
                             bridge._close_canvas()
@@ -488,6 +530,8 @@ def main(argv=None):
                     break
             shutting_down.wait(.25)
         shutting_down.set()
+        if getattr(bridge, '_follower', None):
+            bridge._follower.stop()
         bridge._stop_dictation()
         bridge._close_canvas()
         overlay.stop()
