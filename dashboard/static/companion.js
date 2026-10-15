@@ -1151,9 +1151,20 @@
       const style = pip.document.createElement('link'); style.rel = 'stylesheet'; style.href = new URL('/static/companion.css', location.origin).href;
       pip.document.head.append(style); pip.document.title = 'Apex companion'; pip.document.body.append(root);
       $('float').textContent = 'Return ↙';
-      pip.addEventListener('pagehide', () => { document.body.prepend(root); pip = null; $('float').textContent = 'Float ↗'; }, {once: true});
+      pip.addEventListener('pagehide', () => { document.body.prepend(root); pip = null; $('float').textContent = 'Float ↗'; setCompact(false); }, {once: true});
     } catch (exc) { error(exc.message); }
   };
+  // --- Bubble: shrink to a small floating companion (orb + last reply + mic) ----
+  function setCompact(on) {
+    if (on) root.dataset.compact = '1'; else delete root.dataset.compact;
+    $('bubble-mode').setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (pip) { try { pip.resizeTo(on ? 320 : 440, on ? 400 : 760); } catch (_) {} }
+  }
+  $('bubble-mode').onclick = () => setCompact(!root.dataset.compact);
+  // In bubble mode the orb is the expand control; clicking it opens back out.
+  $('presence').addEventListener('click', e => {
+    if (root.dataset.compact && !e.target.closest('button')) setCompact(false);
+  });
   // --- Look now: Ctrl+Alt+C / "Hey Celly" on the laptop ---------------------
   // The server captures the screen; this page is what answers, out loud.
   const LOOK_DEFAULT = 'Look at my screen right now and help me with what I\'m doing.';
@@ -1291,7 +1302,7 @@
     $('remote-panel').hidden = false;
     root.querySelector('h1').textContent = 'Your Apex, along for the ride.';
     root.querySelector('.eyebrow').textContent = 'CONNECTED TO YOUR COMPUTER';
-    for (const id of ['share', 'review', 'float', 'check-in', 'screen-status']) $(id).hidden = true;
+    for (const id of ['share', 'review', 'float', 'bubble-mode', 'check-in', 'screen-status']) $(id).hidden = true;
     $('check-in').parentElement.hidden = true;
     $('capabilities').textContent = `Microphone: ${navigator.mediaDevices?.getUserMedia && window.MediaRecorder ? 'available to request' : 'unavailable — use text or your phone'} · Device speech: ${window.speechSynthesis ? 'available' : 'unavailable'}`;
     $('welcome').querySelector('h2').textContent = 'What should we work on?';

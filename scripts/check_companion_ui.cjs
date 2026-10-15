@@ -81,8 +81,20 @@ w.eval(fs.readFileSync(base+'speech_queue.js','utf8'));w.eval(fs.readFileSync(ba
  w.documentPictureInPicture={requestWindow:async()=>pipDom.window};pipDom.window.close=()=>pipDom.window.dispatchEvent(new pipDom.window.Event('pagehide'));
  $('float').click();await tick();assert.equal(d.getElementById('companion'),null);assert.ok(pipDom.window.document.getElementById('companion'));
  pipDom.window.document.getElementById('float').click();await tick();assert.ok($('companion'));assert.equal($('float').textContent,'Float ↗');
- $('new').click();assert.ok($('welcome'));assert.equal(w.localStorage.getItem('apex_companion_thread'),null);
- console.log('PASS: client streaming, stable thread, mode selection, tool text escaping, snapshot attachment, capture stop, cancellation handshake, stale TTS suppression, stopped transcription, floating DOM transfer and new chat.');
+ // Bubble: shrink the floating companion to orb + last reply + mic, then expand.
+ let sized=null; pipDom.window.resizeTo=(w2,h2)=>{sized=[w2,h2];};
+ $('float').click();await tick();                                   // float again
+ const cdoc=pipDom.window.document;
+ cdoc.getElementById('bubble-mode').click();await tick();
+ assert.equal(cdoc.getElementById('companion').dataset.compact,'1','bubble layout on');
+ assert.equal(cdoc.getElementById('bubble-mode').getAttribute('aria-pressed'),'true');
+ assert.deepEqual(sized,[320,400],'the floating window shrinks');
+ cdoc.getElementById('presence').dispatchEvent(new pipDom.window.MouseEvent('click',{bubbles:true}));await tick();
+ assert.ok(!cdoc.getElementById('companion').dataset.compact,'clicking the orb expands it');
+ assert.deepEqual(sized,[440,760]);
+ pipDom.window.document.getElementById('float').click();await tick();   // return to the page
+  $('new').click();assert.ok($('welcome'));assert.equal(w.localStorage.getItem('apex_companion_thread'),null);
+ console.log('PASS: client streaming, stable thread, mode selection, tool text escaping, snapshot attachment, capture stop, cancellation handshake, stale TTS suppression, stopped transcription, floating DOM transfer, the bubble layout, and new chat.');
  dom.window.close();
 })().catch(e=>{console.error(e);dom.window.close();process.exitCode=1;});
 

@@ -119,7 +119,9 @@ automatically — watch the console for `[Dashboard] http://127.0.0.1:7860`.
 
 Open **Screen companion** in the dashboard sidebar (or `/companion`). Share a
 window, talk or type, and use **Float** to keep Apex above your work in a browser
-that supports Document Picture-in-Picture. **Discuss** investigates and gives
+that supports Document Picture-in-Picture. **Bubble ⊙** then shrinks the floating
+window to a small always-on-top orb — just Celine, her last reply and the mic;
+click the orb to open it back out. **Discuss** investigates and gives
 advice; **Work** enables Apex's existing action tools for your requested task.
 Tool results appear beside the reply, and **Stop** interrupts further steps.
 

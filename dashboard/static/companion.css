@@ -104,3 +104,21 @@ body.desktop-companion #companion[data-view=voice] #messages {text-align:left;mi
 body.desktop-companion #companion[data-view=voice] .message .text {font-size:14px;line-height:1.4}
 body.desktop-companion #companion[data-view=voice] .message.user .text {font-size:12px}
 body.desktop-companion #companion[data-look][data-view=voice] .avatar {width:52px;height:64px;flex:0 0 52px}
+
+/* Bubble: a small always-on-top companion — Celine's orb, her last line, the mic.
+   Composes with Float (data-compact + a shrunk PiP window) and with voice mode.
+   Everything else folds away; the orb expands it back. */
+#companion[data-compact]{max-width:none;min-height:100dvh;padding:14px 16px 12px;gap:10px;justify-content:flex-start}
+#companion[data-compact] header nav a,#companion[data-compact] header nav #voice-mode{display:none}
+#companion[data-compact] .presence{padding:6px 0 2px;gap:14px;cursor:pointer}
+#companion[data-compact] .presence .eyebrow,#companion[data-compact] .presence h1{display:none}
+#companion[data-compact] .orb{flex:0 0 58px;height:58px}
+#companion[data-compact] #status{font-size:12px}
+#companion[data-compact] .toolbar,#companion[data-compact] .context,#companion[data-compact] .settings,
+#companion[data-compact] footer,#companion[data-compact] details,#companion[data-compact] #welcome>.suggestions,
+#companion[data-compact] #composer .composer-actions>:not(#mic):not(#stop):not(#send){display:none}
+#companion[data-compact] #messages{max-height:none;flex:1;gap:10px}
+#companion[data-compact] #messages .message:not(:last-child){display:none}  /* just the latest exchange */
+#companion[data-compact] #mic-note{display:none}
+#companion[data-compact] #composer{padding:8px}
+#companion[data-compact] textarea{min-height:34px}
