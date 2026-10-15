@@ -308,3 +308,73 @@ def test_readers_say_plainly_when_nomad_is_not_running(monkeypatch):
     monkeypatch.setattr(setup.httpx, 'Client', lambda **kw: real(transport=httpx.MockTransport(refused), **kw))
     with pytest.raises(RuntimeError, match='NOMAD is not running.*Docker Desktop.*Start-Apex-Platform.cmd'):
         setup.prepare_nomad_readers()
+
+
+def _until_done_setup(monkeypatch, tmp_path, jobs, argv):
+    (tmp_path / library.PLAN_NAME).write_text(json.dumps(
+        {'profile': 'english-worldwide', 'jobs': jobs, 'remaining_setup': []}), encoding='utf-8')
+    monkeypatch.setattr(library.apocalypse, 'enabled', lambda: False)
+    monkeypatch.setattr(library.apocalypse, 'library_root', lambda: tmp_path)
+    monkeypatch.setattr(library.shutil, 'disk_usage', lambda _: SimpleNamespace(free=10**13))
+    monkeypatch.setattr(library.sys, 'argv', ['prepare_apocalypse_library.py', *argv])
+    waits = []
+    monkeypatch.setattr(library, '_sleep', waits.append)
+    return waits
+
+
+def test_until_done_rides_out_an_outage_and_finishes(monkeypatch, tmp_path, capsys):
+    jobs = [dict(archive(b'one'), id='a', title='A'), dict(archive(b'two'), id='b', title='B')]
+    waits = _until_done_setup(monkeypatch, tmp_path, jobs, ['--until-done'])
+    tries = {'a': 0, 'b': 0}
+
+    def flaky(client, home, job, checkpoint, **kwargs):
+        tries[job['id']] += 1
+        if job['id'] == 'b' and tries['b'] <= 2:        # the line drops twice on B
+            raise httpx.ConnectError('[Errno 11001] getaddrinfo failed')
+        job.update(status='downloaded', checksum_verified=True)
+    monkeypatch.setattr(library, 'download_with_retries', flaky)
+    library.main()                                       # no exception: everything finished
+    assert waits == [library.UNTIL_DONE_FIRST_WAIT, library.UNTIL_DONE_FIRST_WAIT * 2]
+    assert tries['b'] == 3
+    out = capsys.readouterr().out
+    assert 'Waiting 30 s' in out and 'Every archive in this batch is downloaded' in out
+
+
+def test_until_done_waits_never_more_than_ten_minutes(monkeypatch, tmp_path):
+    jobs = [dict(archive(b'one'), id='a', title='A')]
+    waits = _until_done_setup(monkeypatch, tmp_path, jobs, ['--until-done'])
+    tries = {'n': 0}
+
+    def flaky(client, home, job, checkpoint, **kwargs):
+        tries['n'] += 1
+        if tries['n'] <= 8:
+            raise httpx.ConnectError('down')
+        job.update(status='downloaded')
+    monkeypatch.setattr(library, 'download_with_retries', flaky)
+    library.main()
+    assert max(waits) == library.UNTIL_DONE_MAX_WAIT and waits[-1] == 600
+
+
+def test_until_done_stops_on_a_problem_a_retry_cannot_fix(monkeypatch, tmp_path):
+    jobs = [dict(archive(b'one'), id='a', title='A'), dict(archive(b'two'), id='b', title='B')]
+    waits = _until_done_setup(monkeypatch, tmp_path, jobs, ['--until-done'])
+    done = []
+
+    def bad_checksum(client, home, job, checkpoint, **kwargs):
+        if job['id'] == 'a':
+            raise RuntimeError('Archive incomplete or checksum failed. Partial file preserved.')
+        done.append(job['id'])
+    monkeypatch.setattr(library, 'download_with_retries', bad_checksum)
+    with pytest.raises(RuntimeError, match='need attention'):
+        library.main()
+    assert waits == [], 'never loops forever on a bad archive'
+    assert done == ['b'], 'the other archives still download'
+
+
+def test_the_one_click_launcher_keeps_going_until_done():
+    root = Path(__file__).resolve().parents[1]
+    text = (root / 'Download-Apex-Library.cmd').read_bytes()
+    assert b'\r\n' in text and b'\n' not in text.replace(b'\r\n', b''), 'CRLF, or cmd.exe misreads it'
+    script = text.decode()
+    assert '--until-done' in script and '--max-download-gb %LIMIT%' in script
+    assert 'D:\\Apex-Apocalypse' in script and 'set /p' in script

@@ -96,6 +96,23 @@ downloaded only after checking the publisher checksum. Existing completed
 archives are rechecked and preserved if corrupt; failed partial files are also
 kept for review. The entire remaining selection must fit with 20 GiB headroom.
 
+**Download and keep going: `Download-Apex-Library.cmd`.** Give it a size in GB
+(`Download-Apex-Library.cmd 90`, or double-click it and type one): it downloads
+every archive that fits in that total, counting what you already have, and keeps
+going until it's all there.
+- **Internet drops:** each archive first retries 6 times, resuming from its
+  `.part` file. If the line stays down, the run waits (30 s, then doubling, at
+  most 10 minutes between tries) and tries again, on its own, until it's back.
+- **Window closed, Ctrl+C, power cut or restart:** run it again with the same
+  number. Finished archives are skipped in seconds and a half-downloaded one
+  resumes from where it stopped, never from zero.
+- **A problem a retry can't fix** (a checksum mismatch, a full drive): it says
+  which archive, finishes the others, and stops instead of looping.
+- It asks Windows not to sleep while downloading; closing a laptop's lid can
+  still override that.
+
+The same thing from a terminal: `prepare_apocalypse_library.py --max-download-gb 90 --until-done`.
+
 `python scripts/prepare_apocalypse_library.py --plan-only` resolves metadata
 without downloading archives. `--refresh-plan` explicitly selects newer versions
 and keeps old files. The Apocalypse screen shows the last saved queue counts;
