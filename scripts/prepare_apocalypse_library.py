@@ -332,6 +332,60 @@ def select_jobs(jobs, identifiers=None, max_download_gb=None):
     return selected
 
 
+UNTIL_DONE_FIRST_WAIT = 30      # seconds before the first retry after an outage
+UNTIL_DONE_MAX_WAIT = 600       # never wait more than 10 minutes between tries
+_sleep = time.sleep
+
+
+def run_batch(client, home, output, plan, selected, *, until_done=False) -> str:
+    """Download the selected archives once. Returns 'done', 'network' (the internet
+    failed after every retry; trying again later can finish) or 'error' (an archive
+    needs attention that a retry won't fix, e.g. a checksum mismatch). A network
+    outage stops the round at once instead of spending minutes on each archive;
+    finished archives are skipped in seconds next round and partial files resume."""
+    network = other = False
+    with _awake():
+        for job in selected:
+            try:
+                download_with_retries(client, home, job, lambda: save_plan(output, plan))
+            except httpx.TransportError as exc:
+                job.update(status='needs_attention', error=str(exc), checksum_verified=False)
+                save_plan(output, plan)
+                print('Pending '+job['title']+': '+str(exc), flush=True)
+                if not until_done:
+                    print('The internet connection keeps failing, so this run stops here. '
+                          'Rerun when it is back: every finished archive and partial file is kept.', flush=True)
+                network = True
+                break
+            except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+                job.update(status='needs_attention', error=str(exc), checksum_verified=False)
+                save_plan(output, plan)
+                print('Pending '+job['title']+': '+str(exc), flush=True)
+                other = True
+    return 'network' if network else 'error' if other else 'done'
+
+
+@contextmanager
+def _awake():
+    """Ask Windows not to sleep while archives download (a laptop closing its lid can
+    still override this). Nothing elsewhere."""
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
+        except Exception:
+            pass
+    try:
+        yield
+    finally:
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+            except Exception:
+                pass
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--plan-only', action='store_true', help='Resolve current archive versions without downloading them')
@@ -339,6 +393,8 @@ def main():
     parser.add_argument('--plan-output', type=Path, help='Metadata output location for --plan-only')
     parser.add_argument('--max-download-gb', type=float, help='Limit this batch to whole archives totalling at most this many decimal GB')
     parser.add_argument('--only', action='append', help='Archive ID to select; repeat for multiple archives')
+    parser.add_argument('--until-done', action='store_true',
+                        help='Keep going through internet outages, waiting and retrying until every archive is downloaded')
     args = parser.parse_args()
     if apocalypse.enabled():
         raise RuntimeError('Download preparation must run outside the offline session.')
@@ -370,28 +426,23 @@ def main():
             pending = remaining_bytes(home, selected)
             if shutil.disk_usage(home).free < pending+HEADROOM:
                 raise RuntimeError('The remaining plan does not fit with 20 GiB headroom. Existing files were kept.')
-            failed = False
-            for job in selected:
-                try:
-                    download_with_retries(client, home, job, lambda: save_plan(output, plan))
-                except httpx.TransportError as exc:
-                    # Still failing after every retry: the line is down (often "getaddrinfo
-                    # failed"). Trying each remaining archive would only spend minutes apiece.
-                    job.update(status='needs_attention', error=str(exc), checksum_verified=False)
-                    save_plan(output, plan)
-                    print('Pending '+job['title']+': '+str(exc), flush=True)
-                    print('The internet connection keeps failing, so this run stops here. '
-                          'Rerun when it is back: every finished archive and partial file is kept.', flush=True)
-                    failed = True
-                    break
-                except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
-                    job.update(status='needs_attention', error=str(exc), checksum_verified=False)
-                    save_plan(output, plan)
-                    print('Pending '+job['title']+': '+str(exc), flush=True)
-                    failed = True
+            outcome = run_batch(client, home, output, plan, selected, until_done=args.until_done)
+            wait, round_no = UNTIL_DONE_FIRST_WAIT, 1
+            while outcome == 'network' and args.until_done:
+                print(f'The internet is down or unstable. Waiting {wait} s, then trying again '
+                      f'(try {round_no + 1}). Every finished archive and partial file is kept; '
+                      'Ctrl+C stops safely.', flush=True)
+                _sleep(wait)
+                wait, round_no = min(wait * 2, UNTIL_DONE_MAX_WAIT), round_no + 1
+                outcome = run_batch(client, home, output, plan, selected, until_done=True)
             print('Archives require prepared NOMAD readers. Courses, medical database ingestion, map assets and AI/RAG setup remain visible in the plan.', flush=True)
-            if failed:
-                raise RuntimeError('Some archives remain pending. Rerun to resume; no files were discarded.')
+            if outcome == 'network':
+                raise RuntimeError('Some archives remain pending. Rerun to resume; no files were discarded. '
+                                   'Add --until-done to keep retrying on its own until everything is downloaded.')
+            if outcome == 'error':
+                raise RuntimeError('Some archives need attention (see the Pending lines above): retrying would not fix '
+                                   'them. Every other finished archive and partial file is kept.')
+            print('Every archive in this batch is downloaded and checksum-verified.', flush=True)
 
 
 if __name__ == '__main__':
