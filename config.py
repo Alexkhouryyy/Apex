@@ -406,6 +406,9 @@ COMPANION_DESKTOP_ENABLED = os.getenv("COMPANION_DESKTOP_ENABLED", "false").lowe
 COMPANION_HOTKEY = os.getenv('COMPANION_HOTKEY', '<f8>')
 # The desktop Companion bubble rides beside your mouse pointer (also its Follow button). Windows only.
 COMPANION_FOLLOW_CURSOR = os.getenv('COMPANION_FOLLOW_CURSOR', 'false').lower() in {'1', 'true', 'yes'}
+# Global hotkeys for the desktop Companion: draw on the screen, and toggle the cursor bubble. Empty turns one off.
+COMPANION_DRAW_HOTKEY = os.getenv('COMPANION_DRAW_HOTKEY', '<ctrl>+<alt>+d')
+COMPANION_FOLLOW_HOTKEY = os.getenv('COMPANION_FOLLOW_HOTKEY', '<ctrl>+<alt>+f')
 PROFILE_DIGEST_ENABLED = os.getenv("PROFILE_DIGEST_ENABLED", "true").lower() in {"1", "true", "yes"}
 PROFILE_DIGEST_INTERVAL_SECONDS = int(os.getenv("PROFILE_DIGEST_INTERVAL_SECONDS", "3600"))
 

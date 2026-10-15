@@ -1422,7 +1422,9 @@
       const hint = document.createElement('p'); hint.className = 'desktop-hotkey-hint';
       const key = (info.hotkey || '<f8>').replace(/[<>]/g, '').toUpperCase();
       desktopKeyLabel = key;
-      hint.textContent = `${key}: selected action / stop · Esc: stop and hide`;
+      const label = combo => (combo || '').replace(/[<>]/g, '').split('+').map(k => k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1)).join('+');
+      const extras = [info.draw_hotkey && `${label(info.draw_hotkey)}: draw`, info.follow_hotkey && `${label(info.follow_hotkey)}: follow cursor`].filter(Boolean);
+      hint.textContent = [`${key}: selected action / stop`, ...extras, 'Esc: stop and hide'].join(' · ');
       root.querySelector('header').after(hint);
     }
     await boot();
@@ -1440,6 +1442,13 @@
       Promise.resolve(task).catch(exc => error(exc.message));
     },
     stop: () => desktopConnected ? stop() : Promise.resolve(),
+    // The follow hotkey changed it natively: keep the button and layout in step.
+    followChanged(on) {
+      const b = root.querySelector('#desktop-follow');   // created after startup, so not in $'s map
+      if (b) b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      setCompact(!!on);
+      state('', on ? 'Following your cursor.' : 'Back in the corner.');
+    },
   };
   async function startDictation(item) {
     const invocation = desktopEpoch;
