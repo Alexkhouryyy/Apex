@@ -1368,7 +1368,7 @@
       if (info.desktop !== true) throw new Error('Desktop Companion could not authenticate.');
       if (info.token) localStorage.setItem('apex_token', info.token);
       desktopConnected = true; document.body.classList.add('desktop-companion');
-      $('float').hidden = true;
+      $('float').hidden = true; $('bubble-mode').hidden = true;
       $('share').hidden = true; $('review').hidden = true;
       const expand = document.createElement('button'); expand.id = 'desktop-chat'; expand.textContent = 'Chat';
       expand.onclick = async () => {
@@ -1399,6 +1399,20 @@
         catch (exc) { error(exc.message); }
       };
       const tasks = document.createElement('div'); tasks.className = 'desktop-actions'; tasks.append(task,draw);
+      if (info.can_follow) {
+        // Ride beside the mouse pointer as a small bubble, like a cursor buddy.
+        const follow = document.createElement('button'); follow.id = 'desktop-follow'; follow.textContent = 'Follow';
+        follow.title = 'Keep this bubble beside your mouse pointer';
+        const show = on => { follow.setAttribute('aria-pressed', on ? 'true' : 'false'); setCompact(on); };
+        show(!!info.follow);
+        follow.onclick = async () => {
+          const on = follow.getAttribute('aria-pressed') !== 'true';
+          try { const r = await window.pywebview.api.follow(on); show(!!r.follow);
+                state('', r.follow ? 'Following your cursor. Click Follow again to send me back to the corner.' : 'Back in the corner.'); }
+          catch (exc) { error(exc.message); }
+        };
+        tasks.append(follow);
+      }
       root.querySelector('header').after(tasks);
       const settings = document.createElement('details'); settings.id = 'desktop-settings';
       const summary = document.createElement('summary'); summary.textContent = 'Voice and behavior settings';

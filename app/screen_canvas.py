@@ -25,6 +25,9 @@ def export_svg(width, height, strokes):
         elif kind == 'box':
             (x, y), (a, b) = points
             elements.append(f'<rect x="{min(x,a)}" y="{min(y,b)}" width="{abs(a-x)}" height="{abs(b-y)}" fill="none" stroke="{color}" stroke-width="3"/>')
+        elif kind == 'ellipse':
+            (x, y), (a, b) = points
+            elements.append(f'<ellipse cx="{(x+a)/2}" cy="{(y+b)/2}" rx="{abs(a-x)/2}" ry="{abs(b-y)/2}" fill="none" stroke="{color}" stroke-width="3"/>')
         else:
             mark = ' marker-end="url(#arrow)"' if kind == 'arrow' else ''
             coordinates = ' '.join(f'{x},{y}' for x, y in points)
@@ -32,6 +35,92 @@ def export_svg(width, height, strokes):
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
             '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
             '<path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker></defs>' + ''.join(elements) + '</svg>')
+
+
+def _segment_distance(p, a, b) -> float:
+    (px, py), (ax, ay), (bx, by) = p, a, b
+    dx, dy = bx - ax, by - ay
+    if dx == 0 and dy == 0:
+        return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+    cx, cy = ax + t * dx, ay + t * dy
+    return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+
+
+def hit(stroke, point, radius=12) -> bool:
+    """Whether `point` lands on this mark (for the eraser)."""
+    x, y = point
+    kind, pts = stroke['kind'], stroke['points']
+    if kind == 'text':
+        (tx, ty), = pts[:1]
+        w = 10 * max(1, len(stroke.get('text', '')))
+        return tx - radius <= x <= tx + w + radius and ty - radius <= y <= ty + 24 + radius
+    if kind in ('box', 'ellipse'):
+        (a, b), (c, d) = pts[0], pts[-1]
+        return min(a, c) - radius <= x <= max(a, c) + radius and min(b, d) - radius <= y <= max(b, d) + radius
+    if len(pts) == 1:
+        return _segment_distance(point, pts[0], pts[0]) <= radius
+    return any(_segment_distance(point, pts[i], pts[i + 1]) <= radius for i in range(len(pts) - 1))
+
+
+class Marks:
+    """Your marks, with an undo history that covers adding, erasing and clearing.
+    Pure (no Tk), so the eraser and undo are tested on any OS."""
+    MAX_MARKS, MAX_POINTS = 100, 20000
+
+    def __init__(self):
+        self.items: list[dict] = []
+        self._done: list[tuple] = []
+        self._undone: list[tuple] = []
+
+    def full(self) -> bool:
+        return len(self.items) >= self.MAX_MARKS or sum(len(s['points']) for s in self.items) >= self.MAX_POINTS
+
+    def add(self, stroke: dict) -> None:
+        self.items.append(stroke)
+        self._done.append(('add', stroke))
+        self._undone.clear()
+
+    def erase_at(self, point, radius=12) -> bool:
+        for i in range(len(self.items) - 1, -1, -1):     # topmost first
+            if hit(self.items[i], point, radius):
+                stroke = self.items.pop(i)
+                self._done.append(('erase', i, stroke))
+                self._undone.clear()
+                return True
+        return False
+
+    def clear(self) -> None:
+        if self.items:
+            self._done.append(('clear', self.items[:]))
+            self.items.clear()
+            self._undone.clear()
+
+    def undo(self) -> bool:
+        if not self._done:
+            return False
+        action = self._done.pop()
+        if action[0] == 'add':
+            self.items.remove(action[1])
+        elif action[0] == 'erase':
+            self.items.insert(action[1], action[2])
+        else:
+            self.items[:] = action[1]
+        self._undone.append(action)
+        return True
+
+    def redo(self) -> bool:
+        if not self._undone:
+            return False
+        action = self._undone.pop()
+        if action[0] == 'add':
+            self.items.append(action[1])
+        elif action[0] == 'erase':
+            self.items.remove(action[2])
+        else:
+            self.items.clear()
+        self._done.append(action)
+        return True
 
 
 def set_editing(root, enabled):
@@ -82,7 +171,7 @@ def main(argv=None):
     user.GetParent.argtypes, user.GetParent.restype = [wintypes.HWND], wintypes.HWND
     exclude_from_capture(user.GetParent(toolbar.winfo_id()) or toolbar.winfo_id())
     tool, color = tk.StringVar(value='pen'), tk.StringVar(value='cyan')
-    strokes, current, redo = [], [], []
+    marks, current = Marks(), []
     editing = True
     notice = tk.StringVar(value='Draw on this canvas · Done reveals the screen')
     backdrop = None
@@ -110,7 +199,7 @@ def main(argv=None):
         canvas.delete('all')
         if editing and backdrop is not None:
             canvas.create_image(0,0,image=backdrop,anchor='nw')
-        for stroke in strokes + ([preview] if preview else []):
+        for stroke in marks.items + ([preview] if preview else []):
             points = [v for point in stroke['points'] for v in point]
             tint = PALETTE[stroke['color']]
             if stroke['kind'] == 'text':
@@ -118,6 +207,9 @@ def main(argv=None):
             elif stroke['kind'] == 'box':
                 x, y, a, b = points
                 canvas.create_rectangle(min(x,a), min(y,b), max(x,a), max(y,b), outline=tint, width=3)
+            elif stroke['kind'] == 'ellipse':
+                x, y, a, b = points
+                canvas.create_oval(min(x,a), min(y,b), max(x,a), max(y,b), outline=tint, width=3)
             elif len(points) >= 4:
                 canvas.create_line(*points, fill=tint, width=3, capstyle='round',
                                    arrow='last' if stroke['kind'] == 'arrow' else 'none')
@@ -134,17 +226,20 @@ def main(argv=None):
         redraw()
 
     def press(event):
-        if not editing or len(strokes) >= 100 or sum(len(s['points']) for s in strokes) >= 20000:
+        if editing and tool.get() == 'eraser':
+            if marks.erase_at((event.x, event.y)): redraw()
+            return
+        if not editing or marks.full():
             notice.set('100 marks maximum · Undo or Clear to continue'); return
         current[:] = [(event.x, event.y)]
         if tool.get() == 'text':
             text = simpledialog.askstring('Write on the screen', 'Text (up to 500 characters):', parent=toolbar)
             if text and len(text) <= 500:
-                strokes.append({'kind':'text', 'points':current[:], 'color':color.get(), 'text':text}); redo.clear(); redraw()
+                marks.add({'kind':'text', 'points':current[:], 'color':color.get(), 'text':text}); redraw()
             current.clear()
 
     def drag(event):
-        if not current or not editing: return
+        if not current or not editing or tool.get() == 'eraser': return
         point = (max(0,min(event.x,frame['width'])), max(0,min(event.y,frame['height'])))
         if tool.get() == 'pen':
             if len(current) < 2048 and current[-1] != point: current.append(point)
@@ -153,25 +248,25 @@ def main(argv=None):
 
     def release(event):
         if len(current) >= 2:
-            strokes.append({'kind':tool.get(), 'points':current[:], 'color':color.get()}); redo.clear(); redraw()
+            marks.add({'kind':tool.get(), 'points':current[:], 'color':color.get()}); redraw()
         current.clear()
 
     def undo():
-        if strokes: redo.append(strokes.pop()); redraw()
+        if marks.undo(): redraw()
     def restore():
-        if redo: strokes.append(redo.pop()); redraw()
+        if marks.redo(): redraw()
     def clear():
-        strokes.clear(); redo.clear(); current.clear(); redraw()
+        marks.clear(); current.clear(); redraw()
     def save():
         filename = filedialog.asksaveasfilename(parent=toolbar, title='Save your drawing',
                                                defaultextension='.svg', filetypes=[('SVG drawing', '*.svg')])
         if filename:
             try:
-                Path(filename).write_text(export_svg(frame['width'],frame['height'],strokes), encoding='utf-8')
+                Path(filename).write_text(export_svg(frame['width'],frame['height'],marks.items), encoding='utf-8')
                 notice.set('Drawing saved · underlying screen pixels were not saved')
             except OSError as exc: messagebox.showerror('Could not save drawing', str(exc), parent=toolbar)
 
-    for label, value in [('Pen','pen'),('Box','box'),('Arrow','arrow'),('Text','text')]:
+    for label, value in [('Pen','pen'),('Box','box'),('Circle','ellipse'),('Arrow','arrow'),('Text','text'),('Eraser','eraser')]:
         tk.Radiobutton(toolbar,text=label,value=value,variable=tool,indicatoron=False).pack(side='left')
     tk.OptionMenu(toolbar,color,*PALETTE).pack(side='left')
     for label, callback in [('Undo',undo),('Redo',restore),('Clear',clear),('Save SVG',save)]:
