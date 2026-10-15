@@ -65,6 +65,24 @@ def on_hotkey():
         look_now.on_hotkey()
 
 
+def on_draw_hotkey():
+    """COMPANION_DRAW_HOTKEY (Ctrl+Alt+D): open the drawing surface straight away,
+    without opening Companion first. Silent while muted."""
+    if _is_muted():
+        return
+    if ensure():
+        publish('sketch')
+
+
+def on_follow_hotkey():
+    """COMPANION_FOLLOW_HOTKEY (Ctrl+Alt+F): the bubble rides beside the cursor,
+    or goes back to the corner. Silent while muted."""
+    if _is_muted():
+        return
+    if ensure():
+        publish('follow')
+
+
 def choose_mode(mode):
     global _preferred_mode, _mode
     if mode not in {'screen', 'dictate'}:
@@ -132,7 +150,11 @@ def start(url: str) -> dict:
         from app.hotkey import GlobalHotkeys
         import config
         keys = GlobalHotkeys()
-        keys.bind(config.COMPANION_HOTKEY, on_hotkey)
+        for combo, callback in ((config.COMPANION_HOTKEY, on_hotkey),
+                                (getattr(config, 'COMPANION_DRAW_HOTKEY', ''), on_draw_hotkey),
+                                (getattr(config, 'COMPANION_FOLLOW_HOTKEY', ''), on_follow_hotkey)):
+            if combo:
+                keys.bind(combo, callback)
         _keys = keys if keys.start() else None
         return status()
 

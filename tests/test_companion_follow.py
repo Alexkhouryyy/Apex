@@ -160,3 +160,65 @@ def test_limits_and_the_circle_exports_as_an_svg_ellipse():
     assert m.full()
     svg = export_svg(800, 600, [stroke('ellipse', [(10, 20), (110, 80)])])
     assert '<ellipse cx="60.0" cy="50.0" rx="50.0" ry="30.0"' in svg
+
+
+# ---------------------------------------------------------------- global hotkeys: draw and follow
+
+from agent import desktop_companion as desktop
+
+
+@pytest.fixture
+def running(monkeypatch):
+    monkeypatch.setattr(desktop, '_process', SimpleNamespace(poll=lambda: None))
+    monkeypatch.setattr(desktop, '_events', [])
+    monkeypatch.setattr(desktop, '_seq', 0)
+    monkeypatch.setattr(desktop, '_is_muted', lambda: False)
+
+
+def test_the_draw_and_follow_hotkeys_reach_the_window(running):
+    desktop.on_draw_hotkey()
+    desktop.on_follow_hotkey()
+    assert [e['kind'] for e in desktop._events] == ['sketch', 'follow']
+
+
+def test_muted_hotkeys_do_nothing(running, monkeypatch):
+    monkeypatch.setattr(desktop, '_is_muted', lambda: True)
+    desktop.on_draw_hotkey()
+    desktop.on_follow_hotkey()
+    assert desktop._events == []
+
+
+def test_start_binds_the_main_draw_and_follow_hotkeys(monkeypatch):
+    import config
+    import importlib.util
+    import subprocess
+    from app import hotkey
+    bound = {}
+
+    class Keys:
+        def bind(self, combo, fn): bound[combo] = fn
+        def start(self): return True
+        def stop(self): pass
+    monkeypatch.setattr(hotkey, 'GlobalHotkeys', Keys)
+    monkeypatch.setattr(importlib.util, 'find_spec', lambda name: object())
+    monkeypatch.setattr(subprocess, 'Popen', lambda *a, **k: SimpleNamespace(poll=lambda: None, pid=4242))
+    for name in ('_process', '_session', '_ready', '_heartbeat', '_shown', '_url', '_mode', '_keys'):
+        monkeypatch.setattr(desktop, name, getattr(desktop, name))
+    monkeypatch.setattr(desktop, '_process', None)
+    monkeypatch.setattr(config, 'COMPANION_HOTKEY', '<f8>')
+    monkeypatch.setattr(config, 'COMPANION_DRAW_HOTKEY', '<ctrl>+<alt>+d')
+    monkeypatch.setattr(config, 'COMPANION_FOLLOW_HOTKEY', '')        # empty turns one off
+    desktop.start('http://127.0.0.1:7860')
+    assert bound == {'<f8>': desktop.on_hotkey, '<ctrl>+<alt>+d': desktop.on_draw_hotkey}
+
+
+def test_connect_tells_the_page_its_hotkeys(monkeypatch):
+    import config
+    monkeypatch.setattr(config, 'COMPANION_DRAW_HOTKEY', '<ctrl>+<alt>+d')
+    monkeypatch.setattr(config, 'COMPANION_FOLLOW_HOTKEY', '<ctrl>+<alt>+f')
+    bridge = Bridge(SimpleNamespace(url='http://127.0.0.1:7860'), 'master-secret')
+    bridge._window = Window()
+    info = bridge.connect()
+    assert info['draw_hotkey'] == '<ctrl>+<alt>+d' and info['follow_hotkey'] == '', 'no follower: no follow hotkey shown'
+    bridge._follower = follow.Follower(lambda: (0, 0), lambda x, y: AREA, lambda: SIZE, lambda x, y: None)
+    assert bridge.connect()['follow_hotkey'] == '<ctrl>+<alt>+f'

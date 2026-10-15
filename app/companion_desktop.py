@@ -169,7 +169,9 @@ class Bridge:
         logging.info('Local Companion page connected to its native bridge.')
         follower = getattr(self, '_follower', None)
         return {'desktop': True, 'token': self._token, 'drawings': os.name == 'nt', 'hotkey': config.COMPANION_HOTKEY,
-                'follow': bool(follower and follower.enabled), 'can_follow': bool(follower)}
+                'follow': bool(follower and follower.enabled), 'can_follow': bool(follower),
+                'draw_hotkey': getattr(config, 'COMPANION_DRAW_HOTKEY', ''),
+                'follow_hotkey': getattr(config, 'COMPANION_FOLLOW_HOTKEY', '') if follower else ''}
 
     def ready(self):
         if not self._trusted():
@@ -513,6 +515,26 @@ def main(argv=None):
                             if bridge._trusted():
                                 window.evaluate_js('void window.ApexDesktop?.stop()')
                             window.hide()
+                    elif item['kind'] == 'sketch':                 # Ctrl+Alt+D
+                        try:
+                            bridge.sketch()
+                        except Exception:
+                            logging.exception('The draw hotkey could not open the drawing surface')
+                    elif item['kind'] == 'follow':                 # Ctrl+Alt+F
+                        follower = getattr(bridge, '_follower', None)
+                        if follower is not None:
+                            on = not follower.enabled
+                            try:
+                                bridge.follow(on)
+                                if on:                             # show the bubble right where you are
+                                    reveal(window)
+                                    interactive(window, False)
+                                    window.show()
+                                    follower.paused = False
+                                if bridge._trusted():
+                                    window.evaluate_js('void window.ApexDesktop?.followChanged?.(' + json.dumps(on) + ')')
+                            except Exception:
+                                logging.exception('The follow hotkey could not change follow mode')
                     elif item['kind'] == 'draw':
                         try:
                             result = overlay.send(item, wait=True)

@@ -14,7 +14,7 @@ async function scenario(native,noMicrophone=false){
  Object.defineProperty(w.navigator,'userActivation',{value:{hasBeenActive:false}});
  w.TextDecoder=TextDecoder;
  w.speechSynthesis={cancel(){},speak(){}};
- const nativeApi={connect:async()=>({desktop:true,token:'owner-token',hotkey:'<f8>',can_follow:true,follow:false}),
+ const nativeApi={connect:async()=>({desktop:true,token:'owner-token',hotkey:'<f8>',can_follow:true,follow:false,draw_hotkey:'<ctrl>+<alt>+d',follow_hotkey:'<ctrl>+<alt>+f'}),
                   follow:async on=>{follows.push(on);return {follow:on};},
                   choose_mode:async()=>true,sketch:async()=>({open:true}),
                   ready:async()=>{ready++;},hide:async()=>{hidden++;},expand:async()=>{expanded++;}};
@@ -58,6 +58,13 @@ async function scenario(native,noMicrophone=false){
   assert.equal($('companion').dataset.compact,'1','following uses the compact bubble layout');
   follow.click();await tick();await tick();
   assert.deepEqual(follows,[true,false]);assert.ok(!$('companion').dataset.compact,'back to the full layout');
+  const hint=w.document.querySelector('.desktop-hotkey-hint').textContent;
+  assert.match(hint,/Ctrl\+Alt\+D: draw/);assert.match(hint,/Ctrl\+Alt\+F: follow cursor/);
+  // Ctrl+Alt+F flips it natively; the page keeps its button and layout in step.
+  w.ApexDesktop.followChanged(true);
+  assert.equal(follow.getAttribute('aria-pressed'),'true');assert.equal($('companion').dataset.compact,'1');
+  w.ApexDesktop.followChanged(false);
+  assert.equal(follow.getAttribute('aria-pressed'),'false');assert.ok(!$('companion').dataset.compact);
   assert(!requests.some(r=>r.url.includes('/api/companion/look')),'a browser poll must not steal a native hotkey');
   w.ApexDesktop.activate({kind:'look',source:'hotkey',seq:4});
   await tick();await tick();
@@ -90,5 +97,5 @@ async function scenario(native,noMicrophone=false){
 }
 (async()=>{
  await scenario(true);await scenario(true,true);await scenario(false);
- console.log('PASS: silent native boot, F8 hint, owner authentication, Follow toggles the cursor bubble, click-free native activation, Discuss guidance, no competing browser claim, and stop/hide/cancel.');
+ console.log('PASS: silent native boot, F8 hint, owner authentication, Follow toggles the cursor bubble, Ctrl+Alt+D/F hints and hotkey sync, click-free native activation, Discuss guidance, no competing browser claim, and stop/hide/cancel.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

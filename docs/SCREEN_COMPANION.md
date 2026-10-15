@@ -104,7 +104,8 @@ Windows Unicode input. Microphone denial offers text Chat instead.
 
 ### Follow: a bubble beside your cursor
 
-**Follow** (beside Draw on the Windows Companion) shrinks Companion to a small
+**Follow** (beside Draw on the Windows Companion, or **Ctrl+Alt+F** from any app)
+shrinks Companion to a small
 always-on-top bubble that rides next to your mouse pointer: below and to the
 right of it, flipping to the other side near a screen edge, never covering the
 pointer, and staying inside the work area of the monitor the pointer is on (so
@@ -114,14 +115,20 @@ holds still while the pointer does.
 It follows only while the bubble is compact. Expanding to **Chat**, hiding the
 window, or a full-size view stops it moving, so it never chases you while you
 type; it picks up again the next time the compact bubble opens. Click **Follow**
-again to send it back to the corner. `COMPANION_FOLLOW_CURSOR=true` in `.env`
+again (or press Ctrl+Alt+F) to send it back to the corner; the hotkey also
+shows the bubble if it was hidden. `COMPANION_FOLLOW_CURSOR=true` in `.env`
 starts it following. Windows only; the browser companion's **Bubble ⊙** is the
 always-on-top, non-following version.
 
+Change or turn off the hotkeys with `COMPANION_DRAW_HOTKEY` and
+`COMPANION_FOLLOW_HOTKEY` in `.env` (empty turns one off). Both stay silent while
+Apex is muted.
+
 ### Write, draw and design together
 
-The native **Draw** button opens a user-controlled sketch surface on the monitor
-under your pointer. **Pen**, **Box**, **Circle**, **Arrow** and **Text** create your
+The native **Draw** button, or **Ctrl+Alt+D** from any app (no need to open
+Companion first), opens a user-controlled sketch surface on the monitor under
+your pointer. **Pen**, **Box**, **Circle**, **Arrow** and **Text** create your
 own marks, and **Eraser** removes the one mark you click (the topmost first).
 Colors, Undo, Redo and Clear are local controls; Undo also brings back an
 erased mark, and Clear can be undone. (There is no highlighter: Windows Tk
