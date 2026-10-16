@@ -52,6 +52,13 @@ through its local authenticated desktop endpoint. Startup refuses unrelated
 services on the dashboard port and does not kill or replace existing processes.
 Normal Apex background features still follow your existing settings.
 
+When switching from login startup to the combined platform launcher, quit the
+older Apex first and use `Start-Apex-Platform.cmd --desktop`. The desktop profile
+enables the native window and keeps wake-word listeners off without editing
+your saved settings. Owner Companion replies receive the configured shortcuts,
+the selected activation mode and current native-window readiness each turn;
+the browser page and gesture board are not the only interaction surfaces.
+
 To remove login startup:
 
 ```cmd

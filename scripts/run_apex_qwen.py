@@ -119,10 +119,11 @@ def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
     fast = '--fast' in args
     resident = '--resident' in args
+    device_voice = '--device-voice' in args
     env_name, server = (('apex-qwen-fast-env', 'scripts/qwen_fast_server.py') if fast
                         else ('apex-qwen-env', 'scripts/qwen_server.py'))
     qwen_python = Path.home() / env_name / 'Scripts' / 'python.exe'
-    if not qwen_python.is_file():
+    if not device_voice and not qwen_python.is_file():
         hint = ' Run Test-Apex-Fast-Voice.cmd once to install it.' if fast else ''
         raise RuntimeError(f'Qwen environment missing: {qwen_python}.{hint}')
     env = launch_environment()
@@ -130,24 +131,29 @@ def main(argv=None):
     dashboard_enabled = env.get('DASHBOARD_ENABLED', 'true').lower() in {'1', 'true', 'yes'}
     if dashboard_enabled and port == 17494:
         raise RuntimeError('DASHBOARD_PORT conflicts with Celine voice port 17494.')
-    if port_in_use(17494) or (dashboard_enabled and port_in_use(port, host)):
+    if (not device_voice and port_in_use(17494)) or (dashboard_enabled and port_in_use(port, host)):
         raise RuntimeError(f'An Apex/Qwen port is occupied ({port}, 17494). '
                            'Stop the previous launcher with Ctrl+C or quit Apex from its tray, then retry.')
     voice = agent = None
     try:
-        print('Starting Celine voice. The first GPU warm-up can take several minutes.', flush=True)
-        voice = subprocess.Popen([str(qwen_python), '-u', str(ROOT / server)], cwd=ROOT)
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        wait_healthy(opener, 'http://127.0.0.1:17494/health',
-                     lambda h: h.get('service') == 'apex-qwen' and h.get('model_loaded'),
-                     [('Celine voice', voice)], 'Celine voice', 900)
-        print('Celine voice: ready.', flush=True)
+        if device_voice:
+            print('Device voice selected. The cloned Celine model will not be loaded.', flush=True)
+        else:
+            print('Starting Celine voice. The first GPU warm-up can take several minutes.', flush=True)
+            voice = subprocess.Popen([str(qwen_python), '-u', str(ROOT / server)], cwd=ROOT)
+            wait_healthy(opener, 'http://127.0.0.1:17494/health',
+                         lambda h: h.get('service') == 'apex-qwen' and h.get('model_loaded'),
+                         [('Celine voice', voice)], 'Celine voice', 900)
+            print('Celine voice: ready.', flush=True)
         # Own the child directly, so stopping this launcher also stops Apex.
         # Only the explicit dashboard restart exit code triggers a new child.
         starts = []
         opened = False
         while True:
             env = launch_environment()  # Pick up settings saved before a restart.
+            if device_voice:
+                env['TTS_ENGINE'] = 'pyttsx3'
             host, port, dashboard_url = dashboard_address(env)
             dashboard_enabled = env.get('DASHBOARD_ENABLED', 'true').lower() in {'1', 'true', 'yes'}
             if dashboard_enabled and (port == 17494 or port_in_use(port, host)):
@@ -168,7 +174,7 @@ def main(argv=None):
                 wait_healthy(opener, dashboard_url + '/health',
                              lambda h: h.get('service') == 'apex' and h.get('launch_id') == launch_id
                              and h.get('agent_ready') is True,
-                             [('Apex', agent), ('Celine voice', voice)], 'Apex dashboard', 180)
+                             [('Apex', agent)] + ([('Celine voice', voice)] if voice else []), 'Apex dashboard', 180)
                 print(f'Dashboard: ready. {dashboard_url}/home\n'
                       f'Screen Companion: {dashboard_url}/companion\n'
                       'Open Companion and click Voice mode to allow browser audio/microphone access.', flush=True)
@@ -184,12 +190,12 @@ def main(argv=None):
                   'Apps requiring keys or account authorization still need setup in Apps.\n'
                   'Keep this window open. Press Ctrl+C to stop Apex and Celine.', flush=True)
             while agent.poll() is None:
-                if voice.poll() is not None:
+                if voice is not None and voice.poll() is not None:
                     raise RuntimeError('Celine voice stopped. Restart this launcher; see error above.')
                 time.sleep(1)
             if agent.returncode != 42:
                 return agent.returncode
-            print('Restart requested. Keeping Celine voice warm...', flush=True)
+            print('Restart requested.' + (' Device voice remains selected.' if device_voice else ' Keeping Celine voice warm...'), flush=True)
             time.sleep(2)
     finally:
         try:

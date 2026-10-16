@@ -42,6 +42,70 @@ def frame():
     return guidance.frame_info({'left': -1920, 'top': -200, 'width': 1920, 'height': 1080})
 
 
+def test_desktop_capability_context_uses_actual_bindings_without_activating(native, monkeypatch):
+    monkeypatch.setattr(desktop, 'sys', SimpleNamespace(platform='win32'))
+    monkeypatch.setattr(desktop, '_keys', object())
+    monkeypatch.setattr(desktop, '_preferred_mode', 'dictate')
+    monkeypatch.setattr(config, 'COMPANION_HOTKEY', '<f7>')
+    monkeypatch.setattr(config, 'COMPANION_DRAW_HOTKEY', '<f9>')
+    monkeypatch.setattr(config, 'COMPANION_FOLLOW_HOTKEY', '')
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Describing controls must not activate or capture anything')
+    monkeypatch.setattr(desktop, 'start', forbidden)
+    monkeypatch.setattr(desktop, 'publish', forbidden)
+    monkeypatch.setattr(look_now, 'capture_frame', forbidden)
+    text = desktop.capability_context()
+    assert 'Screen help / Dictate = f7' in text and 'Draw = f9' in text and 'Follow = disabled' in text
+    assert 'ready=True' in text and 'hotkey listener registered=True' in text
+    assert 'selected activation mode=dictate' in text
+    assert 'Save SVG' in text and '/board' in text and 'another Windows app' in text
+
+
+def test_non_windows_capability_context_does_not_offer_local_windows_shortcuts(monkeypatch):
+    monkeypatch.setattr(desktop, 'sys', SimpleNamespace(platform='linux'))
+    text = desktop.capability_context()
+    assert 'This Apex host is not Windows' in text
+    assert 'Configured global hotkeys' not in text
+
+
+def test_owner_model_context_refreshes_desktop_readiness_each_turn(core_agent, native, monkeypatch):
+    from anthropic.types import TextBlock
+    from agent import telemetry
+    monkeypatch.setattr(desktop, 'sys', SimpleNamespace(platform='win32'))
+    monkeypatch.setattr(desktop, '_keys', object())
+    monkeypatch.setattr(desktop, '_preferred_mode', 'screen')
+    seen = []
+    def create(*args, **kwargs):
+        seen.append('\n'.join(block['text'] for block in kwargs['system']))
+        return SimpleNamespace(content=[TextBlock(type='text', text='Desktop status.')], stop_reason='end_turn')
+    monkeypatch.setattr(telemetry, 'create', create)
+    core_agent.run('Which hotkey opens drawing?', channel_id='companion:desktop-context',
+                   companion_mode='discuss', by_owner=True, include_screenshot=False)
+    assert 'ready=True' in seen[-1] and 'selected activation mode=screen' in seen[-1]
+    monkeypatch.setattr(desktop, '_process', None)
+    monkeypatch.setattr(desktop, '_keys', None)
+    monkeypatch.setattr(desktop, '_preferred_mode', 'dictate')
+    core_agent.run('And now?', channel_id='companion:desktop-context',
+                   companion_mode='discuss', by_owner=True, include_screenshot=False)
+    assert 'native window running=False, ready=False' in seen[-1]
+    assert 'hotkey listener registered=False' in seen[-1] and 'selected activation mode=dictate' in seen[-1]
+    assert not desktop._events, 'Reading desktop context must not enqueue actions'
+
+
+@pytest.mark.parametrize('mode,owner', [('discuss', False), ('work', False), ('observe', True), (None, True)])
+def test_desktop_state_is_not_added_to_remote_observe_or_ordinary_turns(core_agent, monkeypatch, mode, owner):
+    from anthropic.types import TextBlock
+    from agent import telemetry
+    def forbidden():
+        raise AssertionError('This turn must not inspect owner desktop state')
+    monkeypatch.setattr(desktop, 'capability_context', forbidden)
+    monkeypatch.setattr(core_agent, '_try_subscription', lambda *a, **kw: None)
+    monkeypatch.setattr(telemetry, 'create', lambda *a, **kw: SimpleNamespace(
+        content=[TextBlock(type='text', text='Hello.')], stop_reason='end_turn'))
+    assert core_agent.run('Hello', channel_id='companion:desktop-context',
+                          companion_mode=mode, by_owner=owner, include_screenshot=False) == 'Hello.'
+
+
 SHAPES = [{'type': 'arrow', 'points': [[.1, .2], [.4, .6]], 'label': 'Click here'}]
 
 
