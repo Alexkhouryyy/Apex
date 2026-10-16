@@ -40,13 +40,14 @@ export class DesignWorkbench {
   fields(){const read=k=>['x','y','z'].map(a=>Number(this.$(`dw-${k}-${a}`).value));return{name:this.$('dw-name').value,size_mm:read('size'),position_mm:read('position'),rotation_deg:read('rotation')};}
   fill(p){this.$('dw-name').value=p.name;for(const[k,f]of[['size','size_mm'],['position','position_mm'],['rotation','rotation_deg']])['x','y','z'].forEach((a,i)=>{this.$(`dw-${k}-${a}`).value=p[f][i];});}
   clearReport(){this.validationGeneration=(this.validationGeneration||0)+1;this.checked=null;this.$('dw-report').replaceChildren();this.$('dw-download').hidden=true;}
+  selectionBusy(on){this.selecting=on;this.$('dw-edit').setAttribute('aria-busy',String(on));for(const el of this.$('dw-edit').querySelectorAll('input,button'))el.disabled=on;for(const id of ['dw-check','dw-export','dw-scope'])this.$(id).disabled=on;this.$('dw-apply').disabled=on||Boolean(this.conflicted)||Boolean(this.saving);}
   async update(msg){
     if(!msg)return;
     if(this.latest?.workspace?.epoch!==msg.workspace?.epoch)this.reference(null);
     this.latest=msg;if(this.panel.hidden)return;
     const sel=msg.selection,card=(msg.cards||[]).find(c=>c.id===sel?.id),key=JSON.stringify([msg.workspace?.epoch,card?.id,card?.src]);
-    if(key===this.key){const index=sel?.selected_part?.mesh;if(Number.isInteger(index)&&index!==this.part&&this.data?.parts[index])this.choose(index,false);return;}
-    this.key=key;const generation=++this.generation;this.data=null;this.clearReport();this.$('dw-retry').hidden=true;this.$('dw-edit').hidden=this.$('dw-verify').hidden=this.$('dw-view').hidden=this.$('dw-hands').hidden=true;this.$('dw-parts').replaceChildren();this.$('dw-empty').hidden=false;this.$('dw-version').textContent='';
+    if(key===this.key){const index=sel?.selected_part?.mesh;if(!this.selecting&&Number.isInteger(index)&&index!==this.part&&this.data?.parts[index])this.choose(index,false);return;}
+    this.key=key;const generation=++this.generation;this.choiceGeneration=(this.choiceGeneration||0)+1;this.selectionBusy(false);this.data=null;this.clearReport();this.$('dw-retry').hidden=true;this.$('dw-edit').hidden=this.$('dw-verify').hidden=this.$('dw-view').hidden=this.$('dw-hands').hidden=true;this.$('dw-parts').replaceChildren();this.$('dw-empty').hidden=false;this.$('dw-version').textContent='';
     if(card?.kind!=='model'){this.data=null;this.$('dw-title').textContent='Select or create a model';this.$('dw-empty').textContent='Start with measured shapes, or ask Céline to build a custom assembly.';return;}
     this.$('dw-title').textContent=card.title;
     this.$('dw-empty').textContent='Loading saved components…';
@@ -60,7 +61,7 @@ export class DesignWorkbench {
   }
   async choose(index,send=true){
     const p=this.data?.parts[index];if(!p)return;
-    if(send){const source=this.data.source;const selected=await this.select(this.data.card.id,{kind:'part',mesh:index,face:0,name:p.name,src:source});if(!selected||this.data?.source!==source){this.status('The component selection changed. Wait for the workspace to update.');return;}}
+    if(send){const before=this.data,choice=this.choiceGeneration=(this.choiceGeneration||0)+1;this.selectionBusy(true);this.clearReport();this.status('Selecting component…');try{const selected=await this.select(before.card.id,{kind:'part',mesh:index,face:0,name:p.name,src:before.source});if(choice!==this.choiceGeneration)return;if(!selected||selected.id!==before.card.id||selected.selected_part?.mesh!==index||this.data!==before){this.status('The component selection changed. Wait for the workspace to update.');return;}}catch(e){if(choice===this.choiceGeneration)this.status(e.message);return;}finally{if(choice===this.choiceGeneration)this.selectionBusy(false);}}
     this.part=index;this.clearReport();const draft=this.drafts.get(this.draftKey());this.conflicted=Boolean(draft&&draft.source!==this.data.source);this.fill(draft?.fields||p);this.$('dw-apply').disabled=this.conflicted;
     this.status(this.conflicted?'This component changed. Your draft is preserved; reload the saved version before applying it.':draft?'Unsaved measurements restored.':'Select a component, then change its measurements or ask Céline about it.');
     const list=this.$('dw-parts');list.replaceChildren();for(const row of this.data.parts){const b=document.createElement('button');b.type='button';b.className='dw-component';b.setAttribute('aria-pressed',String(row.index===index));const name=document.createElement('span'),dims=document.createElement('small');name.textContent=row.name;dims.textContent=row.size_mm.map(v=>Number(v.toFixed(2))).join(' × ')+' mm';b.append(name,dims);b.onclick=()=>this.choose(row.index);list.append(b);}
@@ -74,7 +75,7 @@ export class DesignWorkbench {
   }
   async create(){this.$('dw-create-go').disabled=true;this.$('dw-create-error').textContent='';try{await this.request('create',{title:this.$('dw-create-title').value,shape:this.$('dw-shape').value,size_mm:['x','y','z'].map(a=>Number(this.$('dw-create-'+a).value))});this.dialog.close();this.status('Build saved. Select a component to refine it.');}catch(e){this.$('dw-create-error').textContent=e.message;}finally{this.$('dw-create-go').disabled=false;}}
   async edit(){
-    if(!this.data||this.conflicted||this.saving)return;const before=this.data,part=this.part,fields=this.fields(),stamp=JSON.stringify(fields),key=this.draftKey();this.saving=true;this.$('dw-apply').disabled=true;
+    if(!this.data||this.selecting||this.conflicted||this.saving)return;const before=this.data,part=this.part,fields=this.fields(),stamp=JSON.stringify(fields),key=this.draftKey();this.saving=true;this.$('dw-apply').disabled=true;
     try{const data=await this.request('edit',{id:before.card.id,expected_src:before.source,part,changes:fields});
       const pending=this.drafts.get(key);if(!pending||JSON.stringify(pending.fields)===stamp)this.drafts.delete(key);else this.drafts.set(key,{source:data.source,fields:pending.fields});
       if(this.data?.card.id!==before.card.id||this.data?.workspace?.epoch!==before.workspace?.epoch||this.part!==part)return;
@@ -83,7 +84,7 @@ export class DesignWorkbench {
     }catch(e){this.status(e.message);if(e.status===409){this.conflicted=true;this.key='';}}finally{this.saving=false;this.$('dw-apply').disabled=Boolean(this.conflicted);}
   }
   async fabricate(exportFile){
-    if(!this.data||this.busy)return;if(this.drafts.has(this.draftKey())||this.conflicted){this.status('Save or reload your measurements before checking the saved geometry.');return;}
+    if(!this.data||this.selecting||this.busy)return;if(this.drafts.has(this.draftKey())||this.conflicted){this.status('Save or reload your measurements before checking the saved geometry.');return;}
     this.busy=true;const before=this.data,part=this.$('dw-scope').value==='all'?null:this.part;this.clearReport();const generation=this.validationGeneration;this.$('dw-report').textContent='Measuring the saved mesh…';
     try{const result=await this.request(exportFile?'export':'check',{id:before.card.id,expected_src:before.source,part,format:this.$('dw-format').value});if(this.data?.source!==before.source||this.data?.card.id!==before.card.id||(this.$('dw-scope').value==='all'?null:this.part)!==part)return;
       if(this.data?.workspace?.epoch!==before.workspace?.epoch||this.validationGeneration!==generation)return;

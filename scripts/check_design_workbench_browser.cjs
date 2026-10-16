@@ -23,7 +23,7 @@ from dashboard.server import app
 import uvicorn
 uvicorn.run(app,host='127.0.0.1',port=int(sys.argv[3]),log_level='warning')`;
 const port=()=>new Promise((resolve,reject)=>{const server=net.createServer();server.on('error',reject);server.listen(0,'127.0.0.1',()=>{const n=server.address().port;server.close(()=>resolve(n));});});
-let child,browser,logs='';
+let child,browser,page,logs='';
 (async()=>{
  const p=await port(),url='http://127.0.0.1:'+p;
  child=spawn(process.env.APEX_TEST_PYTHON||'python',['-u','-c',python,root,scratch,String(p),token],{cwd:root,stdio:['ignore','pipe','pipe']});
@@ -32,7 +32,7 @@ let child,browser,logs='';
  while(Date.now()<deadline){if(child.exitCode!==null)throw Error('Preview server exited: '+logs);try{if((await fetch(url+'/health')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));}
  assert.ok(ready,'Preview server did not start: '+logs);
  browser=await chromium.launch({headless:true,...(process.env.APEX_BROWSER_EXECUTABLE?{executablePath:process.env.APEX_BROWSER_EXECUTABLE}:{}),args:['--enable-unsafe-swiftshader','--use-angle=swiftshader']});
- const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true}),errors=[];
+ page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});page.setDefaultTimeout(45000);const errors=[];
  page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(t=>localStorage.setItem('apex_token',t),token);
  await page.goto(url+'/board?design=1');
@@ -45,6 +45,7 @@ let child,browser,logs='';
  await page.click('#dw-frame');await page.waitForTimeout(300);
  await page.screenshot({path:path.join(artifacts,'design-workbench.png')});
  await page.getByRole('button',{name:/^Lid/}).click();
+ await page.waitForFunction(()=>document.querySelector('.dw-component[aria-pressed="true"]')?.textContent.startsWith('Lid')&&!document.getElementById('dw-size-x').disabled);
  await page.fill('#dw-size-x','42');await page.fill('#dw-size-z','42');
  const edited=page.waitForResponse(r=>r.url()===url+'/api/board/design'&&r.request().method()==='POST');
  await page.click('#dw-apply');design=await(await edited).json();
@@ -82,7 +83,7 @@ let child,browser,logs='';
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal overflow at '+viewport.width);
  }
  assert.deepEqual(errors,[]);console.log('PASS: real create → component edit → checked 3MF download → Undo → stale-window recovery → explicit reference staging; desktop and narrow layouts.');
-})().catch(e=>{console.error(e);if(logs)console.error(logs);process.exitCode=1;}).finally(async()=>{
+})().catch(async e=>{console.error(e);if(page){console.error(await page.evaluate(()=>({status:document.getElementById('dw-status')?.textContent,version:document.getElementById('dw-version')?.textContent,selected:document.querySelector('.dw-component[aria-pressed="true"]')?.textContent,busy:document.getElementById('dw-edit')?.getAttribute('aria-busy')})).catch(()=>null));await page.screenshot({path:path.join(artifacts,'design-failure.png')}).catch(()=>{});}if(logs)console.error(logs);process.exitCode=1;}).finally(async()=>{
  await browser?.close();if(child&&child.exitCode===null){child.kill('SIGTERM');await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,4000))]);if(child.exitCode===null)child.kill('SIGKILL');}
  if(!process.env.APEX_DESIGN_ARTIFACTS)console.log('Artifacts:',artifacts);
 });

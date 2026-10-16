@@ -7,7 +7,7 @@ w.eval(fs.readFileSync(path.join(__dirname,'../dashboard/static/board-design.js'
 const source=v=>'created/block/v'+v+'.glb';
 const data=(v=1,epoch='a')=>({workspace:{id:'space',epoch},card:{id:'block',kind:'model',title:'<img src=x onerror=alert(1)>',src:source(v)},source:source(v),version:v,extent_mm:[40,12,30],parts:[{index:0,name:'Base',shape:'box',size_mm:[40,12,30],position_mm:[0,0,0],rotation_deg:[0,0,0]},{index:1,name:'Lid',shape:'box',size_mm:[40,2,30],position_mm:[0,20,0],rotation_deg:[0,0,0]}]});
 const frame=s=>({workspace:s.workspace,cards:[s.card],selection:s.card});
-let current=data(),pendingGet=null,pendingPost=null,fail=false;
+let current=data(),pendingGet=null,pendingPost=null,pendingSelect=null,fail=false;
 const calls=[],selections=[],messages=[];
 const api=async(url,opts)=>{
  if(!opts){if(pendingGet)return pendingGet;return Response.json(current);}
@@ -17,12 +17,20 @@ const api=async(url,opts)=>{
  if(body.action==='edit'){current=data(2);current.parts[body.part]={...current.parts[body.part],...body.changes};return Response.json(current);}
  return Response.json({source:current.source,scope:'Base',version:current.version,verdict:'unverified',ok:false,description:'Thickness not measured'});
 };
-const tool=new w.DesignWorkbench({api,select:async(...s)=>selections.push(s),workspace:()=>({workspace:current.workspace}),partner:m=>messages.push(m),clearReference:()=>messages.push({clear:true}),photo:()=>'/9j/AA=='});
+const tool=new w.DesignWorkbench({api,select:async(...s)=>{selections.push(s);return pendingSelect||{id:s[0],selected_part:s[1]};},workspace:()=>({workspace:current.workspace}),partner:m=>messages.push(m),clearReference:()=>messages.push({clear:true}),photo:()=>'/9j/AA=='});
 const flush=()=>new Promise(r=>setTimeout(r,10));
 (async()=>{
  await tool.update(frame(current));
  assert.equal($('dw-title').textContent,current.card.title);assert.equal($('dw-title').children.length,0,'titles are text');
  assert.equal($('dw-size-y').value,'12');
+ let finishSelection;pendingSelect=new Promise(r=>finishSelection=r);const choosing=tool.choose(1);
+ assert.equal($('dw-size-x').disabled,true,'measurements wait for the selected component');
+ const beforeSelection=calls.length;await tool.edit();await tool.fabricate(true);assert.equal(calls.length,beforeSelection,'pending selection cannot mutate or export the previous part');
+ finishSelection({id:'block',selected_part:{mesh:1}});await choosing;pendingSelect=null;
+ assert.equal($('dw-size-y').value,'2');assert.equal($('dw-size-x').disabled,false);
+ let finishOldSelection;pendingSelect=new Promise(r=>finishOldSelection=r);const oldChoosing=tool.choose(0);pendingSelect=null;
+ await tool.choose(1);finishOldSelection({id:'block',selected_part:{mesh:0}});await oldChoosing;
+ assert.equal(tool.part,1,'an older selection acknowledgement cannot replace the newest choice');
  await tool.choose(1);assert.equal(selections.at(-1)[1].mesh,1);assert.equal(selections.at(-1)[1].src,source(1));
  await tool.choose(0);
  $('dw-size-x').value='55';$('dw-size-x').dispatchEvent(new w.Event('input',{bubbles:true}));
