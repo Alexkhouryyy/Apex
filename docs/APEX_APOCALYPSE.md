@@ -113,6 +113,22 @@ going until it's all there.
 
 The same thing from a terminal: `prepare_apocalypse_library.py --max-download-gb 90 --until-done`.
 
+**Add one more pack: `--add`.** Give a Kiwix catalog name (the archive's file
+name without the `_YYYY-MM.zim` date, e.g. `wikivoyage_en_all_maxi`):
+
+```powershell
+cd C:\Users\alexk\Apex
+.\.venv\Scripts\python.exe -X utf8 scripts\prepare_apocalypse_library.py --add wikivoyage_en_all_maxi --until-done
+```
+
+It pins the pack's current version, exact size and publisher checksum into the
+saved plan and downloads just that pack (repeat `--add` for several). Every
+archive already in the plan keeps its version and status, so nothing else
+downloads again; that's the difference from `--refresh-plan`. A name Kiwix
+doesn't list is an error, not a silent skip. With `--plan-only` it's added
+without downloading; a later `Download-Apex-Library.cmd` run then includes it in
+its size budget.
+
 `python scripts/prepare_apocalypse_library.py --plan-only` resolves metadata
 without downloading archives. `--refresh-plan` explicitly selects newer versions
 and keeps old files. The Apocalypse screen shows the last saved queue counts;
