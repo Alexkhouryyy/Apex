@@ -144,6 +144,33 @@ def build_plan(client):
             'jobs': jobs, 'remaining_setup': pending, 'offline_verified': False}
 
 
+KIWIX_ID = re.compile(r'[a-z0-9][a-z0-9_.-]{1,99}')
+
+
+def add_resources(client, plan, identifiers):
+    """Add more Kiwix archives (by catalog name, e.g. wikipedia_ar_medicine_maxi)
+    to the saved plan, each pinned to its current version, exact size and
+    publisher checksum. Everything already in the plan is left exactly as it
+    was: unlike --refresh-plan, no other archive changes version or downloads
+    again. Returns (added ids, ids already in the plan)."""
+    known = {row['id'] for row in plan['jobs']}
+    added, present = [], []
+    for identifier in dict.fromkeys(identifiers or []):
+        if not KIWIX_ID.fullmatch(identifier or ''):
+            raise RuntimeError(f'Not a Kiwix archive name: {identifier!r}')
+        if identifier in known:
+            present.append(identifier)
+            continue
+        print('Resolving '+identifier, flush=True)
+        row = latest_zim(client, {'id': identifier, 'title': identifier})
+        row['added'] = True                       # chosen by the owner, not from the NOMAD collections
+        plan['jobs'].append(row)
+        known.add(identifier)
+        added.append(identifier)
+    plan['jobs'].sort(key=lambda row: row['bytes'])
+    return added, present
+
+
 def save_plan(path, plan):
     plan['updated_at'] = int(time.time())
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -393,6 +420,8 @@ def main():
     parser.add_argument('--plan-output', type=Path, help='Metadata output location for --plan-only')
     parser.add_argument('--max-download-gb', type=float, help='Limit this batch to whole archives totalling at most this many decimal GB')
     parser.add_argument('--only', action='append', help='Archive ID to select; repeat for multiple archives')
+    parser.add_argument('--add', action='append', metavar='ID',
+                        help='Add a Kiwix archive by catalog name to the saved plan (other archives keep their versions) and download it; repeatable')
     parser.add_argument('--until-done', action='store_true',
                         help='Keep going through internet outages, waiting and retrying until every archive is downloaded')
     args = parser.parse_args()
@@ -414,7 +443,16 @@ def main():
                 plan = build_plan(client)
             if plan.get('profile') != 'english-worldwide':
                 raise RuntimeError('Unexpected preparation profile.')
-            selected = select_jobs(plan['jobs'], args.only, args.max_download_gb)
+            only = args.only
+            if args.add:
+                added, present = add_resources(client, plan, args.add)
+                for identifier in added:
+                    row = next(r for r in plan['jobs'] if r['id'] == identifier)
+                    print(f'Added {identifier} ({row["version"]}, {row["bytes"]/1_000_000_000:.2f} GB).', flush=True)
+                for identifier in present:
+                    print(f'{identifier} is already in the plan; kept as it was.', flush=True)
+                only = only or args.add               # --add X downloads X, not the whole plan
+            selected = select_jobs(plan['jobs'], only, args.max_download_gb)
             save_plan(output, plan)
             total = sum(row['bytes'] for row in plan['jobs'])
             print(f'English + worldwide: {len(plan["jobs"])} archives, {total/1024**3:.1f} GiB. '

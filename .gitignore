@@ -24,6 +24,9 @@ mcp_servers.local.json
 # itself un-excluded so reusable skills below can be re-included and versioned.
 .claude/*
 !.claude/skills/
+# Shared project settings and the cloud session-start hook; settings.local.json stays private.
+!.claude/settings.json
+!.claude/hooks/
 
 # barehands — a SEPARATE AGPL-3.0 program Apex drives over localhost.
 # Apex integrates with it by aggregation (HTTP to 127.0.0.1:8794 plus three
