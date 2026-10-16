@@ -108,6 +108,11 @@ def test_export_uses_selected_source_and_converts_y_up_to_print_z_up(workspace):
     meta = assets.load('measured-block')
     assert meta['versions'][-1]['parent'] == 1
     assert design.inspect(data['card']['id'])['source'] == data['source']
+    from agent import core
+    import json
+    shown = core._execute_tool('board_build', {'action':'show', 'title':'Measured block'})
+    recipe = json.loads(shown.split('\n', 1)[1])
+    assert recipe[0]['size'] == pytest.approx([4, 1.2, 3]), 'voice must inspect the shown model after an export or Undo'
 
 
 def test_unknown_check_never_creates_an_export_or_version(workspace, monkeypatch):

@@ -2586,7 +2586,16 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             if not title:
                 return "board_build needs a title — what is it called?"
             if (inputs.get("action") or "build") == "show":
-                parts = _b3.recipe(title)
+                from agent import board_parts
+                board = get_board()
+                selected = board.selection()
+                matches = [c for c in board.cards() if c['kind'] == 'model' and c['title'].lower() == title.lower()]
+                shown = next((c for c in matches if selected and c['id'] == selected['id']), matches[0] if matches else None)
+                if shown:
+                    source = board_parts.recipe_for_src(shown['src'])
+                    parts = source[1] if source else None
+                else:
+                    parts = _b3.recipe(title)
                 if parts is None:
                     return f"Nothing built called '{title}'. board_history lists what exists."
                 return f"'{title}' — current parts:\n" + json.dumps(parts)
