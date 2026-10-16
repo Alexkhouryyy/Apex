@@ -519,7 +519,7 @@ TOOLS = [*offline_library.DEFINITIONS,
     },
     {
         "name": "screen_draw",
-        "description": "Draw temporary click-through guidance on the current owner host screenshot. Requires its exact frame ID. Shapes use normalized coordinates 0..1. Can point at a control or explain with arrows, rectangles, ellipses, polygons, curves and labels. Does not click or type. Only claim drawing when the returned result confirms it.",
+        "description": "Draw temporary click-through guidance on the current owner host screenshot. Requires its exact frame ID. Shapes use normalized coordinates 0..1. Use it unprompted whenever your answer refers to something visible on that screen: point at the control or explain with arrows, rectangles, ellipses, polygons, curves and labels. Does not click or type. Only claim drawing when the returned result confirms it.",
         "input_schema": {
             "type": "object",
             "properties": {

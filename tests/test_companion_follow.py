@@ -222,3 +222,74 @@ def test_connect_tells_the_page_its_hotkeys(monkeypatch):
     assert info['draw_hotkey'] == '<ctrl>+<alt>+d' and info['follow_hotkey'] == '', 'no follower: no follow hotkey shown'
     bridge._follower = follow.Follower(lambda: (0, 0), lambda x, y: AREA, lambda: SIZE, lambda x, y: None)
     assert bridge.connect()['follow_hotkey'] == '<ctrl>+<alt>+f'
+
+
+# ---------------------------------------------------------------- automatic: follows, and flies to what she marks
+
+def test_the_bubble_follows_by_default(monkeypatch):
+    import importlib
+    import config
+    monkeypatch.delenv('COMPANION_FOLLOW_CURSOR', raising=False)
+    try:
+        assert importlib.reload(config).COMPANION_FOLLOW_CURSOR is True
+        monkeypatch.setenv('COMPANION_FOLLOW_CURSOR', 'false')
+        assert importlib.reload(config).COMPANION_FOLLOW_CURSOR is False, 'still possible to start in the corner'
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
+
+
+FRAME = {'id': 'f', 'left': 1920, 'top': 0, 'width': 1920, 'height': 1080}
+
+
+def test_the_focus_is_an_arrow_tip_or_a_marks_centre():
+    arrow = [{'type': 'label', 'points': [[.1, .1]], 'label': 'x'},
+             {'type': 'arrow', 'points': [[.2, .2], [.5, .25]]}]
+    assert follow.focus_point(FRAME, arrow) == (1920 + 960, 270), 'the arrow tip, on the second monitor'
+    box = [{'type': 'rectangle', 'points': [[.1, .1], [.3, .5]]}]
+    assert follow.focus_point(FRAME, box) == (1920 + 384, 324)
+    assert follow.focus_point(FRAME, []) is None
+
+
+def test_pointing_moves_the_bubble_beside_the_mark_then_back_to_the_pointer():
+    now = [0.0]
+    moves = []
+    f = follow.Follower(lambda: (100, 100), lambda x, y: AREA, lambda: SIZE,
+                        lambda x, y: moves.append((x, y)), enabled=True, clock=lambda: now[0])
+    f.tick()
+    assert moves[-1] == (128, 128)
+    f.point_at(1500, 600, 10)
+    for _ in range(40):
+        f.tick()
+    target = follow.follow_position((1500, 600), SIZE, AREA)
+    assert moves[-1] == target and not covers(target, SIZE, (1500, 600)), 'beside what she marked, not over it'
+    now[0] = 11
+    for _ in range(40):
+        f.tick()
+    assert moves[-1] == (128, 128), 'the mark expired: back beside the pointer'
+
+
+def test_a_confirmed_drawing_points_the_bubble_only_when_following():
+    from app.companion_desktop import point_bubble
+    bridge = SimpleNamespace(_follower=follow.Follower(lambda: (0, 0), lambda x, y: AREA, lambda: SIZE,
+                                                       lambda x, y: None, enabled=True))
+    item = {'frame': FRAME, 'shapes': [{'type': 'ellipse', 'points': [[.4, .4], [.6, .6]]}], 'seconds': 12}
+    assert point_bubble(bridge, item, {'ok': False}) is False, 'an unconfirmed drawing moves nothing'
+    assert bridge._follower._focus is None
+    assert point_bubble(bridge, item, {'ok': True}) is True
+    assert bridge._follower._focus[0] == (1920 + 960, 540)
+    bridge._follower.set_enabled(False)
+    bridge._follower._focus = None
+    assert point_bubble(bridge, item, {'ok': True}) is False, 'Follow off: the bubble stays in its corner'
+    assert point_bubble(SimpleNamespace(), item, {'ok': True}) is False, 'no follower (not Windows)'
+
+
+def test_celine_is_told_to_point_without_being_asked(monkeypatch):
+    import time
+    from agent import screen_guidance as guidance
+    monkeypatch.setattr(desktop, 'status', lambda: {'ready': True, 'shown': True, 'mode': 'screen'})
+    frame = {'id': 'abc123', 'captured_at': time.monotonic()}
+    with guidance.turn(frame):
+        text = guidance.instructions()
+    assert 'abc123' in text and 'without waiting to be asked' in text
+    assert 'draw nothing' in text, 'and holds back when the screen is not relevant'
