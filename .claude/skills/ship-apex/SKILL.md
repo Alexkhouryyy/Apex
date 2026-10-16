@@ -75,6 +75,10 @@ bash .claude/skills/ship-apex/ui_checks.sh companion  # just matching names
 
 It retries each failure once, then runs still-failing checks against
 `origin/main`. Only **NEW** failures (pass on main, fail here) block shipping.
+The `*_browser` checks can time out under load. If a NEW one is for a page your
+diff doesn't touch (`git diff origin/main --stat -- dashboard`), rerun it alone
+3 times (`ui_checks.sh <name>`). Mostly passing means a flake: report it as
+one, with the count.
 Report "also fails on main" ones as environment issues, by name. If you changed
 a page's JS, also `node --check dashboard/static/<file>.js`.
 
