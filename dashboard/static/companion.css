@@ -122,3 +122,6 @@ body.desktop-companion #companion[data-look][data-view=voice] .avatar {width:52p
 #companion[data-compact] #mic-note{display:none}
 #companion[data-compact] #composer{padding:8px}
 #companion[data-compact] textarea{min-height:34px}
+.design-reference-note{display:flex;align-items:center;gap:10px;margin:8px 12px;padding:10px;border:1px solid #6bcbb955;border-radius:8px;font-size:12px;color:#b9dad8}
+.design-reference-note img{width:48px;height:48px;object-fit:cover;border-radius:4px}
+.design-reference-note button{margin-left:auto}

@@ -29,6 +29,7 @@ Object.defineProperty(w, 'parent', {value: board, configurable: true});
 const fromBoard = (data, source = board, origin = 'http://localhost:7860') =>
   w.dispatchEvent(new w.MessageEvent('message', {data, source, origin}));
 const cancels = [], chats = [];
+let rejectChat = false;
 w.fetch = async (url, opts = {}) => {
   if (url === '/api/status') return Response.json({agent_ready: true});
   if (url === '/api/voicebox/profiles') return Response.json({profiles: [{id: 'celine', name: 'CELINE'}]});
@@ -39,6 +40,7 @@ w.fetch = async (url, opts = {}) => {
   if (url === '/api/companion/timing') return Response.json({ok: true});
   if (url === '/api/companion/chat') {
     chats.push(JSON.parse(opts.body));
+    if (rejectChat) return Response.json({detail:'Provider unavailable'}, {status:503});
     const enc = o => new TextEncoder().encode(JSON.stringify(o) + '\n');
     return new Response(new ReadableStream({async start(c) {
       c.enqueue(enc({type: 'start', thread_id: 1})); c.enqueue(enc({type: 'done', text: 'A long answer about the rocket. It goes on.'})); c.close(); }}));
@@ -113,6 +115,28 @@ const root = $('companion');
   assert.doesNotMatch(asked.message, /\n/, 'a title cannot break the sentence open');
   assert.equal(asked.workspace, 'board', 'it must go as a board turn, so "this" is the tapped object');
   assert.equal(asked.voice_profile, 'celine', 'asked after voice mode was on, in her voice');
+
+  // A design reference waits for an explicit question and never starts voice.
+  fromBoard({apex:'voice',on:false});await sleep(100);
+  const reference='/9j/AA==', beforeReference=chats.length, beforeListening=listening;
+  fromBoard({apex:'design-reference',image:reference},board,'https://evil.example');
+  assert.equal($('design-reference-note'),null);
+  fromBoard({apex:'design-reference',image:reference});
+  assert.ok($('design-reference-note'));assert.equal(chats.length,beforeReference);assert.equal(listening,beforeListening);
+  $('spoken').checked=false;$('message').value='Design a 40 mm enclosure from this reference.';
+  $('composer').dispatchEvent(new w.Event('submit'));
+  for(let i=0;i<100&&chats.length===beforeReference;i++)await sleep(10);
+  assert.equal(chats.at(-1).screen_image,reference);
+  assert.match(chats.at(-1).message,/not as a dimensional 3D scan/);
+  for(let i=0;i<100&&$('design-reference-note');i++)await sleep(10);
+  assert.equal($('design-reference-note'),null,'a completed question consumes only its own reference: '+$('error')?.textContent+' / '+$('status').textContent);
+  fromBoard({apex:'design-reference',image:reference});rejectChat=true;
+  const beforeFailure=chats.length;$('message').value='Try this reference.';$('composer').dispatchEvent(new w.Event('submit'));
+  for(let i=0;i<100&&chats.length===beforeFailure;i++)await sleep(10);
+  await sleep(50);assert.ok($('design-reference-note'),'a failed request preserves its reference');rejectChat=false;
+  fromBoard({apex:'design-reference',image:reference});
+  fromBoard({apex:'design-reference',image:null});
+  assert.equal($('design-reference-note'),null,'removal or a workspace switch clears the reference');
 
   console.log('PASS: tap to ask waits for voice mode and asks about the object as a board turn; inside the board the companion reports ready, turns voice on and off only for its own board, '
     + 'hushes Celine on a swipe down while staying in voice mode, and reports every voice change back.');

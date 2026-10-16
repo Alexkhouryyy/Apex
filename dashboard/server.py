@@ -137,6 +137,8 @@ app.include_router(companion_router)
 from dashboard.study import router as study_router
 from dashboard.workspaces import router as workspaces_router
 app.include_router(workspaces_router)
+from dashboard.design import router as design_router
+app.include_router(design_router)
 app.include_router(study_router)
 from dashboard.world import router as world_router
 app.include_router(world_router)

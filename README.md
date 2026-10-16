@@ -33,6 +33,8 @@ Every feature, dated, as live, tested only, waiting on your setup, or planned:
 **[docs/CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md)**.
 The roadmap's acceptance test in one command (projects, restart, app write, recovery):
 **[docs/DEMO.md](docs/DEMO.md)**.
+Design physical objects on the board with measured components, reference photos,
+voice requests and checked 3MF/STL exports: **[docs/DESIGN_WORKBENCH.md](docs/DESIGN_WORKBENCH.md)**.
 Outside projects (1,000+ stars) reviewed for three named gaps, each with a verdict:
 **[docs/OPEN_SOURCE_REGISTER.md](docs/OPEN_SOURCE_REGISTER.md)**.
 Optional Chronicle incident recording and safe boundary replay:

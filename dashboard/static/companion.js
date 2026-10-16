@@ -113,12 +113,30 @@
   // its own parent, on the same origin, is listened to.
   const embedded = window.parent !== window;
   function toParent(msg) { if (embedded) window.parent.postMessage(msg, location.origin); }
+  let designReference = null;
+  function stageDesignReference(image) {
+    if (image !== null && (typeof image !== 'string' || image.length > 2000000 || !image.startsWith('/9j/') || !/^[A-Za-z0-9+/]+={0,2}$/.test(image))) return;
+    designReference = image ? {image} : null;
+    document.getElementById('design-reference-note')?.remove();
+    if (!image) return;
+    const note = document.createElement('div'), thumb = document.createElement('img'), label = document.createElement('span'), remove = document.createElement('button');
+    note.id = 'design-reference-note'; note.className = 'design-reference-note';
+    thumb.src = 'data:image/jpeg;base64,' + image; thumb.alt = 'Design reference for your next question';
+    label.textContent = 'Reference ready · include measured dimensions in your question.';
+    remove.type = 'button'; remove.textContent = 'Remove'; remove.onclick = () => stageDesignReference(null);
+    note.append(thumb, label, remove); $('composer').before(note);
+  }
   window.addEventListener('message', event => {
     if (event.origin !== location.origin || event.source !== window.parent) return;
     const m = event.data || {};
     if (m.apex === 'voice') {
       if (m.on) entering = enterVoiceMode().catch(exc => { leaveVoiceMode(); error(exc.message); });
       else if (voiceMode) stop();
+    } else if (m.apex === 'design-open' && workspace === 'board') {
+      $('message').focus();
+      $('status').textContent = 'Describe your design and its measurements. The selected component is included.';
+    } else if (m.apex === 'design-reference' && workspace === 'board') {
+      stageDesignReference(m.image);
     } else if (m.apex === 'ask') {
       askAbout(m);
     } else if (m.apex === 'study-ask' && workspace === 'assembly') {
@@ -870,11 +888,13 @@
     hands?.pause();
     if (!automatic) lastInteraction=Date.now();
     stopSpeech(); error();
-    let image = null;
+    const reference = !automatic && !recovery ? designReference : null;
+    const requestText = reference ? text + '\n\n[The owner attached an object reference photo. Use it for appearance, not as a dimensional 3D scan. Ask for missing physical measurements; do not invent scale, machining readiness or completed machine actions.]' : text;
+    let image = reference?.image || null;
     // A live screen turn's picture is taken by the server as the words
     // arrive; the browser sends none of its own.
-    const liveTurn = Boolean(liveScreen || desktopShareEnabled) && !look && !automatic && !recovery;
-    if (!look && !liveTurn) { try { image = snapshot(); } catch (exc) { error(exc.message); return; } }
+    const liveTurn = Boolean(liveScreen || desktopShareEnabled) && !reference && !look && !automatic && !recovery;
+    if (!reference && !look && !liveTurn) { try { image = snapshot(); } catch (exc) { error(exc.message); return; } }
     const turn = {id: recovery?.turn_id || crypto.randomUUID(), stopped: false, done: false, text: '', automatic};
     active = turn; controls(); state('thinking', automatic ? 'Checking in on your screen…' : 'Thinking with you…');
     if (!automatic && !recovery) { bubble('user', text); $('message').value = ''; }
@@ -925,7 +945,7 @@
         await remoteEvents(turn, body, event);
       } else {
       const response = await request('/api/companion/chat', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({message: text, thread_id: threadId, turn_id: turn.id,
+        body: JSON.stringify({message: requestText, thread_id: threadId, turn_id: turn.id,
           screen_image: image, mode: automatic ? 'discuss' : $('mode').value, workspace, study_session: studySession, proactive: automatic,
           ...(liveTurn ? {look_live: true} : {}),
           // Which voice will speak the reply: in Celine's voice, Apex answers as Celine.
@@ -955,6 +975,7 @@
       if (!automatic && !$('message').value) $('message').value = text;
     } finally {
       active = null;
+      if (reference && turn.done && !turn.stopped && designReference === reference) stageDesignReference(null);
       if (speaking && !turn.stopped && live === speaking) {
         // Say which half you are waiting on. The reply is written; if no audio
         // is playing yet, the wait is the VOICE — "thinking" here read as the
