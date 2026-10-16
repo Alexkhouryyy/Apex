@@ -22,6 +22,21 @@ readiness through the authenticated `/api/companion/desktop/status` endpoint.
 This does not test microphone permission or dictation insertion. Existing background feature settings,
 including camera/awareness settings, still apply.
 
+If the cloned Celine model cannot load (for example, Windows error 1455 about
+the paging file), use `Start-Apex-Platform.cmd --desktop --device-voice`.
+This starts normal Apex and Apocalypse without starting Qwen or requiring its
+voice environment. Resident replies use the installed system voice; native
+Companion uses its existing device-speech fallback when no Celine service is
+available. This changes the voice, not the configured AI model or app accounts.
+No voice model is downloaded. Microphone permission and transcription still
+have their own requirements. Omit `--device-voice` to use the cloned voice again.
+
+For Windows error 1455, run `sysdm.cpl`, then Advanced > Performance Settings >
+Advanced > Virtual memory > Change. Enable **Automatically manage paging file
+size for all drives**, confirm the dialogs and restart Windows. The system
+drive needs enough free disk space for the page file to grow. The launcher
+does not change Windows memory settings.
+
 Without internet, use `Start-Apex-Platform.cmd --offline-only`. Add `--no-nomad` to skip Docker. This starts the offline dashboard only; normal cloud Apex and Celine are omitted. The existing launchers below still work independently.
 
 Keep the platform console open. Ctrl+C requests a graceful stop of the Apex processes it created; a failed service stops its companion Apex processes. Previously running services are never killed. NOMAD containers remain managed by Docker Desktop after the launcher closes, preserving database and library volumes.

@@ -75,13 +75,16 @@ def main(argv=None):
     parser.add_argument('--offline-only', action='store_true', help='Apocalypse and cached NOMAD only')
     parser.add_argument('--no-nomad', action='store_true', help='Skip Docker entirely')
     parser.add_argument('--desktop', action='store_true', help='Enable the native Companion; keep wake-word listeners off')
+    parser.add_argument('--device-voice', action='store_true', help='Start normal Apex without loading the cloned Celine model')
     parser.add_argument('--open', action='store_true', help='Open the ready dashboards')
     args = parser.parse_args(argv)
-    if args.desktop and args.offline_only:
-        parser.error('--desktop requires normal Apex; omit --offline-only.')
+    if (args.desktop or args.device_voice) and args.offline_only:
+        parser.error('--desktop and --device-voice require normal Apex; omit --offline-only.')
     normal = launcher.launch_environment()
     if args.desktop:
         normal.update(COMPANION_DESKTOP_ENABLED='true', CELINE_WAKE_ENABLED='false', WAKE_WORD_ENABLED='false')
+    if args.device_voice:
+        normal['TTS_ENGINE'] = 'pyttsx3'
     normal['APEX_APOCALYPSE'] = '0'
     # Celine's model loader otherwise fetches missing weights during startup.
     # This entry point runs prepared models only; cloud API access stays normal.
@@ -95,7 +98,9 @@ def main(argv=None):
         raise RuntimeError('Apex, Apocalypse and Celine need separate ports.')
     checks = [(offline_port, '127.0.0.1')]
     if not args.offline_only:
-        checks += [(port, host), (17494, '127.0.0.1')]
+        checks += [(port, host)]
+        if not args.device_voice:
+            checks.append((17494, '127.0.0.1'))
     if any(launcher.port_in_use(p, h) for p, h in checks):
         raise RuntimeError('An Apex service is already running. Stop its previous launcher with Ctrl+C, then retry. Nothing was stopped.')
     platform_id = uuid.uuid4().hex
@@ -116,12 +121,16 @@ def main(argv=None):
             children, 'Apocalypse dashboard', 240)
         print('Apocalypse: ready. '+offline_url+'/apocalypse', flush=True)
         if not args.offline_only:
-            child = spawn([str(ROOT / 'scripts/run_apex_qwen.py'), '--fast', '--resident'], normal)
-            children.append(('Apex + Celine', child))
+            command = [str(ROOT / 'scripts/run_apex_qwen.py'), '--fast', '--resident']
+            if args.device_voice:
+                command.append('--device-voice')
+            label = 'Apex (device voice)' if args.device_voice else 'Apex + Celine'
+            child = spawn(command, normal)
+            children.append((label, child))
             launcher.wait_healthy(opener, normal_url+'/health',
                 lambda h: h.get('service') == 'apex' and h.get('platform_id') == platform_id
-                and h.get('agent_ready') is True, children, 'Apex + Celine', 1200)
-            print('Apex + Celine: ready. '+normal_url+'/home', flush=True)
+                and h.get('agent_ready') is True, children, label, 1200)
+            print(label+': ready. '+normal_url+'/home', flush=True)
             print('Companion: '+normal_url+'/companion · enable Voice mode for browser audio access.', flush=True)
             if args.desktop:
                 headers = {'Authorization': 'Bearer ' + normal['DASHBOARD_TOKEN']} if normal.get('DASHBOARD_TOKEN') else {}

@@ -157,7 +157,9 @@ def capability_context() -> str:
         'When not running/ready, explain that the desktop feature exists but is not ready now, '
         'rather than denying Apex has it. Setup-Apex-Screen-Companion.cmd installs login startup; '
         'Start-Apex-Platform.cmd --desktop starts the prepared platform with the native window '
-        'hidden and wake-word listeners off. Neither requires continuous screen capture. '
+        'hidden and wake-word listeners off. Add --device-voice to skip loading the cloned '
+        'Celine model when Windows memory is insufficient; this uses device speech instead. '
+        'Neither requires continuous screen capture. '
         'Describe these controls accurately even if an older conversation reply denied them.'
     )
 

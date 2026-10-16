@@ -87,11 +87,31 @@ def test_unready_desktop_stops_owned_platform_children(rig, monkeypatch):
     assert len(children) == 2 and stopped == children[::-1]
 
 
-def test_desktop_profile_cannot_silently_disappear_in_offline_only_mode(rig):
+@pytest.mark.parametrize('flag', ['--desktop', '--device-voice'])
+def test_normal_profiles_cannot_silently_disappear_in_offline_only_mode(rig, flag):
     children, stopped = rig
     with pytest.raises(SystemExit) as exc:
-        platform.main(['--desktop', '--offline-only'])
+        platform.main([flag, '--offline-only'])
     assert exc.value.code == 2 and not children and not stopped
+
+
+def test_device_voice_platform_starts_both_dashboards_without_claiming_voice_port(rig, monkeypatch, capsys):
+    children, stopped = rig
+    checks = []
+    def occupied(port, *args):
+        checks.append(port)
+        return port == 17494
+    monkeypatch.setattr(platform.launcher, 'port_in_use', occupied)
+    with pytest.raises(KeyboardInterrupt):
+        platform.main(['--desktop', '--device-voice', '--no-nomad'])
+    assert checks == [7862, 7860]
+    assert len(children) == 2 and stopped == children[::-1]
+    assert '--device-voice' in children[1].args
+    assert children[1].env['TTS_ENGINE'] == 'pyttsx3'
+    assert children[1].env['COMPANION_DESKTOP_ENABLED'] == 'true'
+    text = capsys.readouterr().out
+    assert 'Apocalypse: ready.' in text and 'Apex (device voice): ready.' in text
+    assert 'Apex + Celine: ready.' not in text
 
 
 def test_busy_port_changes_nothing(rig,monkeypatch):

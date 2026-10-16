@@ -160,6 +160,9 @@ r.after(100,save);r.mainloop()
             time.sleep(.05)
         assert target['pid']==child.pid,'Windows did not focus the acceptance field'
         dictation.Session(target,1).insert('Hello café 😀',1)
+        # Cold UI Automation/.NET startup can consume the focus deadline.
+        # Give the target GUI its own bounded interval to process SendInput.
+        deadline=time.monotonic()+5
         while time.monotonic()<deadline:
             try:
                 if json.loads(result.read_text())=='Hello café 😀':break
