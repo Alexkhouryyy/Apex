@@ -378,3 +378,67 @@ def test_the_one_click_launcher_keeps_going_until_done():
     script = text.decode()
     assert '--until-done' in script and '--max-download-gb %LIMIT%' in script
     assert 'D:\\Apex-Apocalypse' in script and 'set /p' in script
+
+
+# ---------------------------------------------------------------- --add: one more pack, nothing else changes
+
+def kiwix(names):
+    """A fake Kiwix catalog: name -> (version, size, sha256)."""
+    def handle(request):
+        if request.url.path.endswith('entries'):
+            name = request.url.params['name']
+            if name not in names:
+                return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"/>')
+            version, size, _ = names[name]
+            return httpx.Response(200, text=f'''<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+              <link type="application/x-zim" href="https://mirror.test/{name}_{version}.zim.meta4" length="{size}"/></entry></feed>''')
+        name = request.url.path.rsplit('/', 1)[-1].rsplit('_', 1)[0]
+        _, size, digest = names[name]
+        return httpx.Response(200, text=f'''<metalink xmlns="urn:ietf:params:xml:ns:metalink"><file>
+             <size>{size}</size><hash type="sha-256">{digest}</hash></file></metalink>''')
+    return httpx.Client(transport=httpx.MockTransport(handle))
+
+
+def test_add_pins_a_new_pack_and_leaves_every_other_archive_alone():
+    old = dict(archive(), id='wikipedia_en_all_maxi', version='2025-01', status='downloaded')
+    plan = {'profile': 'english-worldwide', 'jobs': [json.loads(json.dumps(old))], 'remaining_setup': []}
+    with kiwix({'wikipedia_ar_medicine_maxi': ('2026-09', 2_000_000_000, 'ab' * 32),
+                'wikipedia_en_all_maxi': ('2026-10', 1, 'cd' * 32)}) as client:
+        added, present = library.add_resources(client, plan, ['wikipedia_ar_medicine_maxi', 'wikipedia_en_all_maxi',
+                                                               'wikipedia_ar_medicine_maxi'])
+    assert added == ['wikipedia_ar_medicine_maxi'] and present == ['wikipedia_en_all_maxi']
+    assert plan['jobs'][0] == old, 'the existing archive keeps its version and status: no re-download'
+    new = plan['jobs'][1]
+    assert new['version'] == '2026-09' and new['bytes'] == 2_000_000_000 and new['hash'] == 'ab' * 32
+    assert new['path'] == 'nomad/storage/zim/wikipedia_ar_medicine_maxi_2026-09.zim' and new['added'] is True
+    assert library.select_jobs(plan['jobs'], ['wikipedia_ar_medicine_maxi']) == [new]
+
+
+@pytest.mark.parametrize('bad', ['../../evil', 'A', 'x', 'has space', '', 'name/../zim'])
+def test_add_refuses_anything_that_is_not_a_kiwix_name(bad):
+    plan = {'profile': 'english-worldwide', 'jobs': [], 'remaining_setup': []}
+    with kiwix({}) as client, pytest.raises(RuntimeError, match='Not a Kiwix archive name'):
+        library.add_resources(client, plan, [bad])
+    assert plan['jobs'] == []
+
+
+def test_an_unknown_pack_is_an_error_not_a_silent_skip():
+    plan = {'profile': 'english-worldwide', 'jobs': [], 'remaining_setup': []}
+    with kiwix({}) as client, pytest.raises(RuntimeError, match='No current Kiwix archive'):
+        library.add_resources(client, plan, ['no_such_pack_maxi'])
+    assert plan['jobs'] == []
+
+
+def test_add_from_the_command_line_downloads_only_the_new_pack(monkeypatch, tmp_path, capsys):
+    jobs = [dict(archive(b'one'), id='a', title='A')]
+    _until_done_setup(monkeypatch, tmp_path, jobs, ['--add', 'wikipedia_ar_medicine_maxi', '--until-done'])
+    catalog = kiwix({'wikipedia_ar_medicine_maxi': ('2026-09', 5, 'ab' * 32)})
+    monkeypatch.setattr(library.httpx, 'Client', lambda **kw: catalog)
+    fetched = []
+    monkeypatch.setattr(library, 'download_with_retries',
+                        lambda client, home, job, checkpoint, **kw: fetched.append(job['id']) or job.update(status='downloaded'))
+    library.main()
+    assert fetched == ['wikipedia_ar_medicine_maxi'], 'not the rest of the plan'
+    saved = json.loads((tmp_path / library.PLAN_NAME).read_text(encoding='utf-8'))
+    assert {row['id'] for row in saved['jobs']} == {'a', 'wikipedia_ar_medicine_maxi'}, 'saved for next time'
+    assert 'Added wikipedia_ar_medicine_maxi (2026-09' in capsys.readouterr().out
