@@ -40,6 +40,13 @@ PICK_SLOP = 0.02      # a pinch this close to a part's drawn outline still gets 
 _SRC = re.compile(r"^created/([a-z0-9-]+)/v(\d+)\.glb$")
 
 
+def source_version(src: str) -> int:
+    match = _SRC.fullmatch(src or '')
+    if not match:
+        raise ValueError('This model is not a versioned build.')
+    return int(match.group(2))
+
+
 def recipe_for_src(src: str) -> Optional[tuple[str, list[dict]]]:
     """(title, parts) of the build version a card shows, or None when the
     card is not a build (a dropped-in prop, a Blender export, a text card)."""

@@ -58,6 +58,18 @@ def test_stale_edit_is_409_material_and_does_not_write_over_current_geometry(wor
     assert len(assets.load('measured-block')['versions']) == 2
 
 
+def test_edit_after_undo_branches_from_the_shown_source_not_the_newest_file(workspace):
+    b, _ = workspace
+    data = make()
+    design.edit(request(data, part=0, changes={'size_mm': [42, 14, 32]}))
+    b.undo()
+    changed = design.edit(request(data, part=0, changes={'name': 'From original'}))
+    assert changed['version'] == 3
+    record = assets.load('measured-block')['versions'][-1]
+    assert record['parent'] == 1
+    assert record['command']['parts'][0]['size'] == pytest.approx([4, 1.2, 3])
+
+
 @pytest.mark.parametrize('value', [[True, 3, 3], [float('nan'), 2, 2], [float('inf'), 2, 2], [0, 2, 2], [-1, 2, 2], [3, 4]])
 def test_invalid_physical_measurements_leave_history_and_source_unchanged(workspace, value):
     data = make()

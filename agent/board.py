@@ -1399,7 +1399,7 @@ class Board:
         offset = board_parts.model_delta(before, parts, hold["off"][0], hold["off"][1], self._aspect)
         new_parts = board_parts.edited(parts, hold["index"], offset, hold["scale"])
         try:
-            built = build3d.build(title, new_parts)
+            built = build3d.build(title, new_parts, source_version=board_parts.source_version(card.src))
         except build3d.BuildError as e:
             self.emit("part_failed", title=card.title, part=hold["name"], reason=str(e))
             return
@@ -1441,7 +1441,7 @@ class Board:
     def rebuild(self, card_id: str, new_parts: list) -> dict:
         """Save an edited recipe as the next version of the build this card
         shows, and show it without moving the untouched parts."""
-        from agent import build3d
+        from agent import build3d, board_parts
         with self._lock:
             card = next((c for c in self._cards if c.id == card_id), None)
         if card is None:
@@ -1451,7 +1451,7 @@ class Board:
             raise ValueError(f"'{card.title}' wasn't built from parts.")
         title, parts = recipe
         before = card.as_dict()
-        built = build3d.build(title, new_parts)
+        built = build3d.build(title, new_parts, source_version=board_parts.source_version(card.src))
         self._show_version(card, before, parts, new_parts, built)
         self.emit("part_saved", id=card.id, title=card.title, part="", version=built["version"])
         return built

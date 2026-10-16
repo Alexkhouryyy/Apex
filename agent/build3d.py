@@ -439,7 +439,7 @@ def extent_cm(parts: list[dict]) -> list[float]:
 
 # --- saving it as a versioned asset ----------------------------------------
 
-def build(title: str, parts, props_root=None) -> dict:
+def build(title: str, parts, props_root=None, *, source_version=None) -> dict:
     """Validate, write the next version of the asset named `title`, and return
     {slug, src, version, parent, parts, extent_cm, revised}. A recipe that
     fails validation writes nothing and records no version."""
@@ -451,6 +451,11 @@ def build(title: str, parts, props_root=None) -> dict:
     existing = assets.find_by_title(title, props_root)
     slug = existing["id"] if existing else slugify(title, "build")
     parent = existing.get("current_version") if existing else None
+    if source_version is not None:
+        if (type(source_version) is not int or not existing
+                or not any(v['version'] == source_version for v in existing['versions'])):
+            raise BuildError('The source version is no longer available; reload the model.')
+        parent = source_version
     command = {"tool": "board_build", "parts": clean}
     if not existing:
         # A different asset may already own this slug under another title;
