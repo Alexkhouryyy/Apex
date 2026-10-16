@@ -116,7 +116,8 @@ Celine sees the screen as you speak and, whenever her answer is about something
 on it — a button, a setting, an error, a line of code — she marks it with
 `screen_draw` without being asked: an arrow or a circle for one thing, numbered
 marks for steps. The bubble then flies over to sit beside what she marked for
-as long as the mark lasts, and comes back to your pointer afterwards. The marks
+as long as the mark lasts, and comes back to your pointer afterwards. When she
+numbers steps (1, 2, 3), the bubble visits them in order, one after another. The marks
 are click-through and fade on their own. She draws nothing when the screen
 isn't relevant or she can't actually see the target.
 
@@ -124,8 +125,14 @@ It follows only while the bubble is compact. Expanding to **Chat**, hiding the
 window, or a full-size view stops it moving, so it never chases you while you
 type; it picks up again the next time the compact bubble opens. Click
 **Follow** (or press **Ctrl+Alt+F** from any app) to send it back to the corner;
-the hotkey also shows the bubble if it was hidden. `COMPANION_FOLLOW_CURSOR=false`
-in `.env` starts it in the corner instead. Windows only; the browser companion's
+the hotkey also shows the bubble if it was hidden. Your choice is remembered
+the next time Companion starts; `COMPANION_FOLLOW_CURSOR=false` in `.env` makes
+the corner the starting choice instead.
+
+On a laptop set to 125% or 150% scale, the bubble and the Chat window are sized
+for that scale and placed in real screen pixels, so they land beside the pointer
+(and in the corner of the monitor the pointer is on) rather than off-screen, and
+Chat never grows taller than a small screen. Windows only; the browser companion's
 **Bubble ⊙** is the always-on-top, non-following version.
 
 Change or turn off the hotkeys with `COMPANION_DRAW_HOTKEY` and
