@@ -117,8 +117,25 @@ set "APEX_APOCALYPSE_HOME=D:\Apex-Apocalypse"
 Setup-Apex-Apocalypse.cmd --nomad-readers
 ```
 
-(Docker Desktop running, platform started with `Start-Apex-Platform.cmd`.) Then
-open a book and an article to verify. A title in the catalog isn't proof the
+(Docker Desktop running, platform started with `Start-Apex-Platform.cmd`.)
+
+If `Start-Apex-Platform.cmd` says **"An Apex service is already running"**, Apex
+was started some other way (login autostart or `Start-Apex-All.cmd`). Don't make
+the owner stop it. Start NOMAD alone, then run the readers step:
+
+```powershell
+cd C:\Users\alexk\Apex
+$env:APEX_APOCALYPSE_HOME = "D:\Apex-Apocalypse"
+.\Setup-Apex-Apocalypse.cmd --nomad-start
+.\Setup-Apex-Apocalypse.cmd --nomad-readers
+```
+
+`--nomad-start` uses cached images only and never downloads. If it reports that
+images are missing, NOMAD was never built on this PC. `--nomad` would download
+and build them into Docker's storage on C:, which is nearly full, so check C:
+space first.
+
+Then open a book and an article to verify. A title in the catalog isn't proof the
 library works offline: the real test is unplugging the internet and reading.
 
 ## Changing the downloader
