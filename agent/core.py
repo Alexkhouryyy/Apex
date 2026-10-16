@@ -282,15 +282,8 @@ def _forge_settings() -> dict:
     routine on a 0.1mm one. Reading these here means changing .env changes the
     verdict without a restart.
     """
-    import config as _cfg
-    return {
-        "nozzle_mm": float(getattr(_cfg, "FORGE_NOZZLE_MM", 0.4)),
-        "min_wall_mm": getattr(_cfg, "FORGE_MIN_WALL_MM", None),
-        "overhang_deg": float(getattr(_cfg, "FORGE_OVERHANG_DEG", 45.0)),
-        "build_mm": (float(getattr(_cfg, "FORGE_BUILD_X_MM", 256.0)),
-                     float(getattr(_cfg, "FORGE_BUILD_Y_MM", 256.0)),
-                     float(getattr(_cfg, "FORGE_BUILD_Z_MM", 256.0))),
-    }
+    from agent.forge import machine_settings
+    return machine_settings()
 
 
 def _forge_resolve(inputs: dict):

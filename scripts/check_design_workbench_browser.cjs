@@ -50,8 +50,9 @@ let child,browser,page,logs='';
  const edited=page.waitForResponse(r=>r.url()===url+'/api/board/design'&&r.request().method()==='POST');
  await page.click('#dw-apply');design=await(await edited).json();
  assert.equal(design.parts[2].size_mm[0],42);assert.equal(design.version,2);
- await page.waitForFunction(()=>document.getElementById('dw-version').textContent.startsWith('Saved v2'));
- await page.click('#dw-export');await page.waitForSelector('#dw-download:not([hidden])');
+ await page.waitForFunction(()=>document.getElementById('dw-version').textContent.startsWith('Saved v2')&&!document.getElementById('dw-export').disabled);
+ const exporting=page.waitForResponse(r=>r.url()===url+'/api/board/design'&&r.request().method()==='POST'&&r.request().postDataJSON()?.action==='export');
+ await page.click('#dw-export');const exported=await exporting;assert.equal(exported.status(),200,await exported.text());assert.ok((await exported.json()).file,'export response must contain a checked file');await page.waitForSelector('#dw-download:not([hidden])');
  const downloadPromise=page.waitForEvent('download');await page.click('#dw-download');const download=await downloadPromise;
  const saved=path.join(artifacts,download.suggestedFilename());await download.saveAs(saved);
  assert.equal(fs.readFileSync(saved).subarray(0,2).toString(),'PK','3MF must be a real ZIP package');
@@ -83,7 +84,7 @@ let child,browser,page,logs='';
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal overflow at '+viewport.width);
  }
  assert.deepEqual(errors,[]);console.log('PASS: real create → component edit → checked 3MF download → Undo → stale-window recovery → explicit reference staging; desktop and narrow layouts.');
-})().catch(async e=>{console.error(e);if(page){console.error(await page.evaluate(()=>({status:document.getElementById('dw-status')?.textContent,version:document.getElementById('dw-version')?.textContent,selected:document.querySelector('.dw-component[aria-pressed="true"]')?.textContent,busy:document.getElementById('dw-edit')?.getAttribute('aria-busy')})).catch(()=>null));await page.screenshot({path:path.join(artifacts,'design-failure.png')}).catch(()=>{});}if(logs)console.error(logs);process.exitCode=1;}).finally(async()=>{
+})().catch(async e=>{console.error(e);if(page){console.error(await page.evaluate(()=>({status:document.getElementById('dw-status')?.textContent,report:document.getElementById('dw-report')?.textContent,version:document.getElementById('dw-version')?.textContent,selected:document.querySelector('.dw-component[aria-pressed="true"]')?.textContent,busy:document.getElementById('dw-edit')?.getAttribute('aria-busy')})).catch(()=>null));await page.screenshot({path:path.join(artifacts,'design-failure.png')}).catch(()=>{});}if(logs)console.error(logs);process.exitCode=1;}).finally(async()=>{
  await browser?.close();if(child&&child.exitCode===null){child.kill('SIGTERM');await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,4000))]);if(child.exitCode===null)child.kill('SIGKILL');}
  if(!process.env.APEX_DESIGN_ARTIFACTS)console.log('Artifacts:',artifacts);
 });

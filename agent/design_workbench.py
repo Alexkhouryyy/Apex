@@ -154,9 +154,8 @@ def fabrication(body, *, export=False):
         if index is not None:
             _part(parts, index)
         parts = copy.deepcopy(parts)
-    from agent.core import _forge_settings
     mesh = _mesh(parts, index)
-    settings = _forge_settings()
+    settings = forge.machine_settings()
     report = forge.validate(mesh, **settings)
     result = {'source': card['src'], 'version': version, 'part': index,
               'verdict': report.verdict, 'ok': report.ok, 'description': report.describe(),

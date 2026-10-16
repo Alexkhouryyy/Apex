@@ -48,6 +48,11 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/ide-browser" --no-audit --no-fund playwright@1.64.0
           "$RUNNER_TEMP/ide-browser/node_modules/.bin/playwright" install chromium
+      - name: Measured design edit, history and checked export
+        shell: bash
+        run: |
+          export NODE_PATH="$RUNNER_TEMP/ide-browser/node_modules"
+          APEX_DESIGN_ARTIFACTS="$RUNNER_TEMP/ide-acceptance/design" node scripts/check_design_workbench_browser.cjs
       - name: Package and install the Windows IDE bundle
         if: runner.os == 'Windows'
         shell: bash
@@ -59,7 +64,6 @@ jobs:
         run: |
           export NODE_PATH="$RUNNER_TEMP/ide-browser/node_modules"
           python scripts/check_code_ide_runtime.py --output-dir "$RUNNER_TEMP/ide-acceptance"
-          APEX_DESIGN_ARTIFACTS="$RUNNER_TEMP/ide-acceptance/design" node scripts/check_design_workbench_browser.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

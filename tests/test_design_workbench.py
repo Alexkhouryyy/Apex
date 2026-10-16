@@ -119,6 +119,19 @@ def test_unknown_check_never_creates_an_export_or_version(workspace, monkeypatch
     assert not list(workspace[1].rglob('*.3mf'))
 
 
+def test_numeric_export_does_not_load_the_ai_runtime(workspace, monkeypatch):
+    import builtins
+    original = builtins.__import__
+    def without_agent(name, *args, **kwargs):
+        if name == 'agent.core':
+            raise ImportError('AI runtime is unavailable')
+        return original(name, *args, **kwargs)
+    data = make()
+    monkeypatch.setattr(builtins, '__import__', without_agent)
+    result = design.fabrication(request(data, part=0, format='3mf'), export=True)
+    assert result['ok'] and props.resolve(result['file'], exts=props.FABRICATION_EXTS).is_file()
+
+
 def test_geometry_change_during_validation_cannot_publish_a_stale_export(workspace, monkeypatch):
     data = make(); validate = forge.validate
     def changed(*a, **kw):
