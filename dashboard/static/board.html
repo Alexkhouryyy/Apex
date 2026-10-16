@@ -163,6 +163,7 @@
   @media(max-width:650px){#partner-panel{width:calc(100vw - 24px);top:140px}.card.model-label{max-width:42vw}#board-bar{font-size:12px}}
 </style>
 <link rel="stylesheet" href="/static/workspace.css?v=brand37">
+<link rel="stylesheet" href="/static/board-design.css?v=1">
 <link rel="icon" type="image/svg+xml" href="/static/icons/apex-refined.svg">
 <link rel="stylesheet" href="/static/brand.css?v=brand40"><link rel="stylesheet" href="/static/theme.css">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png?v=chevron38">
@@ -249,6 +250,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { ModelSelection } from '/static/board-selection.js';
+import { DesignWorkbench } from '/static/board-design.js';
 
 const stage = document.getElementById("stage");
 const cam = document.getElementById("cam");
@@ -952,6 +954,13 @@ const loader = new GLTFLoader(manager);
 loader.setRequestHeader({Authorization: `Bearer ${token}`});
 const models = new Map();       // card id -> { group, src }
 const modelSelection = typeof ModelSelection === 'function' ? new ModelSelection(models, () => camera3) : null;
+let designCameraFrame = null;
+const designWorkbench = typeof DesignWorkbench === 'function' ? new DesignWorkbench({
+  api, select: selectObject, workspace: workspaceEnvelope, action: workspaceAction,
+  partner: message => {openPartner();tellPartner(message);},
+  photo: () => designCameraFrame,
+  clearReference: () => tellPartner({apex:'design-reference',image:null}),
+}) : null;
 let latestSelection = null;
 let hitReportAt = 0, hitReportBusy = false;
 async function reportModelHits(cursors) {
@@ -1313,6 +1322,8 @@ function connect() {
     renderHud(msg);
     syncModels(msg.cards || []);
     latestSelection = msg.selection;
+    designCameraFrame = msg.frame || null;
+    designWorkbench?.update(msg);
     modelSelection?.show(latestSelection);
     reportModelHits(msg.hands_enabled === false ? [] : (msg.cursors || []));
     renderCursors(msg.hands_enabled === false ? [] : (msg.cursors || []));

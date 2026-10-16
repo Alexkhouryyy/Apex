@@ -1,5 +1,9 @@
 # What your hands can do on /board
 
+For a measured object workflow with component dimensions, reference photos,
+versioned edits and checked print exports, choose **Design** on the board.
+See [the measured design workbench](DESIGN_WORKBENCH.md).
+
 Open `http://127.0.0.1:7860/board`. Press **D** (or add `?diag=1`) for the
 live readout, which shows what the tracker sees and why a move did or did not
 happen.

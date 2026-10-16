@@ -282,15 +282,8 @@ def _forge_settings() -> dict:
     routine on a 0.1mm one. Reading these here means changing .env changes the
     verdict without a restart.
     """
-    import config as _cfg
-    return {
-        "nozzle_mm": float(getattr(_cfg, "FORGE_NOZZLE_MM", 0.4)),
-        "min_wall_mm": getattr(_cfg, "FORGE_MIN_WALL_MM", None),
-        "overhang_deg": float(getattr(_cfg, "FORGE_OVERHANG_DEG", 45.0)),
-        "build_mm": (float(getattr(_cfg, "FORGE_BUILD_X_MM", 256.0)),
-                     float(getattr(_cfg, "FORGE_BUILD_Y_MM", 256.0)),
-                     float(getattr(_cfg, "FORGE_BUILD_Z_MM", 256.0))),
-    }
+    from agent.forge import machine_settings
+    return machine_settings()
 
 
 def _forge_resolve(inputs: dict):
@@ -2593,7 +2586,16 @@ def _execute_tool_inner(name: str, inputs: dict) -> str:
             if not title:
                 return "board_build needs a title — what is it called?"
             if (inputs.get("action") or "build") == "show":
-                parts = _b3.recipe(title)
+                from agent import board_parts
+                board = get_board()
+                selected = board.selection()
+                matches = [c for c in board.cards() if c['kind'] == 'model' and c['title'].lower() == title.lower()]
+                shown = next((c for c in matches if selected and c['id'] == selected['id']), matches[0] if matches else None)
+                if shown:
+                    source = board_parts.recipe_for_src(shown['src'])
+                    parts = source[1] if source else None
+                else:
+                    parts = _b3.recipe(title)
                 if parts is None:
                     return f"Nothing built called '{title}'. board_history lists what exists."
                 return f"'{title}' — current parts:\n" + json.dumps(parts)

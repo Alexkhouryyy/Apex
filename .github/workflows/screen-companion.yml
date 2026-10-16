@@ -18,6 +18,7 @@ on:
       - 'scripts/*screen_companion.py'
       - 'scripts/check_companion_desktop_ui.cjs'
       - 'tests/test_screen_companion_desktop.py'
+      - 'tests/test_companion_follow.py'
       - 'tests/test_companion_creation.py'
       - 'requirements-screen-companion.txt'
       - '.github/workflows/screen-companion.yml'
@@ -67,7 +68,7 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-screen-companion.txt
       - name: Companion ownership, startup, hotkeys and voice regressions
         shell: bash
-        run: python -X utf8 scripts/run_tests.py tests/test_screen_companion_desktop.py tests/test_companion_creation.py tests/test_companion.py tests/test_look_now.py tests/test_resident.py tests/test_apex_launcher.py
+        run: python -X utf8 scripts/run_tests.py tests/test_screen_companion_desktop.py tests/test_companion_follow.py tests/test_companion_creation.py tests/test_companion.py tests/test_look_now.py tests/test_resident.py tests/test_apex_launcher.py
       - name: Client voice, native activation and cancellation
         shell: bash
         run: |

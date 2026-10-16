@@ -86,14 +86,23 @@ class Window:
         self.moves.append((x, y))
 
 
-def test_follow_shrinks_to_the_bubble_and_off_returns_to_the_corner():
+@pytest.fixture
+def window_placements(monkeypatch):
+    calls = []
+    monkeypatch.setattr('app.companion_desktop.place',
+                        lambda window, size, corner=False: calls.append((window, size, corner)))
+    return calls
+
+
+def test_follow_shrinks_to_the_bubble_and_off_returns_to_the_corner(window_placements):
     bridge = Bridge(SimpleNamespace(url='http://127.0.0.1:7860'), 'master-secret')
     bridge._window = Window()
     bridge._follower = follow.Follower(lambda: (0, 0), lambda x, y: AREA, lambda: SIZE, lambda x, y: None)
     assert bridge.follow(True) == {'follow': True}
-    assert bridge._window.sizes[-1] == FOLLOW_SIZE and bridge._follower.enabled and not bridge._follower.paused
+    assert window_placements[-1] == (bridge._window, FOLLOW_SIZE, False)
+    assert bridge._follower.enabled and not bridge._follower.paused
     assert bridge.follow(False) == {'follow': False}
-    assert bridge._window.sizes[-1] == (420, 300)
+    assert window_placements[-1] == (bridge._window, (420, 300), True)
     assert bridge.connect()['follow'] is False and bridge.connect()['can_follow'] is True
 
 
@@ -322,7 +331,7 @@ def test_the_corner_sits_inside_the_monitor_under_the_pointer():
     assert follow.corner_position((5000, 5000), AREA) == (0, 0), 'never past the top-left'
 
 
-def test_the_follow_choice_is_remembered(tmp_path):
+def test_the_follow_choice_is_remembered(tmp_path, window_placements):
     from app.companion_desktop import load_follow, save_follow
     prefs = tmp_path / 'Companion' / 'follow.json'
     assert load_follow(prefs, True) is True, 'first start: the .env default'

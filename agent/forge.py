@@ -115,6 +115,19 @@ class ForgeError(Exception):
     """A refusal or a broken input — always carries a message for a person."""
 
 
+def machine_settings() -> dict:
+    """Read the configured printer without importing the AI agent runtime."""
+    import config
+    return {
+        "nozzle_mm": float(getattr(config, "FORGE_NOZZLE_MM", 0.4)),
+        "min_wall_mm": getattr(config, "FORGE_MIN_WALL_MM", None),
+        "overhang_deg": float(getattr(config, "FORGE_OVERHANG_DEG", 45.0)),
+        "build_mm": (float(getattr(config, "FORGE_BUILD_X_MM", 256.0)),
+                     float(getattr(config, "FORGE_BUILD_Y_MM", 256.0)),
+                     float(getattr(config, "FORGE_BUILD_Z_MM", 256.0))),
+    }
+
+
 @dataclass(frozen=True)
 class Mesh:
     """Triangles in millimetres: `tris` is (n, 3, 3) — n triangles, 3 corners,
