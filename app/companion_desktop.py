@@ -294,6 +294,23 @@ class Bridge:
         return True
 
 
+def point_bubble(bridge, item, result):
+    """After a confirmed drawing, fly the following bubble beside what was
+    marked, for as long as the mark lasts (like a cursor buddy pointing)."""
+    follower = getattr(bridge, '_follower', None)
+    if not (result.get('ok') and follower and follower.enabled):
+        return False
+    from app import follow as follow_mod
+    try:
+        target = follow_mod.focus_point(item['frame'], item['shapes'])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if target is None:
+        return False
+    follower.point_at(*target, item.get('seconds', 15))
+    return True
+
+
 class MicrophonePermission:
     """One local microphone decision, requested only after a user invocation."""
     def __init__(self, bridge, path):
@@ -540,6 +557,7 @@ def main(argv=None):
                             result = overlay.send(item, wait=True)
                             if result.get('ok') and result.get('hwnd'):
                                 ipc.call(body={'action':'surface','role':'guidance','hwnd':result['hwnd']})
+                            point_bubble(bridge, item, result)
                         except Exception as exc:
                             result = {'ok': False, 'error': str(exc)}
                         ipc.call(body={'action': 'ack', 'seq': item['seq'], 'result': result})

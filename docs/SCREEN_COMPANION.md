@@ -104,21 +104,29 @@ Windows Unicode input. Microphone denial offers text Chat instead.
 
 ### Follow: a bubble beside your cursor
 
-**Follow** (beside Draw on the Windows Companion, or **Ctrl+Alt+F** from any app)
-shrinks Companion to a small
-always-on-top bubble that rides next to your mouse pointer: below and to the
-right of it, flipping to the other side near a screen edge, never covering the
+On Windows the Companion bubble **follows your mouse pointer by default**, like
+a cursor buddy: a small always-on-top bubble below and to the right of the
+pointer, flipping to the other side near a screen edge, never covering the
 pointer, and staying inside the work area of the monitor the pointer is on (so
 not under the taskbar). It eases toward the pointer rather than jumping, and
 holds still while the pointer does.
 
+**She points by herself.** In screen help (F8, Ctrl+Alt+C or "Hey Celly"),
+Celine sees the screen as you speak and, whenever her answer is about something
+on it — a button, a setting, an error, a line of code — she marks it with
+`screen_draw` without being asked: an arrow or a circle for one thing, numbered
+marks for steps. The bubble then flies over to sit beside what she marked for
+as long as the mark lasts, and comes back to your pointer afterwards. The marks
+are click-through and fade on their own. She draws nothing when the screen
+isn't relevant or she can't actually see the target.
+
 It follows only while the bubble is compact. Expanding to **Chat**, hiding the
 window, or a full-size view stops it moving, so it never chases you while you
-type; it picks up again the next time the compact bubble opens. Click **Follow**
-again (or press Ctrl+Alt+F) to send it back to the corner; the hotkey also
-shows the bubble if it was hidden. `COMPANION_FOLLOW_CURSOR=true` in `.env`
-starts it following. Windows only; the browser companion's **Bubble ⊙** is the
-always-on-top, non-following version.
+type; it picks up again the next time the compact bubble opens. Click
+**Follow** (or press **Ctrl+Alt+F** from any app) to send it back to the corner;
+the hotkey also shows the bubble if it was hidden. `COMPANION_FOLLOW_CURSOR=false`
+in `.env` starts it in the corner instead. Windows only; the browser companion's
+**Bubble ⊙** is the always-on-top, non-following version.
 
 Change or turn off the hotkeys with `COMPANION_DRAW_HOTKEY` and
 `COMPANION_FOLLOW_HOTKEY` in `.env` (empty turns one off). Both stay silent while

@@ -1,10 +1,14 @@
 """Keep the desktop Companion bubble beside your cursor.
 
-When follow mode is on (Companion "Follow" button, or COMPANION_FOLLOW_CURSOR),
-the small always-on-top Companion window rides next to the mouse pointer the
-way a cursor buddy does: just below and to the right of it, flipping to the
+Follow mode is on by default (COMPANION_FOLLOW_CURSOR; the Companion "Follow"
+button or Ctrl+Alt+F turns it off): the small always-on-top Companion window
+rides next to the mouse pointer the way a cursor buddy does: just below and to the right of it, flipping to the
 other side near a screen edge, never covering the pointer, and staying inside
 the work area of whichever monitor the pointer is on (so not under the taskbar).
+
+When Celine points at something on screen (screen_draw), the bubble flies over
+to sit beside what she marked for as long as the mark lasts, then comes back to
+the pointer — so your eye goes where she is talking about.
 
 It only follows while the bubble is compact. While you type in the expanded
 chat, dictate, or the window is hidden, it stays put — a window that ran away
@@ -50,6 +54,25 @@ def follow_position(cursor, size, area, offset=OFFSET):
     return x, y
 
 
+def focus_point(frame, shapes):
+    """The screen pixel (x, y) a drawing is about: the tip of the first arrow,
+    else the centre of the first mark. `frame` holds the screenshot's left, top,
+    width and height; shape points are normalized 0..1 across it. None if empty."""
+    if not shapes:
+        return None
+    pick = next((s for s in shapes if s.get('type') == 'arrow'), shapes[0])
+    points = pick.get('points') or []
+    if not points:
+        return None
+    if pick.get('type') in {'arrow', 'line', 'curve'}:
+        nx, ny = points[-1]                       # where it points / ends
+    else:                                         # box, ellipse, polygon, label: its centre
+        nx = sum(p[0] for p in points) / len(points)
+        ny = sum(p[1] for p in points) / len(points)
+    return (int(round(frame['left'] + nx * frame['width'])),
+            int(round(frame['top'] + ny * frame['height'])))
+
+
 def smooth(current, target, factor=SMOOTHING, snap=MIN_STEP):
     """One easing step from `current` toward `target`; snaps when close."""
     if current is None:
@@ -68,11 +91,14 @@ class Follower:
     `size()` -> (w, h) of the window; `move(x, y)` positions it. All injected, so
     tests drive it with fakes and Windows supplies the real ones."""
 
-    def __init__(self, cursor, area, size, move, enabled=False):
+    def __init__(self, cursor, area, size, move, enabled=False, clock=None):
+        import time
         self._cursor, self._area, self._size, self._move = cursor, area, size, move
+        self._clock = clock or time.monotonic
         self.enabled = bool(enabled)
         self.paused = False
         self._at = None
+        self._focus = None         # ((x, y), until): sit beside a mark instead of the pointer
         self._stop = threading.Event()
         self._thread = None
 
@@ -80,17 +106,27 @@ class Follower:
         self.enabled = bool(on)
         self._at = None            # re-seat at once when turned back on
 
+    def point_at(self, x, y, seconds) -> None:
+        """Sit beside (x, y) — what Celine just marked — for `seconds`, then
+        return to the pointer."""
+        self._focus = ((int(x), int(y)), self._clock() + max(0.0, float(seconds)))
+
     def tick(self) -> bool:
         """One step. Returns True when the window was moved."""
         if not self.enabled or self.paused:
             return False
+        focus = self._focus
+        if focus and self._clock() >= focus[1]:
+            focus = self._focus = None
         try:
-            cx, cy = self._cursor()
+            cx, cy = focus[0] if focus else self._cursor()
             target = follow_position((cx, cy), self._size(), self._area(cx, cy))
         except Exception:
             return False           # pointer or monitor briefly unavailable: try next tick
         nxt = smooth(self._at, target)
         if self._at is not None and abs(nxt[0] - self._at[0]) < MIN_STEP and abs(nxt[1] - self._at[1]) < MIN_STEP:
+            nxt = tuple(target)        # the last few pixels: land exactly instead of stalling short
+        if nxt == self._at:
             return False
         try:
             self._move(*nxt)

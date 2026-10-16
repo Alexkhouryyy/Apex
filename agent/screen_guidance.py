@@ -45,10 +45,15 @@ def instructions() -> str:
     if not usable(frame):
         return ''
     return (f'\nTemporary screen guidance is available for this host screenshot. Frame ID: {frame["id"]}. '
-            'Use screen_draw to point at visible controls or draw an explanation, rather than only naming them. '
+            'Point on your own, the way a friend beside the user would: whenever your answer refers to something '
+            'visible in this screenshot (a button, menu, field, setting, error, link, line of code, piece on a board), '
+            'call screen_draw to mark it in the same turn, without waiting to be asked to draw. One target: a single '
+            'arrow ending on it, or an ellipse/rectangle around it. Several steps: mark each one, with short labels '
+            '"1", "2", "3" in order. Mark only what you can actually see; when nothing on the screen is relevant, '
+            'or the target is hidden or unclear, draw nothing and say what to look for. '
             'Coordinates are normalized 0..1 across THIS screenshot, with (0,0) at its top left. '
-            'Use arrows, rectangles, ellipses, polygons, curves or short labels sparingly; the marks are click-through '
-            'and expire. Never guess a hidden target or say a drawing appeared unless the tool confirms it. '
+            'Keep it to the few marks that help; they are click-through and expire, so the user never has to clear '
+            'them. Say "I marked it" only after the tool confirms the drawing. '
             'A drawing only explains; it does not click, type or grant permission to act.\n')
 
 
