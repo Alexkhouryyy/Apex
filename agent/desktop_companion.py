@@ -116,6 +116,52 @@ def status() -> dict:
                 'hotkey_ready': _keys is not None}
 
 
+def capability_context() -> str:
+    """Describe the shipped desktop controls using local state, without activation."""
+    if sys.platform != 'win32':
+        return ('Apex has a native Windows Screen Companion with global hotkeys, app dictation '
+                'and screen annotations, separate from the gesture board at /board. '
+                'This Apex host is not Windows, so those native Windows controls cannot run here. '
+                'Do not describe Windows desktop controls as active on this host or confuse them '
+                'with the browser companion or gesture board.')
+    import config
+    with _condition:
+        state = status()
+        preferred = _preferred_mode
+
+    def binding(value):
+        return value.replace('<', '').replace('>', '') if value else 'disabled'
+
+    return (
+        'Apex has a native Windows Screen Companion, separate from the browser companion '
+        'and the gesture board at /board. Keyboard activation does not require hand gestures.\n'
+        f'Configured global hotkeys: Screen help / Dictate = {binding(config.COMPANION_HOTKEY)}; '
+        f'Draw = {binding(config.COMPANION_DRAW_HOTKEY)}; Follow = {binding(config.COMPANION_FOLLOW_HOTKEY)}. '
+        'These are configured bindings; a disabled binding has no shortcut.\n'
+        'Screen help captures a host snapshot for each question after explicit activation. '
+        'Press its hotkey again, Stop, or Esc in Companion to end it. '
+        'Dictate is a separate mode: select Dictate in the native window, click a text field '
+        'in another Windows app, then press the activation hotkey to transcribe into that field. '
+        'Press it again to stop. Dictate does not ask the agent for a reply or send screen snapshots.\n'
+        'Draw (button or configured hotkey) opens a screen sketch surface: Pen, Box, Circle, '
+        'Arrow, Text, Eraser, Undo/Redo and Save SVG. Done leaves click-through marks; Edit '
+        'resumes drawing. This is screen annotation, not automatic app generation or a full CAD editor. '
+        'The persistent gesture/design board is a different surface at /board. '
+        'When screen_draw is offered for a fresh owner host frame, use it for temporary visual '
+        'explanations and claim a drawing only after its tool result confirms success.\n'
+        f'Current local state: native window running={state["running"]}, '
+        f'ready={state["ready"]}, shown={state["shown"]}; '
+        f'hotkey listener registered={state["hotkey_ready"]}; '
+        f'active action={state["mode"]}; selected activation mode={preferred}. '
+        'Window readiness does not establish microphone permission or prove recording/insertion. '
+        'When not running/ready, explain that the desktop feature exists but is not ready now, '
+        'rather than denying Apex has it. Setup-Apex-Screen-Companion.cmd installs login startup; '
+        'Start-Apex-Platform.cmd --desktop starts the prepared platform with the native window '
+        'hidden and wake-word listeners off. Neither requires continuous screen capture. '
+        'Describe these controls accurately even if an older conversation reply denied them.'
+    )
+
+
 def authorize(session: str) -> bool:
     with _condition:
         return bool(_session and session and running() and hmac.compare_digest(session, _session))

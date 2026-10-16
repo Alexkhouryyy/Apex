@@ -55,6 +55,45 @@ def test_offline_only_does_not_start_cloud_session_or_celine(rig):
     platform.start_cached_nomad.assert_not_called()
 
 
+def test_desktop_profile_enables_native_help_without_ambient_listeners(rig, monkeypatch, capsys):
+    children, _ = rig
+    monkeypatch.setattr(platform.launcher, 'launch_environment', lambda: {
+        'APEX_APOCALYPSE_HOME': str(platform.ROOT), 'DASHBOARD_TOKEN': 'private-owner-token',
+        'CELINE_WAKE_ENABLED': 'true', 'WAKE_WORD_ENABLED': 'true',
+    })
+    with pytest.raises(KeyboardInterrupt):
+        platform.main(['--desktop', '--no-nomad'])
+    env = children[1].env
+    assert env['COMPANION_DESKTOP_ENABLED'] == 'true'
+    assert env['CELINE_WAKE_ENABLED'] == env['WAKE_WORD_ENABLED'] == 'false'
+    _, request, accept, processes, label, timeout = platform.launcher.wait_healthy.call_args.args
+    assert request.full_url == 'http://127.0.0.1:7860/api/companion/desktop/status'
+    assert request.get_header('Authorization') == 'Bearer private-owner-token'
+    ready = dict(running=True, ready=True, hotkey_ready=True)
+    assert accept(ready)
+    for field in ready:
+        assert not accept({**ready, field: False})
+    assert not accept({'service': 'apex', 'agent_ready': True})
+    assert timeout == 45 and 'hotkey' in label
+    assert 'window and hotkey ready' in capsys.readouterr().out
+    platform.start_cached_nomad.assert_not_called()
+
+
+def test_unready_desktop_stops_owned_platform_children(rig, monkeypatch):
+    children, stopped = rig
+    monkeypatch.setattr(platform.launcher, 'wait_healthy', Mock(side_effect=[None, None, RuntimeError('desktop not ready')]))
+    with pytest.raises(RuntimeError, match='desktop not ready'):
+        platform.main(['--desktop', '--no-nomad'])
+    assert len(children) == 2 and stopped == children[::-1]
+
+
+def test_desktop_profile_cannot_silently_disappear_in_offline_only_mode(rig):
+    children, stopped = rig
+    with pytest.raises(SystemExit) as exc:
+        platform.main(['--desktop', '--offline-only'])
+    assert exc.value.code == 2 and not children and not stopped
+
+
 def test_busy_port_changes_nothing(rig,monkeypatch):
     children,stopped=rig
     monkeypatch.setattr(platform.launcher,'port_in_use',lambda *a:True)

@@ -10,6 +10,18 @@ Start-Apex-Platform.cmd
 
 This opens Apex Home and Apocalypse after checking their service identities and agent readiness. Celine still needs browser Voice mode for microphone/playback. NOMAD is optional: the launcher checks Linux Docker and cached images, then uses `--pull never --no-build`. Missing images are skipped, with no model, content, reader-image or map downloads. The large library remains deferred. A ready dashboard is not proof that every app is authorized or every downloaded archive has a reader.
 
+For the installed Windows desktop Companion, use `Start-Apex-Platform.cmd --desktop`
+instead. This enables its hidden native window and disables both wake-word
+listeners for this launch, without editing `.env`. Use **F8** (or your configured
+Companion hotkey) for Screen help or the separately selected **Dictate** mode;
+**Ctrl+Alt+D** opens the screen sketch surface by default. Run
+`Setup-Apex-Screen-Companion.cmd` once if the native dependencies are missing.
+This option does not install them or start recording at login, and cannot be
+combined with `--offline-only`. The launcher separately checks window and hotkey
+readiness through the authenticated `/api/companion/desktop/status` endpoint.
+This does not test microphone permission or dictation insertion. Existing background feature settings,
+including camera/awareness settings, still apply.
+
 Without internet, use `Start-Apex-Platform.cmd --offline-only`. Add `--no-nomad` to skip Docker. This starts the offline dashboard only; normal cloud Apex and Celine are omitted. The existing launchers below still work independently.
 
 Keep the platform console open. Ctrl+C requests a graceful stop of the Apex processes it created; a failed service stops its companion Apex processes. Previously running services are never killed. NOMAD containers remain managed by Docker Desktop after the launcher closes, preserving database and library volumes.

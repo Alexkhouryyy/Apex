@@ -3975,6 +3975,9 @@ class AgentCore:
                 blocks = self._effective_system_prompt(persona)
                 if memory_note:
                     blocks = blocks + [{"type": "text", "text": memory_note}]
+                if by_owner and companion_mode in {"discuss", "work"}:
+                    from agent import desktop_companion
+                    blocks = blocks + [{"type": "text", "text": desktop_companion.capability_context()}]
                 if companion_mode:
                     blocks = blocks + [{"type": "text", "text": companion.prompt(
                         companion_mode, bool(screen_b64),

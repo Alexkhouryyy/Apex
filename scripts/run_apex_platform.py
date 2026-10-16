@@ -74,9 +74,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--offline-only', action='store_true', help='Apocalypse and cached NOMAD only')
     parser.add_argument('--no-nomad', action='store_true', help='Skip Docker entirely')
+    parser.add_argument('--desktop', action='store_true', help='Enable the native Companion; keep wake-word listeners off')
     parser.add_argument('--open', action='store_true', help='Open the ready dashboards')
     args = parser.parse_args(argv)
+    if args.desktop and args.offline_only:
+        parser.error('--desktop requires normal Apex; omit --offline-only.')
     normal = launcher.launch_environment()
+    if args.desktop:
+        normal.update(COMPANION_DESKTOP_ENABLED='true', CELINE_WAKE_ENABLED='false', WAKE_WORD_ENABLED='false')
     normal['APEX_APOCALYPSE'] = '0'
     # Celine's model loader otherwise fetches missing weights during startup.
     # This entry point runs prepared models only; cloud API access stays normal.
@@ -118,6 +123,13 @@ def main(argv=None):
                 and h.get('agent_ready') is True, children, 'Apex + Celine', 1200)
             print('Apex + Celine: ready. '+normal_url+'/home', flush=True)
             print('Companion: '+normal_url+'/companion · enable Voice mode for browser audio access.', flush=True)
+            if args.desktop:
+                headers = {'Authorization': 'Bearer ' + normal['DASHBOARD_TOKEN']} if normal.get('DASHBOARD_TOKEN') else {}
+                request = urllib.request.Request(normal_url+'/api/companion/desktop/status', headers=headers)
+                launcher.wait_healthy(opener, request,
+                    lambda s: s.get('running') is True and s.get('ready') is True and s.get('hotkey_ready') is True,
+                    children, 'Desktop Companion window and hotkey', 45)
+                print('Desktop Companion: window and hotkey ready.', flush=True)
         if args.open:
             webbrowser.open(offline_url+'/apocalypse')
             if not args.offline_only:
