@@ -73,6 +73,26 @@ def focus_point(frame, shapes):
             int(round(frame['top'] + ny * frame['height'])))
 
 
+def focus_points(frame, shapes):
+    """Where the bubble should go, in order. Numbered step labels ("1", "2",
+    "3") give a tour of them; otherwise the one point focus_point() picks."""
+    steps = []
+    for shape in shapes or []:
+        label = str(shape.get('label') or '').strip().rstrip('.)')
+        if label.isdigit() and shape.get('points'):
+            steps.append((int(label), focus_point(frame, [shape])))
+    if len(steps) > 1:
+        return [point for _, point in sorted(steps, key=lambda step: step[0])]
+    point = focus_point(frame, shapes)
+    return [point] if point else []
+
+
+def corner_position(size, area, margin=24):
+    """Bottom-right of `area`, `margin` px in from its edges (never past its top-left)."""
+    left, top, right, bottom = (int(v) for v in area)
+    return max(left, right - int(size[0]) - margin), max(top, bottom - int(size[1]) - margin)
+
+
 def smooth(current, target, factor=SMOOTHING, snap=MIN_STEP):
     """One easing step from `current` toward `target`; snaps when close."""
     if current is None:
@@ -98,7 +118,7 @@ class Follower:
         self.enabled = bool(enabled)
         self.paused = False
         self._at = None
-        self._focus = None         # ((x, y), until): sit beside a mark instead of the pointer
+        self._focus = []           # [((x, y), until), ...]: sit beside marks instead of the pointer
         self._stop = threading.Event()
         self._thread = None
 
@@ -109,17 +129,27 @@ class Follower:
     def point_at(self, x, y, seconds) -> None:
         """Sit beside (x, y) — what Celine just marked — for `seconds`, then
         return to the pointer."""
-        self._focus = ((int(x), int(y)), self._clock() + max(0.0, float(seconds)))
+        self.tour([(x, y)], seconds)
+
+    def tour(self, points, seconds) -> None:
+        """Visit each point in turn, sharing `seconds` between them (her steps
+        1, 2, 3), then return to the pointer."""
+        points = [p for p in points if p]
+        if not points:
+            return
+        each, start = max(0.0, float(seconds)) / len(points), self._clock()
+        self._focus = [((int(p[0]), int(p[1])), start + each * (i + 1)) for i, p in enumerate(points)]
 
     def tick(self) -> bool:
         """One step. Returns True when the window was moved."""
         if not self.enabled or self.paused:
             return False
-        focus = self._focus
-        if focus and self._clock() >= focus[1]:
-            focus = self._focus = None
+        now = self._clock()
+        while self._focus and now >= self._focus[0][1]:
+            self._focus = self._focus[1:]
+        focus = self._focus[0][0] if self._focus else None
         try:
-            cx, cy = focus[0] if focus else self._cursor()
+            cx, cy = focus if focus else self._cursor()
             target = follow_position((cx, cy), self._size(), self._area(cx, cy))
         except Exception:
             return False           # pointer or monitor briefly unavailable: try next tick
@@ -174,6 +204,47 @@ def windows_work_area(x, y):
     user.GetMonitorInfoW(monitor, ctypes.byref(info))
     r = info.rcWork
     return r.left, r.top, r.right, r.bottom
+
+
+def windows_scale(hwnd) -> float:
+    """The display scale for this window (1.5 at 150%)."""
+    import ctypes
+    try:
+        dpi = ctypes.windll.user32.GetDpiForWindow(ctypes.c_void_p(int(hwnd)))
+    except (AttributeError, OSError):
+        return 1.0
+    return dpi / 96 if dpi else 1.0
+
+
+def windows_size(hwnd):
+    """The window's real outer size in screen pixels."""
+    import ctypes
+    from ctypes import wintypes
+    r = wintypes.RECT()
+    ctypes.windll.user32.GetWindowRect(ctypes.c_void_p(int(hwnd)), ctypes.byref(r))
+    return r.right - r.left, r.bottom - r.top
+
+
+def windows_place(hwnd, size=None, at=None) -> None:
+    """Resize and/or move with one SetWindowPos in screen pixels — the same
+    pixels GetCursorPos and the monitor work area use. pywebview's own move()
+    multiplies by the display scale while its resize() doesn't, which lands the
+    window in the wrong place on a 125% or 150% laptop. Asynchronous, so a busy
+    window thread never stalls the caller; never activates the window."""
+    import ctypes
+    from ctypes import wintypes
+    flags = 0x0004 | 0x0010 | 0x4000              # NOZORDER | NOACTIVATE | ASYNCWINDOWPOS
+    if size is None:
+        flags |= 0x0001                           # NOSIZE
+    if at is None:
+        flags |= 0x0002                           # NOMOVE
+    w, h = (int(v) for v in (size or (0, 0)))
+    x, y = (int(v) for v in (at or (0, 0)))
+    user = ctypes.windll.user32
+    user.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                  ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user.SetWindowPos.restype = wintypes.BOOL
+    user.SetWindowPos(int(hwnd), None, x, y, w, h, flags)
 
 
 def available() -> bool:

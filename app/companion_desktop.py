@@ -32,6 +32,58 @@ def position(height):
 
 
 FOLLOW_SIZE = (320, 220)   # the compact bubble while it rides beside the cursor
+BUBBLE_SIZE, CHAT_SIZE = (420, 300), (420, 640)   # in page pixels at 100% display scale
+
+
+def window_handle(window):
+    """The native window handle, read once on the window's own thread."""
+    hwnd = getattr(window, '_apex_hwnd', None)
+    if hwnd is None:
+        handles = []
+        gui_call(window, lambda: handles.append(window.native.Handle.ToInt64()))
+        hwnd = window._apex_hwnd = handles[0]
+    return hwnd
+
+
+def place(window, size, corner=False):
+    """Size the window (`size` in page pixels at 100% scale) and, with corner,
+    dock it bottom-right of the monitor under the pointer. On Windows, sizes are
+    scaled for the display and everything is one SetWindowPos in screen pixels,
+    so a 125% or 150% laptop gets the same layout in the right place."""
+    if os.name != 'nt':
+        window.resize(*size)
+        if corner:
+            x, y = position(size[1])
+            if x is not None:
+                window.move(x, y)
+        return
+    from app import follow as follow_mod
+    hwnd = window_handle(window)
+    scale = follow_mod.windows_scale(hwnd)
+    margin = round(24 * scale)
+    area = follow_mod.windows_work_area(*follow_mod.windows_cursor())
+    # Never taller or wider than the screen it is on (a 768 px laptop at 125%).
+    real = (min(round(size[0] * scale), area[2] - area[0] - 2 * margin),
+            min(round(size[1] * scale), area[3] - area[1] - 2 * margin))
+    at = follow_mod.corner_position(real, area, margin) if corner else None
+    follow_mod.windows_place(hwnd, real, at)
+
+
+def load_follow(path, default):
+    """Your last Follow choice, or `default` (COMPANION_FOLLOW_CURSOR) the first time."""
+    try:
+        value = json.loads(Path(path).read_text(encoding='utf-8')).get('follow')
+    except (OSError, ValueError, AttributeError):
+        return bool(default)
+    return value if isinstance(value, bool) else bool(default)
+
+
+def save_follow(path, on):
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(json.dumps({'follow': bool(on)}), encoding='utf-8')
+    except OSError:
+        logging.exception('Could not remember the Follow choice')
 
 
 def interactive(window, enabled):
@@ -269,13 +321,12 @@ class Bridge:
             raise ValueError('Following the cursor needs the Windows Companion.')
         follower.set_enabled(bool(on))
         follower.paused = False
+        if getattr(self, '_follow_prefs', None):
+            save_follow(self._follow_prefs, follower.enabled)      # the next start keeps your choice
         if on:
-            self._window.resize(*FOLLOW_SIZE)
+            place(self._window, FOLLOW_SIZE)
         else:
-            self._window.resize(420, 300)
-            x, y = position(300)
-            if x is not None:
-                self._window.move(x, y)
+            place(self._window, BUBBLE_SIZE, corner=True)
         return {'follow': follower.enabled}
 
     def expand(self):
@@ -286,28 +337,26 @@ class Bridge:
         if getattr(self, '_follower', None):
             self._follower.paused = True
         interactive(self._window, True)
-        self._window.resize(420, 640)
-        x, y = position(640)
-        if x is not None:
-            self._window.move(x, y)
+        place(self._window, CHAT_SIZE, corner=True)
         self._window.show()
         return True
 
 
 def point_bubble(bridge, item, result):
     """After a confirmed drawing, fly the following bubble beside what was
-    marked, for as long as the mark lasts (like a cursor buddy pointing)."""
+    marked, for as long as the mark lasts (like a cursor buddy pointing);
+    numbered steps get visited in order."""
     follower = getattr(bridge, '_follower', None)
     if not (result.get('ok') and follower and follower.enabled):
         return False
     from app import follow as follow_mod
     try:
-        target = follow_mod.focus_point(item['frame'], item['shapes'])
+        targets = follow_mod.focus_points(item['frame'], item['shapes'])
     except (KeyError, TypeError, ValueError):
         return False
-    if target is None:
+    if not targets:
         return False
-    follower.point_at(*target, item.get('seconds', 15))
+    follower.tour(targets, item.get('seconds', 15))      # numbered steps: one after another
     return True
 
 
@@ -392,11 +441,13 @@ def main(argv=None):
     bridge._window = window
     if os.name == 'nt':
         from app import follow as follow_mod
+        prefs = data / 'follow.json'
         follower = follow_mod.Follower(follow_mod.windows_cursor, follow_mod.windows_work_area,
-                                       lambda: FOLLOW_SIZE, lambda x, y: window.move(x, y),
-                                       enabled=getattr(config, 'COMPANION_FOLLOW_CURSOR', False))
+                                       lambda: follow_mod.windows_size(window_handle(window)),
+                                       lambda x, y: follow_mod.windows_place(window_handle(window), at=(x, y)),
+                                       enabled=load_follow(prefs, getattr(config, 'COMPANION_FOLLOW_CURSOR', True)))
         follower.paused = True        # nothing to follow until the bubble is shown
-        bridge._follower = follower
+        bridge._follower, bridge._follow_prefs = follower, prefs
         follower.start()
     permission = MicrophonePermission(bridge, data / 'permissions.json')
     shutting_down = threading.Event()
@@ -489,10 +540,7 @@ def main(argv=None):
                             bridge._follower.paused = True
                         reveal(window)
                         interactive(window, True)
-                        window.resize(420, 640)
-                        x, y = position(640)
-                        if x is not None:
-                            window.move(x, y)
+                        place(window, CHAT_SIZE, corner=True)
                         window.show()
                     if item['kind'] == 'activate':
                         if not bridge._trusted():
@@ -511,13 +559,10 @@ def main(argv=None):
                             interactive(window, False)
                             follower = getattr(bridge, '_follower', None)
                             if follower and follower.enabled:
-                                window.resize(*FOLLOW_SIZE)          # the bubble rides the cursor
+                                place(window, FOLLOW_SIZE)           # the bubble rides the cursor
                                 follower.paused = False
                             else:
-                                window.resize(420, 300)
-                                x, y = position(300)
-                                if x is not None:
-                                    window.move(x, y)
+                                place(window, BUBBLE_SIZE, corner=True)
                             window.show()
                         bridge._activation = item['item'].get('kind') != 'stop'
                         window.evaluate_js('void window.ApexDesktop.activate(' + json.dumps(item['item']) + ')')

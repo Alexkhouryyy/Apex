@@ -275,11 +275,11 @@ def test_a_confirmed_drawing_points_the_bubble_only_when_following():
                                                        lambda x, y: None, enabled=True))
     item = {'frame': FRAME, 'shapes': [{'type': 'ellipse', 'points': [[.4, .4], [.6, .6]]}], 'seconds': 12}
     assert point_bubble(bridge, item, {'ok': False}) is False, 'an unconfirmed drawing moves nothing'
-    assert bridge._follower._focus is None
+    assert bridge._follower._focus == []
     assert point_bubble(bridge, item, {'ok': True}) is True
-    assert bridge._follower._focus[0] == (1920 + 960, 540)
+    assert bridge._follower._focus[0][0] == (1920 + 960, 540)
     bridge._follower.set_enabled(False)
-    bridge._follower._focus = None
+    bridge._follower._focus = []
     assert point_bubble(bridge, item, {'ok': True}) is False, 'Follow off: the bubble stays in its corner'
     assert point_bubble(SimpleNamespace(), item, {'ok': True}) is False, 'no follower (not Windows)'
 
@@ -293,3 +293,78 @@ def test_celine_is_told_to_point_without_being_asked(monkeypatch):
         text = guidance.instructions()
     assert 'abc123' in text and 'without waiting to be asked' in text
     assert 'draw nothing' in text, 'and holds back when the screen is not relevant'
+
+
+def test_numbered_steps_are_visited_in_order_then_back_to_the_pointer():
+    shapes = [{'type': 'label', 'points': [[.9, .1]], 'label': '2'},
+              {'type': 'label', 'points': [[.1, .1]], 'label': '1.'},
+              {'type': 'arrow', 'points': [[.5, .9], [.5, .5]]},
+              {'type': 'label', 'points': [[.5, .9]], 'label': '3'}]
+    frame = {'left': 0, 'top': 0, 'width': 1000, 'height': 1000}
+    assert follow.focus_points(frame, shapes) == [(100, 100), (900, 100), (500, 900)]
+    assert follow.focus_points(frame, shapes[2:3]) == [(500, 500)], 'no steps: the one thing she pointed at'
+    now, moves = [0.0], []
+    f = follow.Follower(lambda: (50, 50), lambda x, y: AREA, lambda: SIZE,
+                        lambda x, y: moves.append((x, y)), enabled=True, clock=lambda: now[0])
+    f.tour(follow.focus_points(frame, shapes), 15)
+    seen = []
+    for t in (1, 6, 11, 16):
+        now[0] = t
+        for _ in range(40):
+            f.tick()
+        seen.append(moves[-1])
+    expect = [follow.follow_position(p, SIZE, AREA) for p in [(100, 100), (900, 100), (500, 900), (50, 50)]]
+    assert seen == expect, 'step 1, step 2, step 3 (5 s each), then the pointer again'
+
+
+def test_the_corner_sits_inside_the_monitor_under_the_pointer():
+    assert follow.corner_position((630, 450), (1920, 0, 3840, 1040), 36) == (3840 - 630 - 36, 1040 - 450 - 36)
+    assert follow.corner_position((5000, 5000), AREA) == (0, 0), 'never past the top-left'
+
+
+def test_the_follow_choice_is_remembered(tmp_path):
+    from app.companion_desktop import load_follow, save_follow
+    prefs = tmp_path / 'Companion' / 'follow.json'
+    assert load_follow(prefs, True) is True, 'first start: the .env default'
+    bridge = Bridge(SimpleNamespace(url='http://127.0.0.1:7860'), 'master-secret')
+    bridge._window = Window()
+    bridge._follower = follow.Follower(lambda: (0, 0), lambda x, y: AREA, lambda: SIZE, lambda x, y: None, enabled=True)
+    bridge._follow_prefs = prefs
+    bridge.follow(False)
+    assert load_follow(prefs, True) is False, 'you turned it off: it stays off next time'
+    bridge.follow(True)
+    assert load_follow(prefs, False) is True
+    prefs.write_text('not json', encoding='utf-8')
+    assert load_follow(prefs, True) is True, 'a damaged file falls back to the default'
+    save_follow(tmp_path / 'x' / 'f.json', True)
+
+
+def test_on_a_150_percent_laptop_the_window_is_scaled_and_placed_in_screen_pixels(monkeypatch):
+    import app.companion_desktop as cd
+    placed = []
+    monkeypatch.setattr(cd, 'os', SimpleNamespace(name='nt', environ={}))
+    monkeypatch.setattr(follow, 'windows_scale', lambda hwnd: 1.5)
+    monkeypatch.setattr(follow, 'windows_cursor', lambda: (2500, 400))            # pointer on the right monitor
+    monkeypatch.setattr(follow, 'windows_work_area', lambda x, y: (1920, 0, 3840, 1040))
+    monkeypatch.setattr(follow, 'windows_place', lambda hwnd, size=None, at=None: placed.append((hwnd, size, at)))
+    window = SimpleNamespace(native=SimpleNamespace(InvokeRequired=False, Handle=SimpleNamespace(ToInt64=lambda: 77)),
+                             resize=lambda *a: pytest.fail('pywebview resize is not used on Windows'),
+                             move=lambda *a: pytest.fail('pywebview move scales coordinates; not used'))
+    cd.place(window, cd.CHAT_SIZE, corner=True)
+    assert placed[-1] == (77, (630, 960), (3840 - 630 - 36, 1040 - 960 - 36))
+    cd.place(window, cd.FOLLOW_SIZE)
+    assert placed[-1] == (77, (480, 330), None), 'the bubble keeps its layout; the follower moves it'
+
+
+def test_a_small_scaled_screen_never_gets_a_window_taller_than_itself(monkeypatch):
+    import app.companion_desktop as cd
+    placed = []
+    monkeypatch.setattr(cd, 'os', SimpleNamespace(name='nt', environ={}))
+    monkeypatch.setattr(follow, 'windows_scale', lambda hwnd: 1.25)
+    monkeypatch.setattr(follow, 'windows_cursor', lambda: (500, 300))
+    monkeypatch.setattr(follow, 'windows_work_area', lambda x, y: (0, 0, 1366, 728))   # 768 minus the taskbar
+    monkeypatch.setattr(follow, 'windows_place', lambda hwnd, size=None, at=None: placed.append((size, at)))
+    window = SimpleNamespace(native=SimpleNamespace(InvokeRequired=False, Handle=SimpleNamespace(ToInt64=lambda: 5)))
+    cd.place(window, cd.CHAT_SIZE, corner=True)
+    (w, h), (x, y) = placed[-1]
+    assert h == 728 - 60 and y == 30 and x + w <= 1366, 'fits, with its margin'
