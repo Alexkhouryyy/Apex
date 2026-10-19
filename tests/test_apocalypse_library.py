@@ -573,3 +573,23 @@ def test_progress_says_speed_and_time_left():
     assert line == 'Wikipedia: 45.3% · 57.7 GB of 127.4 GB · 1.20 MB/s · about 16 h left'
     assert 'KB/s' in library.progress_line('Map', 1, 10**9, 50_000) and 'days left' in library.progress_line('Map', 1, 10**11, 50_000)
     assert library.progress_line('Book', 5, 10, 0) == 'Book: 50.0% · 0 MB of 0 MB'
+
+
+def test_ctrl_c_says_what_happened_and_that_nothing_is_lost(capsys):
+    def pressed():
+        raise KeyboardInterrupt
+    assert library.run(pressed) == 1
+    err = capsys.readouterr().err
+    assert 'you pressed Ctrl+C' in err and 'kept' in err and 'Enter' in err
+    def silent():
+        raise OSError()                                   # an error with no message still says what it was
+    assert library.run(silent) == 1 and 'stopped: OSError' in capsys.readouterr().err
+    assert library.run(lambda: None) == 0
+
+
+def test_a_stop_exits_with_code_1_so_the_launcher_keeps_its_resume_entry():
+    import subprocess, sys
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run([sys.executable, str(root / 'scripts' / 'prepare_apocalypse_library.py'), '--plan-output', 'x'],
+                            capture_output=True, text=True, env={**__import__('os').environ, 'APEX_APOCALYPSE': ''})
+    assert result.returncode == 1 and 'requires --plan-only' in result.stderr

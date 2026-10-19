@@ -594,9 +594,23 @@ def main():
             print('Every archive in this batch is downloaded and checksum-verified.', flush=True)
 
 
-if __name__ == '__main__':
+STOPPED_BY_CTRL_C = ('Library preparation stopped: you pressed Ctrl+C. Everything downloaded so far is kept; '
+                     'run the same command again to continue. (To copy text from this window, select it with '
+                     'the mouse and press Enter: Ctrl+C with nothing selected stops the download.)')
+
+
+def run(entry=None) -> int:
+    """main(), with a plain-English last line instead of a traceback."""
     try:
-        main()
-    except (RuntimeError, OSError, ValueError, httpx.HTTPError, KeyboardInterrupt) as exc:
-        print('Library preparation stopped: '+str(exc), file=sys.stderr)
-        raise SystemExit(1)
+        (entry or main)()
+    except KeyboardInterrupt:
+        print(STOPPED_BY_CTRL_C, file=sys.stderr)
+        return 1
+    except (RuntimeError, OSError, ValueError, httpx.HTTPError) as exc:
+        print('Library preparation stopped: '+(str(exc) or type(exc).__name__), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(run())
