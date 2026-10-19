@@ -103,9 +103,24 @@ going until it's all there.
 - **Internet drops:** each archive first retries 6 times, resuming from its
   `.part` file. If the line stays down, the run waits (30 s, then doubling, at
   most 10 minutes between tries) and tries again, on its own, until it's back.
-- **Window closed, Ctrl+C, power cut or restart:** run it again with the same
-  number. Finished archives are skipped in seconds and a half-downloaded one
+- **Window closed, Ctrl+C, power cut or restart:** it starts again by itself
+  the next time you sign in to Windows (a `Apex-Library-Resume.cmd` entry in
+  your Startup folder, which deletes itself when the download finishes), or run
+  it again with the same number. Finished archives are skipped in seconds, not
+  re-read: an archive whose size and date are unchanged since its checksum
+  passed isn't hashed again (`--verify-all` forces that). A half-downloaded one
   resumes from where it stopped, never from zero.
+- **Power cuts:** every 10 seconds the half-done file is forced to disk and that
+  length recorded. After a power cut, anything past it (Windows can leave
+  garbage at the end of a file it was writing) is cut off and fetched again, so
+  at most about 10 seconds of download is repeated. The saved plan is written
+  safely too, with a previous copy to fall back on.
+- **Different mirrors:** Kiwix sends each request to a nearby mirror. A resume
+  on another mirror continues the same file. (Earlier versions sent `If-Range`,
+  which every mirror answers differently, so a resume could restart from zero.)
+  A mirror that can't resume never overwrites more than 64 MiB of progress;
+  the run waits and tries again.
+- **Progress** shows percent, GB done, speed and time left, every 10 seconds.
 - **A problem a retry can't fix** (a checksum mismatch, a full drive): it says
   which archive, finishes the others, and stops instead of looping.
 - It asks Windows not to sleep while downloading; closing a laptop's lid can
