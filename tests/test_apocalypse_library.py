@@ -88,10 +88,10 @@ def test_catalog_uses_exact_filename_and_publisher_size_and_hash():
 def test_interrupted_download_resumes_at_actual_partial_length(tmp_path):
     data=b'complete archive';job=archive(data);target=library.destination(tmp_path,job)
     target.parent.mkdir(parents=True);partial=target.with_suffix('.zim.part');partial.write_bytes(data[:5])
-    job['etag']='"version"';saved=[]
+    job['etag']='"version"';job['durable_bytes']=5;saved=[]
     def handle(request):
         assert request.headers['range']=='bytes=5-'
-        assert request.headers['if-range']=='"version"'
+        assert 'if-range' not in request.headers, 'mirrors label files differently; If-Range restarted resumes from zero'
         return httpx.Response(206,content=data[5:],headers={'Content-Range':f'bytes 5-{len(data)-1}/{len(data)}'})
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         library.download_archive(client,tmp_path,job,lambda:saved.append(dict(job)))
@@ -111,7 +111,7 @@ def test_mirror_ignoring_range_restarts_without_appending(tmp_path):
                                     httpx.Response(200,content=b'too short')])
 def test_changed_archive_or_wrong_range_preserves_partial(tmp_path,response):
     job=archive();target=library.destination(tmp_path,job);target.parent.mkdir(parents=True)
-    partial=target.with_suffix('.zim.part');partial.write_bytes(b'part')
+    partial=target.with_suffix('.zim.part');partial.write_bytes(b'part');job['durable_bytes']=4
     with httpx.Client(transport=httpx.MockTransport(lambda _:response)) as client:
         with pytest.raises(RuntimeError):library.download_archive(client,tmp_path,job,lambda:None)
     assert partial.read_bytes()==b'part' and not target.exists()
@@ -380,6 +380,21 @@ def test_the_one_click_launcher_keeps_going_until_done():
     assert 'D:\\Apex-Apocalypse' in script and 'set /p' in script
 
 
+def test_the_launcher_resumes_after_a_restart_and_cleans_up_when_done():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / 'Download-Apex-Library.cmd').read_bytes().decode().replace('\r\n', '\n')
+    startup = 'Start Menu\\Programs\\Startup\\Apex-Library-Resume.cmd'
+    assert startup in script
+    create, run = script.index(') > "%RESUME%"'), script.index('prepare_apocalypse_library.py')
+    assert create < run, 'the sign-in entry exists before the long download starts'
+    assert 'echo call "%~f0" %LIMIT%' in script, 'it reruns this launcher with the same size'
+    done = script.index('if exist "%RESUME%" del "%RESUME%"')
+    failed = script.index('if errorlevel 1 (')
+    assert failed < done < script.index('echo Done.'), 'removed only after a finished run'
+    block = script[script.index('(\n  echo @echo off'):create]
+    assert '(' not in block[1:] and ')' not in block, 'a parenthesis inside the echo block would end it early'
+
+
 # ---------------------------------------------------------------- --add: one more pack, nothing else changes
 
 def kiwix(names):
@@ -442,3 +457,119 @@ def test_add_from_the_command_line_downloads_only_the_new_pack(monkeypatch, tmp_
     saved = json.loads((tmp_path / library.PLAN_NAME).read_text(encoding='utf-8'))
     assert {row['id'] for row in saved['jobs']} == {'a', 'wikipedia_ar_medicine_maxi'}, 'saved for next time'
     assert 'Added wikipedia_ar_medicine_maxi (2026-09' in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- slow lines and power cuts
+
+DATA = bytes(range(16))
+
+
+def ranged(data, seen):
+    """A mirror that honours Range requests, recording what was asked."""
+    def handle(request):
+        seen.append(request.headers.get('range'))
+        start = int(request.headers['range'][6:-1]) if 'range' in request.headers else 0
+        return httpx.Response(206 if start else 200, content=data[start:], headers={
+            'Content-Range': f'bytes {start}-{len(data)-1}/{len(data)}', 'Content-Length': str(len(data)-start)})
+    return httpx.Client(transport=httpx.MockTransport(handle))
+
+
+def partial_of(tmp_path, job, content):
+    target = library.destination(tmp_path, job); target.parent.mkdir(parents=True, exist_ok=True)
+    part = target.with_suffix('.zim.part'); part.write_bytes(content)
+    return target, part
+
+
+def test_after_a_power_cut_the_unsafe_end_is_dropped_and_fetched_again(tmp_path):
+    job = archive(DATA); job['durable_bytes'] = 10            # 10 bytes were forced to disk and recorded
+    target, _ = partial_of(tmp_path, job, DATA[:10] + b'\0' * 4)   # Windows left 4 bytes of garbage after them
+    seen = []
+    with ranged(DATA, seen) as client:
+        library.download_archive(client, tmp_path, job, lambda: None)
+    assert seen == ['bytes=10-'] and target.read_bytes() == DATA
+
+
+def test_an_older_partial_keeps_all_but_its_last_16_mib(tmp_path, monkeypatch):
+    monkeypatch.setattr(library, 'TAIL_MARGIN', 4)            # 16 MiB in real life
+    job = archive(DATA)                                       # no durable_bytes: saved before this release
+    target, _ = partial_of(tmp_path, job, DATA[:10])
+    seen = []
+    with ranged(DATA, seen) as client:
+        library.download_archive(client, tmp_path, job, lambda: None)
+    assert seen == ['bytes=6-'] and target.read_bytes() == DATA
+
+
+def test_a_full_length_partial_with_a_bad_end_refetches_the_end_not_the_archive(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(library, 'TAIL_MARGIN', 4)
+    job = archive(DATA); job['durable_bytes'] = len(DATA)
+    target, _ = partial_of(tmp_path, job, DATA[:-2] + b'\xff\xff')
+    seen = []
+    with ranged(DATA, seen) as client:
+        library.download_archive(client, tmp_path, job, lambda: None)
+    assert seen == ['bytes=12-'] and target.read_bytes() == DATA
+    assert 'downloading the last' in capsys.readouterr().out
+
+
+def test_a_mirror_that_cannot_resume_never_throws_away_a_big_partial(tmp_path, monkeypatch):
+    monkeypatch.setattr(library, 'RESTART_LIMIT', 8)           # 64 MiB in real life
+    job = archive(DATA); job['durable_bytes'] = 10
+    _, part = partial_of(tmp_path, job, DATA[:10])
+    full = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, content=DATA)))
+    with full as client, pytest.raises(httpx.TransportError, match='keeping'):
+        library.download_archive(client, tmp_path, job, lambda: None)
+    assert part.read_bytes() == DATA[:10], 'kept; the retry tries another mirror'
+
+
+def test_ctrl_c_mid_download_keeps_every_byte_written(tmp_path):
+    data = bytes(range(256)) * 8192                            # 2 MiB
+    job = archive(data); target = library.destination(tmp_path, job)
+    def stopped():
+        yield data[:1024 * 1024]
+        raise KeyboardInterrupt
+    saved = []
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda _: httpx.Response(200, content=stopped(), headers={'Content-Length': str(len(data))})))
+    with client, pytest.raises(KeyboardInterrupt):
+        library.download_archive(client, tmp_path, job, lambda: saved.append(job.get('durable_bytes')))
+    assert saved[-1] == 1024 * 1024 and target.with_suffix('.zim.part').stat().st_size == 1024 * 1024
+
+
+def test_finished_archives_are_not_read_again_unless_changed(tmp_path, monkeypatch):
+    job = archive(DATA); target = library.destination(tmp_path, job)
+    target.parent.mkdir(parents=True); target.write_bytes(DATA)
+    reads = []
+    real = library.valid_archive
+    monkeypatch.setattr(library, 'valid_archive', lambda path, j: reads.append(path) or real(path, j))
+    offline = httpx.Client(transport=httpx.MockTransport(lambda _: pytest.fail('no download')))
+    with offline as client:
+        library.download_archive(client, tmp_path, job, lambda: None)      # first time: checked
+        library.download_archive(client, tmp_path, job, lambda: None)      # unchanged: skipped
+        assert len(reads) == 1
+        target.write_bytes(DATA[:-1] + b'\x00')                            # changed on disk
+        import os
+        os.utime(target, ns=(1, 1))
+        with pytest.raises(RuntimeError, match='checksum'):
+            library.download_archive(client, tmp_path, job, lambda: None)
+        assert len(reads) == 2
+        target.write_bytes(DATA); library.mark_verified(target, job)
+        monkeypatch.setattr(library, 'REVERIFY', True)                     # --verify-all
+        library.download_archive(client, tmp_path, job, lambda: None)
+        assert len(reads) == 3
+
+
+def test_a_damaged_plan_falls_back_to_its_previous_copy(tmp_path, capsys):
+    path = tmp_path / 'english-worldwide-plan.json'
+    library.save_plan(path, {'profile': 'english-worldwide', 'jobs': [archive()], 'remaining_setup': []})
+    library.save_plan(path, {'profile': 'english-worldwide', 'jobs': [archive(), archive()], 'remaining_setup': []})
+    assert path.with_suffix('.json.bak').is_file()
+    path.write_bytes(b'\x00' * 50)                                         # what a power cut can leave
+    plan = library.load_plan(path)
+    assert plan['profile'] == 'english-worldwide' and len(plan['jobs']) == 1
+    assert 'previous copy' in capsys.readouterr().out
+
+
+def test_progress_says_speed_and_time_left():
+    line = library.progress_line('Wikipedia', 57_700_000_000, 127_400_000_000, 1_200_000)
+    assert line == 'Wikipedia: 45.3% · 57.7 GB of 127.4 GB · 1.20 MB/s · about 16 h left'
+    assert 'KB/s' in library.progress_line('Map', 1, 10**9, 50_000) and 'days left' in library.progress_line('Map', 1, 10**11, 50_000)
+    assert library.progress_line('Book', 5, 10, 0) == 'Book: 50.0% · 0 MB of 0 MB'

@@ -41,9 +41,17 @@ Equivalent: `.\.venv\Scripts\python.exe -X utf8 scripts\prepare_apocalypse_libra
 
 Tell the owner how it behaves, because it's what they care about:
 
-- **Resumes, never restarts.** Finished archives are re-checked and skipped. A
-  half-done one continues from its `.part` file. After a closed window, Ctrl+C,
-  power cut or reboot, they run the same command again.
+- **Resumes, never restarts.** Finished archives are skipped in seconds (not
+  re-hashed unless changed; `--verify-all` forces a full re-check). A half-done
+  one continues from its `.part` file, even when the resume lands on a
+  different Kiwix mirror.
+- **Restarts and power cuts:** the launcher adds `Apex-Library-Resume.cmd` to the
+  Startup folder, so it carries on by itself at the next sign-in, and removes it
+  when the download is done. Every 10 s the partial is forced to disk and its
+  safe length recorded (`durable_bytes`). After a power cut, any garbage past
+  that is cut off and re-fetched (at most ~10 s of download).
+- To stop auto-resume: delete
+  `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Apex-Library-Resume.cmd`.
 - **Rides out internet drops.** Each archive retries 6 times. In `--until-done`,
   a longer outage waits 30 s, then doubling, at most 10 minutes, and keeps going.
 - **Stops on what a retry can't fix** (checksum mismatch, full drive), names the
@@ -51,6 +59,15 @@ Tell the owner how it behaves, because it's what they care about:
 - It asks Windows not to sleep. Closing the laptop lid can still override that.
 
 ### Reading pasted progress
+
+- `Wikipedia: 45.3% · 57.7 GB of 127.4 GB · 1.20 MB/s · about 16 h left` is
+  printed every 10 s. Speed is averaged since this connection started.
+- `the connection dropped at …% … Resuming in N s` is normal on a bad line.
+  `The internet is down or unstable. Waiting N s` means it's riding out an outage.
+- `The mirror would restart … from zero; keeping …` means one mirror couldn't
+  resume. It keeps the partial and tries again (normally another mirror).
+- `the end of the saved file failed its check; downloading the last …` is the
+  power-cut recovery working.
 
 - `This batch: N archives, X GB` is what this run will fetch.
   `English + worldwide: M archives, Y GiB` is the whole plan.

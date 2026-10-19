@@ -171,11 +171,32 @@ def add_resources(client, plan, identifiers):
     return added, present
 
 
+def load_plan(path):
+    """The saved plan, or its previous copy if a power cut damaged it."""
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        backup = path.with_suffix('.json.bak')
+        if not backup.is_file():
+            raise
+        print('The saved plan was damaged (a power cut?); using its previous copy. Finished archives are '
+              'checked against their checksums, so nothing is lost.', flush=True)
+        return json.loads(backup.read_text(encoding='utf-8'))
+
+
 def save_plan(path, plan):
     plan['updated_at'] = int(time.time())
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(plan, indent=2)+'\n', encoding='utf-8')
+    with temporary.open('w', encoding='utf-8') as stream:
+        stream.write(json.dumps(plan, indent=2)+'\n')
+        stream.flush()
+        os.fsync(stream.fileno())             # never replace the plan with a half-written one
+    if path.is_file():
+        try:
+            shutil.copyfile(path, path.with_suffix('.json.bak'))
+        except OSError:
+            pass
     for attempt in range(8):
         try:
             temporary.replace(path)
@@ -243,13 +264,63 @@ def remaining_bytes(home, jobs):
     return total
 
 
+TAIL_MARGIN = 16 * 1024**2      # re-fetch this much of a partial whose safe length is unknown
+RESTART_LIMIT = 64 * 1024**2    # a partial bigger than this is never thrown away by a mirror
+REVERIFY = False                # --verify-all: hash finished archives again even if unchanged
+
+
+def resume_point(size, job):
+    """How much of a .part file is safe to keep. Each checkpoint forces the file
+    to disk and records that length (durable_bytes), so after a power cut
+    anything past it may be garbage Windows never finished writing and is cut
+    off. A partial from before this was recorded keeps all but its last 16 MiB."""
+    if job.get('durable_bytes') is not None:
+        return max(0, min(size, int(job['durable_bytes'])))
+    return max(0, size - TAIL_MARGIN)
+
+
+def already_verified(target, job):
+    """A finished archive whose size and modification time are unchanged since its
+    checksum passed needs no second full read (90 GB on an external drive takes
+    20+ minutes, repeated after every internet drop). --verify-all reads it all again."""
+    if REVERIFY or job.get('status') != 'downloaded' or not job.get('checksum_verified'):
+        return False
+    info = target.stat()
+    return job.get('verified_size') == info.st_size and job.get('verified_mtime_ns') == info.st_mtime_ns
+
+
+def mark_verified(target, job):
+    info = target.stat()
+    job.update(status='downloaded', downloaded_bytes=job['bytes'], checksum_verified=True,
+               verified_size=info.st_size, verified_mtime_ns=info.st_mtime_ns)
+    job.pop('durable_bytes', None)
+    job.pop('error', None)
+
+
+def _size(n):
+    return f'{n/1e9:.1f} GB' if n >= 1e9 else f'{n/1e6:.0f} MB'
+
+
+def progress_line(title, offset, total, rate):
+    """'Wikipedia: 45.3% · 57.7 of 127.4 GB · 1.2 MB/s · about 16 h left'."""
+    line = f'{title}: {offset/total:.1%} · {_size(offset)} of {_size(total)}'
+    if rate > 0:
+        line += f' · {rate/1e6:.2f} MB/s' if rate >= 1e5 else f' · {rate/1e3:.0f} KB/s'
+        left = (total-offset)/rate
+        line += (f' · about {left/86400:.1f} days left' if left >= 2*86400 else
+                 f' · about {left/3600:.0f} h left' if left >= 3600 else f' · about {max(1, round(left/60))} min left')
+    return line
+
+
 def download_archive(client, home, job, checkpoint):
     target = destination(home, job)
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
+        if already_verified(target, job):
+            return
         if not valid_archive(target, job):
             raise RuntimeError('Existing archive failed its checksum; preserved for review: '+str(target))
-        job.update(status='downloaded', downloaded_bytes=job['bytes'], checksum_verified=True)
+        mark_verified(target, job)
         checkpoint()
         return
     partial = target.with_suffix(target.suffix+'.part')
@@ -259,19 +330,34 @@ def download_archive(client, home, job, checkpoint):
     if offset > job['bytes']:
         raise RuntimeError('Partial archive is larger than expected; preserved: '+str(partial))
     if offset == job['bytes']:
-        if not valid_archive(partial, job):
-            raise RuntimeError('Partial archive failed checksum; preserved: '+str(partial))
-        partial.replace(target)
-        job.update(status='downloaded', downloaded_bytes=job['bytes'], checksum_verified=True)
-        checkpoint()
-        return
+        if valid_archive(partial, job):
+            partial.replace(target)
+            mark_verified(target, job)
+            checkpoint()
+            return
+        # Full length but wrong: most likely a tail damaged by a power cut. Fetch
+        # the end again rather than giving up on the whole archive.
+        keep = resume_point(offset, job)
+        if keep >= offset:
+            keep = max(0, offset - TAIL_MARGIN)
+        print(f'{job["title"]}: the end of the saved file failed its check; downloading the last '
+              f'{_size(offset-keep)} again.', flush=True)
+        os.truncate(partial, keep)
+        offset = keep
+    elif offset:
+        keep = resume_point(offset, job)
+        if keep < offset:                     # drop what may not have reached the disk
+            os.truncate(partial, keep)
+            offset = keep
     if shutil.disk_usage(home).free < job['bytes']-offset+HEADROOM:
         raise RuntimeError('Not enough space for this archive plus 20 GiB headroom.')
+    # No If-Range: the download service sends each request to whichever mirror is
+    # near, and mirrors label the same file differently, so If-Range made a resume
+    # on another mirror start the whole archive again. The pinned size, the exact
+    # Content-Range and the publisher checksum at the end protect the content.
     headers = {'Accept-Encoding': 'identity'}
     if offset:
         headers['Range'] = f'bytes={offset}-'
-        if job.get('etag'):
-            headers['If-Range'] = job['etag']
     with client.stream('GET', job['url'], headers=headers) as response:
         response.raise_for_status()
         if response.status_code == 206:
@@ -280,6 +366,9 @@ def download_archive(client, home, job, checkpoint):
                 raise RuntimeError('Mirror returned an unexpected byte range; partial archive preserved.')
             mode = 'ab'
         elif response.status_code == 200:
+            if offset >= RESTART_LIMIT:       # this mirror can't resume: try another, keep the partial
+                raise httpx.RemoteProtocolError(f'The mirror would restart {job["title"]} from zero; '
+                                                f'keeping the {_size(offset)} already downloaded and trying again.')
             offset, mode = 0, 'wb'
         else:
             raise RuntimeError('Mirror returned an unexpected download response.')
@@ -288,25 +377,43 @@ def download_archive(client, home, job, checkpoint):
             raise RuntimeError('Archive length changed; refresh the plan before downloading.')
         if shutil.disk_usage(home).free < job['bytes']-offset+HEADROOM:
             raise RuntimeError('Not enough free space if the mirror restarts this partial download.')
-        job.update(status='downloading', downloaded_bytes=offset, etag=response.headers.get('etag'))
+        job.pop('etag', None)
+        job.update(status='downloading', downloaded_bytes=offset, durable_bytes=offset)
         checkpoint()
-        last = time.monotonic()
+        started, first = time.monotonic(), offset
+        last = started
         with partial.open(mode) as stream:
-            for chunk in response.iter_bytes(1024*1024):
-                if offset+len(chunk) > job['bytes']:
-                    raise RuntimeError('Download exceeded its expected size.')
-                stream.write(chunk)
-                offset += len(chunk)
-                if time.monotonic()-last > 10:
-                    job['downloaded_bytes'] = offset
+            try:
+                for chunk in response.iter_bytes(1024*1024):
+                    if offset+len(chunk) > job['bytes']:
+                        raise RuntimeError('Download exceeded its expected size.')
+                    stream.write(chunk)
+                    offset += len(chunk)
+                    now = time.monotonic()
+                    if now-last > 10:
+                        stream.flush()
+                        os.fsync(stream.fileno())          # on disk before it's recorded as safe
+                        job.update(downloaded_bytes=offset, durable_bytes=offset)
+                        checkpoint()
+                        print(progress_line(job['title'], offset, job['bytes'], (offset-first)/max(now-started, 1e-6)),
+                              flush=True)
+                        last = now
+            finally:
+                # A dropped connection or Ctrl+C: this process wrote every byte so
+                # far, so force it to disk and keep all of it for the resume.
+                try:
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                    job.update(downloaded_bytes=offset, durable_bytes=offset)
                     checkpoint()
-                    print(f'{job["title"]}: {offset/job["bytes"]:.1%}', flush=True)
-                    last = time.monotonic()
+                except Exception:
+                    pass
+    job.update(downloaded_bytes=offset, durable_bytes=offset)
     if not valid_archive(partial, job):
-        raise RuntimeError('Archive incomplete or checksum failed. Partial file preserved; nothing marked downloaded.')
+        raise RuntimeError('Archive incomplete or checksum failed. Partial file preserved; nothing marked downloaded. '
+                           'Run again to re-fetch its end; if this repeats, delete '+str(partial)+' to start it over.')
     partial.replace(target)
-    job.update(status='downloaded', downloaded_bytes=job['bytes'], checksum_verified=True)
-    job.pop('error', None)
+    mark_verified(target, job)
     checkpoint()
     print('Downloaded and checksum verified: '+job['title'], flush=True)
 
@@ -422,9 +529,13 @@ def main():
     parser.add_argument('--only', action='append', help='Archive ID to select; repeat for multiple archives')
     parser.add_argument('--add', action='append', metavar='ID',
                         help='Add a Kiwix archive by catalog name to the saved plan (other archives keep their versions) and download it; repeatable')
+    parser.add_argument('--verify-all', action='store_true',
+                        help='Read every finished archive again to check its checksum, even if it is unchanged')
     parser.add_argument('--until-done', action='store_true',
                         help='Keep going through internet outages, waiting and retrying until every archive is downloaded')
     args = parser.parse_args()
+    global REVERIFY
+    REVERIFY = args.verify_all
     if apocalypse.enabled():
         raise RuntimeError('Download preparation must run outside the offline session.')
     if args.plan_output and not args.plan_only:
@@ -434,8 +545,8 @@ def main():
     with preparation_lock(output.parent if args.plan_only else home):
         with httpx.Client(follow_redirects=True, trust_env=False, timeout=httpx.Timeout(120, connect=20)) as client:
             snapshot = ROOT/'integrations/project-nomad/english-worldwide-plan.json'
-            if output.exists() and not args.refresh_plan:
-                plan = json.loads(output.read_text(encoding='utf-8'))
+            if (output.exists() or output.with_suffix('.json.bak').is_file()) and not args.refresh_plan:
+                plan = load_plan(output)
             elif not args.plan_only and not args.refresh_plan and snapshot.is_file():
                 plan = json.loads(snapshot.read_text(encoding='utf-8'))
                 print('Starting from the reviewed archive versions. Use --refresh-plan to select newer ones.', flush=True)
