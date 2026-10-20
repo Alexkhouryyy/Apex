@@ -120,6 +120,11 @@ going until it's all there.
   which every mirror answers differently, so a resume could restart from zero.)
   A mirror that can't resume never overwrites more than 64 MiB of progress;
   the run waits and tries again.
+- **The library drive disconnected** (unplugged, a USB power blip, or it shows up
+  a few seconds after you sign in): it says `Drive D: isn't connected` and waits
+  for it, then continues. Without keep-going mode it says so plainly and stops.
+  If Windows gives the drive another letter, set it back to D: in Disk
+  Management, or set `APEX_APOCALYPSE_HOME` to the new path.
 - **Progress** shows percent, GB done, speed and time left, every 10 seconds.
 - **A problem a retry can't fix** (a checksum mismatch, a full drive): it says
   which archive, finishes the others, and stops instead of looping.

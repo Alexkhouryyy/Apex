@@ -64,6 +64,15 @@ Tell the owner how it behaves, because it's what they care about:
   printed every 10 s. Speed is averaged since this connection started.
 - `the connection dropped at …% … Resuming in N s` is normal on a bad line.
   `The internet is down or unstable. Waiting N s` means it's riding out an outage.
+- `Drive D: isn't connected` / `[WinError 3] … 'D:\\'` (older versions): the
+  external ADATA drive isn't connected. Nothing is lost. Have them plug it in,
+  then check its letter with
+  `Get-Volume | Where-Object DriveLetter | Select-Object DriveLetter, FileSystemLabel, @{n='Size GB';e={[math]::Round($_.Size/1e9)}}`.
+  If it came back as another letter, set it back to D: (Win+X → Disk Management →
+  Change Drive Letter and Paths), or for one window run
+  `$env:APEX_APOCALYPSE_HOME = "E:\Apex-Apocalypse"` first. Never suggest formatting
+  or "repair" prompts without seeing the message. In keep-going mode it waits
+  for the drive by itself.
 - `The mirror would restart … from zero; keeping …` means one mirror couldn't
   resume. It keeps the partial and tries again (normally another mirror).
 - `the end of the saved file failed its check; downloading the last …` is the
