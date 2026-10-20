@@ -593,3 +593,45 @@ def test_a_stop_exits_with_code_1_so_the_launcher_keeps_its_resume_entry():
     result = subprocess.run([sys.executable, str(root / 'scripts' / 'prepare_apocalypse_library.py'), '--plan-output', 'x'],
                             capture_output=True, text=True, env={**__import__('os').environ, 'APEX_APOCALYPSE': ''})
     assert result.returncode == 1 and 'requires --plan-only' in result.stderr
+
+
+# ---------------------------------------------------------------- the external library drive
+
+def test_a_missing_drive_is_said_plainly_without_keep_going(tmp_path):
+    with pytest.raises(RuntimeError, match="isn't connected"):
+        library.wait_for_drive(tmp_path, False, exists=lambda root: False)
+
+
+def test_keep_going_waits_for_the_drive_to_come_back(tmp_path, capsys):
+    looks, waits = iter([False, False, False, True]), []
+    library.wait_for_drive(tmp_path, True, exists=lambda root: next(looks), sleep=waits.append)
+    assert waits == [library.DRIVE_WAIT, library.DRIVE_WAIT]
+    out = capsys.readouterr().out
+    assert "isn't connected. Waiting" in out and 'is back' in out
+
+
+def test_a_drive_unplugged_mid_download_waits_then_resumes(monkeypatch, tmp_path, capsys):
+    jobs = [dict(archive(b'one'), id='a', title='A')]
+    _until_done_setup(monkeypatch, tmp_path, jobs, ['--until-done'])
+    present = iter([True, False, False, True, True, True])            # gone during the first try
+    monkeypatch.setattr(library, 'drive_present', lambda home, exists=None: next(present, True))
+    tries = []
+    def download(client, home, job, checkpoint, **kw):
+        tries.append(job['id'])
+        if len(tries) == 1:
+            raise FileNotFoundError(3, 'The system cannot find the path specified', 'D:\\\\')
+        job.update(status='downloaded')
+    monkeypatch.setattr(library, 'download_with_retries', download)
+    library.main()
+    assert tries == ['a', 'a']
+    out = capsys.readouterr().out
+    assert 'was disconnected' in out and 'is back' in out and 'Every archive in this batch' in out
+
+
+def test_another_disk_error_with_the_drive_present_is_reported_not_waited_on(monkeypatch, tmp_path):
+    jobs = [dict(archive(b'one'), id='a', title='A')]
+    _until_done_setup(monkeypatch, tmp_path, jobs, ['--until-done'])
+    monkeypatch.setattr(library, 'download_with_retries',
+                        lambda *a, **k: (_ for _ in ()).throw(PermissionError(13, 'Access is denied')))
+    with pytest.raises(RuntimeError, match='need attention'):
+        library.main()

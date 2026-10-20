@@ -1,12 +1,14 @@
 """Revert-audit: prove a test guards a line. Breaks the line (OLD -> NEW, first
 occurrence), runs the given tests, always restores the file, and reports
-CAUGHT (a test failed, good) or GAP (everything still passed: add a test).
+CAUGHT (a test failed or hung, good) or GAP (everything still passed: add a test).
 
     python .claude/skills/ship-apex/audit.py app/follow.py "if focus" "if False" tests/test_companion_follow.py
 """
 import subprocess
 import sys
 from pathlib import Path
+
+TIMEOUT = 300       # seconds; a hang counts as CAUGHT
 
 
 def main(argv):
@@ -22,12 +24,17 @@ def main(argv):
         return 2
     try:
         file.write_bytes(text.replace(old, new, 1).encode('utf-8'))
-        result = subprocess.run([sys.executable, '-m', 'pytest', '-q', '-x', '-p', 'no:cacheprovider', *tests],
-                                capture_output=True, text=True)
+        try:
+            result = subprocess.run([sys.executable, '-m', 'pytest', '-q', '-x', '-p', 'no:cacheprovider', *tests],
+                                    capture_output=True, text=True, timeout=TIMEOUT)
+            last = (result.stdout.strip().splitlines() or ['?'])[-1]
+            caught = result.returncode != 0
+        except subprocess.TimeoutExpired:
+            # The break made a test hang (e.g. a wait loop that never ends): the
+            # tests noticed the change, which is what an audit asks.
+            last, caught = f'tests hung for {TIMEOUT}s', True
     finally:
         file.write_bytes(original)
-    last = (result.stdout.strip().splitlines() or ['?'])[-1]
-    caught = result.returncode != 0
     print(f'{"CAUGHT" if caught else "GAP   "}  {path}: {old[:60]!r} -> {new[:40]!r}  [{last}]')
     return 0 if caught else 1
 

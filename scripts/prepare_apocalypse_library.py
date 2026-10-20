@@ -466,6 +466,35 @@ def select_jobs(jobs, identifiers=None, max_download_gb=None):
     return selected
 
 
+DRIVE_WAIT = 30                 # seconds between looks for a disconnected library drive
+
+
+def drive_present(home, exists=os.path.exists):
+    """Is the drive holding the library (D: for the external disk) connected?"""
+    return exists(Path(home).anchor or '/')
+
+
+def wait_for_drive(home, until_done, *, exists=os.path.exists, sleep=None):
+    """A USB library drive can be unplugged, lose power, or appear a few seconds
+    after Windows signs in (when the download resumes by itself). Keep-going mode
+    waits for it; otherwise say plainly what's wrong instead of 'WinError 3'."""
+    if drive_present(home, exists):
+        return
+    letter = Path(home).drive or Path(home).anchor
+    if not until_done:
+        raise RuntimeError(f"Drive {letter} isn't connected. Plug in the library drive (it holds {home}), "
+                           'then run this again. Nothing on it was changed.')
+    print(f"Drive {letter} isn't connected. Waiting for it: plug in the library drive. "
+          'Everything already on it is safe.', flush=True)
+    looks = 0
+    while not drive_present(home, exists):
+        (sleep or _sleep)(DRIVE_WAIT)
+        looks += 1
+        if looks % 20 == 0:
+            print(f'Still waiting for drive {letter} ({looks * DRIVE_WAIT // 60} min).', flush=True)
+    print(f'Drive {letter} is back; continuing.', flush=True)
+
+
 UNTIL_DONE_FIRST_WAIT = 30      # seconds before the first retry after an outage
 UNTIL_DONE_MAX_WAIT = 600       # never wait more than 10 minutes between tries
 _sleep = time.sleep
@@ -473,7 +502,8 @@ _sleep = time.sleep
 
 def run_batch(client, home, output, plan, selected, *, until_done=False) -> str:
     """Download the selected archives once. Returns 'done', 'network' (the internet
-    failed after every retry; trying again later can finish) or 'error' (an archive
+    failed after every retry; trying again later can finish), 'drive' (the library
+    drive was disconnected) or 'error' (an archive
     needs attention that a retry won't fix, e.g. a checksum mismatch). A network
     outage stops the round at once instead of spending minutes on each archive;
     finished archives are skipped in seconds next round and partial files resume."""
@@ -491,7 +521,15 @@ def run_batch(client, home, output, plan, selected, *, until_done=False) -> str:
                           'Rerun when it is back: every finished archive and partial file is kept.', flush=True)
                 network = True
                 break
-            except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+            except OSError as exc:
+                if not drive_present(home):          # unplugged mid-download: nothing to save the plan to
+                    print(f'{job["title"]}: the library drive was disconnected. Its partial file is kept on it.', flush=True)
+                    return 'drive'
+                job.update(status='needs_attention', error=str(exc), checksum_verified=False)
+                save_plan(output, plan)
+                print('Pending '+job['title']+': '+str(exc), flush=True)
+                other = True
+            except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                 job.update(status='needs_attention', error=str(exc), checksum_verified=False)
                 save_plan(output, plan)
                 print('Pending '+job['title']+': '+str(exc), flush=True)
@@ -542,6 +580,7 @@ def main():
         raise RuntimeError('--plan-output requires --plan-only.')
     home = apocalypse.library_root()
     output = args.plan_output or home/PLAN_NAME
+    wait_for_drive(output.parent if args.plan_only else home, args.until_done)
     with preparation_lock(output.parent if args.plan_only else home):
         with httpx.Client(follow_redirects=True, trust_env=False, timeout=httpx.Timeout(120, connect=20)) as client:
             snapshot = ROOT/'integrations/project-nomad/english-worldwide-plan.json'
@@ -577,7 +616,11 @@ def main():
                 raise RuntimeError('The remaining plan does not fit with 20 GiB headroom. Existing files were kept.')
             outcome = run_batch(client, home, output, plan, selected, until_done=args.until_done)
             wait, round_no = UNTIL_DONE_FIRST_WAIT, 1
-            while outcome == 'network' and args.until_done:
+            while outcome in ('network', 'drive') and args.until_done:
+                if outcome == 'drive':
+                    wait_for_drive(home, True)
+                    outcome = run_batch(client, home, output, plan, selected, until_done=True)
+                    continue
                 print(f'The internet is down or unstable. Waiting {wait} s, then trying again '
                       f'(try {round_no + 1}). Every finished archive and partial file is kept; '
                       'Ctrl+C stops safely.', flush=True)
@@ -585,6 +628,9 @@ def main():
                 wait, round_no = min(wait * 2, UNTIL_DONE_MAX_WAIT), round_no + 1
                 outcome = run_batch(client, home, output, plan, selected, until_done=True)
             print('Archives require prepared NOMAD readers. Courses, medical database ingestion, map assets and AI/RAG setup remain visible in the plan.', flush=True)
+            if outcome == 'drive':
+                raise RuntimeError("The library drive was disconnected. Plug it back in and run this again; "
+                                   'the partial file on it resumes where it stopped.')
             if outcome == 'network':
                 raise RuntimeError('Some archives remain pending. Rerun to resume; no files were discarded. '
                                    'Add --until-done to keep retrying on its own until everything is downloaded.')
