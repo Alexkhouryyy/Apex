@@ -215,6 +215,15 @@ class BootResult:
             return []
 
 
+def model_cache_env(env: dict, home: Path | None = None) -> dict:
+    """Keep pointing Hugging Face / sentence-transformers at the real model cache
+    when HOME is redirected. A location the caller already set wins."""
+    if env.get("HF_HOME"):
+        return {}
+    base = Path(home) if home is not None else Path.home()
+    return {"HF_HOME": str(base / ".cache" / "huggingface")}
+
+
 def boot(say: str = "", script: list[dict] | None = None,
          timeout: float = 75.0, extra_env: dict | None = None,
          args: tuple[str, ...] = ("--think", "--no-screenshot"),
@@ -244,6 +253,12 @@ def boot(say: str = "", script: list[dict] | None = None,
     if isinstance(user_site, str) and Path(user_site).is_dir():
         env["PYTHONPATH"] = os.pathsep.join(
             [user_site] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+
+    # The same redirect would hide the downloaded model cache, so the boot would
+    # fetch the embedding model again before the scripted turn's `remember` could
+    # store anything. On a slow line that took longer than the turn deadline and
+    # failed tool_calls_take_effect for a reason that has nothing to do with Apex.
+    env.update(model_cache_env(env))
 
     env.update({
         "DB_PATH": str(work / "apex.db"),
