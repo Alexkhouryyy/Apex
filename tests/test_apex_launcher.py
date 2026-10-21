@@ -133,6 +133,40 @@ def test_only_explicit_restart_keeps_same_voice_process(launcher, monkeypatch, e
     assert children[0].terminated
 
 
+def test_device_voice_skips_qwen_environment_and_port_and_survives_restart(launcher, monkeypatch, capsys):
+    (launcher.Path.home() / 'apex-qwen-fast-env/Scripts/python.exe').unlink()
+    monkeypatch.setattr(launcher, 'port_in_use', lambda port, *a: port == 17494)
+    monkeypatch.setattr(launcher, 'launch_environment', lambda: {'TTS_ENGINE': 'voicebox', 'APEX_SUPERVISED': '1'})
+    children = [Process(701, 42), Process(702, 0)]
+    spawn = Mock(side_effect=children)
+    monkeypatch.setattr(launcher.subprocess, 'Popen', spawn)
+    def health(opener, url, accept, processes, label, timeout):
+        assert label == 'Apex dashboard'
+        assert [name for name, _ in processes] == ['Apex']
+        env = spawn.call_args.kwargs['env']
+        assert accept(dict(service='apex', launch_id=env['APEX_LAUNCH_ID'], agent_ready=True))
+    monkeypatch.setattr(launcher, 'wait_healthy', health)
+    assert launcher.main(['--fast', '--resident', '--device-voice']) == 0
+    assert spawn.call_count == 2
+    for call in spawn.call_args_list:
+        assert call.args[0][-2:] == [str(launcher.ROOT / 'main.py'), '--resident']
+        assert call.kwargs['env']['TTS_ENGINE'] == 'pyttsx3'
+    assert len({call.kwargs['env']['APEX_LAUNCH_ID'] for call in spawn.call_args_list}) == 2
+    assert 'cloned Celine model will not be loaded' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('failure', [RuntimeError('dashboard failed'), KeyboardInterrupt()])
+def test_device_voice_startup_failure_stops_its_owned_resident(launcher, monkeypatch, failure):
+    child = Process(703)
+    spawn = Mock(return_value=child)
+    monkeypatch.setattr(launcher.subprocess, 'Popen', spawn)
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock(side_effect=failure))
+    with pytest.raises(type(failure)):
+        launcher.main(['--resident', '--device-voice'])
+    assert child.terminated
+    spawn.assert_called_once()
+
+
 def test_restart_burst_is_bounded(launcher, monkeypatch):
     children, spawn = child_factory(launcher, monkeypatch, [42] * 5)
     monkeypatch.setattr(launcher, 'wait_healthy', Mock())
