@@ -151,3 +151,30 @@ class TestTheDashboardSweepClassifier:
         is a fault in the sweep or the server, never a configuration answer."""
         assert not self._verdict(
             [{"route": "/api/x", "status": 401, "body": "Unauthorized"}]).ok
+
+
+def test_the_redirected_home_keeps_the_real_model_cache(tmp_path):
+    """On a slow line the boot re-downloaded the embedding model into the temp
+    home and the scripted `remember` missed its deadline (seen on the owner's PC)."""
+    from tools.smoke import model_cache_env
+    assert model_cache_env({}, home=tmp_path) == {"HF_HOME": str(tmp_path / ".cache" / "huggingface")}
+    assert model_cache_env({"HF_HOME": "D:/models"}, home=tmp_path) == {}, "a cache you chose is kept"
+
+
+def test_the_boot_hands_apex_the_real_model_cache(monkeypatch, tmp_path):
+    from pathlib import Path
+    import tools.smoke as smoke
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def popen(*args, env=None, **kwargs):
+        seen.update(env)
+        raise Stop
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.setattr(smoke.subprocess, "Popen", popen)
+    with pytest.raises(Stop):
+        smoke.boot()
+    assert seen["HF_HOME"] == str(Path.home() / ".cache" / "huggingface")
+    assert seen["HOME"] != str(Path.home()), "HOME itself is still redirected"
