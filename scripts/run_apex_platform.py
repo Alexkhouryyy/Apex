@@ -97,38 +97,61 @@ def main(argv=None):
     normal['APEX_PLATFORM_ID'] = offline['APEX_PLATFORM_ID'] = platform_id
     offline['APEX_LAUNCH_ID'] = uuid.uuid4().hex
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    children = []
+    children = []          # (name, process) still running
+    ready = []             # names that became healthy
     nomad = None
     try:
         if not args.no_nomad:
             nomad = start_cached_nomad(Path(offline['APEX_APOCALYPSE_HOME']))
+        offline_url = f'http://127.0.0.1:{offline_port}'
+        # Each service starts and fails on its own: Celine's voice model failing
+        # to load on the GPU must not take the working Apocalypse library down
+        # with it, and the other way round.
         child = spawn([str(ROOT / 'scripts/run_apex_apocalypse.py')], offline)
         children.append(('Apocalypse', child))
-        offline_url = f'http://127.0.0.1:{offline_port}'
-        launcher.wait_healthy(opener, offline_url+'/health',
-            lambda h: h.get('service') == 'apex' and h.get('launch_id') == offline['APEX_LAUNCH_ID']
-            and h.get('platform_id') == platform_id and h.get('agent_ready') is True,
-            children, 'Apocalypse dashboard', 240)
-        print('Apocalypse: ready. '+offline_url+'/apocalypse', flush=True)
+        try:
+            launcher.wait_healthy(opener, offline_url+'/health',
+                lambda h: h.get('service') == 'apex' and h.get('launch_id') == offline['APEX_LAUNCH_ID']
+                and h.get('platform_id') == platform_id and h.get('agent_ready') is True,
+                [('Apocalypse', child)], 'Apocalypse dashboard', 240)
+            ready.append('Apocalypse')
+            print('Apocalypse: ready. '+offline_url+'/apocalypse', flush=True)
+        except RuntimeError as exc:
+            print(f'Apocalypse: did not start ({exc}). Apex continues without it.', flush=True)
+            stop_owned(child)
+            children.remove(('Apocalypse', child))
         if not args.offline_only:
             child = spawn([str(ROOT / 'scripts/run_apex_qwen.py'), '--fast', '--resident'], normal)
             children.append(('Apex + Celine', child))
-            launcher.wait_healthy(opener, normal_url+'/health',
-                lambda h: h.get('service') == 'apex' and h.get('platform_id') == platform_id
-                and h.get('agent_ready') is True, children, 'Apex + Celine', 1200)
-            print('Apex + Celine: ready. '+normal_url+'/home', flush=True)
-            print('Companion: '+normal_url+'/companion · enable Voice mode for browser audio access.', flush=True)
+            try:
+                launcher.wait_healthy(opener, normal_url+'/health',
+                    lambda h: h.get('service') == 'apex' and h.get('platform_id') == platform_id
+                    and h.get('agent_ready') is True, [('Apex + Celine', child)], 'Apex + Celine', 1200)
+                ready.append('Apex + Celine')
+                print('Apex + Celine: ready. '+normal_url+'/home', flush=True)
+                print('Companion: '+normal_url+'/companion · enable Voice mode for browser audio access.', flush=True)
+            except RuntimeError as exc:
+                print(f'Apex + Celine: did not start ({exc}).'
+                      + (' Apocalypse remains available.' if ready else ''), flush=True)
+                stop_owned(child)
+                children.remove(('Apex + Celine', child))
+        if not ready:
+            raise RuntimeError('No Apex service started. See the messages above.')
         if args.open:
-            webbrowser.open(offline_url+'/apocalypse')
-            if not args.offline_only:
+            if 'Apocalypse' in ready:
+                webbrowser.open(offline_url+'/apocalypse')
+            if 'Apex + Celine' in ready:
                 webbrowser.open(normal_url+'/home')
-        print('Prepared dashboards are ready. Account authorization and offline readers have their own readiness checks.', flush=True)
+        print('Ready: '+', '.join(ready)+'. Account authorization and offline readers have their own readiness checks.', flush=True)
         print('No model, book, course or map downloads were started. Keep this console open; Ctrl+C stops its Apex services.', flush=True)
         nomad_announced = args.no_nomad or nomad is None
-        while True:
-            for name, process in children:
+        while children:
+            for name, process in list(children):
                 if process.poll() is not None:
-                    raise RuntimeError(f'{name} stopped (exit {process.returncode}). Other owned Apex services will stop too.')
+                    children.remove((name, process))
+                    others = ', '.join(n for n, _ in children)
+                    print(f'{name} stopped (exit {process.returncode}).'
+                          + (f' {others} keeps running.' if others else ''), flush=True)
             if not nomad_announced:
                 if nomad.poll() not in (None, 0):
                     print('NOMAD: startup failed. Apex remains available; inspect the Docker output above.', flush=True)
@@ -137,6 +160,7 @@ def main(argv=None):
                     print('NOMAD Command Center: ready. http://127.0.0.1:8080 · check each reader and its content inside.', flush=True)
                     nomad_announced = True
             time.sleep(1)
+        raise RuntimeError('Every Apex service has stopped.')
     finally:
         for _, process in reversed(children):
             stop_owned(process)

@@ -25,7 +25,8 @@ def launcher(tmp_path, monkeypatch):
     python.parent.mkdir(parents=True)
     python.touch()
     monkeypatch.setattr(module, 'port_in_use', lambda *args: False)
-    monkeypatch.setattr(module, 'launch_environment', lambda: {'APEX_SUPERVISED': '1'})
+    monkeypatch.setattr(module, 'launch_environment', lambda *a: {'APEX_SUPERVISED': '1'})
+    monkeypatch.setattr(module, 'voice_health', lambda opener: {})
     monkeypatch.setattr(module.time, 'sleep', lambda seconds: None)
     return module
 
@@ -64,15 +65,13 @@ def test_full_start_checks_own_dashboard_and_opens_companion(launcher, monkeypat
     children, spawn = child_factory(launcher, monkeypatch, [0])
 
     def health(opener, url, accept, processes, label, timeout):
-        if label == 'Apex dashboard':
-            launch_id = spawn.call_args.kwargs['env']['APEX_LAUNCH_ID']
-            assert not accept({'service': 'apex', 'pid': 101, 'agent_ready': True})
-            assert not accept({'service': 'apex', 'launch_id': 'another-launch', 'agent_ready': True})
-            assert not accept({'service': 'apex', 'launch_id': launch_id, 'agent_ready': False})
-            assert accept({'service': 'apex', 'pid': 999, 'launch_id': launch_id, 'agent_ready': True})
-        else:
-            assert not accept({'service': 'apex-qwen', 'model_loaded': False})
-            assert accept({'service': 'apex-qwen', 'model_loaded': True})
+        assert label == 'Apex dashboard', 'Apex never waits for the voice'
+        assert [name for name, _ in processes] == ['Apex'], 'a voice failure cannot abort the Apex wait'
+        launch_id = spawn.call_args.kwargs['env']['APEX_LAUNCH_ID']
+        assert not accept({'service': 'apex', 'pid': 101, 'agent_ready': True})
+        assert not accept({'service': 'apex', 'launch_id': 'another-launch', 'agent_ready': True})
+        assert not accept({'service': 'apex', 'launch_id': launch_id, 'agent_ready': False})
+        assert accept({'service': 'apex', 'pid': 999, 'launch_id': launch_id, 'agent_ready': True})
 
     monkeypatch.setattr(launcher, 'wait_healthy', health)
     browser = Mock()
@@ -87,7 +86,7 @@ def test_full_start_checks_own_dashboard_and_opens_companion(launcher, monkeypat
 
 def test_dashboard_failure_stops_both_children_without_ready_message(launcher, monkeypatch, capsys):
     children, _ = child_factory(launcher, monkeypatch, [None])
-    monkeypatch.setattr(launcher, 'wait_healthy', Mock(side_effect=[None, RuntimeError('dashboard failed')]))
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock(side_effect=[RuntimeError('dashboard failed')]))
     with pytest.raises(RuntimeError, match='dashboard failed'):
         launcher.main(['--fast', '--resident'])
     assert all(p.terminated for p in children)
@@ -96,29 +95,70 @@ def test_dashboard_failure_stops_both_children_without_ready_message(launcher, m
 
 def test_interrupt_stops_both_owned_processes(launcher, monkeypatch):
     children, _ = child_factory(launcher, monkeypatch, [None])
-    monkeypatch.setattr(launcher, 'wait_healthy', Mock(side_effect=[None, KeyboardInterrupt()]))
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock(side_effect=[KeyboardInterrupt()]))
     with pytest.raises(KeyboardInterrupt):
         launcher.main(['--fast', '--resident'])
     assert all(p.terminated for p in children)
 
 
-def test_voice_crash_stops_agent(launcher, monkeypatch):
-    children, _ = child_factory(launcher, monkeypatch, [None])
-    children[0].returncode = 9
+def test_a_voice_crash_keeps_apex_running(launcher, monkeypatch, capsys):
+    children, _ = child_factory(launcher, monkeypatch, [0])
+    children[0].returncode = 9                       # Celine's server died (e.g. out of GPU memory)
     monkeypatch.setattr(launcher, 'wait_healthy', Mock())
-    with pytest.raises(RuntimeError, match='Celine voice stopped'):
-        launcher.main(['--fast', '--resident'])
-    assert children[1].terminated
+    assert launcher.main(['--fast', '--resident']) == 0, 'Apex ran until it exited by itself'
+    assert not children[1].terminated
+    out = capsys.readouterr().out
+    assert 'Celine voice stopped (exit 9)' in out and 'Apex keeps running' in out
+
+
+def test_voice_ready_is_announced_without_ever_blocking_apex(launcher, monkeypatch, capsys):
+    child_factory(launcher, monkeypatch, [0])
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock())
+    monkeypatch.setattr(launcher, 'voice_health', lambda opener: {'service': 'apex-qwen', 'model_loaded': True})
+    assert launcher.main(['--fast', '--resident']) == 0
+    assert 'Celine voice: ready.' in capsys.readouterr().out
+
+
+def test_no_voice_environment_still_starts_apex_with_your_own_voice_settings(launcher, monkeypatch, capsys, tmp_path):
+    (tmp_path / 'apex-qwen-fast-env/Scripts/python.exe').unlink()
+    agent = Process(101, 0)
+    spawn = Mock(side_effect=[agent])
+    monkeypatch.setattr(launcher.subprocess, 'Popen', spawn)
+    calls = []
+    monkeypatch.setattr(launcher, 'launch_environment', lambda *a: calls.append(a) or {'APEX_SUPERVISED': '1'})
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock())
+    assert launcher.main(['--fast', '--resident']) == 0
+    assert spawn.call_count == 1 and spawn.call_args.args[0][-1] == '--resident', 'only Apex was started'
+    assert calls[-1] == (False,), "TTS settings from .env are kept when there is no local voice"
+    assert 'Celine voice: not installed' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('health, local, says', [
+    ({'service': 'apex-qwen', 'model_loaded': True}, True, 'already running'),
+    ({}, False, 'used by another program'),
+])
+def test_an_occupied_voice_port_is_reused_or_skipped(launcher, monkeypatch, capsys, health, local, says):
+    agent = Process(101, 0)
+    spawn = Mock(side_effect=[agent])
+    monkeypatch.setattr(launcher.subprocess, 'Popen', spawn)
+    monkeypatch.setattr(launcher, 'port_in_use', lambda port, host='127.0.0.1': port == 17494)
+    monkeypatch.setattr(launcher, 'voice_health', lambda opener: health)
+    calls = []
+    monkeypatch.setattr(launcher, 'launch_environment', lambda *a: calls.append(a) or {'APEX_SUPERVISED': '1'})
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock())
+    assert launcher.main(['--fast', '--resident']) == 0
+    assert spawn.call_count == 1 and calls[-1] == (local,)
+    assert says in capsys.readouterr().out
 
 
 def test_dashboard_opt_out_skips_browser_and_health_check(launcher, monkeypatch):
     child_factory(launcher, monkeypatch, [0])
-    monkeypatch.setattr(launcher, 'launch_environment', lambda: {'DASHBOARD_ENABLED': 'false'})
+    monkeypatch.setattr(launcher, 'launch_environment', lambda *a: {'DASHBOARD_ENABLED': 'false'})
     health, browser = Mock(), Mock()
     monkeypatch.setattr(launcher, 'wait_healthy', health)
     monkeypatch.setattr(launcher.webbrowser, 'open', browser)
     assert launcher.main(['--fast', '--resident', '--open']) == 0
-    assert health.call_count == 1  # Only the voice service.
+    assert health.call_count == 0  # Nothing waits: no dashboard, and never the voice.
     browser.assert_not_called()
 
 
@@ -275,7 +315,7 @@ def test_windows_shutdown_failure_is_reported(launcher, monkeypatch):
 
 def test_voice_cleanup_still_runs_if_agent_cleanup_fails(launcher, monkeypatch):
     children, _ = child_factory(launcher, monkeypatch, [None])
-    monkeypatch.setattr(launcher, 'wait_healthy', Mock(side_effect=[None, RuntimeError('startup failed')]))
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock(side_effect=[RuntimeError('startup failed')]))
     stop = Mock(side_effect=[RuntimeError('cannot stop agent'), None])
     monkeypatch.setattr(launcher, 'stop', stop)
     with pytest.raises(RuntimeError, match='cannot stop agent'):
@@ -350,3 +390,25 @@ server.server_close()
             while module.port_in_use(child['port']) and time.monotonic() < deadline:
                 time.sleep(.05)
             assert not module.port_in_use(child['port'])
+
+
+def test_every_launcher_shares_one_set_of_defaults(tmp_path, monkeypatch):
+    """Start-Apex-All, the sign-in launcher and start-apex.bat used to differ."""
+    from scripts import launch_defaults, start_screen_companion as startup
+    spec = importlib.util.spec_from_file_location('apex_launcher_defaults',
+        Path(__file__).resolve().parents[1] / 'scripts/run_apex_qwen.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for name in launch_defaults.DEFAULTS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(module, 'ROOT', tmp_path)
+    monkeypatch.setattr(startup, 'ROOT', tmp_path)
+    (tmp_path / '.env').write_text('DASHBOARD_PORT=8123\n')
+    qwen, login = module.launch_environment(), startup.environment()
+    for name, value in launch_defaults.DEFAULTS.items():
+        assert qwen[name] == login[name] == value
+    assert qwen['COMPANION_DESKTOP_ENABLED'] == 'true' and qwen['CELINE_WAKE_ENABLED'] == 'false'
+    supervisor_env = launch_defaults.apply({}, keys=set())
+    assert supervisor_env == launch_defaults.DEFAULTS
+    assert launch_defaults.apply({}, keys={'CELINE_WAKE_ENABLED'}).get('CELINE_WAKE_ENABLED') is None, \
+        'a value in .env is left for config.py to read'

@@ -63,20 +63,51 @@ def test_busy_port_changes_nothing(rig,monkeypatch):
     platform.start_cached_nomad.assert_not_called()
 
 
-def test_second_service_startup_failure_cleans_up_both(rig,monkeypatch):
+def test_apex_failing_to_start_keeps_the_apocalypse_library_running(rig,monkeypatch,capsys):
+    """Celine's voice model failing on the GPU once shut the working library down too."""
     children,stopped=rig
     monkeypatch.setattr(platform.launcher,'wait_healthy',Mock(side_effect=[None,RuntimeError('not ready')]))
-    with pytest.raises(RuntimeError,match='not ready'):platform.main([])
-    assert len(children)==2 and stopped==children[::-1]
+    with pytest.raises(KeyboardInterrupt):platform.main([])         # still running until Ctrl+C
+    out=capsys.readouterr().out
+    assert 'Apex + Celine: did not start (not ready). Apocalypse remains available.' in out
+    assert 'Ready: Apocalypse.' in out
+    assert stopped==[children[1],children[0]],'the failed one at once, the library only at Ctrl+C'
 
 
-def test_service_crash_stops_remaining_owned_service(rig,monkeypatch):
+def test_apocalypse_failing_to_start_still_starts_apex(rig,monkeypatch,capsys):
+    children,stopped=rig
+    monkeypatch.setattr(platform.launcher,'wait_healthy',Mock(side_effect=[RuntimeError('no library'),None]))
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    out=capsys.readouterr().out
+    assert 'Apocalypse: did not start (no library). Apex continues without it.' in out and 'Ready: Apex + Celine.' in out
+    assert len(children)==2
+
+
+def test_nothing_starting_is_an_error(rig,monkeypatch):
+    children,stopped=rig
+    monkeypatch.setattr(platform.launcher,'wait_healthy',Mock(side_effect=RuntimeError('down')))
+    with pytest.raises(RuntimeError,match='No Apex service started'):platform.main([])
+    assert stopped==children
+
+
+def test_a_service_crash_leaves_the_other_running(rig,monkeypatch,capsys):
     children,stopped=rig
     def health(*a):
         if len(children)==2:children[0].poll.return_value=7
     monkeypatch.setattr(platform.launcher,'wait_healthy',health)
-    with pytest.raises(RuntimeError,match='Apocalypse stopped'):platform.main([])
-    assert stopped==children[::-1]
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    assert 'Apocalypse stopped (exit 7). Apex + Celine keeps running.' in capsys.readouterr().out
+    assert stopped==[children[1]],'only the one still running is stopped at Ctrl+C'
+
+
+def test_when_every_service_has_stopped_the_launcher_exits(rig,monkeypatch):
+    children,stopped=rig
+    monkeypatch.setattr(platform.time,'sleep',lambda s:None)
+    def health(*a):
+        if len(children)==2:
+            children[0].poll.return_value=7; children[1].poll.return_value=3
+    monkeypatch.setattr(platform.launcher,'wait_healthy',health)
+    with pytest.raises(RuntimeError,match='Every Apex service has stopped'):platform.main([])
 
 
 @pytest.mark.parametrize('missing', ['engine','images',None])

@@ -431,6 +431,10 @@ def main():
         shutdown_event.set()
         if monitor is not None:
             monitor.stop()
+        from agent import handtrack as _ht_stop
+        _hands = _ht_stop.active_tracker()
+        if monitor is None and _hands is not None:
+            _hands.stop()
         try:
             longterm.end_session(session_id, summary=agent.memory.summary)
         except Exception:
@@ -461,6 +465,13 @@ def main():
     wake_event = threading.Event()
     # Gestures (wave / pinch-hold / swipe-down). resident.py wires its own.
     _tracker = getattr(monitor, "handtrack", None) if monitor else None
+    _standalone_hands = False
+    if monitor is None and getattr(config, "HANDTRACK_ENABLED", False):
+        # Hands do not depend on awareness: AWARENESS_ENABLED=false used to
+        # switch them off without a word.
+        from agent import handtrack as _handtrack
+        _tracker = _handtrack.start_standalone(start=False)
+        _standalone_hands = _tracker is not None
     if _tracker is not None and _tracker.on_gesture is None:
         _mode = ("tui" if args.tui else "text" if args.text
                  else "wake" if args.wake else "voice")
@@ -469,6 +480,8 @@ def main():
 
     if monitor is not None:
         monitor.start()
+    if _standalone_hands:
+        _handtrack.start_tracker(_tracker)
 
     # Look now: Ctrl+Alt+C / "Hey Celly" -> Celine looks at the screen and
     # helps, through the open companion page (agent/look_now.py). Needs the

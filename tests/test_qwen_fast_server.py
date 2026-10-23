@@ -167,7 +167,7 @@ def test_pcm16_clips_instead_of_wrapping():
     assert list(out) == [32767, -32767, 0]
 
 
-def test_the_fast_launcher_uses_the_fast_environment_and_server(tmp_path, monkeypatch):
+def test_the_fast_launcher_uses_the_fast_environment_and_server(tmp_path, monkeypatch, capsys):
     """--fast must start qwen_fast_server.py in apex-qwen-fast-env, and say
     how to get that environment when it is missing."""
     spec2 = importlib.util.spec_from_file_location("run_apex_qwen_t", ROOT / "scripts" / "run_apex_qwen.py")
@@ -175,10 +175,26 @@ def test_the_fast_launcher_uses_the_fast_environment_and_server(tmp_path, monkey
     spec2.loader.exec_module(launcher)
     monkeypatch.setattr(launcher.Path, "home", staticmethod(lambda: tmp_path))
     import pytest
-    with pytest.raises(RuntimeError, match="apex-qwen-fast-env.*Test-Apex-Fast-Voice"):
-        launcher.main(["--fast"])
-    with pytest.raises(RuntimeError, match="apex-qwen-env"):
-        launcher.main([])
+    # A missing voice environment no longer stops the launcher: it says how to
+    # install it and starts Apex without the local voice.
+    started, chosen = [], []
+    monkeypatch.setattr(launcher, "port_in_use", lambda *a: False)
+    def start_voice(python, server, opener):
+        chosen.append((python, server))
+        raise KeyboardInterrupt          # stop before any real process starts
+    monkeypatch.setattr(launcher, "start_voice", start_voice)
+    for argv in (["--fast"], []):
+        with pytest.raises(KeyboardInterrupt):
+            launcher.main(argv)
+    assert chosen[0] == (tmp_path / "apex-qwen-fast-env" / "Scripts" / "python.exe", "scripts/qwen_fast_server.py")
+    assert chosen[1] == (tmp_path / "apex-qwen-env" / "Scripts" / "python.exe", "scripts/qwen_server.py")
+    spec3 = importlib.util.spec_from_file_location("run_apex_qwen_t2", ROOT / "scripts" / "run_apex_qwen.py")
+    real = importlib.util.module_from_spec(spec3)
+    spec3.loader.exec_module(real)
+    voice, local = real.start_voice(chosen[0][0], chosen[0][1], None)
+    assert voice is None and local is False, "missing: nothing started, Apex keeps its own voice settings"
+    out = capsys.readouterr().out
+    assert "apex-qwen-fast-env" in out and "Test-Apex-Fast-Voice" in out and "Apex starts without it" in out
     src = (ROOT / "scripts" / "run_apex_qwen.py").read_text()
     assert "'scripts/qwen_fast_server.py'" in src
     cmd = (ROOT / "Start-Apex-Celine-Fast.cmd").read_text()

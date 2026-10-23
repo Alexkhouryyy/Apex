@@ -1305,6 +1305,37 @@ def _handedness_label(result, idx: int) -> str:
 _active: Optional[HandTracker] = None
 
 
+def start_standalone(log=None, *, start=True) -> Optional[HandTracker]:
+    """Hand tracking without the awareness monitor.
+
+    The tracker used to exist only inside agent/awareness.AwarenessMonitor, so
+    turning awareness off silently turned your hands off too. The startup paths
+    call this when HANDTRACK_ENABLED is on and there is no monitor: the same
+    tracker, sharing frames with camera_capture, with its own small event log."""
+    import config
+    if not getattr(config, "HANDTRACK_ENABLED", False):
+        return None
+    if log is None:
+        from agent.awareness import AwarenessLog
+        log = AwarenessLog()
+    tracker = HandTracker(log)
+    set_active_tracker(tracker)
+    if start:
+        start_tracker(tracker)
+    return tracker
+
+
+def start_tracker(tracker: HandTracker) -> None:
+    """Start a standalone tracker (after its gesture handler is wired)."""
+    tracker.start()
+    try:
+        from tools import camera as _cam
+        _cam.set_tracker_frame_source(tracker.latest_frame)
+    except Exception as e:
+        print(f"[HandTrack] could not share frames with camera_capture: {e}")
+    print("[HandTrack] Hand tracking on, without the awareness monitor.")
+
+
 def set_active_tracker(tracker: Optional[HandTracker]) -> None:
     global _active
     _active = tracker

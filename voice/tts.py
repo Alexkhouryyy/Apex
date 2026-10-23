@@ -38,7 +38,7 @@ def speak(text: str, interruptible: bool = True) -> bool:
 
         try:
             if config.TTS_ENGINE == "voicebox":
-                _speak_voicebox(text)
+                _speak_voicebox_or_fallback(text)
             elif config.TTS_ENGINE == "openai" and config.OPENAI_API_KEY:
                 _speak_openai(text)
             elif config.TTS_ENGINE == "elevenlabs" and config.ELEVENLABS_API_KEY:
@@ -102,6 +102,29 @@ def _speak_elevenlabs(text: str) -> None:
         capture_output=True,
     )
     if proc.returncode != 0:
+        _speak_pyttsx3(text)
+
+
+_fallback_noted = False
+
+
+def _speak_voicebox_or_fallback(text):
+    """Celine's local voice when it answers; this PC's own voice when it doesn't.
+
+    The local server can be warming up, out of GPU memory or stopped. Saying the
+    reply in the system voice beats saying nothing, which is what an exception
+    here used to mean."""
+    global _fallback_noted
+    try:
+        _speak_voicebox(text)
+        _fallback_noted = False
+    except Exception as exc:
+        if interrupt_mod.is_interrupted():
+            return
+        if not _fallback_noted:
+            print(f"[TTS] Celine's voice is unavailable ({type(exc).__name__}: {str(exc)[:120]}); "
+                  "using this PC's own voice until it answers again.")
+            _fallback_noted = True
         _speak_pyttsx3(text)
 
 

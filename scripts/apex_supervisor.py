@@ -48,6 +48,10 @@ def run(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:]) or ["--resident"]
     env = dict(os.environ)
     env[SUPERVISOR_ENV] = "1"
+    # The same defaults as every other launcher; config.py still reads .env, so
+    # only names .env leaves unset are filled in.
+    from scripts import launch_defaults
+    launch_defaults.apply(env)
 
     starts: list[float] = []
     while True:
