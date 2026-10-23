@@ -292,11 +292,12 @@ def test_the_model_is_told_whose_screen_it_is(monkeypatch, test_db):
     assert "same screen your click" not in seen["system"]
 
 
-def test_the_launcher_turns_the_wake_phrase_on_unless_env_says_otherwise():
+def test_the_launcher_leaves_the_wake_phrase_off_unless_env_turns_it_on():
     spec = importlib.util.spec_from_file_location("run_apex_qwen_l", ROOT / "scripts" / "run_apex_qwen.py")
     launcher = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(launcher)
-    assert launcher.apply_wake_default({}, dotenv_keys=set())["CELINE_WAKE_ENABLED"] == "true"
-    assert "CELINE_WAKE_ENABLED" not in launcher.apply_wake_default({}, dotenv_keys={"CELINE_WAKE_ENABLED"}), \
-        ".env must be able to turn it off"
-    assert launcher.apply_wake_default({"CELINE_WAKE_ENABLED": "false"}, dotenv_keys=set())["CELINE_WAKE_ENABLED"] == "false"
+    assert launcher.apply_launch_defaults({}, dotenv_keys=set())["CELINE_WAKE_ENABLED"] == "false", \
+        "hotkeys start a request; no microphone listens unless asked"
+    assert "CELINE_WAKE_ENABLED" not in launcher.apply_launch_defaults({}, dotenv_keys={"CELINE_WAKE_ENABLED"}), \
+        ".env decides when it says"
+    assert launcher.apply_launch_defaults({"CELINE_WAKE_ENABLED": "true"}, dotenv_keys=set())["CELINE_WAKE_ENABLED"] == "true"

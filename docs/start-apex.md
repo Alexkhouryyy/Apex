@@ -24,18 +24,37 @@ Start-Apex-All.cmd
 First stop any older launcher with Ctrl+C, or quit resident Apex from its tray.
 The new launcher refuses to take over occupied ports or stop unrelated servers.
 
-This starts the fast local Qwen Celine voice service, then Apex resident mode:
-the dashboard (Home, Apps, Screen Companion and Spatial Workspace), tray,
-hotkeys, scheduler, memory, enabled awareness features and configured MCP
-discovery. Existing feature switches remain in effect. Celine wake listening
-defaults on unless you explicitly disabled it in `.env` or the environment.
-Resident mode shares one listener for Apex and Celine wake phrases.
+This starts Apex resident mode right away (the dashboard with Home, Apps,
+Screen Companion and Spatial Workspace, tray, hotkeys, scheduler, memory,
+enabled awareness features and configured MCP discovery) and warms the fast
+local Qwen Celine voice in the background.
 
-The launcher waits for the voice model and the dashboard's health response
-from the newly started Apex process before reporting them ready. Other
-services still depend on their own settings, credentials and hardware; their
-startup diagnostics are in `%USERPROFILE%\.apex\resident.log` (or your configured
-`RESIDENT_LOG_FILE`). A healthy dashboard does not certify every integration.
+**One failure doesn't stop everything.** Apex never waits for Celine's voice.
+If the voice model can't load (for example the GPU is out of memory or Windows
+reports a paging-file error), or the voice environment isn't installed, the
+console says so and Apex keeps running: replies are spoken with the PC's own
+voice until Celine's server answers. `Start-Apex-Platform.cmd` treats Apex and
+the offline Apocalypse service the same way: if one fails to start or stops,
+the other keeps running.
+
+**Every launcher has the same defaults** (`scripts/launch_defaults.py`):
+`Start-Apex-All.cmd`, the sign-in launcher and `start-apex.bat` all start with
+the desktop Companion on and no wake phrase listening (hotkeys F8 and
+Ctrl+Alt+C start requests). `.env` or the environment overrides any of them,
+for example `CELINE_WAKE_ENABLED=true` for "Hey Celly". Hand tracking
+(`HANDTRACK_ENABLED=true`) no longer depends on `AWARENESS_ENABLED`.
+
+**Celine knows what is running.** Every turn, her prompt lists which controls
+are live (desktop Companion and its hotkeys, hand tracking, her voice state,
+wake phrases, awareness), so she doesn't deny a control that exists, and she
+says how to turn on one that's off.
+
+The launcher waits for the dashboard's health response from the newly started
+Apex process before reporting it ready, and announces "Celine voice: ready."
+when the voice model has loaded. Other services still depend on their own
+settings, credentials and hardware; their startup diagnostics are in
+`%USERPROFILE%\.apex\resident.log` (or your configured `RESIDENT_LOG_FILE`).
+A healthy dashboard does not certify every integration.
 
 On Windows, a unique launch identifier links the health response to this start;
 the Python virtual environment's launcher can have a different process ID from

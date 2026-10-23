@@ -23,13 +23,11 @@ def environment():
     from dotenv import dotenv_values
     env = {k: v for k, v in dotenv_values(ROOT / '.env').items() if v is not None}
     env.update(os.environ)
-    env['COMPANION_DESKTOP_ENABLED'] = 'true'
     env['DASHBOARD_ENABLED'] = 'true'  # native voice and screen help use this local backend
-    # Hotkey-first does not turn on ambient microphone listeners. Explicit
-    # existing wake settings are retained, rather than changing the user's file.
-    env.setdefault('CELINE_WAKE_ENABLED', 'false')
-    env.setdefault('WAKE_WORD_ENABLED', 'false')
-    return env
+    # The same defaults as every other launcher (desktop Companion on, wake
+    # phrases off); anything .env or the environment sets is kept.
+    from scripts import launch_defaults
+    return launch_defaults.apply(env, set())
 
 
 def attach(env):

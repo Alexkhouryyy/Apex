@@ -3575,6 +3575,16 @@ def time_block(now=None) -> str:
     )
 
 
+def _live_status() -> str:
+    """Which parts of Apex are running now (agent/live_status.py); never fails a turn."""
+    try:
+        from agent import live_status
+        return live_status.status_block()
+    except Exception as e:
+        print(f"[Status] live status unavailable: {e}")
+        return ""
+
+
 class AgentCore:
     def __init__(self):
         from agent import apocalypse
@@ -3737,6 +3747,7 @@ class AgentCore:
             text += '\n' + continuity.prompt(max_field_chars=600)
             text += "\nUser profile:\n" + self._memory_files.get('user', '')[:1375]
             text += "\n" + goals.active_goals_for_prompt()[:1000] + "\n" + time_block()
+            text += "\n" + _live_status()
             return [{'type': 'text', 'text': text}]
         blocks: list[dict] = []
         # Persona — prepended so character rules take highest priority. Celine
@@ -3811,6 +3822,9 @@ class AgentCore:
         if project_context:
             blocks.append({"type": "text", "text": project_context})
         blocks.append({"type": "text", "text": time_block()})
+        live = _live_status()
+        if live:
+            blocks.append({"type": "text", "text": live})
         return blocks
 
     def _get_channel(self, channel_id: str | None) -> tuple[Memory, threading.Lock]:

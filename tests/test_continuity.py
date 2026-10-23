@@ -342,3 +342,16 @@ def test_code_projects_keep_a_handoff_and_rules_without_a_board_workspace(test_d
             continuity.save_corrections('default', bad, 1)
         with pytest.raises(ValueError):
             continuity.save_code_corrections(3, bad, 2)
+
+
+def test_every_persona_is_told_what_is_running_now(isolated, monkeypatch):
+    """Celine once denied having controls the code gave her."""
+    from agent import core, goals, live_status
+    goals.init_db()
+    monkeypatch.setattr(config, 'ANTHROPIC_API_KEY', 'fake')
+    monkeypatch.setattr(live_status, 'status_block', lambda: '## WHAT IS RUNNING RIGHT NOW\n- probe')
+    agent = core.AgentCore()
+    for persona in (None, 'celine'):
+        blocks = agent._effective_system_prompt(persona)
+        assert blocks[-1]['text'].startswith('## WHAT IS RUNNING RIGHT NOW'), 'last, in the volatile tail'
+        assert 'CURRENT DATE AND TIME' in blocks[-2]['text']

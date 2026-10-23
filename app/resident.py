@@ -469,9 +469,13 @@ def run_resident(model_override: Optional[str] = None) -> None:
             if src is not None:
                 src.on_gesture = _on_gesture
             else:
-                logging.warning(
-                    "Hand tracking is enabled but no watcher is running — "
-                    "gestures will not be seen (is AWARENESS_ENABLED off?).")
+                # Hands do not depend on awareness: start the tracker on its own.
+                from agent import handtrack as _handtrack
+                src = _handtrack.start_standalone(start=False)
+                if src is not None:
+                    src.on_gesture = _on_gesture
+                    _handtrack.start_tracker(src)
+                    logging.info("Hand tracking started without the awareness monitor.")
         except Exception as e:
             logging.error(f"gesture wiring failed: {e}")
 
@@ -562,6 +566,13 @@ def run_resident(model_override: Optional[str] = None) -> None:
         if awareness_monitor is not None:
             try:
                 awareness_monitor.stop()
+            except Exception:
+                pass
+        else:
+            try:
+                from agent import handtrack as _ht_stop
+                if _ht_stop.active_tracker() is not None:
+                    _ht_stop.active_tracker().stop()   # a standalone tracker holds the webcam
             except Exception:
                 pass
         if wake_listener:
