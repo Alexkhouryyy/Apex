@@ -428,8 +428,8 @@ def report_hand_tracking(monitor) -> str:
     if not getattr(config, "HANDTRACK_ENABLED", False):
         return ""
     if monitor is None:
-        line = ("[HandTrack] Hand tracking is enabled but the awareness monitor "
-                "is not running, so it is OFF. Set AWARENESS_ENABLED=true.")
+        line = ("[HandTrack] Awareness is off, so hand tracking starts on its own "
+                "(Apex's own camera tracker, no browser needed).")
     elif getattr(monitor, "handtrack", None) is not None:
         line = ("[HandTrack] Hand tracking on — Apex's own camera tracker, "
                 "no browser needed.")

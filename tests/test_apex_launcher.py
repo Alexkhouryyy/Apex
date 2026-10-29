@@ -10,6 +10,7 @@ import time
 from unittest.mock import Mock
 
 import pytest
+from types import SimpleNamespace
 
 
 @pytest.fixture
@@ -392,23 +393,130 @@ server.server_close()
             assert not module.port_in_use(child['port'])
 
 
-def test_every_launcher_shares_one_set_of_defaults(tmp_path, monkeypatch):
-    """Start-Apex-All, the sign-in launcher and start-apex.bat used to differ."""
-    from scripts import launch_defaults, start_screen_companion as startup
+def test_no_launcher_injects_feature_defaults(tmp_path, monkeypatch):
+    """Defaults live in config.py. A launcher that injected them into the
+    environment made them beat a setting saved in .env before a dashboard
+    Restart (load_dotenv never overrides the environment)."""
+    from scripts import start_screen_companion as startup
     spec = importlib.util.spec_from_file_location('apex_launcher_defaults',
         Path(__file__).resolve().parents[1] / 'scripts/run_apex_qwen.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    for name in launch_defaults.DEFAULTS:
+    names = ('COMPANION_DESKTOP_ENABLED', 'CELINE_WAKE_ENABLED', 'WAKE_WORD_ENABLED')
+    for name in names:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(module, 'ROOT', tmp_path)
     monkeypatch.setattr(startup, 'ROOT', tmp_path)
     (tmp_path / '.env').write_text('DASHBOARD_PORT=8123\n')
-    qwen, login = module.launch_environment(), startup.environment()
-    for name, value in launch_defaults.DEFAULTS.items():
-        assert qwen[name] == login[name] == value
-    assert qwen['COMPANION_DESKTOP_ENABLED'] == 'true' and qwen['CELINE_WAKE_ENABLED'] == 'false'
-    supervisor_env = launch_defaults.apply({}, keys=set())
-    assert supervisor_env == launch_defaults.DEFAULTS
-    assert launch_defaults.apply({}, keys={'CELINE_WAKE_ENABLED'}).get('CELINE_WAKE_ENABLED') is None, \
-        'a value in .env is left for config.py to read'
+    for env in (module.launch_environment(), startup.environment()):
+        assert not any(name in env for name in names)
+    from scripts import apex_supervisor
+    seen = {}
+    monkeypatch.setattr(apex_supervisor.subprocess, 'run',
+                        lambda argv, cwd, env: seen.update(env) or SimpleNamespace(returncode=0))
+    assert apex_supervisor.run(['--resident']) == 0
+    assert not any(name in seen for name in names)
+
+
+def test_config_holds_one_set_of_defaults(monkeypatch):
+    import importlib
+    import config as cfg
+    for name in ('COMPANION_DESKTOP_ENABLED', 'CELINE_WAKE_ENABLED', 'WAKE_WORD_ENABLED'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr('dotenv.load_dotenv', lambda *a, **k: False)
+    try:
+        fresh = importlib.reload(cfg)
+        assert fresh.COMPANION_DESKTOP_ENABLED is True
+        assert fresh.CELINE_WAKE_ENABLED is False and fresh.WAKE_WORD_ENABLED is False
+    finally:
+        monkeypatch.undo()
+        importlib.reload(cfg)
+
+
+# ---------------------------------------------------------------- what the stress test found
+
+class _Opener:
+    def __init__(self, behave):
+        self.behave = behave
+    def open(self, url, timeout=None):
+        return self.behave()
+
+
+@pytest.mark.filterwarnings('error::pytest.PytestUnhandledThreadExceptionWarning')
+@pytest.mark.parametrize('behave', [
+    lambda: (_ for _ in ()).throw(__import__('http.client').client.BadStatusLine('SSH-2.0-not-http')),
+    lambda: (_ for _ in ()).throw(__import__('http.client').client.IncompleteRead(b'x' * 23, 177)),
+    lambda: (_ for _ in ()).throw(__import__('http.client').client.LineTooLong('header line')),
+    lambda: (_ for _ in ()).throw(RuntimeError('anything at all')),
+])
+def test_no_reply_on_the_voice_port_can_crash_the_launcher(launcher, behave):
+    """A malformed reply used to escape voice_health and stop a healthy Apex."""
+    import importlib
+    spec = importlib.util.spec_from_file_location('apex_launcher_real_vh',
+        Path(__file__).resolve().parents[1] / 'scripts/run_apex_qwen.py')
+    real = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real)
+    assert real.voice_health(_Opener(behave)) == {}
+
+
+def test_a_trickling_voice_port_cannot_hang_the_launcher():
+    import time as _time
+    spec = importlib.util.spec_from_file_location('apex_launcher_real_trickle',
+        Path(__file__).resolve().parents[1] / 'scripts/run_apex_qwen.py')
+    real = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real)
+    def trickle():
+        _time.sleep(10)              # one byte at a time: never finishes in time
+    started = _time.monotonic()
+    assert real.voice_health(_Opener(trickle), deadline=0.5) == {}
+    assert _time.monotonic() - started < 2
+
+
+def test_a_damaged_voice_python_still_starts_apex(launcher, monkeypatch, capsys):
+    agent = Process(101, 0)
+    def spawn(argv, **kwargs):
+        if 'qwen' in str(argv[0]):
+            raise OSError(8, 'Exec format error')
+        return agent
+    monkeypatch.setattr(launcher.subprocess, 'Popen', spawn)
+    calls = []
+    monkeypatch.setattr(launcher, 'launch_environment', lambda *a: calls.append(a) or {'APEX_SUPERVISED': '1'})
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock())
+    assert launcher.main(['--fast', '--resident']) == 0
+    assert calls[-1] == (False,) and 'Celine voice: could not start' in capsys.readouterr().out
+
+
+def test_after_celine_dies_a_restarted_apex_no_longer_points_at_her(launcher, monkeypatch, capsys):
+    children, spawn = child_factory(launcher, monkeypatch, [42, 0])
+    children[0].returncode = 9
+    calls = []
+    monkeypatch.setattr(launcher, 'launch_environment', lambda *a: calls.append(a) or {'APEX_SUPERVISED': '1'})
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock())
+    assert launcher.main(['--fast', '--resident']) == 0
+    assert calls[-1] == (False,), 'the second Apex keeps its own voice settings'
+    out = capsys.readouterr().out
+    assert 'Restart requested.' in out and 'Keeping Celine voice warm' not in out
+
+
+def test_an_external_voice_that_stops_answering_is_reported(launcher, monkeypatch, capsys):
+    agent = Process(101)
+    polls = {'n': 0}
+    def agent_poll():
+        polls['n'] += 1
+        return 0 if polls['n'] > 40 else None
+    agent.poll = agent_poll
+    agent.returncode = 0
+    monkeypatch.setattr(launcher.subprocess, 'Popen', Mock(side_effect=[agent]))
+    monkeypatch.setattr(launcher, 'port_in_use', lambda port, host='127.0.0.1': port == 17494)
+    answers = iter([{'service': 'apex-qwen', 'model_loaded': True}] * 2 + [{}] * 50)
+    monkeypatch.setattr(launcher, 'voice_health', lambda opener: next(answers))
+    clock = {'t': 0.0}
+    def tick():
+        clock['t'] += 10
+        return clock['t']
+    monkeypatch.setattr(launcher.time, 'monotonic', tick)
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock())
+    assert launcher.main(['--fast', '--resident']) == 0
+    out = capsys.readouterr().out
+    assert 'already running; using it' in out and 'Celine voice: ready.' in out
+    assert out.count('Celine voice stopped answering') == 1

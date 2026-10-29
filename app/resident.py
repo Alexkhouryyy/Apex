@@ -244,6 +244,9 @@ def run_resident(model_override: Optional[str] = None) -> None:
             logging.info("Autonomous cortex + awareness monitor started (resident).")
         except Exception as e:
             logging.error(f"Awareness monitor failed to start in resident mode: {e}")
+            # Not running, so treat it as off: hand tracking then starts on its own
+            # below instead of staying silently off behind a dead monitor.
+            awareness_monitor = None
 
     from agent import safety as _safety_ref
     _safety_ref.set_confirm_fn(resident_confirm)

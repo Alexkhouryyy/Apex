@@ -24,10 +24,9 @@ def environment():
     env = {k: v for k, v in dotenv_values(ROOT / '.env').items() if v is not None}
     env.update(os.environ)
     env['DASHBOARD_ENABLED'] = 'true'  # native voice and screen help use this local backend
-    # The same defaults as every other launcher (desktop Companion on, wake
-    # phrases off); anything .env or the environment sets is kept.
-    from scripts import launch_defaults
-    return launch_defaults.apply(env, set())
+    # Feature defaults (desktop Companion on, wake phrases off) live in config.py,
+    # the same for every launcher; nothing else is injected.
+    return env
 
 
 def attach(env):

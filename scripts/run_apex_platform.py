@@ -18,10 +18,12 @@ from agent import apocalypse
 
 
 def health(opener, url):
+    """A service's /health, or {} for anything that isn't a proper JSON object."""
     try:
         with opener.open(url, timeout=2) as response:
-            return json.load(response)
-    except (OSError, ValueError):
+            data = json.loads(response.read(65536))
+        return data if isinstance(data, dict) else {}
+    except Exception:   # http.client errors are not OSError; none of them may stop the platform
         return {}
 
 
@@ -88,9 +90,11 @@ def main(argv=None):
     offline_port = int(offline['DASHBOARD_PORT'])
     if offline_port == 17494 or (not args.offline_only and offline_port == port):
         raise RuntimeError('Apex, Apocalypse and Celine need separate ports.')
+    # Celine's voice port is not checked here: the Apex + Celine launcher reuses
+    # an Apex voice server already on it, or starts without the local voice.
     checks = [(offline_port, '127.0.0.1')]
     if not args.offline_only:
-        checks += [(port, host), (17494, '127.0.0.1')]
+        checks += [(port, host)]
     if any(launcher.port_in_use(p, h) for p, h in checks):
         raise RuntimeError('An Apex service is already running. Stop its previous launcher with Ctrl+C, then retry. Nothing was stopped.')
     platform_id = uuid.uuid4().hex
@@ -100,41 +104,53 @@ def main(argv=None):
     children = []          # (name, process) still running
     ready = []             # names that became healthy
     nomad = None
+
+    def alive(name):
+        return any(n == name and p.poll() is None for n, p in children)
+
+    def drop(name, process):
+        if (name, process) in children:
+            children.remove((name, process))
+        stop_owned(process)
+
     try:
         if not args.no_nomad:
             nomad = start_cached_nomad(Path(offline['APEX_APOCALYPSE_HOME']))
         offline_url = f'http://127.0.0.1:{offline_port}'
         # Each service starts and fails on its own: Celine's voice model failing
         # to load on the GPU must not take the working Apocalypse library down
-        # with it, and the other way round.
-        child = spawn([str(ROOT / 'scripts/run_apex_apocalypse.py')], offline)
-        children.append(('Apocalypse', child))
+        # with it, and the other way round. Both start now; neither waits for
+        # the other to become healthy.
+        apocalypse_child = spawn([str(ROOT / 'scripts/run_apex_apocalypse.py')], offline)
+        children.append(('Apocalypse', apocalypse_child))
+        apex_child = None
+        if not args.offline_only:
+            apex_child = spawn([str(ROOT / 'scripts/run_apex_qwen.py'), '--fast', '--resident'], normal)
+            children.append(('Apex + Celine', apex_child))
         try:
             launcher.wait_healthy(opener, offline_url+'/health',
                 lambda h: h.get('service') == 'apex' and h.get('launch_id') == offline['APEX_LAUNCH_ID']
                 and h.get('platform_id') == platform_id and h.get('agent_ready') is True,
-                [('Apocalypse', child)], 'Apocalypse dashboard', 240)
+                [('Apocalypse', apocalypse_child)], 'Apocalypse dashboard', 240)
             ready.append('Apocalypse')
             print('Apocalypse: ready. '+offline_url+'/apocalypse', flush=True)
-        except RuntimeError as exc:
-            print(f'Apocalypse: did not start ({exc}). Apex continues without it.', flush=True)
-            stop_owned(child)
-            children.remove(('Apocalypse', child))
-        if not args.offline_only:
-            child = spawn([str(ROOT / 'scripts/run_apex_qwen.py'), '--fast', '--resident'], normal)
-            children.append(('Apex + Celine', child))
+        except Exception as exc:
+            print(f'Apocalypse: did not start ({exc}).'
+                  + ('' if args.offline_only else ' Apex continues without it.'), flush=True)
+            drop('Apocalypse', apocalypse_child)
+        if apex_child is not None:
             try:
                 launcher.wait_healthy(opener, normal_url+'/health',
                     lambda h: h.get('service') == 'apex' and h.get('platform_id') == platform_id
-                    and h.get('agent_ready') is True, [('Apex + Celine', child)], 'Apex + Celine', 1200)
+                    and h.get('agent_ready') is True, [('Apex + Celine', apex_child)], 'Apex + Celine', 1200)
                 ready.append('Apex + Celine')
                 print('Apex + Celine: ready. '+normal_url+'/home', flush=True)
                 print('Companion: '+normal_url+'/companion · enable Voice mode for browser audio access.', flush=True)
-            except RuntimeError as exc:
+            except Exception as exc:
+                drop('Apex + Celine', apex_child)
                 print(f'Apex + Celine: did not start ({exc}).'
-                      + (' Apocalypse remains available.' if ready else ''), flush=True)
-                stop_owned(child)
-                children.remove(('Apex + Celine', child))
+                      + (' Apocalypse remains available.' if alive('Apocalypse') else ''), flush=True)
+        ready = [name for name in ready if alive(name)]   # one may have died while the other was starting
         if not ready:
             raise RuntimeError('No Apex service started. See the messages above.')
         if args.open:
@@ -146,12 +162,15 @@ def main(argv=None):
         print('No model, book, course or map downloads were started. Keep this console open; Ctrl+C stops its Apex services.', flush=True)
         nomad_announced = args.no_nomad or nomad is None
         while children:
-            for name, process in list(children):
-                if process.poll() is not None:
-                    children.remove((name, process))
-                    others = ', '.join(n for n, _ in children)
-                    print(f'{name} stopped (exit {process.returncode}).'
-                          + (f' {others} keeps running.' if others else ''), flush=True)
+            dead = [(n, p) for n, p in children if p.poll() is not None]
+            for item in dead:
+                children.remove(item)
+            for name, process in dead:
+                others = ', '.join(n for n, _ in children)
+                print(f'{name} stopped (exit {process.returncode}).'
+                      + (f' {others} keeps running.' if others else ''), flush=True)
+            if not children:
+                break
             if not nomad_announced:
                 if nomad.poll() not in (None, 0):
                     print('NOMAD: startup failed. Apex remains available; inspect the Docker output above.', flush=True)
@@ -162,10 +181,21 @@ def main(argv=None):
             time.sleep(1)
         raise RuntimeError('Every Apex service has stopped.')
     finally:
-        for _, process in reversed(children):
-            stop_owned(process)
-        if nomad is not None and nomad.poll() is None:
-            launcher.stop(nomad)  # Stops only this compose client; never removes volumes.
+        # Each stop is protected on its own: a second Ctrl+C (or a failed stop)
+        # while one service is stopping must not leave the others running.
+        for _, process in reversed(list(children)):
+            for _attempt in range(2):
+                try:
+                    stop_owned(process)
+                    break
+                except BaseException:
+                    continue
+        if nomad is not None:
+            try:
+                if nomad.poll() is None:
+                    launcher.stop(nomad)  # Stops only this compose client; never removes volumes.
+            except BaseException:
+                pass
         print('Owned Apex services stopped. Cached NOMAD containers, if started, remain managed by Docker Desktop.', flush=True)
     return 0
 

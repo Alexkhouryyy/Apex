@@ -292,12 +292,42 @@ def test_the_model_is_told_whose_screen_it_is(monkeypatch, test_db):
     assert "same screen your click" not in seen["system"]
 
 
-def test_the_launcher_leaves_the_wake_phrase_off_unless_env_turns_it_on():
-    spec = importlib.util.spec_from_file_location("run_apex_qwen_l", ROOT / "scripts" / "run_apex_qwen.py")
-    launcher = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(launcher)
-    assert launcher.apply_launch_defaults({}, dotenv_keys=set())["CELINE_WAKE_ENABLED"] == "false", \
-        "hotkeys start a request; no microphone listens unless asked"
-    assert "CELINE_WAKE_ENABLED" not in launcher.apply_launch_defaults({}, dotenv_keys={"CELINE_WAKE_ENABLED"}), \
-        ".env decides when it says"
-    assert launcher.apply_launch_defaults({"CELINE_WAKE_ENABLED": "true"}, dotenv_keys=set())["CELINE_WAKE_ENABLED"] == "true"
+def test_wake_phrases_are_off_unless_env_turns_them_on(monkeypatch):
+    """One default for every launcher, held in config.py: hotkeys start requests."""
+    import importlib
+    import config as cfg
+    for name in ("CELINE_WAKE_ENABLED", "WAKE_WORD_ENABLED"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
+    try:
+        fresh = importlib.reload(cfg)
+        assert fresh.CELINE_WAKE_ENABLED is False and fresh.WAKE_WORD_ENABLED is False
+        monkeypatch.setenv("CELINE_WAKE_ENABLED", "true")
+        assert importlib.reload(cfg).CELINE_WAKE_ENABLED is True, ".env / the environment can turn it on"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(cfg)
+
+
+def test_companion_turns_keep_the_live_status_last(monkeypatch, test_db):
+    from types import SimpleNamespace
+    """A Companion turn adds its own rules after the base prompt; the live
+    status (what is running now) must still be the last system block."""
+    from agent import core, schema, telemetry, router, live_status
+    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "test-key")
+    schema.init_all(log=lambda *a: None)
+    a = core.AgentCore()
+    monkeypatch.setattr(a, "_all_tools", lambda: [])
+    monkeypatch.setattr(a, "_maybe_autocreate_skill", lambda *args: None)
+    monkeypatch.setattr(core._budget, "check", lambda: None)
+    monkeypatch.setattr(router, "route_model", lambda *args: ("test-model", 0))
+    monkeypatch.setattr(live_status, "status_block", lambda compact=False: "## WHAT IS RUNNING RIGHT NOW\n- probe")
+    seen = {}
+
+    def create(*args, **kwargs):
+        seen["system"] = kwargs.get("system") or []
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")], stop_reason="end_turn")
+    monkeypatch.setattr(telemetry, "create", create)
+    for mode in ("discuss", "work", "observe"):
+        a.run("hello", channel_id=f"companion:4{len(mode)}", companion_mode=mode)
+        assert seen["system"][-1]["text"].startswith("## WHAT IS RUNNING RIGHT NOW"), mode
