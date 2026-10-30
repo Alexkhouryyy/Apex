@@ -1,5 +1,6 @@
 """One console for prepared Apex, Celine and Apocalypse; never prepares downloads."""
 import argparse
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,25 @@ def health(opener, url):
 def spawn(args, env):
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if launcher.WINDOWS else 0
     return subprocess.Popen([sys.executable, '-u', *args], cwd=ROOT, env=env, creationflags=flags)
+
+
+@contextlib.contextmanager
+def held_ctrl_c():
+    """Hold a Ctrl+C until the block ends, then raise it: a child started in
+    the block is always recorded before shutdown begins, so it is stopped too."""
+    pressed = []
+    previous = held = object()
+    try:
+        previous = signal.signal(signal.SIGINT, lambda *_: pressed.append(True))
+    except (ValueError, OSError):
+        pass                                       # not the main thread
+    try:
+        yield
+    finally:
+        if previous is not held:
+            signal.signal(signal.SIGINT, signal.default_int_handler if previous is None else previous)
+            if pressed:
+                raise KeyboardInterrupt
 
 
 def stop_owned(process):
@@ -136,6 +156,12 @@ def main(argv=None):
     ready = []             # names that became healthy
     nomad = None
 
+    def launch(name, script_args, env):
+        with held_ctrl_c():
+            process = spawn(script_args, env)
+            children.append((name, process))
+        return process
+
     def alive(name):
         return any(n == name and p.poll() is None for n, p in children)
 
@@ -154,12 +180,10 @@ def main(argv=None):
         # to load on the GPU must not take the working Apocalypse library down
         # with it, and the other way round. Both start now; neither waits for
         # the other to become healthy.
-        apocalypse_child = spawn([str(ROOT / 'scripts/run_apex_apocalypse.py')], offline)
-        children.append(('Apocalypse', apocalypse_child))
+        apocalypse_child = launch('Apocalypse', [str(ROOT / 'scripts/run_apex_apocalypse.py')], offline)
         apex_child = None
         if not args.offline_only:
-            apex_child = spawn([str(ROOT / 'scripts/run_apex_qwen.py'), '--fast', '--resident'], apex_env)
-            children.append(('Apex + Celine', apex_child))
+            apex_child = launch('Apex + Celine', [str(ROOT / 'scripts/run_apex_qwen.py'), '--fast', '--resident'], apex_env)
         try:
             launcher.wait_healthy(opener, offline_url+'/health',
                 lambda h: h.get('service') == 'apex' and h.get('launch_id') == offline['APEX_LAUNCH_ID']
@@ -214,7 +238,7 @@ def main(argv=None):
                     # with the settings saved since (Start-Apex-All does the same for Apex).
                     restarts.append(now)
                     print('Apocalypse: restarting as requested.', flush=True)
-                    children.append(('Apocalypse', spawn([str(ROOT / 'scripts/run_apex_apocalypse.py')], fresh_offline())))
+                    launch('Apocalypse', [str(ROOT / 'scripts/run_apex_apocalypse.py')], fresh_offline())
                     continue
                 others = ', '.join(n for n, _ in children)
                 print(f'{name} stopped (exit {process.returncode}).'

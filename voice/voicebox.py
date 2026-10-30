@@ -7,6 +7,15 @@ import httpx
 import config
 
 _gate = threading.Lock()
+STREAM_HEALTH_DEADLINE = 5     # seconds for the whole "do you stream?" answer
+STREAM_FIRST_DEADLINE = 60     # seconds until the voice server starts answering a section
+STREAM_STALL = 30              # seconds of silence mid-stream before giving up
+
+
+def stream_deadline(text: str) -> float:
+    """Seconds a whole streamed section may take: generous for real speech
+    (about 15 characters a second, made faster than it plays), but finite."""
+    return 60 + len(text) / 10
 
 
 def base_url():
@@ -173,15 +182,19 @@ async def synthesize(text, profile_id=''):
 async def streaming_supported() -> dict | None:
     """The voice server's health if it streams PCM, else None. Never raises:
     'cannot tell' is answered as 'no', and the caller falls back."""
-    try:
+    async def ask():
         async with httpx.AsyncClient(base_url=base_url(), trust_env=False,
                                      timeout=httpx.Timeout(3, connect=2)) as c:
             r = await c.get('/health')
-            health = r.json() if r.status_code == 200 else {}
+            return r.json() if r.status_code == 200 else {}
+    try:
+        # A total deadline: httpx's timeout is per read, and a server that
+        # trickles one byte at a time would otherwise hold the page forever.
+        health = await asyncio.wait_for(ask(), STREAM_HEALTH_DEADLINE)
+        if health.get('streaming') is True and int(health.get('sample_rate') or 0) > 0:
+            return health
     except Exception:
-        return None
-    if health.get('streaming') is True and int(health.get('sample_rate') or 0) > 0:
-        return health
+        pass
     return None
 
 

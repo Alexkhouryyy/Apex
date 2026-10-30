@@ -163,3 +163,92 @@ def test_the_page_can_ask_before_the_first_reply(apex):
     mp.setattr(config, "VOICEBOX_URL", f"http://127.0.0.1:{_port()}", raising=False)
     data = json.loads(urllib.request.urlopen(base + "/api/speak/stream", timeout=3).read())
     assert data == {"streaming": False, "sample_rate": None}
+
+
+class Trickler:
+    """A voice server that answers too slowly on purpose: `health` decides how
+    /health answers, `pcm` how /generate/pcm does."""
+
+    def __init__(self, health='trickle', pcm='trickle'):
+        self.health, self.pcm, self.stop = health, pcm, threading.Event()
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self):
+        while not self.stop.is_set():
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    def _serve(self, conn):
+        with conn:
+            request = conn.recv(65536).decode('latin-1')
+            try:
+                if request.startswith('GET /health'):
+                    if self.health == 'ok':
+                        body = b'{"streaming": true, "sample_rate": 24000}'
+                        conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n'
+                                     b'Content-Length: %d\r\n\r\n' % len(body) + body)
+                        return
+                    conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n')
+                    while not self.stop.wait(0.1):
+                        conn.sendall(b' ')            # one byte at a time, forever
+                    return
+                conn.sendall(b'HTTP/1.1 200 OK\r\nX-Sample-Rate: 24000\r\n'
+                             b'Content-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\n\r\n')
+                while not self.stop.wait(0.1):
+                    if self.pcm == 'trickle':
+                        conn.sendall(b'2\r\n\x00\x00\r\n')
+            except OSError:
+                pass
+
+    def close(self):
+        self.stop.set()
+        self.sock.close()
+
+
+@pytest.fixture
+def trickler(apex):
+    import config
+    from voice import voicebox
+    base, mp = apex
+    servers = []
+    def make(**kw):
+        t = Trickler(**kw)
+        servers.append(t)
+        mp.setattr(config, "VOICEBOX_URL", f"http://127.0.0.1:{t.port}", raising=False)
+        return t
+    mp.setattr(voicebox, "STREAM_HEALTH_DEADLINE", 0.5)
+    mp.setattr(voicebox, "STREAM_STALL", 0.5)
+    mp.setattr(voicebox, "stream_deadline", lambda text: 1.5)
+    yield base, make
+    for t in servers:
+        t.close()
+
+
+def test_a_trickling_health_answer_does_not_hold_the_page(trickler):
+    base, make = trickler
+    make(health='trickle')
+    started = time.monotonic()
+    data = json.loads(urllib.request.urlopen(base + "/api/speak/stream", timeout=5).read())
+    assert data["streaming"] is False and time.monotonic() - started < 3
+
+
+@pytest.mark.parametrize('pcm', ['trickle', 'silent'])
+def test_a_trickling_or_silent_voice_stream_ends(trickler, pcm):
+    """A voice server sending two bytes every 0.1 s (or nothing) after its
+    headers used to keep the request open for as long as it liked."""
+    base, make = trickler
+    make(health='ok', pcm=pcm)
+    started = time.monotonic()
+    req = urllib.request.Request(base + "/api/speak/stream", method="POST",
+                                 data=json.dumps({"text": "Hello.", "profile": "celine"}).encode(),
+                                 headers={"Content-Type": "application/json", "Origin": base})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        r.read()
+    assert time.monotonic() - started < 5

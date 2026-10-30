@@ -5,6 +5,14 @@ from env_file import load_env
 # Any encoding Windows saved it in (PowerShell 5 writes UTF-16): env_file.py.
 load_env(Path(__file__).resolve().parent / '.env')
 
+
+def _flag(name: str, default: bool) -> bool:
+    """A yes/no setting. 1/true/yes/on (any case, spaces ignored) mean yes."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
 # Explicit offline launches install this before providers or background workers.
 from agent.apocalypse import install_network_guard
 install_network_guard()
@@ -28,11 +36,11 @@ API_MAX_RETRIES = 4  # transient errors (429/500/529/network) retried by the SDK
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "anthropic/claude-3-5-sonnet")
 SMART_ROUTING_ENABLED = False   # set True to activate; routes simple queries to Haiku
-INCIDENT_RECORDING_ENABLED = os.getenv("INCIDENT_RECORDING_ENABLED", "false").lower() in {"1", "true", "yes"}
+INCIDENT_RECORDING_ENABLED = _flag("INCIDENT_RECORDING_ENABLED", False)
 INCIDENT_RECORDING_DIR = os.path.expanduser(os.getenv("INCIDENT_RECORDING_DIR", "~/.apex/incidents"))
-COUNCIL_VERIFY_READOUT = os.getenv("COUNCIL_VERIFY_READOUT", "false").lower() in {"1", "true", "yes"}
-SKILL_EVALUATION_REQUIRED = os.getenv("SKILL_EVALUATION_REQUIRED", "false").lower() in {"1", "true", "yes"}
-REVERSIBLE_CONTEXT_ENABLED = os.getenv("REVERSIBLE_CONTEXT_ENABLED", "false").lower() in {"1", "true", "yes"}
+COUNCIL_VERIFY_READOUT = _flag("COUNCIL_VERIFY_READOUT", False)
+SKILL_EVALUATION_REQUIRED = _flag("SKILL_EVALUATION_REQUIRED", False)
+REVERSIBLE_CONTEXT_ENABLED = _flag("REVERSIBLE_CONTEXT_ENABLED", False)
 CONTEXT_SELECTION_BYTES = int(os.getenv("CONTEXT_SELECTION_BYTES", "64000"))
 COUNCIL_PROFILE_PATH = os.path.expanduser(os.getenv("COUNCIL_PROFILE_PATH", ""))
 ROUTING_SIMPLE_MODEL = "claude-haiku-4-5"
@@ -47,8 +55,8 @@ CURATOR_ARCHIVE_DAYS = 90
 # their own expertise + persistent memory, and the Sun synthesizes one answer.
 # AUTO is off by default: when on, only high-stakes queries auto-convene (the
 # heuristic router returns no planets for everything else, so cost stays at zero).
-CONSTELLATION_AUTO          = os.getenv("CONSTELLATION_AUTO", "false").lower() in {"1", "true", "yes"}
-CONSTELLATION_LEARN         = os.getenv("CONSTELLATION_LEARN", "true").lower() in {"1", "true", "yes"}
+CONSTELLATION_AUTO          = _flag("CONSTELLATION_AUTO", False)
+CONSTELLATION_LEARN         = _flag("CONSTELLATION_LEARN", True)
 CONSTELLATION_MAX_PLANETS   = int(os.getenv("CONSTELLATION_MAX_PLANETS", "4"))
 CONSTELLATION_PLANET_MODEL  = os.getenv("CONSTELLATION_PLANET_MODEL", "claude-sonnet-5" if BACKGROUND_MODEL.startswith("claude") else BACKGROUND_MODEL)
 CONSTELLATION_SYNTH_MODEL   = os.getenv("CONSTELLATION_SYNTH_MODEL", AGENT_MODEL)
@@ -57,8 +65,8 @@ CONSTELLATION_BRIEFING_MAXCHARS = int(os.getenv("CONSTELLATION_BRIEFING_MAXCHARS
 
 # Write-approval gate — when True, memory/note/skill writes are staged for the
 # user to approve from the dashboard instead of being applied immediately.
-MEMORY_WRITE_APPROVAL = os.getenv("MEMORY_WRITE_APPROVAL", "false").lower() in {"1", "true", "yes"}
-SKILL_WRITE_APPROVAL = os.getenv("SKILL_WRITE_APPROVAL", "false").lower() in {"1", "true", "yes"}
+MEMORY_WRITE_APPROVAL = _flag("MEMORY_WRITE_APPROVAL", False)
+SKILL_WRITE_APPROVAL = _flag("SKILL_WRITE_APPROVAL", False)
 
 # Voice
 WHISPER_MODEL = "base"          # tiny/base/small/medium/large
@@ -82,11 +90,11 @@ PROACTIVE_ENABLED = True
 # Off by default: hotkeys (F8, Ctrl+Alt+C) start requests and no microphone
 # listens in the background. Every launcher reads this same default here, so
 # Apex behaves the same however it starts, and a value saved in .env always wins.
-WAKE_WORD_ENABLED = os.getenv("WAKE_WORD_ENABLED", "false").lower() in {"1", "true", "yes"}
+WAKE_WORD_ENABLED = _flag("WAKE_WORD_ENABLED", False)
 WAKE_PHRASES = ["apex", "hey apex", "yo apex", "okay apex", "ok apex"]
 
 # Resident mode — always-on background companion (python main.py --resident)
-RESIDENT_SILENT_BOOT = os.getenv("RESIDENT_SILENT_BOOT", "true").lower() in {"1", "true", "yes"}
+RESIDENT_SILENT_BOOT = _flag("RESIDENT_SILENT_BOOT", True)
 RESIDENT_LOG_FILE = os.path.expanduser(os.getenv("RESIDENT_LOG_FILE", "~/.apex/resident.log"))
 RESIDENT_AUDIT_FILE = os.path.expanduser(os.getenv("RESIDENT_AUDIT_FILE", "~/.apex/wake_audit.log"))
 RESIDENT_GLOBAL_HOTKEY = os.getenv("RESIDENT_GLOBAL_HOTKEY", "<ctrl>+<space>")
@@ -97,7 +105,7 @@ RESIDENT_WAKE_REQUIRE_CONTINUATION = True  # "apex" alone won't trigger — must
 # Env-readable. It was a hardcoded True, so the only way to turn awareness
 # off was to edit this file — which left main.py's "no monitor" branch
 # unreachable by configuration, i.e. dead code.
-AWARENESS_ENABLED = os.getenv("AWARENESS_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+AWARENESS_ENABLED = _flag("AWARENESS_ENABLED", True)
 AWARENESS_REVIEW_INTERVAL = 60        # seconds — how often to review event log
 AWARENESS_WATCH_PATHS = [             # file watcher dirs
     "~/Documents", "~/Desktop", "~/Downloads",
@@ -119,7 +127,7 @@ MAX_SUBAGENTS = 5                     # max concurrent sub-agents
 MAX_ITERATIONS = 30                   # max tool-use iterations per agent turn
 
 # Dashboard
-DASHBOARD_ENABLED = os.getenv("DASHBOARD_ENABLED", "true").lower() in {"1", "true", "yes"}
+DASHBOARD_ENABLED = _flag("DASHBOARD_ENABLED", True)
 DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "7860"))
 DASHBOARD_HOST  = os.getenv("DASHBOARD_HOST", "127.0.0.1")
 DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
@@ -146,7 +154,7 @@ BASH_TIMEOUT = 30               # seconds
 # When docker is selected but unavailable: fall back to local with a warning,
 # unless SANDBOX_REQUIRE=true (then refuse to execute — fail closed).
 EXECUTION_BACKEND = os.getenv("EXECUTION_BACKEND", "local").strip().lower()
-SANDBOX_REQUIRE = os.getenv("SANDBOX_REQUIRE", "false").strip().lower() in ("1", "true", "yes")
+SANDBOX_REQUIRE = _flag("SANDBOX_REQUIRE", False)
 SANDBOX_DOCKER_IMAGE = os.getenv("SANDBOX_DOCKER_IMAGE", "python:3.11-slim")
 SANDBOX_NETWORK = os.getenv("SANDBOX_NETWORK", "none").strip().lower()   # "none" | "bridge"
 SANDBOX_MEMORY = os.getenv("SANDBOX_MEMORY", "512m")
@@ -161,14 +169,14 @@ SANDBOX_WORKDIR = os.getenv("SANDBOX_WORKDIR", "~/Documents/Apex/sandbox")
 # It self-disables when the reranker is cold (fewer than 3 rated answers), so
 # enabling it before you have rated anything spends nothing.
 # Never applies to tool-use turns or to streaming replies — see agent/core.
-RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+RERANK_ENABLED = _flag("RERANK_ENABLED", False)
 RERANK_N = max(2, min(4, int(os.getenv("RERANK_N", "2"))))
 
 # Restraint (agent/restraint.py): hold non-urgent notifications until a moment
 # you actually respond in. High-priority messages are never held, held messages
 # are never dropped, and an unknown moment is treated as a good one - it learns
 # to be quieter, it never starts quiet. Set false to make Apex always speak.
-RESTRAINT_ENABLED = os.getenv("RESTRAINT_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+RESTRAINT_ENABLED = _flag("RESTRAINT_ENABLED", True)
 
 # Memory consolidation cadence (agent/reflection.consolidate_if_due).
 # Consolidation distils recent activity into reflections and refreshes the
@@ -192,8 +200,7 @@ RESEARCH_SUPPORT_FLOOR = float(os.getenv("RESEARCH_SUPPORT_FLOOR", "0.25"))
 # Tokens pass through agent/answers.CitationGate first, so an unbacked marker is
 # never shown even mid-stream. Streaming failure falls back to the blocking call
 # on its own; this switch exists so streaming can be turned off without a deploy.
-RESEARCH_STREAM_ENABLED = os.getenv(
-    "RESEARCH_STREAM_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+RESEARCH_STREAM_ENABLED = _flag("RESEARCH_STREAM_ENABLED", True)
 
 # Safety: semantic command review (agent/command_review.py)
 # The pattern blocklist in agent/safety.py is finite and misses obvious variants
@@ -203,11 +210,11 @@ RESEARCH_STREAM_ENABLED = os.getenv(
 # Cost note: this adds one small LLM call per *unseen* harm-capable tool call
 # (verdicts are cached per exact input). Point SAFETY_REVIEW_MODEL at a local
 # ollama/* model to make it free.
-SAFETY_LLM_REVIEW = os.getenv("SAFETY_LLM_REVIEW", "true").strip().lower() in ("1", "true", "yes")
+SAFETY_LLM_REVIEW = _flag("SAFETY_LLM_REVIEW", True)
 SAFETY_REVIEW_MODEL = os.getenv("SAFETY_REVIEW_MODEL", "")   # blank -> PROACTIVE_MODEL
 # An unavailable reviewer requires confirmation by default. Set false explicitly
 # to accept the weaker pattern-only fallback.
-SAFETY_REVIEW_REQUIRED = os.getenv("SAFETY_REVIEW_REQUIRED", "true").strip().lower() in ("1", "true", "yes")
+SAFETY_REVIEW_REQUIRED = _flag("SAFETY_REVIEW_REQUIRED", True)
 
 # Screen
 SCREENSHOT_QUALITY = 85         # JPEG quality for screenshots sent to Claude
@@ -234,7 +241,7 @@ TELEGRAM_ALLOWED_CHAT_IDS = [x.strip() for x in os.getenv("TELEGRAM_ALLOWED_CHAT
 # Long-polling mode: Apex pulls messages via getUpdates instead of receiving a
 # webhook. Set true when you have no public HTTPS URL (laptop / home machine).
 # Leave false if you register a webhook with a public URL.
-TELEGRAM_POLLING = os.getenv("TELEGRAM_POLLING", "false").lower() == "true"
+TELEGRAM_POLLING = _flag("TELEGRAM_POLLING", False)
 # Echoed back by Telegram in X-Telegram-Bot-Api-Secret-Token on every delivery.
 # Must match the `secret_token` given to setWebhook — tools/telegram.set_webhook
 # registers both together. Without it, remote callers are refused outright.
@@ -353,18 +360,18 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "")
 OLLAMA_COUNCIL_MODEL = os.getenv("OLLAMA_COUNCIL_MODEL", "")
 
 # Webcam — local camera capture (opt-in, off by default; requires opencv-python)
-CAMERA_ENABLED = os.getenv("CAMERA_ENABLED", "false").lower() in {"1", "true", "yes"}
+CAMERA_ENABLED = _flag("CAMERA_ENABLED", False)
 CAMERA_DEVICE_INDEX = int(os.getenv("CAMERA_DEVICE_INDEX", "0"))
 
 # Guardian Angel — decision-moment detection (works alongside awareness watchers)
-GUARDIAN_ANGEL_ENABLED = os.getenv("GUARDIAN_ANGEL_ENABLED", "true").lower() in {"1", "true", "yes"}
+GUARDIAN_ANGEL_ENABLED = _flag("GUARDIAN_ANGEL_ENABLED", True)
 GUARDIAN_THRESHOLD = float(os.getenv("GUARDIAN_THRESHOLD", "0.70"))
 GUARDIAN_COOLDOWN_MINUTES = int(os.getenv("GUARDIAN_COOLDOWN_MINUTES", "20"))
 GUARDIAN_MODELS = [m.strip() for m in os.getenv("GUARDIAN_MODELS", "claude-haiku-4-5,gpt-5-mini" if BACKGROUND_MODEL.startswith("claude") else BACKGROUND_MODEL).split(",") if m.strip()]
 
 # Time Capsule — long-horizon memory: bookmark goal/emotional statements and
 # surface them as unprompted callbacks days or weeks later.
-TIME_CAPSULE_ENABLED = os.getenv("TIME_CAPSULE_ENABLED", "true").lower() in {"1", "true", "yes"}
+TIME_CAPSULE_ENABLED = _flag("TIME_CAPSULE_ENABLED", True)
 TIME_CAPSULE_MODEL = os.getenv("TIME_CAPSULE_MODEL", PROACTIVE_MODEL)
 TIME_CAPSULE_SCAN_INTERVAL_SECONDS = int(os.getenv("TIME_CAPSULE_SCAN_INTERVAL_SECONDS", "60"))
 TIME_CAPSULE_SURFACE_INTERVAL_SECONDS = int(os.getenv("TIME_CAPSULE_SURFACE_INTERVAL_SECONDS", "1800"))
@@ -378,15 +385,15 @@ VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
 VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "mailto:apex@localhost")
 # When no Web Push subscription exists yet, fall back to Telegram so proactive
 # nudges still reach the user during setup.
-NOTIFY_TELEGRAM_FALLBACK = os.getenv("NOTIFY_TELEGRAM_FALLBACK", "true").lower() in {"1", "true", "yes"}
+NOTIFY_TELEGRAM_FALLBACK = _flag("NOTIFY_TELEGRAM_FALLBACK", True)
 NOTIFY_DEDUP_SECONDS = int(os.getenv("NOTIFY_DEDUP_SECONDS", "30"))
 # Public HTTPS origin (set when exposed via a tunnel) — used for push click-through
 # URLs, the PWA start_url, and QR pairing. Empty = local/LAN only.
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 
 # === Jarvis integration — personality, PC control, app profiles, screen vision, orb ===
-JARVIS_PERSONA_ENABLED = os.getenv("JARVIS_PERSONA_ENABLED", "true").lower() in {"1", "true", "yes"}
-APP_CONTEXT_ENABLED = os.getenv("APP_CONTEXT_ENABLED", "true").lower() in {"1", "true", "yes"}
+JARVIS_PERSONA_ENABLED = _flag("JARVIS_PERSONA_ENABLED", True)
+APP_CONTEXT_ENABLED = _flag("APP_CONTEXT_ENABLED", True)
 SCREEN_HOTKEY = os.getenv("SCREEN_HOTKEY", "")           # e.g. "<ctrl>+<shift>+s"
 # Look now (agent/look_now.py): Celine looks at your screen and helps. The
 # hotkey is on whenever the dashboard is; set it empty to turn it off.
@@ -398,23 +405,23 @@ CELINE_TALK_HOTKEY = os.getenv("CELINE_TALK_HOTKEY", "<ctrl>+<alt>+t")
 # The wake phrase keeps the microphone open and runs a small speech model all
 # the time, so it is off unless asked for — the Celine launchers turn it on.
 # The variants are how Whisper actually hears "Hey Celly".
-CELINE_WAKE_ENABLED = os.getenv("CELINE_WAKE_ENABLED", "false").lower() in {"1", "true", "yes"}
+CELINE_WAKE_ENABLED = _flag("CELINE_WAKE_ENABLED", False)
 CELINE_WAKE_PHRASES = [p.strip().lower() for p in os.getenv(
     "CELINE_WAKE_PHRASES",
     "hey celly,hey celli,hey cely,hey selly,hey shelly,hey kelly,hey chelly,hey celine,hey seline",
 ).split(",") if p.strip()]
 DESKTOP_SHELL_HOTKEY = os.getenv("DESKTOP_SHELL_HOTKEY", "<ctrl>+<shift>+\\")
-ORB_ENABLED = os.getenv("ORB_ENABLED", "false").lower() in {"1", "true", "yes"}
+ORB_ENABLED = _flag("ORB_ENABLED", False)
 # Optional native Companion: installed once, starts hidden, activated by Celine's hotkeys.
 # On by default for every launcher (it needs pywebview; without it Apex logs why and carries on).
-COMPANION_DESKTOP_ENABLED = os.getenv("COMPANION_DESKTOP_ENABLED", "true").lower() in {"1", "true", "yes"}
+COMPANION_DESKTOP_ENABLED = _flag("COMPANION_DESKTOP_ENABLED", True)
 COMPANION_HOTKEY = os.getenv('COMPANION_HOTKEY', '<f8>')
 # The desktop Companion bubble rides beside your mouse pointer (also its Follow button). Windows only.
 COMPANION_FOLLOW_CURSOR = os.getenv('COMPANION_FOLLOW_CURSOR', 'true').lower() in {'1', 'true', 'yes'}
 # Global hotkeys for the desktop Companion: draw on the screen, and toggle the cursor bubble. Empty turns one off.
 COMPANION_DRAW_HOTKEY = os.getenv('COMPANION_DRAW_HOTKEY', '<ctrl>+<alt>+d')
 COMPANION_FOLLOW_HOTKEY = os.getenv('COMPANION_FOLLOW_HOTKEY', '<ctrl>+<alt>+f')
-PROFILE_DIGEST_ENABLED = os.getenv("PROFILE_DIGEST_ENABLED", "true").lower() in {"1", "true", "yes"}
+PROFILE_DIGEST_ENABLED = _flag("PROFILE_DIGEST_ENABLED", True)
 PROFILE_DIGEST_INTERVAL_SECONDS = int(os.getenv("PROFILE_DIGEST_INTERVAL_SECONDS", "3600"))
 
 # === Email — IMAP inbox triage + SMTP send (opt-in; off until configured) ===
@@ -442,7 +449,7 @@ CALDAV_PASSWORD = os.getenv("CALDAV_PASSWORD", "")
 # cannot read the snapshot.
 #
 # Off until deliberately configured, like everything that touches a network.
-RELAY_ENABLED = os.getenv("RELAY_ENABLED", "false").lower() in {"1", "true", "yes"}
+RELAY_ENABLED = _flag("RELAY_ENABLED", False)
 RELAY_URL = os.getenv("RELAY_URL", "")            # https://apex-relay.example.com
 RELAY_TOKEN = os.getenv("RELAY_TOKEN", "")        # authenticates THIS laptop to it
 # The sealing key. Never sent to the relay, never committed. Generate with
@@ -460,8 +467,7 @@ RELAY_SNAPSHOT_MINUTES = int(os.getenv("RELAY_SNAPSHOT_MINUTES", "30"))
 # snapshot is only readable with the key that sealed it, and pushing would
 # destroy it. Set true only when that key is gone for good and you want to
 # start over.
-RELAY_OVERWRITE_UNREADABLE = os.getenv(
-    "RELAY_OVERWRITE_UNREADABLE", "false").lower() in {"1", "true", "yes"}
+RELAY_OVERWRITE_UNREADABLE = _flag("RELAY_OVERWRITE_UNREADABLE", False)
 
 # === Delegated work — what the Core may make THIS machine do ===
 #
@@ -469,7 +475,7 @@ RELAY_OVERWRITE_UNREADABLE = os.getenv(
 # through agent/core._execute_tool — the same door a locally-decided tool call
 # uses, so subagent_scope and safety.check apply exactly as they always do. The
 # queue carries a request; it never carries permission.
-NODE_WORKER_ENABLED = os.getenv("NODE_WORKER_ENABLED", "false").lower() in {"1", "true", "yes"}
+NODE_WORKER_ENABLED = _flag("NODE_WORKER_ENABLED", False)
 # Which tools may be triggered REMOTELY. Deny-by-default and empty by default,
 # which is a separate question from whether a tool is dangerous: `read_file` is
 # never risky enough for safety.check to stop, and may still be something you do
@@ -505,7 +511,7 @@ MCP_ALLOW = [e.strip() for e in os.getenv("MCP_ALLOW", "").split(",") if e.strip
 MCP_DENY = [e.strip() for e in os.getenv("MCP_DENY", "").split(",") if e.strip()]
 
 # IoT — Home Assistant integration (opt-in, off by default)
-IOT_ENABLED = os.getenv("IOT_ENABLED", "false").lower() in {"1", "true", "yes"}
+IOT_ENABLED = _flag("IOT_ENABLED", False)
 IOT_HA_URL = os.getenv("IOT_HA_URL", "")          # e.g. http://homeassistant.local:8123
 IOT_HA_TOKEN = os.getenv("IOT_HA_TOKEN", "")      # HA long-lived access token
 IOT_WEBHOOK_SECRET = os.getenv("IOT_WEBHOOK_SECRET", "")  # HMAC secret for inbound webhooks
@@ -519,12 +525,12 @@ IOT_TRIGGER_ALLOWED_ENTITIES = [e.strip() for e in os.getenv("IOT_TRIGGER_ALLOWE
 
 # Hand tracking — Apex's OWN MediaPipe tracker, reading the webcam directly.
 # No browser, no second process: it keeps working when nothing else is open.
-HANDTRACK_ENABLED = os.getenv("HANDTRACK_ENABLED", "false").lower() in {"1", "true", "yes"}
+HANDTRACK_ENABLED = _flag("HANDTRACK_ENABLED", False)
 HANDTRACK_POLL_HZ = float(os.getenv("HANDTRACK_POLL_HZ", "30"))   # 30 since 2026-09-25: 20 felt stepped
 # Selfie space. A raw webcam frame is NOT mirrored, so without this a hand moving
 # to your right travels left in the image and swipe_right fires for a leftward
 # wave. Set false only if your camera already mirrors.
-HANDTRACK_MIRROR = os.getenv("HANDTRACK_MIRROR", "true").lower() in {"1", "true", "yes"}
+HANDTRACK_MIRROR = _flag("HANDTRACK_MIRROR", True)
 # Pinch = thumb-to-index distance as a fraction of the hand's own span, so it is
 # scale-invariant and does not change with how far away you sit.
 #
@@ -567,7 +573,7 @@ HANDTRACK_PINCH_RELEASE_RATIO = float(_release) if _release else None
 # comparable. The board's calibration writes "3d"; until then the board asks
 # you to calibrate.
 HANDTRACK_PINCH_MEASURE = os.getenv("HANDTRACK_PINCH_MEASURE", "").strip().lower()
-HANDTRACK_DEBUG = os.getenv("HANDTRACK_DEBUG", "false").lower() in {"1", "true", "yes"}
+HANDTRACK_DEBUG = _flag("HANDTRACK_DEBUG", False)
 # The webcam is exclusive: while Apex holds it, no video call can open it. This
 # is how long `release_camera` hands it back before tracking resumes on its own,
 # so forgetting to resume cannot silently end hand tracking.
@@ -614,7 +620,7 @@ HANDTRACK_MIN_CONFIDENCE = float(os.getenv("HANDTRACK_MIN_CONFIDENCE", "0.5"))
 # Run Apex's conversation on a Claude subscription instead of metered API
 # credits. Off by default: it needs the `claude` CLI installed and logged in,
 # and it draws on the SAME five-hour window as your own Claude Code sessions.
-SUBSCRIPTION_ENABLED = os.getenv("SUBSCRIPTION_ENABLED", "false").lower() in {"1", "true", "yes"}
+SUBSCRIPTION_ENABLED = _flag("SUBSCRIPTION_ENABLED", False)
 # Which call sites route there. Measured: the SDK carries ~26.5k tokens of
 # Claude Code harness per call, which makes it 3x DEARER than Haiku for
 # high-volume background work — so deep research and the awareness loop stay on
@@ -626,14 +632,14 @@ SUBSCRIPTION_CALL_SITES = [s.strip() for s in os.getenv(
 # Apex's own glass board — cards you move with your hands, at /board on the
 # dashboard. Rendered from the tracker Apex already runs in Python, so it
 # keeps working when the tab is not in front. Needs HANDTRACK_ENABLED.
-BOARD_ENABLED = os.getenv("BOARD_ENABLED", "false").lower() in {"1", "true", "yes"}
+BOARD_ENABLED = _flag("BOARD_ENABLED", False)
 # Frames per second for the board's video backdrop. The picture has to come from
 # Python because it holds the camera exclusively; 15 is smooth enough behind
 # cards and a third of the bandwidth of 45.
 # Flick a held object toward an edge to throw it away. Off by default: it
 # deletes on a misfire, and a fast drag looked like a throw on a real hand.
 # "undo" brings a thrown object back. Turn on with BOARD_THROW_ENABLED=true.
-BOARD_THROW_ENABLED = os.getenv("BOARD_THROW_ENABLED", "false").lower() in {"1", "true", "yes"}
+BOARD_THROW_ENABLED = _flag("BOARD_THROW_ENABLED", False)
 BOARD_FPS = float(os.getenv("BOARD_FPS", "30"))   # the page glides between updates as well
 
 # Voice-driven 3D creation — "Apex, create a red cube, 50 millimetres wide."
@@ -654,7 +660,7 @@ BOARD_FPS = float(os.getenv("BOARD_FPS", "30"))   # the page glides between upda
 # capability, and agent/blender_bridge.py enforces the same allowlist again on
 # the Apex side, so a compromised or buggy caller on either end is still capped
 # by the other.
-BLENDER_ENABLED = os.getenv("BLENDER_ENABLED", "false").lower() in {"1", "true", "yes"}
+BLENDER_ENABLED = _flag("BLENDER_ENABLED", False)
 BLENDER_HOST = os.getenv("BLENDER_HOST", "127.0.0.1")
 BLENDER_PORT = int(os.getenv("BLENDER_PORT", "8799"))
 BLENDER_TIMEOUT_SECONDS = float(os.getenv("BLENDER_TIMEOUT_SECONDS", "20"))
@@ -704,7 +710,7 @@ WORK_CODEX_WINDOWS_SANDBOX = os.getenv("WORK_CODEX_WINDOWS_SANDBOX", "").strip()
 OWNER_NAME = os.getenv("OWNER_NAME", "Alex").strip()
 # Apex's own memory server (scripts/apex_mcp.py) inside every Apex Code session: the plan can
 # ask Apex's memory while it works, and `remember` only suggests a memory for your OK. false: off.
-CODE_APEX_MCP = os.getenv("CODE_APEX_MCP", "true").lower() in {"1", "true", "yes"}
+CODE_APEX_MCP = _flag("CODE_APEX_MCP", True)
 # REA (Reverse Engineer Anything, github.com/morluto/rea, MIT): its MCP server joins
 # a session only for a project where you switched it on, and only in Full mode (it
 # can run the program it analyses). Pinned, as REA's own docs ask; started with npx.

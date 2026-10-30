@@ -29,7 +29,7 @@ class OfflineUnavailable(RuntimeError):
 
 
 def enabled():
-    return os.getenv('APEX_APOCALYPSE', '').lower() in {'1', 'true', 'yes'}
+    return os.getenv('APEX_APOCALYPSE', '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
 def local_host(host):

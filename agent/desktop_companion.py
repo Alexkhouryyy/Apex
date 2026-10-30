@@ -31,6 +31,7 @@ _keys = None
 _is_muted = lambda: False
 _preferred_mode = 'screen'
 _surfaces = {}
+_error = ''              # why the last start failed, for the live status
 
 
 def bind_resident(state):
@@ -111,7 +112,12 @@ def running() -> bool:
 def status() -> dict:
     with _condition:
         alive = running()
-        return {'running': alive, 'ready': alive and _ready and time.monotonic() - _heartbeat < 15,
+        error = _error
+        if not alive and _process is not None and not error:
+            code = _process.poll()
+            if code not in (None, 0):
+                error = f'the window closed unexpectedly (exit code {code}); desktop.log says why'
+        return {'running': alive, 'error': error, 'ready': alive and _ready and time.monotonic() - _heartbeat < 15,
                 'shown': alive and _shown, 'mode': _mode if alive else 'idle', 'seq': _seq,
                 'hotkey_ready': _keys is not None}
 
@@ -134,6 +140,19 @@ def authorize(session: str) -> bool:
 
 
 def start(url: str) -> dict:
+    global _error
+    try:
+        result = _start(url)
+    except Exception as exc:
+        with _condition:
+            _error = str(exc) or type(exc).__name__
+        raise
+    with _condition:
+        _error = ''
+    return dict(result, error='')
+
+
+def _start(url: str) -> dict:
     global _process, _session, _ready, _heartbeat, _shown, _url, _mode, _keys
     url = local_url(url)
     with _condition:

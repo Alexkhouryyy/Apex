@@ -19,6 +19,7 @@ def quiet_tts(monkeypatch):
     monkeypatch.setattr(tts, '_speak_system', lambda text: spoken.append(('system', text)))
     monkeypatch.setattr(tts, '_play', lambda audio: spoken.append(('celine', audio)))
     monkeypatch.setattr(tts, '_fallback_noted', False)
+    monkeypatch.setattr(tts, '_noted_at', 0.0)
     monkeypatch.setattr(tts, '_celine_down_until', 0.0)
     monkeypatch.setattr(tts, '_celine_busy_until', 0.0)
     monkeypatch.setattr(tts, '_audio_missing', '')
@@ -50,7 +51,15 @@ def test_celine_is_used_again_after_the_cool_down(quiet_tts, monkeypatch, capsys
     assert quiet_tts == [('system', 'one'), ('system', 'two'), ('celine', b'wav:three')]
     up['v'] = False
     tts.speak('four')
-    assert capsys.readouterr().out.count('unavailable') == 2, 'a new outage is reported again'
+    assert capsys.readouterr().out.count('unavailable') == 1, 'a voice flapping within minutes is not re-announced'
+    monkeypatch.setattr(tts, '_noted_at', tts._noted_at - tts.NOTICE_GAP)   # minutes later
+    monkeypatch.setattr(tts, '_celine_down_until', 0.0)
+    up['v'] = True
+    tts.speak('five')
+    up['v'] = False
+    monkeypatch.setattr(tts, '_celine_down_until', 0.0)
+    tts.speak('six')
+    assert capsys.readouterr().out.count('unavailable') == 1, 'a new outage after a while is reported again'
 
 
 def test_a_sentence_is_never_said_twice_when_playback_breaks_part_way(quiet_tts, monkeypatch, capsys):
@@ -692,3 +701,31 @@ def test_main_carries_on_when_awareness_fails_to_start():
     i = src.index('            monitor.start()')
     block = src[i - 40:i + 900]
     assert 'except Exception' in block and 'monitor = None' in block and 'start_standalone(start=False)' in block
+
+
+def test_a_companion_that_failed_to_start_says_why(monkeypatch):
+    """A failed desktop window used to read as "enabled but not running" with no reason."""
+    import importlib.util
+    from agent import desktop_companion, live_status
+    monkeypatch.setattr(desktop_companion, '_process', None)
+    monkeypatch.setattr(desktop_companion, '_error', '')
+    monkeypatch.setattr(importlib.util, 'find_spec', lambda name, *a: None if name == 'webview' else object())
+    with pytest.raises(RuntimeError):
+        desktop_companion.start('http://127.0.0.1:7860')
+    st = desktop_companion.status()
+    assert 'Setup-Apex-Screen-Companion.cmd' in st['error']
+    monkeypatch.setattr(config, 'COMPANION_DESKTOP_ENABLED', True)
+    block = live_status.status_block()
+    assert 'Desktop Companion: failed to start (Run Setup-Apex-Screen-Companion.cmd' in block
+    assert 'Companion failed' in live_status.status_block(compact=True)
+
+
+def test_a_companion_window_that_crashed_says_so(monkeypatch):
+    from agent import desktop_companion
+    monkeypatch.setattr(desktop_companion, '_error', '')
+    monkeypatch.setattr(desktop_companion, '_process', SimpleNamespace(poll=lambda: 3))
+    assert 'exit code 3' in desktop_companion.status()['error']
+    monkeypatch.setattr(desktop_companion, '_process', SimpleNamespace(poll=lambda: 0))
+    assert desktop_companion.status()['error'] == ''
+    monkeypatch.setattr(desktop_companion, '_process', None)
+    assert desktop_companion.status()['error'] == ''
