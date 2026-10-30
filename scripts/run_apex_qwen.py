@@ -28,8 +28,8 @@ def port_in_use(port, host='127.0.0.1'):
 
 
 def launch_environment(local_voice=True):
-    from dotenv import dotenv_values
-    env = {k: v for k, v in dotenv_values(ROOT / '.env').items() if v is not None}
+    from env_file import env_values
+    env = env_values(ROOT / '.env')
     env.update(os.environ)
     # No feature defaults are injected here: config.py holds them, so a setting
     # saved on the dashboard before a restart is what the next Apex reads.

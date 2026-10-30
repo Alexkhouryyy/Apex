@@ -15,8 +15,9 @@ import threading
 import time
 
 # Ensure ANTHROPIC_API_KEY is set before anything else
-from dotenv import load_dotenv
-load_dotenv()
+from pathlib import Path as _Path
+from env_file import load_env
+load_env(_Path(__file__).resolve().parent / '.env')
 
 import config
 

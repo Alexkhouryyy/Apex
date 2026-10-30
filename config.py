@@ -1,8 +1,9 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
+from env_file import load_env
 
-load_dotenv(Path(__file__).resolve().parent / '.env')
+# Any encoding Windows saved it in (PowerShell 5 writes UTF-16): env_file.py.
+load_env(Path(__file__).resolve().parent / '.env')
 
 # Explicit offline launches install this before providers or background workers.
 from agent.apocalypse import install_network_guard

@@ -109,8 +109,8 @@ def verify_model(model, base):
 
 def launch_environment(root, environ=None):
     """Child-only settings. The normal .env and system settings stay intact."""
-    from dotenv import dotenv_values
-    env = {k: v for k, v in dotenv_values(Path(root) / '.env').items() if v is not None}
+    from env_file import env_values
+    env = env_values(Path(root) / '.env')
     env.update(os.environ if environ is None else environ)
     model = 'ollama/' + env.get('APEX_APOCALYPSE_MODEL', 'qwen3:4b').removeprefix('ollama/')
     base = loopback_url(env.get('APEX_APOCALYPSE_OLLAMA', 'http://127.0.0.1:11435'))
