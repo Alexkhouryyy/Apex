@@ -231,6 +231,19 @@ def make_wake_handler(phrases: list[str]):
     return on_wake
 
 
+_bound: set = set()   # what is actually listening in this process: "look", "talk", "wake"
+
+
+def mark_bound(*names: str) -> None:
+    """Record a listener that started (resident mode binds its own)."""
+    _bound.update(names)
+
+
+def bound() -> set:
+    """Which of Celine's triggers are live here, for agent/live_status.py."""
+    return set(_bound)
+
+
 def start(hotkey: str = "", wake_phrases: Optional[list[str]] = None,
           talk_hotkey: str = "") -> list[str]:
     """Bind the hotkeys and start the wake listener. Returns what started, in
@@ -250,8 +263,10 @@ def start(hotkey: str = "", wake_phrases: Optional[list[str]] = None,
             if keys.start():
                 if hotkey:
                     started.append(f"look {hotkey}")
+                    mark_bound("look")
                 if talk_hotkey:
                     started.append(f"talk {talk_hotkey}")
+                    mark_bound("talk")
         except Exception as e:
             print(f"[Celine] Hotkeys not available: {e}", flush=True)
     if wake_phrases:
@@ -259,6 +274,7 @@ def start(hotkey: str = "", wake_phrases: Optional[list[str]] = None,
             from voice.wake import WakeWordListener
             WakeWordListener(wake_phrases=wake_phrases).start(on_wake=make_wake_handler(wake_phrases))
             started.append(f"wake phrase \"{wake_phrases[0]}\"")
+            mark_bound("wake")
         except Exception as e:
             print(f"[Celine] Wake phrase not available: {e}", flush=True)
     return started

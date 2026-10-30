@@ -136,16 +136,38 @@ def status_block(compact: bool = False) -> str:
                 + _hotkey(getattr(config, 'COMPANION_FOLLOW_HOTKEY', ''), 'toggles the bubble following the mouse pointer')
                 + f" (follows by default: {'yes' if getattr(config, 'COMPANION_FOLLOW_CURSOR', True) else 'no'}). "
                 'During screen help you can point at things with screen_draw.')
+        elif getattr(config, 'COMPANION_DESKTOP_ENABLED', True):
+            lines.append('- Desktop Companion: enabled but not running in this Apex (the desktop window starts with '
+                         'Start-Apex-All or the sign-in launcher; desktop.log says why if it should be running). '
+                         'The browser Companion page still works.')
         else:
-            lines.append('- Desktop Companion: not running. COMPANION_DESKTOP_ENABLED=true in .env and a restart turns it on '
+            lines.append('- Desktop Companion: off. COMPANION_DESKTOP_ENABLED=true in .env and a restart turns it on '
                          '(the browser Companion page still works).')
     except Exception:
         pass
-    lines.append('- ' + _hotkey(getattr(config, 'CELINE_HOTKEY', ''), 'has Celine look at the screen') + '; '
-                 + _hotkey(getattr(config, 'CELINE_TALK_HOTKEY', ''), 'turns voice mode on/off') + '.')
+    try:
+        from agent import look_now
+        live = look_now.bound()
+    except Exception:
+        live = set()
+    keys = []
+    if 'look' in live:
+        keys.append(_hotkey(getattr(config, 'CELINE_HOTKEY', ''), 'has Celine look at the screen'))
+    if 'talk' in live:
+        keys.append(_hotkey(getattr(config, 'CELINE_TALK_HOTKEY', ''), 'turns voice mode on/off'))
+    if keys:
+        lines.append('- ' + '; '.join(keys) + '.')
+    else:
+        lines.append("- Celine's look/talk hotkeys: not active in this Apex (they need the dashboard and a desktop session).")
     wake = getattr(config, 'CELINE_WAKE_ENABLED', False)
-    short.append('wake phrase ' + ('on' if wake else 'off'))
-    lines.append('- Wake phrase ("Hey Celly"): ' + ('on.' if wake else 'off; hotkeys start requests. CELINE_WAKE_ENABLED=true turns it on.'))
+    listening = 'wake' in live
+    short.append('wake phrase ' + ('on' if listening else 'off'))
+    if listening:
+        lines.append('- Wake phrase ("Hey Celly"): on.')
+    elif wake:
+        lines.append('- Wake phrase ("Hey Celly"): enabled in settings but not listening in this Apex.')
+    else:
+        lines.append('- Wake phrase ("Hey Celly"): off; hotkeys start requests. CELINE_WAKE_ENABLED=true turns it on.')
     try:
         from agent import handtrack
         tracker = handtrack.active_tracker()
@@ -171,8 +193,14 @@ def status_block(compact: bool = False) -> str:
         lines.append("- Celine's voice: " + voice + '.')
     elif engine:
         lines.append(f'- Voice engine: {engine}.')
+    try:
+        from agent import awareness
+        watching = awareness.running()
+    except Exception:
+        watching = False
     lines.append('- Background awareness (screen/clipboard watching, proactive notes): '
-                 + ('on.' if getattr(config, 'AWARENESS_ENABLED', True) else 'off.'))
+                 + ('on.' if watching else 'enabled but not running in this Apex.'
+                    if getattr(config, 'AWARENESS_ENABLED', True) else 'off.'))
     try:
         from agent import apocalypse
         if apocalypse.enabled():

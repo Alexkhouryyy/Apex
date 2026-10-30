@@ -208,9 +208,33 @@ def test_what_is_off_says_how_to_turn_it_on(monkeypatch):
     monkeypatch.setattr(handtrack, 'active_tracker', lambda: None)
     monkeypatch.setattr(config, 'HANDTRACK_ENABLED', False)
     monkeypatch.setattr(config, 'CELINE_WAKE_ENABLED', False)
+    monkeypatch.setattr(config, 'COMPANION_DESKTOP_ENABLED', False)
     block = live_status.status_block()
     assert 'COMPANION_DESKTOP_ENABLED=true' in block and 'HANDTRACK_ENABLED=true' in block
     assert 'CELINE_WAKE_ENABLED=true turns it on' in block
+
+
+def test_only_what_actually_started_is_listed(monkeypatch):
+    """The Apocalypse child and a dashboard-off Apex never bind Celine's hotkeys
+    or start awareness; the prompt used to list them anyway."""
+    from agent import live_status, desktop_companion, look_now, awareness
+    monkeypatch.setattr(desktop_companion, 'status_quick', lambda wait=0.1: {'running': False})
+    monkeypatch.setattr(config, 'COMPANION_DESKTOP_ENABLED', True)
+    monkeypatch.setattr(config, 'CELINE_WAKE_ENABLED', True)
+    monkeypatch.setattr(config, 'AWARENESS_ENABLED', True)
+    monkeypatch.setattr(look_now, '_bound', set())
+    monkeypatch.setattr(awareness, '_running', False)
+    block = live_status.status_block()
+    assert 'Ctrl+Alt+C' not in block and 'hotkeys: not active in this Apex' in block
+    assert 'enabled in settings but not listening' in block
+    assert 'Background awareness (screen/clipboard watching, proactive notes): enabled but not running' in block
+    assert 'enabled but not running in this Apex' in block and 'a restart turns it on' not in block, \
+        'no "set it and restart" advice when it is already set'
+    look_now.mark_bound('look', 'talk', 'wake')
+    monkeypatch.setattr(awareness, '_running', True)
+    block = live_status.status_block()
+    assert 'Ctrl+Alt+C has Celine look at the screen' in block and 'Wake phrase ("Hey Celly"): on.' in block
+    assert 'proactive notes): on.' in block
 
 
 def test_a_busy_companion_never_makes_the_turn_wait(monkeypatch):
@@ -367,3 +391,50 @@ def test_a_failed_awareness_start_falls_back_to_standalone_hands():
     src = (Path(__file__).resolve().parents[1] / 'app' / 'resident.py').read_text(encoding='utf-8')
     failed = src.index('Awareness monitor failed to start in resident mode')
     assert 'awareness_monitor = None' in src[failed:failed + 400]
+
+
+# ---------------------------------------------------------------- listeners record what really started
+
+def test_resident_records_the_hotkeys_and_wake_phrase_it_binds(monkeypatch):
+    from unittest.mock import Mock
+    from app import resident
+    from app.hotkey import GlobalHotkeys
+    from agent import look_now
+    from voice import wake
+    for key, value in {'DASHBOARD_ENABLED': True, 'WAKE_WORD_ENABLED': False,
+                       'CELINE_WAKE_ENABLED': True, 'CELINE_WAKE_PHRASES': ['hey celly']}.items():
+        monkeypatch.setattr(resident.config, key, value)
+    monkeypatch.setattr(wake, 'WakeWordListener', Mock(return_value=Mock()))
+    monkeypatch.setattr(look_now, '_bound', set())
+    resident._configure_attention(GlobalHotkeys(), Mock(), lambda: False)
+    assert look_now.bound() == {'look', 'talk', 'wake'}
+
+
+def test_look_now_start_records_what_it_bound(monkeypatch):
+    from agent import look_now
+    import app.hotkey as hk
+
+    class Keys:
+        def __init__(self): self.b = {}
+        def bind(self, combo, fn): self.b[combo] = fn
+        def start(self): return True
+    monkeypatch.setattr(hk, 'GlobalHotkeys', Keys)
+    monkeypatch.setattr(look_now, '_bound', set())
+    look_now.start('<ctrl>+<alt>+c', None, '<ctrl>+<alt>+t')
+    assert look_now.bound() == {'look', 'talk'}
+
+
+def test_awareness_reports_running_only_between_start_and_stop(monkeypatch):
+    from agent import awareness
+    monitor = object.__new__(awareness.AwarenessMonitor)
+    stub = SimpleNamespace(start=lambda: None, stop=lambda: None)
+    monitor.window = monitor.clipboard = monitor.files = stub
+    monitor.iot = monitor.handtrack = None
+    monitor.review_interval = 60
+    monitor._stop = __import__('threading').Event()
+    monkeypatch.setattr(awareness.AwarenessMonitor, '_review_loop', lambda self: None)
+    monkeypatch.setattr(awareness, '_running', False)
+    monitor.start()
+    assert awareness.running() is True
+    monitor.stop()
+    assert awareness.running() is False
