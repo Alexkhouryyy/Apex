@@ -20,8 +20,8 @@ if str(ROOT) not in sys.path:
 
 
 def environment():
-    from dotenv import dotenv_values
-    env = {k: v for k, v in dotenv_values(ROOT / '.env').items() if v is not None}
+    from env_file import env_values
+    env = env_values(ROOT / '.env')
     env.update(os.environ)
     env['DASHBOARD_ENABLED'] = 'true'  # native voice and screen help use this local backend
     # Feature defaults (desktop Companion on, wake phrases off) live in config.py,
