@@ -209,6 +209,8 @@ def test_what_is_off_says_how_to_turn_it_on(monkeypatch):
     monkeypatch.setattr(config, 'HANDTRACK_ENABLED', False)
     monkeypatch.setattr(config, 'CELINE_WAKE_ENABLED', False)
     monkeypatch.setattr(config, 'COMPANION_DESKTOP_ENABLED', False)
+    from agent import look_now
+    monkeypatch.setattr(look_now, '_bound', set())     # other tests may have bound listeners
     block = live_status.status_block()
     assert 'COMPANION_DESKTOP_ENABLED=true' in block and 'HANDTRACK_ENABLED=true' in block
     assert 'CELINE_WAKE_ENABLED=true turns it on' in block
