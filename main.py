@@ -481,7 +481,21 @@ def main():
             log=getattr(monitor, "log", None) or getattr(_tracker, "log", None))
 
     if monitor is not None:
-        monitor.start()
+        try:
+            monitor.start()
+        except Exception as e:
+            # Same as resident mode: carry on without awareness rather than crash,
+            # and hands still start on their own.
+            print(f"[Awareness] Could not start ({type(e).__name__}: {e}); Apex continues without it.")
+            monitor = None
+            if getattr(config, "HANDTRACK_ENABLED", False):
+                from agent import handtrack as _handtrack
+                _tracker = _handtrack.start_standalone(start=False)
+                if _tracker is not None:
+                    _tracker.on_gesture = make_gesture_handler(
+                        "tui" if args.tui else "text" if args.text else "wake" if args.wake else "voice",
+                        wake_event=wake_event, log=getattr(_tracker, "log", None))
+                    _standalone_hands = True
     if _standalone_hands:
         _handtrack.start_tracker(_tracker)
 

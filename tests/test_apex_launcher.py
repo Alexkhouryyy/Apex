@@ -550,6 +550,9 @@ def test_probes_never_pile_up_against_a_trickling_peer():
     gate.set()
     _time.sleep(0.2)
     real.probe_json(_Opener(lambda: (_ for _ in ()).throw(OSError('refused'))), 'http://127.0.0.1:17494/health', 0.5)
+    for i in range(200):                       # many addresses over time: finished probes are forgotten
+        real.probe_json(_Opener(lambda: (_ for _ in ()).throw(OSError('refused'))), f'http://127.0.0.1:{i}/health', 0.5)
+    assert len(real._in_flight) == 0, 'the in-flight table does not grow without bound'
 
 
 def test_waiting_for_the_dashboard_respects_its_overall_timeout_against_a_trickle():

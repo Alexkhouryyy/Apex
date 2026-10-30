@@ -20,6 +20,8 @@ def quiet_tts(monkeypatch):
     monkeypatch.setattr(tts, '_play', lambda audio: spoken.append(('celine', audio)))
     monkeypatch.setattr(tts, '_fallback_noted', False)
     monkeypatch.setattr(tts, '_celine_down_until', 0.0)
+    monkeypatch.setattr(tts, '_celine_busy_until', 0.0)
+    monkeypatch.setattr(tts, '_audio_missing', '')
     return spoken
 
 
@@ -489,15 +491,46 @@ def test_a_ready_voice_that_stops_answering_is_not_called_ready_forever(monkeypa
 
 def test_a_stuck_probe_stops_the_old_state_being_trusted(monkeypatch):
     from agent import live_status
-    monkeypatch.setattr(live_status, '_voice', {'at': 0.0, 'state': live_status.READY, 'busy': True,
+    stuck = SimpleNamespace(is_alive=lambda: True)
+    monkeypatch.setattr(live_status, '_voice', {'at': 0.0, 'state': live_status.READY, 'thread': stuck, 'gen': 1,
                                                 'since': 100.0, 'misses': 0, 'seen': True})
     assert live_status._voice_state('u', now=110.0) == live_status.NOT_ANSWERING
+    assert live_status._voice['thread'] is stuck, 'no second probe while the stuck one lives'
+
+
+def test_stuck_voice_probes_never_pile_up(monkeypatch):
+    import threading
+    import time as _time
+    from agent import live_status
+    monkeypatch.setattr(live_status, '_voice', {'at': 0.0, 'state': '', 'thread': None, 'gen': 0,
+                                                'since': 0.0, 'misses': 0, 'seen': False})
+    gate = threading.Event()
+    calls = []
+    def trickle(url):
+        calls.append(1)
+        gate.wait(10)
+        return {'service': 'apex-qwen', 'model_loaded': True}
+    for i in range(30):
+        live_status._voice_state('u', now=100.0 + i * 10, fetch=trickle, wait=0)
+    assert len(calls) == 1, 'one stuck probe, not one per turn'
+    gate.set()
+    _time.sleep(0.2)
+    # Within the first seconds, before it counts as stuck, turns must not start more probes either.
+    monkeypatch.setattr(live_status, '_voice', {'at': 0.0, 'state': '', 'thread': None, 'gen': 0,
+                                                'since': 0.0, 'misses': 0, 'seen': False})
+    gate.clear()
+    calls.clear()
+    for i in range(10):
+        live_status._voice_state('u', now=500.0 + i * 0.1, fetch=trickle, wait=0)
+    assert len(calls) == 1, 'a probe still out (not yet stuck) is not joined by another'
+    gate.set()
+    _time.sleep(0.2)
 
 
 def test_a_voice_that_crashed_after_answering_is_not_called_starting(monkeypatch):
     from agent import live_status
     monkeypatch.setenv('APEX_LOCAL_VOICE', 'starting')
-    monkeypatch.setattr(live_status, '_voice', {'at': 0.0, 'state': '', 'busy': False, 'since': 0.0,
+    monkeypatch.setattr(live_status, '_voice', {'at': 0.0, 'state': '', 'thread': None, 'gen': 0, 'since': 0.0,
                                                 'misses': 0, 'seen': False})
     assert live_status.classify(error=ConnectionRefusedError()) == live_status.STARTING
     live_status._voice['seen'] = True
@@ -570,3 +603,92 @@ def test_long_text_without_sentence_ends_is_split_between_words():
     pieces = tts._chunks(text)
     assert all(len(p) <= tts.MAX_CHUNK for p in pieces) and all(p.startswith('words') and p.endswith('words') for p in pieces)
     assert ' '.join(pieces) == text
+
+
+
+# ---------------------------------------------------------------- round 3 of the stress test
+
+def test_the_streaming_409_counts_as_busy():
+    assert tts._is_busy(ValueError('Voicebox could not generate audio (409): The voice is generating another section'))
+
+
+def test_a_long_busy_spell_does_not_cost_four_seconds_a_sentence(monkeypatch):
+    import time as _time
+    async def busy(text):
+        raise ValueError('Voicebox is already generating an Apex reply. Try again when it finishes.')
+    import voice.voicebox as vb
+    monkeypatch.setattr(vb, 'synthesize', busy)
+    monkeypatch.setattr(tts.interrupt_mod, 'is_interrupted', lambda: False)
+    monkeypatch.setattr(tts, '_celine_busy_until', _time.monotonic() + 10)   # she was busy a moment ago
+    started = _time.monotonic()
+    with pytest.raises(tts.CelineBusy):
+        tts._synthesize('hi')
+    assert _time.monotonic() - started < 1, 'one try, no busy wait, during the busy cool-down'
+
+
+def test_missing_audio_skips_celine_until_restart(quiet_tts, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(tts, '_synthesize', lambda text: calls.append(text) or b'wav')
+    monkeypatch.setattr(tts, '_audio_missing', 'OSError: PortAudio library not found')
+    tts.speak('One.')
+    tts.speak('Two.')
+    assert calls == [] and quiet_tts == [('system', 'One.'), ('system', 'Two.')]
+    out = capsys.readouterr().out
+    assert out.count("cannot play Celine's audio") == 1 and 'PortAudio' in out
+
+
+def test_a_second_awareness_start_keeps_the_first_running(monkeypatch):
+    from agent import awareness
+    started = []
+    monitor = object.__new__(awareness.AwarenessMonitor)
+    stub = SimpleNamespace(start=lambda: started.append(1), stop=lambda: None)
+    monitor.window = monitor.clipboard = monitor.files = stub
+    monitor.iot = monitor.handtrack = None
+    monitor.review_interval = 60
+    monitor._stop = __import__('threading').Event()
+    monkeypatch.setattr(awareness.AwarenessMonitor, '_review_loop', lambda self: None)
+    monkeypatch.setattr(awareness, '_running', False)
+    monitor.start()
+    monitor.start()
+    assert awareness.running() is True and len(started) == 3, 'the second start did nothing'
+    monitor.stop()
+
+
+@pytest.mark.parametrize('kind', ['ClipboardWatcher', 'ActiveWindowWatcher'])
+def test_awareness_watchers_can_be_joined(kind):
+    """They shadowed Thread._stop with an Event, so join() and is_alive() raised."""
+    from agent import awareness
+    watcher = getattr(awareness, kind)(awareness.AwarenessLog())
+    watcher.interval = 0.05
+    watcher.start()
+    watcher.stop()
+    watcher.join(timeout=5)
+    assert watcher.is_alive() is False
+
+
+def test_a_stopping_tracker_is_replaced_not_reused(monkeypatch):
+    from agent import handtrack
+    monkeypatch.setattr(config, 'HANDTRACK_ENABLED', True)
+    import threading
+    old = SimpleNamespace(is_alive=lambda: True, _stop_event=threading.Event(), join=lambda timeout=None: None)
+    old._stop_event.set()
+    monkeypatch.setattr(handtrack, '_active', old)
+    created = []
+
+    class Tracker:
+        def __init__(self, log):
+            created.append(self)
+        def start(self):
+            pass
+        def latest_frame(self):
+            return None
+    monkeypatch.setattr(handtrack, 'HandTracker', Tracker)
+    assert handtrack.start_standalone(start=False) is created[0]
+
+
+def test_main_carries_on_when_awareness_fails_to_start():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / 'main.py').read_text(encoding='utf-8')
+    i = src.index('            monitor.start()')
+    block = src[i - 40:i + 900]
+    assert 'except Exception' in block and 'monitor = None' in block and 'start_standalone(start=False)' in block

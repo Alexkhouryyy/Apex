@@ -23,7 +23,7 @@ POSITIVE_CACHE_SECONDS = 30   # a ready voice is re-checked this often
 NEGATIVE_CACHE_SECONDS = 5    # a missing or slow one sooner, so "ready" shows up quickly
 PROBE_WAIT = 0.3              # how long a turn waits for a fresh answer before using the last one
 
-_voice = {'at': 0.0, 'state': '', 'busy': False, 'since': 0.0, 'misses': 0, 'seen': False}
+_voice = {'at': 0.0, 'state': '', 'thread': None, 'gen': 0, 'since': 0.0, 'misses': 0, 'seen': False}
 PROBE_STUCK = 3.0            # a probe running longer than this counts as no answer
 _voice_lock = threading.Lock()
 _BOOT = time.monotonic()
@@ -90,21 +90,24 @@ def _probe(url: str, fetch=None) -> str:
 def _voice_state(url: str, *, now: float | None = None, fetch=None, wait: float = PROBE_WAIT) -> str:
     """The voice state, at most `wait` seconds late: a stale answer starts one
     background probe; the turn takes its result if it arrives in time, else the
-    last known state. A ready voice survives one slow answer, not two, and a
-    probe stuck past PROBE_STUCK counts as no answer."""
+    last known state. A ready voice survives one slow answer, not two. A probe
+    stuck past PROBE_STUCK (a trickling server) means "not answering", and no
+    second probe is started while it lives."""
     now = time.monotonic() if now is None else now
     with _voice_lock:
-        state, at, busy = _voice['state'], _voice['at'], _voice['busy']
-        if busy and now - _voice.get('since', now) > PROBE_STUCK:
-            # A trickling server keeps the probe alive forever: stop trusting the old state.
-            _voice.update(state=NOT_ANSWERING, at=now, busy=False, misses=_voice.get('misses', 0) + 1)
+        state, at = _voice['state'], _voice['at']
+        worker = _voice.get('thread')
+        in_flight = worker is not None and worker.is_alive()
+        if in_flight and now - _voice.get('since', now) > PROBE_STUCK:
+            if state != NOT_ANSWERING:
+                _voice.update(state=NOT_ANSWERING, at=now, misses=_voice.get('misses', 0) + 1)
             return NOT_ANSWERING
         ttl = POSITIVE_CACHE_SECONDS if state == READY else NEGATIVE_CACHE_SECONDS
         if state and now - at < ttl:
             return state
-        start = not busy
+        start = not in_flight                      # never a second probe while one is out
         if start:
-            _voice.update(busy=True, since=now)
+            _voice['since'] = now
     done = threading.Event()
 
     def run():
@@ -117,10 +120,13 @@ def _voice_state(url: str, *, now: float | None = None, fetch=None, wait: float 
                 result = READY                     # one slow answer doesn't undo a ready voice; two do
             else:
                 _voice['misses'] = _voice.get('misses', 0) + 1
-            _voice.update(state=result, at=now, busy=False)
+            _voice.update(state=result, at=now)
         done.set()
     if start:
-        threading.Thread(target=run, daemon=True, name='LiveStatusVoice').start()
+        thread = threading.Thread(target=run, daemon=True, name='LiveStatusVoice')
+        with _voice_lock:
+            _voice['thread'] = thread
+        thread.start()
     done.wait(wait if start else 0)
     with _voice_lock:
         return _voice['state'] or NOT_ANSWERING
@@ -189,6 +195,7 @@ def status_block(compact: bool = False) -> str:
         tracker = handtrack.active_tracker()
         state = tracker.camera_state() if tracker is not None and hasattr(tracker, 'camera_state') else None
         short.append('hands ' + ('on' if state == 'watching' else 'paused' if state == 'paused'
+                                 else 'stopped' if state == 'stopped'
                                  else 'no camera' if tracker is not None else 'off'))
         if state == 'watching':
             lines.append('- Hand tracking: running (camera gestures can wake or stop Apex).')
