@@ -75,13 +75,13 @@ class ActiveWindowWatcher(threading.Thread):
         super().__init__(daemon=True, name="WindowWatcher")
         self.log = log
         self.interval = interval
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self._last_title: str = ""
 
-    def stop(self): self._stop.set()
+    def stop(self): self._stop_event.set()
 
     def run(self):
-        while not self._stop.wait(timeout=self.interval):
+        while not self._stop_event.wait(timeout=self.interval):
             try:
                 wid = subprocess.run(
                     ["xdotool", "getactivewindow"],
@@ -105,15 +105,15 @@ class ClipboardWatcher(threading.Thread):
         super().__init__(daemon=True, name="ClipboardWatcher")
         self.log = log
         self.interval = interval
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self._last: str = ""
 
-    def stop(self): self._stop.set()
+    def stop(self): self._stop_event.set()
 
     def run(self):
         if pyperclip is None:
             return
-        while not self._stop.wait(timeout=self.interval):
+        while not self._stop_event.wait(timeout=self.interval):
             try:
                 current = pyperclip.paste()
                 if current and current != self._last and len(current) < 4000:
@@ -289,6 +289,8 @@ class AwarenessMonitor:
 
     def start(self) -> None:
         global _running
+        if getattr(self, '_started', False):
+            return                    # already running: a second start must not tear the first down
         try:
             self._start_watchers()
         except BaseException:
@@ -297,6 +299,7 @@ class AwarenessMonitor:
             except Exception:
                 pass
             raise
+        self._started = True
         _running = True
 
     def _start_watchers(self) -> None:
@@ -321,6 +324,7 @@ class AwarenessMonitor:
     def stop(self) -> None:
         global _running
         _running = False
+        self._started = False
         self._stop.set()
         self.window.stop()
         self.clipboard.stop()

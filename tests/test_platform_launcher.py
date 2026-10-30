@@ -96,7 +96,9 @@ def test_a_service_crash_leaves_the_other_running(rig,monkeypatch,capsys):
         if len(children)==2:children[0].poll.return_value=7
     monkeypatch.setattr(platform.launcher,'wait_healthy',health)
     with pytest.raises(KeyboardInterrupt):platform.main([])
-    assert 'Apocalypse stopped (exit 7). Apex + Celine keeps running.' in capsys.readouterr().out
+    out=capsys.readouterr().out
+    assert out.count('Apocalypse stopped (exit 7)')==1,'reported once, not again by the monitor loop'
+    assert 'Ready: Apex + Celine.' in out
     assert stopped==[children[1]],'only the one still running is stopped at Ctrl+C'
 
 
@@ -207,6 +209,7 @@ def test_ctrl_c_is_ignored_during_cleanup_and_restored_after(rig,monkeypatch):
     def stop(p):
         seen.append(signal.getsignal(signal.SIGINT))
     monkeypatch.setattr(platform,'stop_owned',stop)
+    signal.signal(signal.SIGINT,signal.default_int_handler)
     before=signal.getsignal(signal.SIGINT)
     with pytest.raises(KeyboardInterrupt):platform.main([])
     assert seen and all(s==signal.SIG_IGN for s in seen),'a second Ctrl+C cannot interrupt the stops'
@@ -223,3 +226,49 @@ def test_a_service_that_was_ready_then_died_is_reported(rig,monkeypatch,capsys):
     with pytest.raises(RuntimeError,match='No Apex service is running'):platform.main([])
     out=capsys.readouterr().out
     assert 'Apocalypse: ready.' in out and 'Apocalypse stopped (exit 7).' in out
+
+
+# ---------------------------------------------------------------- round 3 of the stress test
+
+def test_the_apex_launcher_does_not_inherit_values_read_from_env(rig,monkeypatch):
+    """Saved settings were ignored after a dashboard Restart: the platform passed
+    its startup copy of .env down as environment variables, which beat the
+    freshly saved file (load_dotenv never overrides)."""
+    children,stopped=rig
+    monkeypatch.setattr(platform.launcher,'launch_environment',
+                        lambda: {'APEX_APOCALYPSE':'1','APEX_APOCALYPSE_HOME':'/x','HANDTRACK_ENABLED':'false'})
+    monkeypatch.delenv('HANDTRACK_ENABLED',raising=False)
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    apex_env=children[1].env
+    assert 'HANDTRACK_ENABLED' not in apex_env,'a value from .env is read fresh by the child on every restart'
+    assert apex_env['APEX_APOCALYPSE']=='0' and apex_env['HF_HUB_OFFLINE']=='1' and apex_env['APEX_PLATFORM_ID']
+
+
+def test_restart_on_the_apocalypse_dashboard_restarts_it(rig,monkeypatch,capsys):
+    children,stopped=rig
+    calls={'n':0}
+    def sleep(_):
+        calls['n']+=1
+        if calls['n']==1:
+            children[0].poll.return_value=42          # Restart pressed on the Apocalypse dashboard
+            children[0].returncode=42
+        else:
+            raise KeyboardInterrupt()
+    monkeypatch.setattr(platform.time,'sleep',sleep)
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    out=capsys.readouterr().out
+    assert 'Apocalypse: restarting as requested.' in out and 'Apocalypse stopped' not in out
+    assert len(children)==3 and 'run_apex_apocalypse.py' in children[2].args[0]
+    assert children[2].env['APEX_LAUNCH_ID']!=children[0].env['APEX_LAUNCH_ID']
+
+
+def test_ctrl_c_works_again_even_if_the_cleanup_fails(rig,monkeypatch):
+    import signal
+    children,stopped=rig
+    signal.signal(signal.SIGINT,signal.default_int_handler)    # a known starting point, whatever ran before
+    before=signal.getsignal(signal.SIGINT)
+    def broken(children,nomad):
+        raise BrokenPipeError(32,'Broken pipe')
+    monkeypatch.setattr(platform,'_stop_all',broken)
+    with pytest.raises(BrokenPipeError):platform.main([])
+    assert signal.getsignal(signal.SIGINT)==before

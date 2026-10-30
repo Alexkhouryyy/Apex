@@ -107,6 +107,9 @@ def _speak_elevenlabs(text: str) -> None:
 
 _fallback_noted = False
 _celine_down_until = 0.0
+_celine_busy_until = 0.0     # recently busy: don't wait for her again for a few seconds
+BUSY_COOLDOWN = 10.0
+_audio_missing = ''          # the audio library could not load: skip Celine until restart
 CELINE_COOLDOWN = 30.0      # after a failure, speak with the PC voice for this long before asking Celine again
 SYNTH_BUDGET = 20.0         # seconds one sentence may take to synthesize before the PC voice takes over
 BUSY_RETRY_SECONDS = 4.0    # Celine busy with another reply: wait this long for her before falling back
@@ -143,7 +146,8 @@ class CelineBusy(RuntimeError):
 
 def _is_busy(exc) -> bool:
     text = str(exc)
-    return isinstance(exc, ValueError) and ('already generating' in text or text.startswith('Voicebox 409'))
+    return isinstance(exc, ValueError) and ('already generating' in text or text.startswith('Voicebox 409')
+                                            or 'could not generate audio (409)' in text)
 
 
 def _synthesize(text):
@@ -185,7 +189,8 @@ def _synthesize_here(text):
                 except BaseException:
                     pass
 
-    busy_until = time.monotonic() + BUSY_RETRY_SECONDS
+    # Recently busy: one try, no 4 s wait per sentence through a long busy spell.
+    busy_until = time.monotonic() + (0 if time.monotonic() < _celine_busy_until else BUSY_RETRY_SECONDS)
     while True:
         try:
             return asyncio.run(bounded())
@@ -205,7 +210,12 @@ def _play(audio):
     started = False
     try:
         import numpy as np
-        import sounddevice as sd          # can fail to load (PortAudio missing): nothing was heard
+        try:
+            import sounddevice as sd      # can fail to load (PortAudio missing): nothing was heard
+        except (ImportError, OSError) as exc:
+            global _audio_missing
+            _audio_missing = f'{type(exc).__name__}: {exc}'
+            raise
         with wave.open(io.BytesIO(audio), 'rb') as wav:
             if wav.getsampwidth() != 2:
                 raise ValueError('Voicebox terminal playback requires PCM16 WAV.')
@@ -287,10 +297,19 @@ def _speak_voicebox_or_fallback(text):
     a sentence is never said twice: once Celine's audio has started playing, a
     playback error is logged, not repeated in the PC voice."""
     import time
-    global _fallback_noted, _celine_down_until
+    global _fallback_noted, _celine_down_until, _celine_busy_until
     for piece in _chunks(text):
         if interrupt_mod.is_interrupted():
             return
+        if _audio_missing:
+            # No audio library: Celine's audio could never be played. Don't make her
+            # synthesize it; the PC voice speaks, and the log says why once.
+            if not _fallback_noted:
+                print(f"[TTS] This PC cannot play Celine's audio ({_audio_missing[:120]}); "
+                      "using its own voice until Apex restarts.")
+                _fallback_noted = True
+            _speak_system(piece)
+            continue
         if time.monotonic() < _celine_down_until:
             _speak_system(piece)
             continue
@@ -298,7 +317,9 @@ def _speak_voicebox_or_fallback(text):
             audio = _synthesize(piece)
         except CelineBusy:
             # Up, but making another reply: this sentence in the PC voice, no
-            # cool-down and no outage notice, so the next one asks her again.
+            # cool-down and no outage notice, so the next one asks her again
+            # (without the busy wait for a few seconds).
+            _celine_busy_until = time.monotonic() + BUSY_COOLDOWN
             if not interrupt_mod.is_interrupted():
                 _speak_system(piece)
             continue

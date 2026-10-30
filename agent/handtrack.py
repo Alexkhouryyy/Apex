@@ -209,7 +209,12 @@ def ensure_model(timeout: float = 120.0) -> Optional[Path]:
         return p
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".partial")
+        import tempfile
+        # A unique temp name: two Apex processes downloading at once no longer
+        # trip over each other's .partial file.
+        fd, tmp_name = tempfile.mkstemp(dir=p.parent, suffix=".partial")
+        os.close(fd)
+        tmp = Path(tmp_name)
         print(f"[HandTrack] Downloading the hand model (~7.5 MB) to {p} …")
         with urllib.request.urlopen(MODEL_URL, timeout=timeout) as r, \
                 open(tmp, "wb") as f:
@@ -995,8 +1000,8 @@ class HandTracker(threading.Thread):
                 self._retry_at = now + self._retry_delay
                 self._say("camera_busy",
                           f"[HandTrack] Camera {self.device_index} would not "
-                          f"open — something else may be using it. Retrying "
-                          f"every {self._retry_delay:.0f}s.")
+                          f"open — something else may be using it. Retrying in "
+                          f"{self._retry_delay:.0f}s, then less often (up to every {CAMERA_RETRY_MAX:.0f}s).")
                 self._retry_delay = min(self._retry_delay * 2, CAMERA_RETRY_MAX)
                 return False
             self._reset_retry()
@@ -1357,8 +1362,11 @@ def start_standalone(log=None, *, start=True) -> Optional[HandTracker]:
     if not getattr(config, "HANDTRACK_ENABLED", False):
         return None
     current = active_tracker()
-    if current is not None and current.is_alive():
+    stopping = getattr(getattr(current, '_stop_event', None), 'is_set', lambda: False)()
+    if current is not None and current.is_alive() and not stopping:
         return current                          # one tracker per webcam: never start a second
+    if current is not None and current.is_alive():
+        current.join(timeout=5)                 # a stopping tracker: let it release the camera first
     if log is None:
         from agent.awareness import AwarenessLog
         log = AwarenessLog()

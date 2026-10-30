@@ -131,7 +131,10 @@ def probe_json(opener, url, deadline=3.0):
     _in_flight[url] = worker
     worker.start()
     worker.join(deadline)
-    return dict(result) if not worker.is_alive() else {}
+    if worker.is_alive():
+        return {}
+    _in_flight.pop(url, None)          # finished: nothing to remember (it grew without bound)
+    return dict(result)
 
 
 def voice_health(opener, deadline=3.0):
@@ -266,7 +269,7 @@ def main(argv=None):
                     if alive and not voice_ready:
                         print('Celine voice: ready.', flush=True)
                         voice_ready = True
-                    elif not alive and voice_ready and misses >= 2:   # one busy, slow answer is not a death
+                    elif not alive and voice_ready and misses >= 3:   # a busy stretch is not a death
                         # An external server that dies, or one that stops answering: say so once.
                         print("Celine voice stopped answering. Apex keeps running with this PC's own voice "
                               'until it answers again.', flush=True)

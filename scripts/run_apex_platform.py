@@ -71,6 +71,23 @@ def start_cached_nomad(home):
         return None
 
 
+def _stop_all(children, nomad):
+    for _, process in reversed(list(children)):
+        for _attempt in range(2):
+            try:
+                stop_owned(process)
+                break
+            except BaseException:
+                continue
+    if nomad is not None:
+        try:
+            if nomad.poll() is None:
+                launcher.stop(nomad)  # Stops only this compose client; never removes volumes.
+        except BaseException:
+            pass
+    print('Owned Apex services stopped. Cached NOMAD containers, if started, remain managed by Docker Desktop.', flush=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--offline-only', action='store_true', help='Apocalypse and cached NOMAD only')
@@ -99,6 +116,21 @@ def main(argv=None):
     platform_id = uuid.uuid4().hex
     normal['APEX_PLATFORM_ID'] = offline['APEX_PLATFORM_ID'] = platform_id
     offline['APEX_LAUNCH_ID'] = uuid.uuid4().hex
+    # The Apex + Celine launcher gets the real process environment plus this
+    # launcher's own overrides, NOT the values read from .env: it reads .env
+    # itself on every restart, and inherited copies would beat a setting saved
+    # on the dashboard before a Restart (load_dotenv never overrides).
+    apex_env = dict(os.environ)
+    for key in ('APEX_APOCALYPSE', 'HF_HUB_OFFLINE', 'TRANSFORMERS_OFFLINE', 'APEX_PLATFORM_ID'):
+        apex_env[key] = normal[key]
+
+    def fresh_offline():
+        """The Apocalypse child's environment from the .env as it is now."""
+        env = launcher.launch_environment()
+        env['APEX_APOCALYPSE'] = '0'
+        env = apocalypse.launch_environment(ROOT, env)
+        env['APEX_PLATFORM_ID'], env['APEX_LAUNCH_ID'] = platform_id, uuid.uuid4().hex
+        return env
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     children = []          # (name, process) still running
     ready = []             # names that became healthy
@@ -126,7 +158,7 @@ def main(argv=None):
         children.append(('Apocalypse', apocalypse_child))
         apex_child = None
         if not args.offline_only:
-            apex_child = spawn([str(ROOT / 'scripts/run_apex_qwen.py'), '--fast', '--resident'], normal)
+            apex_child = spawn([str(ROOT / 'scripts/run_apex_qwen.py'), '--fast', '--resident'], apex_env)
             children.append(('Apex + Celine', apex_child))
         try:
             launcher.wait_healthy(opener, offline_url+'/health',
@@ -156,6 +188,8 @@ def main(argv=None):
                 process = next((p for n, p in children if n == name), None)
                 print(f'{name} stopped' + (f' (exit {process.returncode})' if process is not None else '') + '.',
                       flush=True)
+                if process is not None:
+                    children.remove((name, process))   # reported here, not again by the monitor loop
         ready = [name for name in ready if alive(name)]
         if not ready:
             raise RuntimeError('No Apex service is running. See the messages above.')
@@ -167,11 +201,21 @@ def main(argv=None):
         print('Ready: '+', '.join(ready)+'. Account authorization and offline readers have their own readiness checks.', flush=True)
         print('No model, book, course or map downloads were started. Keep this console open; Ctrl+C stops its Apex services.', flush=True)
         nomad_announced = args.no_nomad or nomad is None
+        restarts = []
         while children:
             dead = [(n, p) for n, p in children if p.poll() is not None]
             for item in dead:
                 children.remove(item)
             for name, process in dead:
+                now = time.monotonic()
+                restarts = [t for t in restarts if now - t < 120]
+                if name == 'Apocalypse' and process.returncode == 42 and len(restarts) < 5:
+                    # Restart pressed on the Apocalypse dashboard: start it again
+                    # with the settings saved since (Start-Apex-All does the same for Apex).
+                    restarts.append(now)
+                    print('Apocalypse: restarting as requested.', flush=True)
+                    children.append(('Apocalypse', spawn([str(ROOT / 'scripts/run_apex_apocalypse.py')], fresh_offline())))
+                    continue
                 others = ', '.join(n for n, _ in children)
                 print(f'{name} stopped (exit {process.returncode}).'
                       + (f' {others} keeps running.' if others else ''), flush=True)
@@ -195,25 +239,14 @@ def main(argv=None):
             previous_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
         except (ValueError, OSError):
             pass                                   # not the main thread
-        for _, process in reversed(list(children)):
-            for _attempt in range(2):
+        try:
+            _stop_all(children, nomad)
+        finally:
+            if previous_sigint is not None:        # Ctrl+C works again even if the cleanup itself failed
                 try:
-                    stop_owned(process)
-                    break
-                except BaseException:
-                    continue
-        if nomad is not None:
-            try:
-                if nomad.poll() is None:
-                    launcher.stop(nomad)  # Stops only this compose client; never removes volumes.
-            except BaseException:
-                pass
-        print('Owned Apex services stopped. Cached NOMAD containers, if started, remain managed by Docker Desktop.', flush=True)
-        if previous_sigint is not None:
-            try:
-                signal.signal(signal.SIGINT, previous_sigint)
-            except (ValueError, OSError):
-                pass
+                    signal.signal(signal.SIGINT, previous_sigint)
+                except (ValueError, OSError):
+                    pass
     return 0
 
 
