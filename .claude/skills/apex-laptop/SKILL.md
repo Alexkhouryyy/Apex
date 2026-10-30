@@ -94,6 +94,18 @@ Then restart Apex.
 Get-Content "$env:LOCALAPPDATA\Apex\Companion\desktop.log" -Tail 40
 ```
 
+**Hardware check** (webcam, hands, mic, speakers, GPU, paging file, both voices;
+saves a dated report and shows what changed since last time). Quit Apex first
+for the camera part:
+
+```powershell
+cd C:\Users\alexk\Apex
+.\Test-Apex-Hardware.cmd
+```
+
+Ask the owner to paste the console output, or the newest file in
+`%LOCALAPPDATA%\Apex\hardware\`.
+
 **Health checks**
 
 ```powershell
