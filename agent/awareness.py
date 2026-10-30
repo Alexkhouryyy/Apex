@@ -289,7 +289,17 @@ class AwarenessMonitor:
 
     def start(self) -> None:
         global _running
+        try:
+            self._start_watchers()
+        except BaseException:
+            try:
+                self.stop()           # nothing half-started keeps running, and running() stays False
+            except Exception:
+                pass
+            raise
         _running = True
+
+    def _start_watchers(self) -> None:
         self.window.start()
         self.clipboard.start()
         self.files.start()

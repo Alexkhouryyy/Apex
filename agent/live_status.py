@@ -23,7 +23,8 @@ POSITIVE_CACHE_SECONDS = 30   # a ready voice is re-checked this often
 NEGATIVE_CACHE_SECONDS = 5    # a missing or slow one sooner, so "ready" shows up quickly
 PROBE_WAIT = 0.3              # how long a turn waits for a fresh answer before using the last one
 
-_voice = {'at': 0.0, 'state': '', 'busy': False}
+_voice = {'at': 0.0, 'state': '', 'busy': False, 'since': 0.0, 'misses': 0, 'seen': False}
+PROBE_STUCK = 3.0            # a probe running longer than this counts as no answer
 _voice_lock = threading.Lock()
 _BOOT = time.monotonic()
 STARTING_WINDOW = 1200       # after this long, a closed port no longer means "still loading"
@@ -64,7 +65,8 @@ def classify(health=None, error=None) -> str:
             # The launcher says when it started her: then a closed port means
             # "still loading", not "gone".
             starting = (os.environ.get('APEX_LOCAL_VOICE') == 'starting'
-                        and time.monotonic() - _BOOT < STARTING_WINDOW)
+                        and time.monotonic() - _BOOT < STARTING_WINDOW
+                        and not _voice.get('seen'))      # once she has answered, a closed port means gone
             return STARTING if starting else NOT_RUNNING
         return NOT_ANSWERING
     if not isinstance(health, dict) or health.get('service') not in ('apex-qwen', None):
@@ -88,23 +90,33 @@ def _probe(url: str, fetch=None) -> str:
 def _voice_state(url: str, *, now: float | None = None, fetch=None, wait: float = PROBE_WAIT) -> str:
     """The voice state, at most `wait` seconds late: a stale answer starts one
     background probe; the turn takes its result if it arrives in time, else the
-    last known state."""
+    last known state. A ready voice survives one slow answer, not two, and a
+    probe stuck past PROBE_STUCK counts as no answer."""
     now = time.monotonic() if now is None else now
     with _voice_lock:
         state, at, busy = _voice['state'], _voice['at'], _voice['busy']
+        if busy and now - _voice.get('since', now) > PROBE_STUCK:
+            # A trickling server keeps the probe alive forever: stop trusting the old state.
+            _voice.update(state=NOT_ANSWERING, at=now, busy=False, misses=_voice.get('misses', 0) + 1)
+            return NOT_ANSWERING
         ttl = POSITIVE_CACHE_SECONDS if state == READY else NEGATIVE_CACHE_SECONDS
         if state and now - at < ttl:
             return state
         start = not busy
         if start:
-            _voice['busy'] = True
+            _voice.update(busy=True, since=now)
     done = threading.Event()
 
     def run():
         result = _probe(url, fetch)
         with _voice_lock:
-            if result == NOT_ANSWERING and _voice['state'] == READY:
-                result = READY                     # one slow answer doesn't undo a ready voice
+            if result in (READY, WARMING):
+                _voice.update(seen=True, misses=0)
+            elif result == NOT_ANSWERING and _voice['state'] == READY and not _voice.get('misses'):
+                _voice['misses'] = 1
+                result = READY                     # one slow answer doesn't undo a ready voice; two do
+            else:
+                _voice['misses'] = _voice.get('misses', 0) + 1
             _voice.update(state=result, at=now, busy=False)
         done.set()
     if start:
@@ -128,6 +140,9 @@ def status_block(compact: bool = False) -> str:
         short.append('Companion ' + ('starting' if st is None else 'on' if st.get('running') else 'off'))
         if st is None:
             lines.append('- Desktop Companion: starting or busy right now.')
+        elif st.get('running') and st.get('hotkey_ready', True) is False:
+            lines.append(f"- Desktop Companion: running ({'open' if st.get('shown') else 'hidden'}), but its "
+                         'hotkeys did not start (another program may own them); use the browser Companion page.')
         elif st.get('running'):
             lines.append(
                 f"- Desktop Companion: running ({'open' if st.get('shown') else 'hidden'}). "
@@ -155,6 +170,7 @@ def status_block(compact: bool = False) -> str:
         keys.append(_hotkey(getattr(config, 'CELINE_HOTKEY', ''), 'has Celine look at the screen'))
     if 'talk' in live:
         keys.append(_hotkey(getattr(config, 'CELINE_TALK_HOTKEY', ''), 'turns voice mode on/off'))
+    short.append('look/talk hotkeys ' + ('on' if keys else 'off'))
     if keys:
         lines.append('- ' + '; '.join(keys) + '.')
     else:
@@ -178,6 +194,8 @@ def status_block(compact: bool = False) -> str:
             lines.append('- Hand tracking: running (camera gestures can wake or stop Apex).')
         elif state == 'paused':
             lines.append('- Hand tracking: paused while another program uses the camera.')
+        elif state == 'stopped':
+            lines.append('- Hand tracking: enabled but not running (the tracker stopped).')
         elif tracker is not None:
             lines.append('- Hand tracking: enabled, but the camera is not delivering frames.')
         elif getattr(config, 'HANDTRACK_ENABLED', False):
@@ -198,6 +216,7 @@ def status_block(compact: bool = False) -> str:
         watching = awareness.running()
     except Exception:
         watching = False
+    short.append('awareness ' + ('on' if watching else 'off'))
     lines.append('- Background awareness (screen/clipboard watching, proactive notes): '
                  + ('on.' if watching else 'enabled but not running in this Apex.'
                     if getattr(config, 'AWARENESS_ENABLED', True) else 'off.'))
