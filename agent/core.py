@@ -3575,11 +3575,14 @@ def time_block(now=None) -> str:
     )
 
 
-def _live_status() -> str:
+LIVE_STATUS_HEADING = "## WHAT IS RUNNING RIGHT NOW"
+
+
+def _live_status(compact: bool = False) -> str:
     """Which parts of Apex are running now (agent/live_status.py); never fails a turn."""
     try:
         from agent import live_status
-        return live_status.status_block()
+        return live_status.status_block(compact=True) if compact else live_status.status_block()
     except Exception as e:
         print(f"[Status] live status unavailable: {e}")
         return ""
@@ -3747,7 +3750,7 @@ class AgentCore:
             text += '\n' + continuity.prompt(max_field_chars=600)
             text += "\nUser profile:\n" + self._memory_files.get('user', '')[:1375]
             text += "\n" + goals.active_goals_for_prompt()[:1000] + "\n" + time_block()
-            text += "\n" + _live_status()
+            text += "\n" + _live_status(compact=True)
             return [{'type': 'text', 'text': text}]
         blocks: list[dict] = []
         # Persona — prepended so character rules take highest priority. Celine
@@ -3994,7 +3997,9 @@ class AgentCore:
                         companion_mode, bool(screen_b64),
                         name="Celine" if persona == "celine" else continuity.display_name(),
                         screen_origin=screen_origin)}]
-                return blocks
+                # The live status stays the very last block, after any turn-specific ones.
+                live = [b for b in blocks if str(b.get("text", "")).startswith(LIVE_STATUS_HEADING)]
+                return [b for b in blocks if b not in live] + live
 
             # Build user message content
             user_content: list = []

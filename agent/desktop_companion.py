@@ -116,6 +116,18 @@ def status() -> dict:
                 'hotkey_ready': _keys is not None}
 
 
+def status_quick(wait: float = 0.1) -> dict | None:
+    """status() for a model turn: if the Companion lock is held (a slow window
+    launch), give up after `wait` seconds and return None instead of making the
+    turn wait for it."""
+    if not _condition.acquire(timeout=wait):
+        return None
+    try:
+        return status()
+    finally:
+        _condition.release()
+
+
 def authorize(session: str) -> bool:
     with _condition:
         return bool(_session and session and running() and hmac.compare_digest(session, _session))

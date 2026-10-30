@@ -318,8 +318,11 @@ def test_startup_keeps_explicit_wake_settings_and_enables_native_window(tmp_path
     (tmp_path/'.env').write_text('CELINE_WAKE_ENABLED=true\nWAKE_WORD_ENABLED=false\n',encoding='utf-8')
     monkeypatch.delenv('CELINE_WAKE_ENABLED',raising=False)
     monkeypatch.delenv('WAKE_WORD_ENABLED',raising=False)
+    monkeypatch.delenv('COMPANION_DESKTOP_ENABLED',raising=False)
     result=startup.environment()
-    assert result['COMPANION_DESKTOP_ENABLED']=='true'
+    assert 'COMPANION_DESKTOP_ENABLED' not in result,'config.py holds that default for every launcher'
+    import config
+    assert config.COMPANION_DESKTOP_ENABLED is True
     assert result['CELINE_WAKE_ENABLED']=='true'
     assert result['WAKE_WORD_ENABLED']=='false'
 

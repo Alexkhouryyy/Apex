@@ -476,7 +476,8 @@ def main():
         _mode = ("tui" if args.tui else "text" if args.text
                  else "wake" if args.wake else "voice")
         _tracker.on_gesture = make_gesture_handler(
-            _mode, wake_event=wake_event, log=getattr(monitor, "log", None))
+            _mode, wake_event=wake_event,
+            log=getattr(monitor, "log", None) or getattr(_tracker, "log", None))
 
     if monitor is not None:
         monitor.start()

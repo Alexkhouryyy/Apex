@@ -244,6 +244,9 @@ def run_resident(model_override: Optional[str] = None) -> None:
             logging.info("Autonomous cortex + awareness monitor started (resident).")
         except Exception as e:
             logging.error(f"Awareness monitor failed to start in resident mode: {e}")
+            # Not running, so treat it as off: hand tracking then starts on its own
+            # below instead of staying silently off behind a dead monitor.
+            awareness_monitor = None
 
     from agent import safety as _safety_ref
     _safety_ref.set_confirm_fn(resident_confirm)
@@ -611,10 +614,11 @@ def _configure_attention(hotkeys, on_apex_wake, is_muted):
         return run
 
     if config.DASHBOARD_ENABLED:
-        for combo, callback in ((config.CELINE_HOTKEY, look_now.on_hotkey),
-                                (config.CELINE_TALK_HOTKEY, look_now.on_talk_hotkey)):
+        for name, combo, callback in (("look", config.CELINE_HOTKEY, look_now.on_hotkey),
+                                      ("talk", config.CELINE_TALK_HOTKEY, look_now.on_talk_hotkey)):
             if combo:
                 hotkeys.bind(combo, when_unmuted(callback))
+                look_now.mark_bound(name)
         if config.CELINE_WAKE_ENABLED:
             celine_phrases = list(config.CELINE_WAKE_PHRASES)
     phrases = list(dict.fromkeys(celine_phrases + apex_phrases))
@@ -632,6 +636,8 @@ def _configure_attention(hotkeys, on_apex_wake, is_muted):
 
     listener = WakeWordListener(wake_phrases=phrases)
     listener.start(on_wake=route)
+    if celine_phrases:
+        look_now.mark_bound("wake")
     return listener
 
 

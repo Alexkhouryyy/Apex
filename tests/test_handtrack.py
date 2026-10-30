@@ -768,7 +768,7 @@ class TestCameraOpenBackoff:
         monkeypatch.setattr(handtrack, "ensure_model", forbidden)
         def one_tick(now):
             t._open(now)
-            t._stop.set()
+            t._stop_event.set()
         monkeypatch.setattr(t, "_tick", one_tick)
         t.run()
         output = capsys.readouterr().out
@@ -853,7 +853,7 @@ def test_detector_work_counts_toward_frame_budget(monkeypatch):
     class Stop:
         def is_set(self): return len(waits) == 3
         def wait(self, timeout=0): waits.append(timeout); clock[0] += timeout
-    t._stop = Stop()
+    t._stop_event = Stop()
     monkeypatch.setattr(handtrack, 'available', lambda: (True, ''))
     monkeypatch.setattr(handtrack, 'opencv_conflict', lambda: [])
     monkeypatch.setattr(handtrack.time, 'monotonic', lambda: clock[0])

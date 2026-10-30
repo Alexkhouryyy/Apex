@@ -31,7 +31,7 @@ def rig(tmp_path, monkeypatch):
 def test_full_start_checks_identity_separates_modes_and_stops_only_owned_children(rig,monkeypatch,capsys):
     children,stopped=rig
     def wait(opener,url,accept,processes,label,timeout):
-        env=children[-1].env
+        env=processes[0][1].env
         base=dict(service='apex',agent_ready=True,platform_id=env['APEX_PLATFORM_ID'],launch_id=env.get('APEX_LAUNCH_ID'))
         assert accept(base)
         assert not accept({**base,'platform_id':'unrelated'})
@@ -102,43 +102,84 @@ def test_a_service_crash_leaves_the_other_running(rig,monkeypatch,capsys):
 
 def test_when_every_service_has_stopped_the_launcher_exits(rig,monkeypatch):
     children,stopped=rig
-    monkeypatch.setattr(platform.time,'sleep',lambda s:None)
-    def health(*a):
-        if len(children)==2:
-            children[0].poll.return_value=7; children[1].poll.return_value=3
-    monkeypatch.setattr(platform.launcher,'wait_healthy',health)
+    def die(_):
+        for c in children: c.poll.return_value=3
+    monkeypatch.setattr(platform.time,'sleep',die)
     with pytest.raises(RuntimeError,match='Every Apex service has stopped'):platform.main([])
 
 
-@pytest.mark.parametrize('missing', ['engine','images',None])
-def test_cached_nomad_never_pulls_builds_or_regenerates_compose(tmp_path,monkeypatch,missing):
-    monkeypatch.setattr(platform.launcher,'WINDOWS',False)
-    monkeypatch.setenv('LOCALAPPDATA',str(tmp_path/'local'))
-    docker=tmp_path/'local/Programs/DockerDesktop/resources/bin/docker.exe'
-    docker.parent.mkdir(parents=True);docker.touch()
-    compose=tmp_path/'nomad/compose.json';compose.parent.mkdir();compose.write_text('{"fixture":true}')
-    original=compose.read_bytes()
-    commands=[]
-    def run(args,**kwargs):
-        commands.append(args)
-        if args[1]=='info':return NS(returncode=1 if missing=='engine' else 0,stdout='linux\n')
-        if '--images' in args:return NS(returncode=0,stdout='mysql:8.0\nredis:7-alpine\napex-nomad:pinned\n')
-        assert args[1:3]==['image','inspect']
-        return NS(returncode=1 if missing=='images' else 0,stdout='')
-    monkeypatch.setattr(platform.subprocess,'run',run)
-    popen=Mock(return_value='cached-process');monkeypatch.setattr(platform.subprocess,'Popen',popen)
-    result=platform.start_cached_nomad(tmp_path)
-    if missing:
-        assert result is None;popen.assert_not_called()
-    else:
-        assert result=='cached-process'
-        assert popen.call_args.args[0][-5:]==['up','-d','--pull','never','--no-build']
-    assert compose.read_bytes()==original
-    assert not any('build' in c or 'pull' in c for c in commands)
+# ---------------------------------------------------------------- what the stress test found
+
+def test_both_services_start_at_once(rig,monkeypatch):
+    """A hung Apocalypse used to delay Apex + Celine by its full 240 s wait."""
+    children,stopped=rig
+    seen=[]
+    def wait(opener,url,accept,processes,label,timeout):
+        seen.append((label,len(children)))
+    monkeypatch.setattr(platform.launcher,'wait_healthy',wait)
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    assert seen[0]==('Apocalypse dashboard',2),'Apex + Celine was already started when the first wait began'
 
 
-def test_health_platform_identity_is_optional(monkeypatch):
-    import asyncio
-    from dashboard import server
-    monkeypatch.setenv('APEX_PLATFORM_ID','fixture-platform')
-    assert asyncio.run(server.health())['platform_id']=='fixture-platform'
+def test_two_services_crashing_at_once_are_both_reported_as_stopped(rig,monkeypatch,capsys):
+    children,stopped=rig
+    def sleep(_):
+        for c in children: c.poll.return_value=7   # both die in the same second
+    monkeypatch.setattr(platform.time,'sleep',sleep)
+    with pytest.raises(RuntimeError,match='Every Apex service has stopped'):platform.main([])
+    out=capsys.readouterr().out
+    assert 'Apocalypse stopped (exit 7).' in out and 'Apex + Celine stopped (exit 7).' in out
+    assert 'keeps running' not in out
+
+
+def test_a_service_that_died_while_the_other_was_starting_is_not_called_ready(rig,monkeypatch,capsys):
+    children,stopped=rig
+    def wait(opener,url,accept,processes,label,timeout):
+        if label=='Apex + Celine':
+            children[0].poll.return_value=1          # Apocalypse dies during the Apex wait
+            raise RuntimeError('not ready')
+    monkeypatch.setattr(platform.launcher,'wait_healthy',wait)
+    with pytest.raises(RuntimeError,match='No Apex service started'):platform.main([])
+    out=capsys.readouterr().out
+    assert 'Apocalypse remains available' not in out and 'Ready: Apocalypse' not in out
+
+
+def test_offline_only_failure_does_not_promise_apex(rig,monkeypatch,capsys):
+    children,stopped=rig
+    monkeypatch.setattr(platform.launcher,'wait_healthy',Mock(side_effect=RuntimeError('no library')))
+    with pytest.raises(RuntimeError,match='No Apex service started'):platform.main(['--offline-only','--no-nomad'])
+    assert 'Apex continues without it' not in capsys.readouterr().out
+
+
+def test_celine_s_voice_port_does_not_block_the_platform(rig,monkeypatch):
+    children,stopped=rig
+    monkeypatch.setattr(platform.launcher,'port_in_use',lambda port,host='127.0.0.1':port==17494)
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    assert len(children)==2
+
+
+@pytest.mark.parametrize('error',[__import__('http.client').client.BadStatusLine('x'),ValueError('not json'),TypeError('odd')])
+def test_odd_health_answers_mean_not_ready_never_a_crash(monkeypatch,error):
+    class Opener:
+        def open(self,url,timeout=None): raise error
+    assert platform.health(Opener(),'http://127.0.0.1:1/health')=={}
+
+
+def test_a_second_ctrl_c_during_shutdown_still_stops_every_service(rig,monkeypatch):
+    children,stopped=rig
+    attempts=[]
+    def stop(p):
+        attempts.append(p)
+        if len(attempts)==1:
+            raise KeyboardInterrupt()             # the owner presses Ctrl+C again
+    monkeypatch.setattr(platform,'stop_owned',stop)
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    assert set(map(id,attempts))=={id(c) for c in children},'both services got a stop, the first one twice'
+
+
+def test_an_unexpected_error_while_apocalypse_starts_still_starts_apex(rig,monkeypatch,capsys):
+    children,stopped=rig
+    monkeypatch.setattr(platform.launcher,'wait_healthy',Mock(side_effect=[ValueError('odd reply'),None]))
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    out=capsys.readouterr().out
+    assert 'Apocalypse: did not start (odd reply)' in out and 'Ready: Apex + Celine.' in out

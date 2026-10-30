@@ -78,7 +78,10 @@ OPENAI_STT_ENGINE = os.getenv("OPENAI_STT_ENGINE", "local")  # local|openai
 PROACTIVE_ENABLED = True
 
 # Wake word
-WAKE_WORD_ENABLED = os.getenv("WAKE_WORD_ENABLED", "true").lower() in {"1", "true", "yes"}
+# Off by default: hotkeys (F8, Ctrl+Alt+C) start requests and no microphone
+# listens in the background. Every launcher reads this same default here, so
+# Apex behaves the same however it starts, and a value saved in .env always wins.
+WAKE_WORD_ENABLED = os.getenv("WAKE_WORD_ENABLED", "false").lower() in {"1", "true", "yes"}
 WAKE_PHRASES = ["apex", "hey apex", "yo apex", "okay apex", "ok apex"]
 
 # Resident mode — always-on background companion (python main.py --resident)
@@ -402,7 +405,8 @@ CELINE_WAKE_PHRASES = [p.strip().lower() for p in os.getenv(
 DESKTOP_SHELL_HOTKEY = os.getenv("DESKTOP_SHELL_HOTKEY", "<ctrl>+<shift>+\\")
 ORB_ENABLED = os.getenv("ORB_ENABLED", "false").lower() in {"1", "true", "yes"}
 # Optional native Companion: installed once, starts hidden, activated by Celine's hotkeys.
-COMPANION_DESKTOP_ENABLED = os.getenv("COMPANION_DESKTOP_ENABLED", "false").lower() in {"1", "true", "yes"}
+# On by default for every launcher (it needs pywebview; without it Apex logs why and carries on).
+COMPANION_DESKTOP_ENABLED = os.getenv("COMPANION_DESKTOP_ENABLED", "true").lower() in {"1", "true", "yes"}
 COMPANION_HOTKEY = os.getenv('COMPANION_HOTKEY', '<f8>')
 # The desktop Companion bubble rides beside your mouse pointer (also its Follow button). Windows only.
 COMPANION_FOLLOW_CURSOR = os.getenv('COMPANION_FOLLOW_CURSOR', 'true').lower() in {'1', 'true', 'yes'}

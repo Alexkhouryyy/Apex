@@ -291,13 +291,36 @@ def choose_delegate(preference: str, try_create):
         return try_create("CPU"), "CPU", note
 
 
+class ModelDownloading(RuntimeError):
+    """The hand model is still downloading in the background."""
+
+
+_download: dict = {"thread": None}
+
+
+def _model_on_disk() -> bool:
+    p = model_path()
+    return p.is_file() and p.stat().st_size > 1_000_000
+
+
 def build_landmarker(num_hands: int = 2):
     """The real factory. Returns (landmarker, delegate_used, note)."""
     from mediapipe.tasks.python import BaseOptions, vision
     # Called only after the tracker has opened a camera. An absent camera
     # must be reported even when a model download is slow or unavailable.
-    if ensure_model() is None:
-        raise RuntimeError("Hand model is unavailable; check the download connection.")
+    # The download itself never holds the camera: it runs in the background
+    # and the tracker releases the webcam until the model is on disk (on a slow
+    # line that took minutes, during which nothing else could use the camera).
+    if not _model_on_disk():
+        worker = _download["thread"]
+        if worker is not None and not worker.is_alive():
+            _download["thread"] = None          # finished without a file: report it, retry later
+            raise RuntimeError("Hand model is unavailable; check the download connection.")
+        if worker is None:
+            worker = threading.Thread(target=ensure_model, daemon=True, name="HandModelDownload")
+            _download["thread"] = worker
+            worker.start()
+        raise ModelDownloading("The hand model is still downloading.")
 
     def _create(delegate_name: str):
         delegate = getattr(BaseOptions.Delegate, delegate_name)
@@ -765,7 +788,7 @@ class HandTracker(threading.Thread):
         from agent.gestures import GestureRecognizer
         self.recognizer = GestureRecognizer()
 
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self._paused_until = 0.0
         self._lock = threading.Lock()
         self._latest_frame = None       # BGR ndarray, for tools/camera.py
@@ -787,7 +810,7 @@ class HandTracker(threading.Thread):
 
     # -- lifecycle ---------------------------------------------------------
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def release_for(self, seconds: float = 60.0) -> str:
         """Hand the webcam back to the rest of the machine for a while.
@@ -807,6 +830,18 @@ class HandTracker(threading.Thread):
             self._paused_until = 0.0
             self._reset_retry()
         return "[HandTrack] Camera reclaimed — hand tracking resumes."
+
+    def camera_state(self) -> str:
+        """What the tracker is really doing: 'watching' (frames arriving),
+        'paused' (camera handed to something else), 'stopped', or 'no_camera'
+        (started, but the webcam never opened or stopped delivering)."""
+        if self._stop_event.is_set():
+            return "stopped"
+        if self.paused:
+            return "paused"
+        if self._cap is not None and time.time() - self._latest_ts < 5.0:
+            return "watching"
+        return "no_camera"
 
     @property
     def paused(self) -> bool:
@@ -910,7 +945,7 @@ class HandTracker(threading.Thread):
         ok, why = available()
         if not ok:
             print(f"[HandTrack] Hand tracking is off: {why}")
-            self._stop.wait()          # park; never spin
+            self._stop_event.wait()          # park; never spin
             return
         clash = opencv_conflict()
         if clash:
@@ -924,7 +959,7 @@ class HandTracker(threading.Thread):
         print(f"[HandTrack] Watching camera {self.device_index} at "
               f"{1 / self.interval:.0f} Hz.")
         try:
-            while not self._stop.is_set():
+            while not self._stop_event.is_set():
                 started = time.monotonic()
                 try:
                     self._tick(time.time())
@@ -934,7 +969,7 @@ class HandTracker(threading.Thread):
                     print(f"[HandTrack] tick error: {e}")
                 # Capture/inference already consumed part (or all) of the
                 # frame budget. Do not add a whole interval after that work.
-                self._stop.wait(timeout=max(0.0, self.interval - (time.monotonic() - started)))
+                self._stop_event.wait(timeout=max(0.0, self.interval - (time.monotonic() - started)))
         finally:
             self._teardown()
 
@@ -971,6 +1006,12 @@ class HandTracker(threading.Thread):
             model_started = time.monotonic()
             try:
                 self._landmarker, used, note = build_landmarker(num_hands=2)
+            except ModelDownloading:
+                self._teardown()                     # hand the webcam back while the model downloads
+                self._retry_at = now + 3
+                self._say("model_downloading", "[HandTrack] Downloading the hand model (~7.5 MB); "
+                          "the camera stays free until it is ready.")
+                return False
             except Exception as exc:
                 self._teardown()
                 self._retry_at = now + (time.monotonic() - model_started) + CAMERA_RETRY_MAX
@@ -1315,6 +1356,9 @@ def start_standalone(log=None, *, start=True) -> Optional[HandTracker]:
     import config
     if not getattr(config, "HANDTRACK_ENABLED", False):
         return None
+    current = active_tracker()
+    if current is not None and current.is_alive():
+        return current                          # one tracker per webcam: never start a second
     if log is None:
         from agent.awareness import AwarenessLog
         log = AwarenessLog()

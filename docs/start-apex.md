@@ -37,12 +37,20 @@ voice until Celine's server answers. `Start-Apex-Platform.cmd` treats Apex and
 the offline Apocalypse service the same way: if one fails to start or stops,
 the other keeps running.
 
-**Every launcher has the same defaults** (`scripts/launch_defaults.py`):
-`Start-Apex-All.cmd`, the sign-in launcher and `start-apex.bat` all start with
-the desktop Companion on and no wake phrase listening (hotkeys F8 and
-Ctrl+Alt+C start requests). `.env` or the environment overrides any of them,
-for example `CELINE_WAKE_ENABLED=true` for "Hey Celly". Hand tracking
+**Every launcher has the same defaults.** They live in `config.py`, which every
+entry point reads: `Start-Apex-All.cmd`, the sign-in launcher, `start-apex.bat`,
+`Start-Apex-Platform.cmd` and plain `main.py` all start with the desktop
+Companion on and no wake phrase listening (hotkeys F8 and Ctrl+Alt+C start
+requests). No launcher injects settings into the environment, so a value in
+`.env` always wins, also after a dashboard Restart. For example,
+`CELINE_WAKE_ENABLED=true` turns on "Hey Celly". Hand tracking
 (`HANDTRACK_ENABLED=true`) no longer depends on `AWARENESS_ENABLED`.
+
+**Speech never goes silent.** When Celine's voice server is starting, busy,
+hung or stopped, replies are spoken in the PC's own voice (barge-in and the stop
+gesture still work), with a 30-second cool-down before Celine is asked again. A
+sentence is never said twice, and replies longer than 4,000 characters are split
+so Celine can read them.
 
 **Celine knows what is running.** Every turn, her prompt lists which controls
 are live (desktop Companion and its hotkeys, hand tracking, her voice state,

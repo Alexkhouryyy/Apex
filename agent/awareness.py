@@ -33,6 +33,14 @@ except Exception:
     _WATCHDOG = False
 
 
+_running = False      # an AwarenessMonitor is started in this process
+
+
+def running() -> bool:
+    """Whether background awareness is actually running here (not just enabled)."""
+    return _running
+
+
 class AwarenessLog:
     """Ring buffer of recent events."""
     def __init__(self, maxlen: int = 60):
@@ -280,6 +288,8 @@ class AwarenessMonitor:
             _ht.set_active_tracker(self.handtrack)
 
     def start(self) -> None:
+        global _running
+        _running = True
         self.window.start()
         self.clipboard.start()
         self.files.start()
@@ -299,6 +309,8 @@ class AwarenessMonitor:
         print(f"[Awareness] Monitor started (review every {self.review_interval}s).")
 
     def stop(self) -> None:
+        global _running
+        _running = False
         self._stop.set()
         self.window.stop()
         self.clipboard.stop()
@@ -428,8 +440,8 @@ def report_hand_tracking(monitor) -> str:
     if not getattr(config, "HANDTRACK_ENABLED", False):
         return ""
     if monitor is None:
-        line = ("[HandTrack] Hand tracking is enabled but the awareness monitor "
-                "is not running, so it is OFF. Set AWARENESS_ENABLED=true.")
+        line = ("[HandTrack] Awareness is off, so hand tracking starts on its own "
+                "(Apex's own camera tracker, no browser needed).")
     elif getattr(monitor, "handtrack", None) is not None:
         line = ("[HandTrack] Hand tracking on — Apex's own camera tracker, "
                 "no browser needed.")
