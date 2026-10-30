@@ -18,12 +18,11 @@ from agent import apocalypse
 
 
 def health(opener, url):
-    """A service's /health, or {} for anything that isn't a proper JSON object."""
+    """A service's /health, or {} for anything that isn't a proper JSON object,
+    within a total deadline (a trickling peer must not freeze crash reporting)."""
     try:
-        with opener.open(url, timeout=2) as response:
-            data = json.loads(response.read(65536))
-        return data if isinstance(data, dict) else {}
-    except Exception:   # http.client errors are not OSError; none of them may stop the platform
+        return launcher.probe_json(opener, url, 3.0)
+    except Exception:   # none of them may stop the platform
         return {}
 
 
@@ -109,9 +108,11 @@ def main(argv=None):
         return any(n == name and p.poll() is None for n, p in children)
 
     def drop(name, process):
+        # Stop first, forget after: a Ctrl+C in the middle leaves it in `children`,
+        # so the final cleanup still stops it.
+        stop_owned(process)
         if (name, process) in children:
             children.remove((name, process))
-        stop_owned(process)
 
     try:
         if not args.no_nomad:
@@ -147,12 +148,17 @@ def main(argv=None):
                 print('Apex + Celine: ready. '+normal_url+'/home', flush=True)
                 print('Companion: '+normal_url+'/companion · enable Voice mode for browser audio access.', flush=True)
             except Exception as exc:
-                drop('Apex + Celine', apex_child)
                 print(f'Apex + Celine: did not start ({exc}).'
                       + (' Apocalypse remains available.' if alive('Apocalypse') else ''), flush=True)
-        ready = [name for name in ready if alive(name)]   # one may have died while the other was starting
+                drop('Apex + Celine', apex_child)
+        for name in ready:
+            if not alive(name):                    # became ready, then died while the other was starting
+                process = next((p for n, p in children if n == name), None)
+                print(f'{name} stopped' + (f' (exit {process.returncode})' if process is not None else '') + '.',
+                      flush=True)
+        ready = [name for name in ready if alive(name)]
         if not ready:
-            raise RuntimeError('No Apex service started. See the messages above.')
+            raise RuntimeError('No Apex service is running. See the messages above.')
         if args.open:
             if 'Apocalypse' in ready:
                 webbrowser.open(offline_url+'/apocalypse')
@@ -182,7 +188,13 @@ def main(argv=None):
         raise RuntimeError('Every Apex service has stopped.')
     finally:
         # Each stop is protected on its own: a second Ctrl+C (or a failed stop)
-        # while one service is stopping must not leave the others running.
+        # while one service is stopping must not leave the others running. Once
+        # shutdown has begun, further Ctrl+C presses are ignored until it is done.
+        previous_sigint = None
+        try:
+            previous_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass                                   # not the main thread
         for _, process in reversed(list(children)):
             for _attempt in range(2):
                 try:
@@ -197,6 +209,11 @@ def main(argv=None):
             except BaseException:
                 pass
         print('Owned Apex services stopped. Cached NOMAD containers, if started, remain managed by Docker Desktop.', flush=True)
+        if previous_sigint is not None:
+            try:
+                signal.signal(signal.SIGINT, previous_sigint)
+            except (ValueError, OSError):
+                pass
     return 0
 
 

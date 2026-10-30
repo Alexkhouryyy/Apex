@@ -7,6 +7,8 @@ import pytest
 import config
 from voice import tts
 
+REAL_PLAY = tts._play
+
 
 @pytest.fixture
 def quiet_tts(monkeypatch):
@@ -194,7 +196,7 @@ def test_the_prompt_says_which_controls_exist_right_now(monkeypatch):
 
 @pytest.mark.parametrize('state, says', [('no_camera', 'camera is not delivering frames'),
                                           ('paused', 'paused while another program uses the camera'),
-                                          ('stopped', 'camera is not delivering frames')])
+                                          ('stopped', 'enabled but not running (the tracker stopped)')])
 def test_hand_tracking_is_only_called_running_when_frames_arrive(monkeypatch, state, says):
     from agent import live_status, handtrack
     monkeypatch.setattr(handtrack, 'active_tracker', lambda: SimpleNamespace(camera_state=lambda: state))
@@ -321,7 +323,7 @@ def test_the_hand_tracker_thread_can_be_inspected_and_joined():
     assert tracker.is_alive() is False and tracker.camera_state() == 'no_camera'
     tracker._stop_event.set()            # stop before the first camera attempt
     tracker.start()
-    tracker.join(timeout=5)
+    tracker.join(timeout=60)              # a cold MediaPipe import can take a while before the stop is seen
     assert tracker.is_alive() is False and tracker.camera_state() == 'stopped'
 
 
@@ -406,10 +408,41 @@ def test_resident_records_the_hotkeys_and_wake_phrase_it_binds(monkeypatch):
     for key, value in {'DASHBOARD_ENABLED': True, 'WAKE_WORD_ENABLED': False,
                        'CELINE_WAKE_ENABLED': True, 'CELINE_WAKE_PHRASES': ['hey celly']}.items():
         monkeypatch.setattr(resident.config, key, value)
-    monkeypatch.setattr(wake, 'WakeWordListener', Mock(return_value=Mock()))
+    alive = SimpleNamespace(_thread=SimpleNamespace(is_alive=lambda: True), start=lambda on_wake: None)
+    monkeypatch.setattr(wake, 'WakeWordListener', Mock(return_value=alive))
     monkeypatch.setattr(look_now, '_bound', set())
     resident._configure_attention(GlobalHotkeys(), Mock(), lambda: False)
+    resident._record_celine_hotkeys(False)          # the hotkey listener failed to start
+    assert look_now.bound() == {'wake'}, 'hotkeys that never started are not listed'
+    resident._record_celine_hotkeys(True)
     assert look_now.bound() == {'look', 'talk', 'wake'}
+
+
+def test_a_dead_wake_listener_is_not_reported_as_listening(monkeypatch):
+    from agent import look_now
+    monkeypatch.setattr(look_now, '_bound', set())
+    thread = SimpleNamespace(alive=True, is_alive=lambda: thread.alive)
+    look_now.mark_bound('wake', listener=SimpleNamespace(_thread=thread))
+    assert 'wake' in look_now.bound()
+    thread.alive = False                             # no microphone: the WakeWord thread died
+    assert 'wake' not in look_now.bound()
+
+
+def test_a_failed_awareness_start_cleans_up_and_is_not_running(monkeypatch):
+    from agent import awareness
+    stopped = []
+    monitor = object.__new__(awareness.AwarenessMonitor)
+    def boom():
+        raise OSError('clipboard unavailable')
+    monitor.window = SimpleNamespace(start=lambda: None, stop=lambda: stopped.append('window'))
+    monitor.clipboard = SimpleNamespace(start=boom, stop=lambda: stopped.append('clipboard'))
+    monitor.files = SimpleNamespace(start=lambda: None, stop=lambda: stopped.append('files'))
+    monitor.iot = monitor.handtrack = None
+    monitor._stop = __import__('threading').Event()
+    monkeypatch.setattr(awareness, '_running', False)
+    with pytest.raises(OSError):
+        monitor.start()
+    assert awareness.running() is False and 'window' in stopped, 'the watcher that did start was stopped again'
 
 
 def test_look_now_start_records_what_it_bound(monkeypatch):
@@ -440,3 +473,100 @@ def test_awareness_reports_running_only_between_start_and_stop(monkeypatch):
     assert awareness.running() is True
     monitor.stop()
     assert awareness.running() is False
+
+
+# ---------------------------------------------------------------- round 2 of the stress test
+
+def test_a_ready_voice_that_stops_answering_is_not_called_ready_forever(monkeypatch):
+    from agent import live_status
+    monkeypatch.setattr(live_status, '_voice', {'at': 0.0, 'state': live_status.READY, 'busy': False,
+                                                'since': 0.0, 'misses': 0, 'seen': True})
+    def slow(url):
+        raise TimeoutError('timed out')
+    assert live_status._voice_state('u', now=100.0, fetch=slow) == live_status.READY, 'one slow answer is forgiven'
+    assert live_status._voice_state('u', now=200.0, fetch=slow) == live_status.NOT_ANSWERING, 'two are not'
+
+
+def test_a_stuck_probe_stops_the_old_state_being_trusted(monkeypatch):
+    from agent import live_status
+    monkeypatch.setattr(live_status, '_voice', {'at': 0.0, 'state': live_status.READY, 'busy': True,
+                                                'since': 100.0, 'misses': 0, 'seen': True})
+    assert live_status._voice_state('u', now=110.0) == live_status.NOT_ANSWERING
+
+
+def test_a_voice_that_crashed_after_answering_is_not_called_starting(monkeypatch):
+    from agent import live_status
+    monkeypatch.setenv('APEX_LOCAL_VOICE', 'starting')
+    monkeypatch.setattr(live_status, '_voice', {'at': 0.0, 'state': '', 'busy': False, 'since': 0.0,
+                                                'misses': 0, 'seen': False})
+    assert live_status.classify(error=ConnectionRefusedError()) == live_status.STARTING
+    live_status._voice['seen'] = True
+    assert live_status.classify(error=ConnectionRefusedError()) == live_status.NOT_RUNNING
+
+
+def test_companion_hotkeys_are_not_listed_when_they_did_not_start(monkeypatch):
+    from agent import live_status, desktop_companion
+    monkeypatch.setattr(desktop_companion, 'status_quick',
+                        lambda wait=0.1: {'running': True, 'shown': False, 'hotkey_ready': False})
+    block = live_status.status_block()
+    assert 'hotkeys did not start' in block and 'F8 opens' not in block
+
+
+def test_the_offline_line_covers_hotkeys_and_awareness():
+    from agent import live_status
+    line = live_status.status_block(compact=True)
+    assert 'look/talk hotkeys' in line and 'awareness' in line
+
+
+def test_audio_that_cannot_even_load_falls_back_instead_of_raising(quiet_tts, monkeypatch, capsys):
+    """PortAudio missing: speak() raised and killed the streaming voice worker."""
+    import builtins
+    real = builtins.__import__
+    def no_audio(name, *a, **k):
+        if name == 'sounddevice':
+            raise OSError('PortAudio library not found')
+        return real(name, *a, **k)
+    monkeypatch.setattr(tts, '_play', REAL_PLAY)
+    monkeypatch.setattr(builtins, '__import__', no_audio)
+    monkeypatch.setattr(tts, '_synthesize', lambda text: b'RIFF')
+    assert tts.speak('Hello there.') is True
+    assert ('system', 'Hello there.') in quiet_tts
+    assert tts._celine_down_until > 0, 'nothing was heard, so the cool-down starts'
+
+
+def test_a_busy_celine_is_not_an_outage(quiet_tts, monkeypatch, capsys):
+    calls = []
+    def busy(text):
+        calls.append(text)
+        raise tts.CelineBusy('Voicebox 409: The voice is generating another section')
+    monkeypatch.setattr(tts, '_synthesize', busy)
+    tts.speak('One.')
+    tts.speak('Two.')
+    assert quiet_tts == [('system', 'One.'), ('system', 'Two.')]
+    assert calls == ['One.', 'Two.'], 'no cool-down: she is asked again for the next sentence'
+    assert tts._celine_down_until == 0.0 and 'unavailable' not in capsys.readouterr().out
+
+
+def test_the_server_409_counts_as_busy():
+    assert tts._is_busy(ValueError('Voicebox 409: The voice is generating another section; try again shortly'))
+    assert tts._is_busy(ValueError('Voicebox is already generating an Apex reply. Try again when it finishes.'))
+    assert not tts._is_busy(ValueError('Voicebox 500: model crashed'))
+
+
+def test_speech_works_from_inside_a_running_event_loop(monkeypatch):
+    import asyncio
+    async def synth(text):
+        return b'wav'
+    import voice.voicebox as vb
+    monkeypatch.setattr(vb, 'synthesize', synth)
+    monkeypatch.setattr(tts.interrupt_mod, 'is_interrupted', lambda: False)
+    async def inside():
+        return tts._synthesize('hi')
+    assert asyncio.run(inside()) == b'wav'
+
+
+def test_long_text_without_sentence_ends_is_split_between_words():
+    text = ('words ' * 2000).strip()                  # 4000 is not a multiple of 6: a hard cut would split a word
+    pieces = tts._chunks(text)
+    assert all(len(p) <= tts.MAX_CHUNK for p in pieces) and all(p.startswith('words') and p.endswith('words') for p in pieces)
+    assert ' '.join(pieces) == text

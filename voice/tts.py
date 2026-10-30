@@ -127,6 +127,8 @@ def _chunks(text, limit=MAX_CHUNK):
     pieces = []
     while len(text) > limit:
         cut = max(text.rfind(mark, 0, limit) for mark in ('. ', '! ', '? ', '\n'))
+        if cut <= 0:
+            cut = text.rfind(' ', 0, limit)          # no sentence end: at least never cut a word
         cut = cut + 1 if cut > 0 else limit
         pieces.append(text[:cut].strip())
         text = text[cut:].strip()
@@ -135,9 +137,30 @@ def _chunks(text, limit=MAX_CHUNK):
     return pieces
 
 
+class CelineBusy(RuntimeError):
+    """Celine is up but making another reply; not an outage."""
+
+
+def _is_busy(exc) -> bool:
+    text = str(exc)
+    return isinstance(exc, ValueError) and ('already generating' in text or text.startswith('Voicebox 409'))
+
+
 def _synthesize(text):
     """Celine's audio for `text`, within SYNTH_BUDGET, cancelled by barge-in;
-    retries briefly while she is busy with another reply."""
+    retries briefly while she is busy with another reply, then raises
+    CelineBusy. Safe to call from inside a running event loop."""
+    import asyncio
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return _synthesize_here(text)
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(_synthesize_here, text).result()
+
+
+def _synthesize_here(text):
     import asyncio
     import time
     from voice.voicebox import synthesize
@@ -167,30 +190,31 @@ def _synthesize(text):
         try:
             return asyncio.run(bounded())
         except ValueError as exc:
-            if ('already generating' in str(exc) and time.monotonic() < busy_until
-                    and not interrupt_mod.is_interrupted()):
+            if not _is_busy(exc):
+                raise
+            if time.monotonic() < busy_until and not interrupt_mod.is_interrupted():
                 time.sleep(0.5)
                 continue
-            raise
+            raise CelineBusy(str(exc)) from exc
 
 
 def _play(audio):
     import io
     import time
     import wave
-    import numpy as np
-    import sounddevice as sd
     started = False
     try:
+        import numpy as np
+        import sounddevice as sd          # can fail to load (PortAudio missing): nothing was heard
         with wave.open(io.BytesIO(audio), 'rb') as wav:
             if wav.getsampwidth() != 2:
                 raise ValueError('Voicebox terminal playback requires PCM16 WAV.')
             samples = np.frombuffer(wav.readframes(wav.getnframes()), dtype='<i2')
             samples = samples.reshape(-1, wav.getnchannels())
         sd.play(samples, wav.getframerate())
-        started = True
         try:
             while sd.get_stream().active and not interrupt_mod.is_interrupted():
+                started = True                # the device is really playing it now
                 time.sleep(0.05)
         finally:
             sd.stop()
@@ -232,6 +256,12 @@ def _speak_system(text):
     except Exception as exc:
         print(f"[TTS] Neither Celine's voice nor this PC's voice could speak ({type(exc).__name__}: "
               f"{str(exc)[:120]}). Unspoken: {text[:80]!r}")
+        global _engine
+        try:
+            engine.stop()
+        except Exception:
+            pass
+        _engine = None                        # a wedged engine is rebuilt for the next sentence
     finally:
         done.set()
 
@@ -239,8 +269,12 @@ def _speak_system(text):
 def _note_outage(exc):
     global _fallback_noted
     if not _fallback_noted:
-        print(f"[TTS] Celine's voice is unavailable ({type(exc).__name__}: {str(exc)[:120]}); "
-              "using this PC's own voice until it answers again.")
+        if isinstance(exc, TimeoutError):
+            print(f"[TTS] Celine's voice is slow right now (no audio after {SYNTH_BUDGET:.0f} s); "
+                  "using this PC's own voice for a while.")
+        else:
+            print(f"[TTS] Celine's voice is unavailable ({type(exc).__name__}: {str(exc)[:120]}); "
+                  "using this PC's own voice until it answers again.")
         _fallback_noted = True
 
 
@@ -262,6 +296,12 @@ def _speak_voicebox_or_fallback(text):
             continue
         try:
             audio = _synthesize(piece)
+        except CelineBusy:
+            # Up, but making another reply: this sentence in the PC voice, no
+            # cool-down and no outage notice, so the next one asks her again.
+            if not interrupt_mod.is_interrupted():
+                _speak_system(piece)
+            continue
         except Exception as exc:
             if interrupt_mod.is_interrupted():
                 return
@@ -269,8 +309,6 @@ def _speak_voicebox_or_fallback(text):
             _note_outage(exc)
             _speak_system(piece)
             continue
-        _celine_down_until = 0.0
-        _fallback_noted = False
         if interrupt_mod.is_interrupted():
             return
         try:
@@ -279,5 +317,10 @@ def _speak_voicebox_or_fallback(text):
             if exc.started:
                 print(f"[TTS] Celine's audio stopped part-way ({exc}); not repeating the sentence.")
             else:
+                # Nothing was heard (audio device or library missing): same as an outage.
+                _celine_down_until = time.monotonic() + CELINE_COOLDOWN
                 _note_outage(exc)
                 _speak_system(piece)
+            continue
+        _celine_down_until = 0.0
+        _fallback_noted = False

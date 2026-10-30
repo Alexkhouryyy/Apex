@@ -546,7 +546,7 @@ def run_resident(model_override: Optional[str] = None) -> None:
     hotkeys.bind(config.RESIDENT_GLOBAL_HOTKEY, _on_hotkey_wake)
     hotkeys.bind(config.RESIDENT_MUTE_HOTKEY, _on_mute_hotkey)
     wake_listener = _configure_attention(hotkeys, _on_wake, state.is_muted)
-    hotkeys.start()
+    _record_celine_hotkeys(bool(hotkeys.start()))
 
     # --- Signals ---
     def _shutdown_signal(sig, frame):
@@ -595,6 +595,16 @@ def run_resident(model_override: Optional[str] = None) -> None:
         logging.info("Resident exited cleanly.")
 
 
+_celine_hotkeys: list = []   # Celine's hotkeys bound by _configure_attention, pending hotkeys.start()
+
+
+def _record_celine_hotkeys(started: bool) -> None:
+    """Tell live status which of Celine's hotkeys work: only if the listener started."""
+    from agent import look_now
+    if started:
+        look_now.mark_bound(*_celine_hotkeys)
+
+
 def _configure_attention(hotkeys, on_apex_wake, is_muted):
     """Share one wake listener and hotkey manager with Screen Companion.
 
@@ -606,6 +616,7 @@ def _configure_attention(hotkeys, on_apex_wake, is_muted):
 
     apex_phrases = list(config.WAKE_PHRASES) if config.WAKE_WORD_ENABLED else []
     celine_phrases = []
+    _celine_hotkeys.clear()
 
     def when_unmuted(callback):
         def run(*args):
@@ -618,7 +629,7 @@ def _configure_attention(hotkeys, on_apex_wake, is_muted):
                                       ("talk", config.CELINE_TALK_HOTKEY, look_now.on_talk_hotkey)):
             if combo:
                 hotkeys.bind(combo, when_unmuted(callback))
-                look_now.mark_bound(name)
+                _celine_hotkeys.append(name)          # recorded as live once hotkeys.start() succeeds
         if config.CELINE_WAKE_ENABLED:
             celine_phrases = list(config.CELINE_WAKE_PHRASES)
     phrases = list(dict.fromkeys(celine_phrases + apex_phrases))
@@ -637,7 +648,7 @@ def _configure_attention(hotkeys, on_apex_wake, is_muted):
     listener = WakeWordListener(wake_phrases=phrases)
     listener.start(on_wake=route)
     if celine_phrases:
-        look_now.mark_bound("wake")
+        look_now.mark_bound("wake", listener=listener)
     return listener
 
 

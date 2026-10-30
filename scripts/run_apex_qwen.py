@@ -60,12 +60,12 @@ def wait_healthy(opener, url, accept, processes, label, timeout):
             if process.poll() is not None:
                 raise RuntimeError(f'{name} stopped during startup (exit {process.returncode}). '
                                    'See the console or ~/.apex/resident.log.')
+        # Total deadline per probe, so a trickling /health can't outlast the overall timeout.
+        health = probe_json(opener, url, max(0.5, min(3.0, deadline - time.monotonic())))
         try:
-            with opener.open(url, timeout=2) as response:
-                health = json.load(response)
-            if isinstance(health, dict) and accept(health):
+            if health and accept(health):
                 return
-        except Exception:   # refused, malformed (http.client errors are not OSError), not JSON: not ready yet
+        except Exception:
             pass
         if time.monotonic() >= next_notice:
             print(f'Waiting for {label}...', flush=True)
@@ -102,27 +102,41 @@ VOICE_URL = 'http://127.0.0.1:17494/health'
 VOICE_WARMUP_NOTICE = 900     # seconds: say so if Celine still isn't ready by then
 
 
-def voice_health(opener, deadline=3.0):
-    """Celine's voice server health, or {} if it doesn't answer properly.
+_in_flight: dict = {}       # url -> probe thread still running (a trickling peer keeps one alive)
 
-    Whatever is on port 17494 (a crashing server, another program, a peer that
-    trickles one byte at a time) can only ever mean "not ready": the probe runs
-    in a thread with a total deadline and any error counts as no answer, so it
-    can never crash or hang the launcher that keeps Apex running."""
+
+def probe_json(opener, url, deadline=3.0):
+    """GET url and parse a JSON object, within `deadline` seconds in total, or {}.
+
+    Whatever answers (a crashing server, another program, a peer that trickles
+    one byte at a time) can only ever mean "no answer": the probe runs in a
+    thread with a total deadline and any error counts as no answer, so it can
+    never crash or hang a launcher. At most one probe per address is in flight:
+    while an earlier one is still stuck on a trickling peer, no new thread or
+    socket is opened (they used to pile up until the process ran out of files)."""
+    previous = _in_flight.get(url)
+    if previous is not None and previous.is_alive():
+        return {}
     result = {}
 
     def probe():
         try:
-            with opener.open(VOICE_URL, timeout=2) as response:
+            with opener.open(url, timeout=2) as response:
                 health = json.loads(response.read(65536))
             if isinstance(health, dict):
                 result.update(health)
         except Exception:
             pass
-    worker = threading.Thread(target=probe, daemon=True, name='VoiceHealth')
+    worker = threading.Thread(target=probe, daemon=True, name='HealthProbe')
+    _in_flight[url] = worker
     worker.start()
     worker.join(deadline)
     return dict(result) if not worker.is_alive() else {}
+
+
+def voice_health(opener, deadline=3.0):
+    """Celine's voice server health, or {} if it doesn't answer properly."""
+    return probe_json(opener, VOICE_URL, deadline)
 
 
 def start_voice(qwen_python, server, opener):
@@ -144,13 +158,14 @@ def start_voice(qwen_python, server, opener):
             return None, True
         print('Celine voice: port 17494 is used by another program. Apex starts without the local voice.', flush=True)
         return None, False
-    print('Starting Celine voice in the background. Apex does not wait for it; '
-          'the first GPU warm-up can take several minutes.', flush=True)
     try:
-        return subprocess.Popen([str(qwen_python), '-u', str(ROOT / server)], cwd=ROOT), True
+        process = subprocess.Popen([str(qwen_python), '-u', str(ROOT / server)], cwd=ROOT)
     except OSError as exc:   # a damaged python.exe (power cut, antivirus): no voice, but Apex still starts
         print(f'Celine voice: could not start ({exc}). Apex starts without it.', flush=True)
         return None, False
+    print('Starting Celine voice in the background. Apex does not wait for it; '
+          'the first GPU warm-up can take several minutes.', flush=True)
+    return process, True
 
 
 def main(argv=None):
@@ -183,13 +198,23 @@ def main(argv=None):
         voice, local_voice = start_voice(qwen_python, server, opener)
         voice_started = time.monotonic()
         voice_ready = voice_reported = warmup_noted = False
+        misses = 0
+        if voice is None and local_voice:          # reusing a voice that is already running
+            voice_ready = bool(voice_health(opener).get('model_loaded'))
+            if voice_ready:
+                print('Celine voice: ready.', flush=True)
         # Own the child directly, so stopping this launcher also stops Apex.
         # Only the explicit dashboard restart exit code triggers a new child.
         starts = []
         opened = False
         while True:
+            if voice is not None and voice.poll() is not None and not voice_reported:
+                print(f'Celine voice stopped (exit {voice.returncode}); see the error above. Apex starts '
+                      "with this PC's own voice.", flush=True)
+                voice_reported, local_voice = True, False
             env = launch_environment(local_voice)  # Pick up settings saved before a restart.
-            if voice is not None and local_voice:
+            env.pop('APEX_LOCAL_VOICE', None)
+            if voice is not None and local_voice and not voice_ready:
                 env['APEX_LOCAL_VOICE'] = 'starting'   # Apex can tell "still loading" from "not there"
             host, port, dashboard_url = dashboard_address(env)
             dashboard_enabled = env.get('DASHBOARD_ENABLED', 'true').lower() in {'1', 'true', 'yes'}
@@ -237,10 +262,11 @@ def main(argv=None):
                     last_probe = time.monotonic()
                     health = voice_health(opener)
                     alive = health.get('service') == 'apex-qwen' and health.get('model_loaded')
+                    misses = 0 if alive else misses + 1
                     if alive and not voice_ready:
                         print('Celine voice: ready.', flush=True)
                         voice_ready = True
-                    elif not alive and voice_ready:
+                    elif not alive and voice_ready and misses >= 2:   # one busy, slow answer is not a death
                         # An external server that dies, or one that stops answering: say so once.
                         print("Celine voice stopped answering. Apex keeps running with this PC's own voice "
                               'until it answers again.', flush=True)

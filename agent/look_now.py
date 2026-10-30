@@ -232,16 +232,26 @@ def make_wake_handler(phrases: list[str]):
 
 
 _bound: set = set()   # what is actually listening in this process: "look", "talk", "wake"
+_wake_listener = None  # the wake-phrase listener, so a dead one isn't reported as listening
 
 
-def mark_bound(*names: str) -> None:
+def mark_bound(*names: str, listener=None) -> None:
     """Record a listener that started (resident mode binds its own)."""
+    global _wake_listener
     _bound.update(names)
+    if listener is not None:
+        _wake_listener = listener
 
 
 def bound() -> set:
-    """Which of Celine's triggers are live here, for agent/live_status.py."""
-    return set(_bound)
+    """Which of Celine's triggers are live here, for agent/live_status.py. The
+    wake phrase counts only while its listener thread is alive (it dies without
+    a microphone or PortAudio)."""
+    live = set(_bound)
+    thread = getattr(_wake_listener, '_thread', None)
+    if 'wake' in live and _wake_listener is not None and not (thread is not None and thread.is_alive()):
+        live.discard('wake')
+    return live
 
 
 def start(hotkey: str = "", wake_phrases: Optional[list[str]] = None,
@@ -272,9 +282,10 @@ def start(hotkey: str = "", wake_phrases: Optional[list[str]] = None,
     if wake_phrases:
         try:
             from voice.wake import WakeWordListener
-            WakeWordListener(wake_phrases=wake_phrases).start(on_wake=make_wake_handler(wake_phrases))
+            listener = WakeWordListener(wake_phrases=wake_phrases)
+            listener.start(on_wake=make_wake_handler(wake_phrases))
             started.append(f"wake phrase \"{wake_phrases[0]}\"")
-            mark_bound("wake")
+            mark_bound("wake", listener=listener)
         except Exception as e:
             print(f"[Celine] Wake phrase not available: {e}", flush=True)
     return started

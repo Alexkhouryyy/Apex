@@ -86,7 +86,7 @@ def test_apocalypse_failing_to_start_still_starts_apex(rig,monkeypatch,capsys):
 def test_nothing_starting_is_an_error(rig,monkeypatch):
     children,stopped=rig
     monkeypatch.setattr(platform.launcher,'wait_healthy',Mock(side_effect=RuntimeError('down')))
-    with pytest.raises(RuntimeError,match='No Apex service started'):platform.main([])
+    with pytest.raises(RuntimeError,match='No Apex service is running'):platform.main([])
     assert stopped==children
 
 
@@ -139,7 +139,7 @@ def test_a_service_that_died_while_the_other_was_starting_is_not_called_ready(ri
             children[0].poll.return_value=1          # Apocalypse dies during the Apex wait
             raise RuntimeError('not ready')
     monkeypatch.setattr(platform.launcher,'wait_healthy',wait)
-    with pytest.raises(RuntimeError,match='No Apex service started'):platform.main([])
+    with pytest.raises(RuntimeError,match='No Apex service is running'):platform.main([])
     out=capsys.readouterr().out
     assert 'Apocalypse remains available' not in out and 'Ready: Apocalypse' not in out
 
@@ -147,7 +147,7 @@ def test_a_service_that_died_while_the_other_was_starting_is_not_called_ready(ri
 def test_offline_only_failure_does_not_promise_apex(rig,monkeypatch,capsys):
     children,stopped=rig
     monkeypatch.setattr(platform.launcher,'wait_healthy',Mock(side_effect=RuntimeError('no library')))
-    with pytest.raises(RuntimeError,match='No Apex service started'):platform.main(['--offline-only','--no-nomad'])
+    with pytest.raises(RuntimeError,match='No Apex service is running'):platform.main(['--offline-only','--no-nomad'])
     assert 'Apex continues without it' not in capsys.readouterr().out
 
 
@@ -183,3 +183,43 @@ def test_an_unexpected_error_while_apocalypse_starts_still_starts_apex(rig,monke
     with pytest.raises(KeyboardInterrupt):platform.main([])
     out=capsys.readouterr().out
     assert 'Apocalypse: did not start (odd reply)' in out and 'Ready: Apex + Celine.' in out
+
+
+# ---------------------------------------------------------------- round 2 of the stress test
+
+def test_a_ctrl_c_while_a_failed_service_is_being_stopped_still_stops_it_later(rig,monkeypatch):
+    children,stopped=rig
+    calls=[]
+    def stop(p):
+        calls.append(p)
+        if len(calls)==1:
+            raise KeyboardInterrupt()          # pressed while drop() was stopping Apex
+    monkeypatch.setattr(platform,'stop_owned',stop)
+    monkeypatch.setattr(platform.launcher,'wait_healthy',Mock(side_effect=[None,RuntimeError('not ready')]))
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    assert calls.count(children[1])>=2,'the half-stopped Apex is still owned, so the final cleanup stops it again'
+
+
+def test_ctrl_c_is_ignored_during_cleanup_and_restored_after(rig,monkeypatch):
+    import signal
+    children,stopped=rig
+    seen=[]
+    def stop(p):
+        seen.append(signal.getsignal(signal.SIGINT))
+    monkeypatch.setattr(platform,'stop_owned',stop)
+    before=signal.getsignal(signal.SIGINT)
+    with pytest.raises(KeyboardInterrupt):platform.main([])
+    assert seen and all(s==signal.SIG_IGN for s in seen),'a second Ctrl+C cannot interrupt the stops'
+    assert signal.getsignal(signal.SIGINT)==before,'and Ctrl+C works again afterwards'
+
+
+def test_a_service_that_was_ready_then_died_is_reported(rig,monkeypatch,capsys):
+    children,stopped=rig
+    def wait(opener,url,accept,processes,label,timeout):
+        if label=='Apex + Celine':
+            children[0].poll.return_value=4      # the ready Apocalypse dies meanwhile
+            raise RuntimeError('not ready')
+    monkeypatch.setattr(platform.launcher,'wait_healthy',wait)
+    with pytest.raises(RuntimeError,match='No Apex service is running'):platform.main([])
+    out=capsys.readouterr().out
+    assert 'Apocalypse: ready.' in out and 'Apocalypse stopped (exit 7).' in out

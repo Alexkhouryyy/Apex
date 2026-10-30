@@ -109,7 +109,8 @@ def test_a_voice_crash_keeps_apex_running(launcher, monkeypatch, capsys):
     assert launcher.main(['--fast', '--resident']) == 0, 'Apex ran until it exited by itself'
     assert not children[1].terminated
     out = capsys.readouterr().out
-    assert 'Celine voice stopped (exit 9)' in out and 'Apex keeps running' in out
+    assert 'Celine voice stopped (exit 9)' in out and "this PC's own voice" in out
+    assert out.count('Celine voice stopped') == 1
 
 
 def test_voice_ready_is_announced_without_ever_blocking_apex(launcher, monkeypatch, capsys):
@@ -206,7 +207,8 @@ def test_wait_requires_health_predicate_and_rejects_failed_process(launcher, mon
 
 
 def test_wait_times_out_when_endpoint_never_becomes_ready(launcher, monkeypatch):
-    ticks = iter([0, 0, 0, 1, 3])
+    import itertools
+    ticks = itertools.chain([0, 0, 0, 1], itertools.repeat(3))
     monkeypatch.setattr(launcher.time, 'monotonic', lambda: next(ticks))
     opener = Mock()
     opener.open.side_effect = OSError('unavailable')
@@ -520,3 +522,97 @@ def test_an_external_voice_that_stops_answering_is_reported(launcher, monkeypatc
     out = capsys.readouterr().out
     assert 'already running; using it' in out and 'Celine voice: ready.' in out
     assert out.count('Celine voice stopped answering') == 1
+
+
+# ---------------------------------------------------------------- round 2 of the stress test
+
+def _real_launcher(name):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parents[1] / 'scripts/run_apex_qwen.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_probes_never_pile_up_against_a_trickling_peer():
+    """720 stuck threads an hour, each holding a socket, until the process ran out of files."""
+    import threading
+    import time as _time
+    real = _real_launcher('apex_launcher_pileup')
+    gate = threading.Event()
+    opened = []
+
+    def trickle():
+        opened.append(1)
+        gate.wait(10)
+    for _ in range(20):
+        assert real.probe_json(_Opener(trickle), 'http://127.0.0.1:17494/health', deadline=0.05) == {}
+    assert len(opened) == 1, 'one stuck probe per address, not one per check'
+    gate.set()
+    _time.sleep(0.2)
+    real.probe_json(_Opener(lambda: (_ for _ in ()).throw(OSError('refused'))), 'http://127.0.0.1:17494/health', 0.5)
+
+
+def test_waiting_for_the_dashboard_respects_its_overall_timeout_against_a_trickle():
+    import threading
+    import time as _time
+    real = _real_launcher('apex_launcher_wait_trickle')
+    gate = threading.Event()
+    started = _time.monotonic()
+    with pytest.raises(RuntimeError, match='did not become ready'):
+        real.wait_healthy(_Opener(lambda: gate.wait(30)), 'http://127.0.0.1:7860/health', lambda h: True, [], 'Apex', 2)
+    gate.set()
+    assert _time.monotonic() - started < 6
+
+
+def test_starting_hint_only_while_the_voice_is_not_ready(launcher, monkeypatch):
+    children, spawn = child_factory(launcher, monkeypatch, [42, 0])
+    monkeypatch.setattr(launcher, 'launch_environment', lambda *a: {'APEX_SUPERVISED': '1', 'APEX_LOCAL_VOICE': 'inherited'})
+    import itertools
+    states = itertools.chain([{}], itertools.repeat({'service': 'apex-qwen', 'model_loaded': True}))
+    monkeypatch.setattr(launcher, 'voice_health', lambda opener: next(states))
+    clock = {'t': 0.0}
+    monkeypatch.setattr(launcher.time, 'monotonic', lambda: clock.__setitem__('t', clock['t'] + 10) or clock['t'])
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock())
+    assert launcher.main(['--fast', '--resident']) == 0
+    first, second = (c.kwargs['env'] for c in spawn.call_args_list[1:3])
+    assert first['APEX_LOCAL_VOICE'] == 'starting', 'the first Apex starts while she is warming'
+    assert 'APEX_LOCAL_VOICE' not in second, 'after "ready", a restarted Apex is not told she is starting'
+
+
+def test_one_slow_answer_from_a_ready_voice_is_not_a_death(launcher, monkeypatch, capsys):
+    agent = Process(101)
+    polls = {'n': 0}
+    agent.poll = lambda: (polls.__setitem__('n', polls['n'] + 1) or (0 if polls['n'] > 60 else None))
+    agent.returncode = 0
+    monkeypatch.setattr(launcher.subprocess, 'Popen', Mock(side_effect=[Process(100), agent]))
+    ok = {'service': 'apex-qwen', 'model_loaded': True}
+    import itertools
+    answers = itertools.chain([ok, {}, ok, {}, ok], itertools.repeat(ok))   # busy blips between good answers
+    monkeypatch.setattr(launcher, 'voice_health', lambda opener: next(answers))
+    clock = {'t': 0.0}
+    monkeypatch.setattr(launcher.time, 'monotonic', lambda: clock.__setitem__('t', clock['t'] + 40) or clock['t'])
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock())
+    assert launcher.main(['--fast', '--resident']) == 0
+    assert 'stopped answering' not in capsys.readouterr().out
+
+
+def test_a_reused_ready_voice_is_ready_from_the_start(launcher, monkeypatch, capsys):
+    agent = Process(101, 0)
+    monkeypatch.setattr(launcher.subprocess, 'Popen', Mock(side_effect=[agent]))
+    monkeypatch.setattr(launcher, 'port_in_use', lambda port, host='127.0.0.1': port == 17494)
+    monkeypatch.setattr(launcher, 'voice_health', lambda opener: {'service': 'apex-qwen', 'model_loaded': True})
+    monkeypatch.setattr(launcher, 'wait_healthy', Mock())
+    assert launcher.main(['--fast', '--resident']) == 0
+    out = capsys.readouterr().out
+    assert out.index('already running; using it') < out.index('Celine voice: ready.') < out.index('Starting Apex')
+
+
+def test_starting_is_announced_only_once_the_voice_process_exists(tmp_path, monkeypatch, capsys):
+    real = _real_launcher('apex_launcher_order')
+    python = tmp_path / 'python.exe'
+    python.touch()
+    monkeypatch.setattr(real, 'port_in_use', lambda *a: False)
+    monkeypatch.setattr(real.subprocess, 'Popen', Mock(side_effect=OSError(8, 'Exec format error')))
+    assert real.start_voice(python, 'scripts/qwen_server.py', None) == (None, False)
+    out = capsys.readouterr().out
+    assert 'could not start' in out and 'Starting Celine voice' not in out
