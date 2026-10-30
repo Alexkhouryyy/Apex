@@ -12,6 +12,7 @@ lock-in. One persistent "brain" that every device and channel is a window
 into, not a chat log that forgets you between sessions.
 
 **Something not working?** `python -m tools.doctor` — it checks what is actually running on your machine and every failure says what to run next.
+**Hardware acting up?** `Test-Apex-Hardware.cmd` measures the webcam, hand detection, microphone, speakers, GPU, paging file and both voices, and keeps a dated report ([docs/HARDWARE_CHECK.md](docs/HARDWARE_CHECK.md)).
 
 **Work on code:** open `/code`, add a project and choose **Open workspace**.
 Edit files, run a persistent terminal and preview your app before keeping changes.
