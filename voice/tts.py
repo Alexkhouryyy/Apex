@@ -106,6 +106,8 @@ def _speak_elevenlabs(text: str) -> None:
 
 
 _fallback_noted = False
+_noted_at = 0.0             # when the last outage notice was printed
+NOTICE_GAP = 300.0          # at most one outage notice this often
 _celine_down_until = 0.0
 _celine_busy_until = 0.0     # recently busy: don't wait for her again for a few seconds
 BUSY_COOLDOWN = 10.0
@@ -277,8 +279,12 @@ def _speak_system(text):
 
 
 def _note_outage(exc):
-    global _fallback_noted
-    if not _fallback_noted:
+    """Say once that the PC voice took over. A voice server flapping up and
+    down says it at most every NOTICE_GAP seconds, not on every drop."""
+    import time
+    global _fallback_noted, _noted_at
+    if not _fallback_noted and (not _noted_at or time.monotonic() - _noted_at >= NOTICE_GAP):
+        _noted_at = time.monotonic()
         if isinstance(exc, TimeoutError):
             print(f"[TTS] Celine's voice is slow right now (no audio after {SYNTH_BUDGET:.0f} s); "
                   "using this PC's own voice for a while.")

@@ -7,6 +7,7 @@ events from the awareness log.
 Runs in a background thread on DASHBOARD_PORT (default 7860).
 """
 import asyncio
+import logging
 import hmac
 import json
 import os
@@ -2123,15 +2124,21 @@ async def speak_stream_endpoint(request: Request):
                             status_code=404)
     client = httpx.AsyncClient(base_url=voicebox.base_url(), trust_env=False,
                                timeout=httpx.Timeout(300, connect=5))
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + voicebox.stream_deadline(payload["text"])
     try:
-        upstream = await client.send(client.build_request("POST", "/generate/pcm", json=payload),
-                                     stream=True)
+        upstream = await asyncio.wait_for(
+            client.send(client.build_request("POST", "/generate/pcm", json=payload), stream=True),
+            voicebox.STREAM_FIRST_DEADLINE)
     except Exception as exc:
         await client.aclose()
         return JSONResponse({"error": f"Voice server unreachable: {type(exc).__name__}"},
                             status_code=503)
     if upstream.status_code != 200:
-        detail = (await upstream.aread())[:500].decode("utf-8", "replace")
+        try:
+            detail = (await asyncio.wait_for(upstream.aread(), 5))[:500].decode("utf-8", "replace")
+        except Exception:
+            detail = ""
         await upstream.aclose(); await client.aclose()
         try:
             detail = json.loads(detail).get("detail", detail)
@@ -2141,8 +2148,21 @@ async def speak_stream_endpoint(request: Request):
                             status_code=upstream.status_code if upstream.status_code in (400, 409) else 503)
 
     async def relay():
+        # Each read waits at most STREAM_STALL, and the whole section at most
+        # its deadline: a voice server trickling a byte at a time cannot hold
+        # the page's request (and this connection) open forever.
+        pieces = upstream.aiter_raw()
         try:
-            async for piece in upstream.aiter_raw():
+            while True:
+                left = deadline - loop.time()
+                try:
+                    piece = await asyncio.wait_for(pieces.__anext__(), max(0, min(left, voicebox.STREAM_STALL)))
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    logging.warning("Voice stream stopped: %s.", "the section ran past its deadline"
+                                    if left <= voicebox.STREAM_STALL else "the voice server went quiet mid-section")
+                    break
                 if piece:
                     yield piece
         finally:

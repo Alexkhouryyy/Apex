@@ -143,7 +143,8 @@ def status_block(compact: bool = False) -> str:
     try:
         from agent import desktop_companion
         st = desktop_companion.status_quick() if hasattr(desktop_companion, 'status_quick') else desktop_companion.status()
-        short.append('Companion ' + ('starting' if st is None else 'on' if st.get('running') else 'off'))
+        short.append('Companion ' + ('starting' if st is None else 'on' if st.get('running')
+                                     else 'failed' if st.get('error') else 'off'))
         if st is None:
             lines.append('- Desktop Companion: starting or busy right now.')
         elif st.get('running') and st.get('hotkey_ready', True) is False:
@@ -157,6 +158,9 @@ def status_block(compact: bool = False) -> str:
                 + _hotkey(getattr(config, 'COMPANION_FOLLOW_HOTKEY', ''), 'toggles the bubble following the mouse pointer')
                 + f" (follows by default: {'yes' if getattr(config, 'COMPANION_FOLLOW_CURSOR', True) else 'no'}). "
                 'During screen help you can point at things with screen_draw.')
+        elif st.get('error'):
+            lines.append(f"- Desktop Companion: failed to start ({str(st['error'])[:200]}). "
+                         'The browser Companion page still works; restarting Apex retries the desktop window.')
         elif getattr(config, 'COMPANION_DESKTOP_ENABLED', True):
             lines.append('- Desktop Companion: enabled but not running in this Apex (the desktop window starts with '
                          'Start-Apex-All or the sign-in launcher; desktop.log says why if it should be running). '

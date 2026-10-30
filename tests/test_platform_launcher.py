@@ -272,3 +272,28 @@ def test_ctrl_c_works_again_even_if_the_cleanup_fails(rig,monkeypatch):
     monkeypatch.setattr(platform,'_stop_all',broken)
     with pytest.raises(BrokenPipeError):platform.main([])
     assert signal.getsignal(signal.SIGINT)==before
+
+
+def test_a_ctrl_c_right_after_a_child_starts_still_stops_it(rig,monkeypatch):
+    """Ctrl+C between "child started" and "child recorded" used to orphan it."""
+    import os, signal
+    children,stopped=rig
+    real=platform.spawn
+    def spawn_then_ctrl_c(args,env):
+        p=real(args,env)
+        os.kill(os.getpid(),signal.SIGINT)        # lands before the launcher has recorded p
+        return p
+    monkeypatch.setattr(platform,'spawn',spawn_then_ctrl_c)
+    def loop_reached(_): raise AssertionError('the Ctrl+C was swallowed')
+    monkeypatch.setattr(platform.time,'sleep',loop_reached)
+    with pytest.raises(KeyboardInterrupt):platform.main(['--offline-only','--no-nomad'])
+    assert len(children)==1 and stopped==children
+    platform.launcher.wait_healthy.assert_not_called()   # stopped at once, not after startup
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+
+def test_held_ctrl_c_passes_through_when_nothing_was_pressed():
+    import signal
+    with platform.held_ctrl_c():
+        pass
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler

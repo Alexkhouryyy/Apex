@@ -15,9 +15,11 @@ def test_environment(run_dir: Path, inherited: dict[str, str]) -> dict[str, str]
     # Do not let the owner's provider, keys, background services or data paths
     # select different branches in unit tests. Preserve OS and proxy settings.
     tree = ast.parse((ROOT / "config.py").read_text(encoding="utf-8"))
+    # os.getenv("X", ...) and the yes/no helper _flag("X", ...)
     settings = {node.args[0].value for node in ast.walk(tree)
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "getenv" and node.args
+                if isinstance(node, ast.Call) and node.args
+                and ((isinstance(node.func, ast.Attribute) and node.func.attr == "getenv")
+                     or (isinstance(node.func, ast.Name) and node.func.id == "_flag"))
                 and isinstance(node.args[0], ast.Constant)
                 and isinstance(node.args[0].value, str)}
     prefixes = ("APEX_", "ANTHROPIC_", "OPENAI_", "GEMINI_", "DEEPSEEK_",
