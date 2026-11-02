@@ -122,6 +122,24 @@ and leaves every other archive exactly as it was. **Never suggest
 version, which can mean downloading hundreds of GB again. Add `--plan-only` to
 queue a pack without downloading it now.
 
+## Update to newer versions
+
+When the owner asks how to get newer Wikipedia/medicine/etc. (the library is
+from 2026 and it is now later):
+
+```powershell
+cd C:\Users\alexk\Apex
+.\Update-Apex-Library.cmd
+```
+
+That lists archives with a newer version and their sizes, and downloads nothing.
+Then `.\Update-Apex-Library.cmd NAME [NAME...]` (or `all`) updates those. Be
+honest that Kiwix has no add-only patches: each update re-downloads that archive
+in full. Suggest small, fast-changing ones first and big Wikipedia only when the
+internet allows. The old copy keeps working until the new one is verified, then
+it's removed; a drop or power cut means: run the same command again. It refuses
+to switch an archive whose current version hasn't finished downloading.
+
 Choosing packs: prefer what works fully offline in a Kiwix reader, has a clear
 license, and fills a real gap (offline medicine, first aid, Arabic-language
 references for Lebanon, repair/how-to, survival, maps). For each suggestion give

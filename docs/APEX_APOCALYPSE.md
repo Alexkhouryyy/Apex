@@ -149,9 +149,29 @@ doesn't list is an error, not a silent skip. With `--plan-only` it's added
 without downloading; a later `Download-Apex-Library.cmd` run then includes it in
 its size budget.
 
+**Update to newer versions: `Update-Apex-Library.cmd`.** Run it with no name to
+see which archives have a newer version and how big each is (nothing is
+downloaded). Then name the ones to update, or `all`:
+
+```powershell
+cd C:\Users\alexk\Apex
+.\Update-Apex-Library.cmd
+.\Update-Apex-Library.cmd wikipedia_en_medicine_maxi
+```
+
+Kiwix publishes whole new files; there are no "only the new articles" patches,
+so an update downloads that archive again in full. Update the small, fast-moving
+ones (medicine, guides) often and the big Wikipedia rarely. The old copy stays
+on the drive and keeps working until the new one is downloaded and its checksum
+passes; only then is the old file removed. An internet drop or power cut keeps
+the old copy and the partial download: run the same command again to finish.
+An archive that hasn't finished downloading its current version is not switched,
+because that would restart it from zero. The drive needs room for the new copy
+while the old one still exists.
+
 `python scripts/prepare_apocalypse_library.py --plan-only` resolves metadata
-without downloading archives. `--refresh-plan` explicitly selects newer versions
-and keeps old files. The Apocalypse screen shows the last saved queue counts;
+without downloading archives. `--refresh-plan` re-resolves every archive at once
+and keeps old files; to update a few, use `Update-Apex-Library.cmd` instead. The Apocalypse screen shows the last saved queue counts;
 it does not assume the download process is still running or that readers work.
 Missing catalog references stay visible instead of being claimed as installed.
 The FDA drug dataset needs NOMAD's database ingestion pipeline, not a raw ZIM
