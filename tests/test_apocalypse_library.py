@@ -635,3 +635,150 @@ def test_another_disk_error_with_the_drive_present_is_reported_not_waited_on(mon
                         lambda *a, **k: (_ for _ in ()).throw(PermissionError(13, 'Access is denied')))
     with pytest.raises(RuntimeError, match='need attention'):
         library.main()
+
+
+# ---------------------------------------------------------------- updates: newer versions, one archive at a time
+
+def _installed(tmp_path, identifier, version, data=b'old copy', **extra):
+    row = dict(archive(data), id=identifier, title=identifier.title(), version=version,
+               path=f'nomad/storage/zim/{identifier}_{version}.zim', status='downloaded', checksum_verified=True, **extra)
+    path = tmp_path / row['path']
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return row
+
+
+def test_check_updates_lists_only_newer_versions_and_downloads_nothing(monkeypatch, tmp_path, capsys):
+    jobs = [_installed(tmp_path, 'wikipedia_en_all_maxi', '2026-01'), _installed(tmp_path, 'medicine', '2026-10')]
+    _until_done_setup(monkeypatch, tmp_path, jobs, ['--check-updates'])
+    catalog = kiwix({'wikipedia_en_all_maxi': ('2028-03', 130_000_000_000, 'ab' * 32),
+                     'medicine': ('2026-10', 5, 'cd' * 32)})
+    seen = []
+    real = catalog.get
+    monkeypatch.setattr(catalog, 'get', lambda url, **kw: seen.append(str(url)) or real(url, **kw))
+    monkeypatch.setattr(library.httpx, 'Client', lambda **kw: catalog)
+    monkeypatch.setattr(library, 'download_with_retries', lambda *a, **k: pytest.fail('nothing may download'))
+    before = (tmp_path / library.PLAN_NAME).read_text(encoding='utf-8')
+    library.main()
+    out = capsys.readouterr().out
+    assert 'wikipedia_en_all_maxi: 2026-01 -> 2028-03, 130.00 GB' in out and 'medicine:' not in out
+    assert 'no "only the new articles" patches' in out
+    assert (tmp_path / library.PLAN_NAME).read_text(encoding='utf-8') == before, 'the plan is unchanged'
+    assert not any(u.endswith('.meta4') and 'medicine' in u for u in seen), 'no checksum fetch for an up-to-date one'
+
+
+def test_update_downloads_the_new_version_then_removes_the_old_copy(monkeypatch, tmp_path, capsys):
+    old = _installed(tmp_path, 'wikipedia_en_all_maxi', '2026-01')
+    other = _installed(tmp_path, 'medicine', '2026-10', data=b'medicine')
+    _until_done_setup(monkeypatch, tmp_path, [old, other], ['--update', 'wikipedia_en_all_maxi', '--until-done'])
+    catalog = kiwix({'wikipedia_en_all_maxi': ('2028-03', 9, 'ab' * 32), 'medicine': ('2028-01', 5, 'cd' * 32)})
+    monkeypatch.setattr(library.httpx, 'Client', lambda **kw: catalog)
+    old_file = tmp_path / old['path']
+    fetched = []
+
+    def download(client, home, job, checkpoint, **kw):
+        assert old_file.is_file(), 'the old copy stays usable while the new one downloads'
+        fetched.append(job['id'])
+        library.destination(home, job).write_bytes(b'new copy!')
+        library.mark_verified(library.destination(home, job), job)
+    monkeypatch.setattr(library, 'download_with_retries', download)
+    library.main()
+    assert fetched == ['wikipedia_en_all_maxi'], 'only the chosen archive'
+    assert not old_file.exists() and (tmp_path / 'nomad/storage/zim/wikipedia_en_all_maxi_2028-03.zim').is_file()
+    assert (tmp_path / other['path']).is_file()
+    saved = {r['id']: r for r in json.loads((tmp_path / library.PLAN_NAME).read_text(encoding='utf-8'))['jobs']}
+    assert saved['wikipedia_en_all_maxi']['version'] == '2028-03' and 'replaces' not in saved['wikipedia_en_all_maxi']
+    assert saved['medicine']['version'] == '2026-10', 'not chosen: keeps its version'
+    assert 'Updated Wikipedia_En_All_Maxi to 2028-03 (was 2026-01)' in capsys.readouterr().out
+
+
+def test_an_interrupted_update_keeps_the_old_copy_and_resumes(monkeypatch, tmp_path, capsys):
+    old = _installed(tmp_path, 'medicine', '2026-01')
+    _until_done_setup(monkeypatch, tmp_path, [old], ['--update', 'medicine'])
+    catalog = kiwix({'medicine': ('2028-01', 9, 'ab' * 32)})
+    empty = kiwix({})                                  # made now: httpx.Client is patched below
+    monkeypatch.setattr(library.httpx, 'Client', lambda **kw: catalog)
+
+    def cut(client, home, job, checkpoint, **kw):
+        raise httpx.ConnectError('[Errno 11001] getaddrinfo failed')
+    monkeypatch.setattr(library, 'download_with_retries', cut)
+    with pytest.raises(RuntimeError, match='remain pending'):
+        library.main()
+    assert (tmp_path / old['path']).is_file(), 'a failed update never removes the working copy'
+    saved = json.loads((tmp_path / library.PLAN_NAME).read_text(encoding='utf-8'))['jobs'][0]
+    assert saved['version'] == '2028-01' and saved['replaces']['version'] == '2026-01'
+    # Later, the same command finishes it without asking the catalog again.
+    monkeypatch.setattr(library.httpx, 'Client', lambda **kw: empty)
+    done = []
+    monkeypatch.setattr(library, 'download_with_retries',
+                        lambda client, home, job, checkpoint, **kw: done.append(job['id']) or
+                        job.update(status='downloaded', checksum_verified=True))
+    library.main()
+    assert done == ['medicine'] and not (tmp_path / old['path']).exists()
+
+
+def test_a_new_copy_that_fails_its_checksum_never_replaces_the_old_one(tmp_path):
+    old = _installed(tmp_path, 'medicine', '2026-01')
+    new = dict(old, version='2028-01', path='nomad/storage/zim/medicine_2028-01.zim', status='needs_attention',
+               checksum_verified=False, replaces={'path': old['path'], 'version': '2026-01'})
+    plan = {'jobs': [new]}
+    assert library.finish_replacements(tmp_path, plan) == []
+    assert (tmp_path / old['path']).is_file() and 'replaces' in new
+
+
+def test_an_old_path_still_used_by_another_archive_is_never_deleted(tmp_path):
+    keep = _installed(tmp_path, 'medicine', '2026-01')
+    new = dict(keep, id='medicine-copy', version='2028-01', path='nomad/storage/zim/medicine_2028-01.zim',
+               replaces={'path': keep['path'], 'version': '2026-01'})
+    (tmp_path / new['path']).write_bytes(b'x')
+    library.finish_replacements(tmp_path, {'jobs': [keep, new]})
+    assert (tmp_path / keep['path']).is_file()
+
+
+@pytest.mark.parametrize('escape', ['../outside.zim', 'nomad/storage/zim/../../../../etc/passwd'])
+def test_a_replaced_path_outside_the_library_is_refused(tmp_path, escape):
+    new = dict(_installed(tmp_path, 'medicine', '2028-01'), replaces={'path': escape, 'version': 'x'})
+    with pytest.raises(ValueError):
+        library.finish_replacements(tmp_path, {'jobs': [new]})
+
+
+def test_an_unfinished_archive_is_not_switched_to_a_new_version(capsys):
+    job = dict(archive(), id='wikipedia_en_all_maxi', version='2026-01', status='pending')
+    plan = {'jobs': [job]}
+    with kiwix({'wikipedia_en_all_maxi': ('2028-03', 9, 'ab' * 32)}) as client:
+        assert library.start_updates(client, plan, ['wikipedia_en_all_maxi']) == []
+    assert plan['jobs'] == [job], 'its partial download keeps going toward the version it started'
+    assert 'has not finished downloading' in capsys.readouterr().out
+
+
+def test_update_all_and_unknown_names():
+    a = dict(archive(), id='a', version='2026-01', status='downloaded')
+    b = dict(archive(), id='b', version='2026-01', status='downloaded')
+    plan = {'jobs': [a, b]}
+    with kiwix({'a': ('2027-01', 9, 'ab' * 32), 'b': ('2026-01', 9, 'cd' * 32)}) as client:
+        with pytest.raises(RuntimeError, match='Unknown archive: nope'):
+            library.start_updates(client, plan, ['nope'])
+        assert library.start_updates(client, plan, ['all']) == ['a']
+    assert plan['jobs'][0]['version'] == '2027-01' and plan['jobs'][1] is b
+
+
+def test_the_map_is_compared_by_build_date():
+    builds = [{'key': '20280101.pmtiles', 'size': 7, 'md5sum': 'AAAAAAAAAAAAAAAAAAAAAA=='}]
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=builds)))
+    assert library.newer_version(client, {'id': 'worldwide-map', 'version': '20280101'}) is None
+    row = library.newer_version(client, {'id': 'worldwide-map', 'version': '20260301'})
+    assert row['version'] == '20280101' and row['path'].endswith('20280101.pmtiles')
+
+
+def test_no_internet_while_checking_says_so_and_changes_nothing():
+    def down(request):
+        raise httpx.ConnectError('[Errno 11001] getaddrinfo failed')
+    plan = {'jobs': [dict(archive(), id='a', version='2026-01', status='downloaded')]}
+    with httpx.Client(transport=httpx.MockTransport(down)) as client, pytest.raises(RuntimeError, match='internet'):
+        library.find_updates(client, plan)
+
+
+def test_the_update_launcher_lists_by_default_and_updates_named_archives():
+    text = (Path(__file__).resolve().parents[1] / 'Update-Apex-Library.cmd').read_text(encoding='utf-8')
+    assert '--check-updates' in text and '--update %~1' in text and '--until-done' in text
+    assert 'set "RC=%errorlevel%"' in text, 'pause would otherwise hide a failure'

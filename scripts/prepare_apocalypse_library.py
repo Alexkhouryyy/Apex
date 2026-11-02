@@ -70,7 +70,10 @@ def english_resources(spec):
     return list(selected.values())
 
 
-def latest_zim(client, resource):
+def latest_zim(client, resource, newer_than=None):
+    """The newest Kiwix archive for `resource`, pinned to its exact size and
+    publisher checksum. With newer_than (a version like '2025-08'), None when the
+    catalog has nothing newer, without fetching the checksum file."""
     identifier = resource['id']
     pattern = re.compile(r'^'+re.escape(identifier)+r'_(\d{4}-\d{2})\.zim$')
     names = [identifier]
@@ -91,6 +94,8 @@ def latest_zim(client, resource):
                 matches.append((match[1], url, filename, int(link.get('length'))))
         if matches:
             version, url, filename, size = max(matches)
+            if newer_than is not None and version <= newer_than:
+                return None
             # Metalink carries authoritative checksums; no archive is labelled
             # verified on the strength of its size alone.
             meta = client.get(url+'.meta4')
@@ -112,6 +117,21 @@ def latest_zim(client, resource):
     raise RuntimeError('No current Kiwix archive found for '+identifier)
 
 
+def latest_map(client, newer_than=None):
+    """The newest worldwide map build; None when it isn't newer than `newer_than`."""
+    response = client.get('https://build-metadata.protomaps.dev/builds.json')
+    response.raise_for_status()
+    latest = max(response.json(), key=lambda row: row['key'])
+    if not re.fullmatch(r'\d{8}\.pmtiles', latest['key']):
+        raise RuntimeError('Unexpected worldwide map filename.')
+    if newer_than is not None and latest['key'][:8] <= newer_than:
+        return None
+    return {'id': 'worldwide-map', 'title': 'Worldwide detailed map',
+            'url': 'https://build.protomaps.com/'+latest['key'], 'version': latest['key'][:8],
+            'bytes': int(latest['size']), 'path': 'nomad/storage/maps/pmtiles/'+latest['key'],
+            'hash_algorithm': 'md5', 'hash': base64.b64decode(latest['md5sum']).hex(), 'status': 'pending'}
+
+
 def build_plan(client):
     spec, revision = original_collections()
     jobs, pending = [], []
@@ -124,15 +144,7 @@ def build_plan(client):
             jobs.append(latest_zim(client, resource))
         except (httpx.HTTPError, ET.ParseError, RuntimeError, ValueError) as exc:
             pending.append({'id': resource['id'], 'reason': str(exc)})
-    response = client.get('https://build-metadata.protomaps.dev/builds.json')
-    response.raise_for_status()
-    latest = max(response.json(), key=lambda row: row['key'])
-    if not re.fullmatch(r'\d{8}\.pmtiles', latest['key']):
-        raise RuntimeError('Unexpected worldwide map filename.')
-    jobs.append({'id': 'worldwide-map', 'title': 'Worldwide detailed map',
-                 'url': 'https://build.protomaps.com/'+latest['key'], 'version': latest['key'][:8],
-                 'bytes': int(latest['size']), 'path': 'nomad/storage/maps/pmtiles/'+latest['key'],
-                 'hash_algorithm': 'md5', 'hash': base64.b64decode(latest['md5sum']).hex(), 'status': 'pending'})
+    jobs.append(latest_map(client))
     jobs.sort(key=lambda row: row['bytes'])
     pending.extend([
         {'id': 'nomad-readers', 'reason': 'Install/start Docker and NOMAD, then prepare its apps.'},
@@ -169,6 +181,96 @@ def add_resources(client, plan, identifiers):
         added.append(identifier)
     plan['jobs'].sort(key=lambda row: row['bytes'])
     return added, present
+
+
+def newer_version(client, job):
+    """The plan row for a newer version of `job`, or None if it is the newest."""
+    if job['id'] == 'worldwide-map':
+        return latest_map(client, job.get('version', ''))
+    return latest_zim(client, {'id': job['id'], 'title': job.get('title', job['id'])}, job.get('version', ''))
+
+
+def find_updates(client, plan):
+    """Which archives in the plan have a newer version. Nothing is downloaded or
+    changed. Returns (updates as (job, newer row), [(id, reason it couldn't be checked)])."""
+    updates, failed = [], []
+    for job in plan['jobs']:
+        if job.get('replaces'):
+            continue                                  # its update is already under way
+        try:
+            row = newer_version(client, job)
+        except httpx.TransportError as exc:
+            raise RuntimeError("Couldn't reach the online catalog (is the internet down?). "
+                               'Nothing was changed.') from exc
+        except (httpx.HTTPError, ET.ParseError, RuntimeError, ValueError, KeyError) as exc:
+            failed.append((job['id'], str(exc) or type(exc).__name__))
+            continue
+        if row is not None:
+            updates.append((job, row))
+    return updates, failed
+
+
+def start_updates(client, plan, identifiers):
+    """Switch the chosen archives (or 'all') to their newest version in the plan.
+    The old file stays on the drive, and in use, until the new one is downloaded
+    and its checksum passes (finish_replacements removes it then). Returns the ids
+    to download now, including updates that were already under way."""
+    jobs = {row['id']: row for row in plan['jobs']}
+    everything = 'all' in identifiers
+    unknown = [i for i in identifiers if i != 'all' and i not in jobs]
+    if unknown:
+        raise RuntimeError('Unknown archive: '+', '.join(unknown)+'. --check-updates lists the names.')
+    chosen = list(jobs) if everything else list(dict.fromkeys(identifiers))
+    selected = []
+    for identifier in chosen:
+        job = jobs[identifier]
+        if job.get('replaces'):
+            selected.append(identifier)               # an update a power cut or outage interrupted
+            continue
+        if job.get('status') != 'downloaded':
+            if not everything:
+                print(f'{identifier} has not finished downloading its current version yet. Finish that first '
+                      '(Download-Apex-Library.cmd); switching now would start it again from zero.', flush=True)
+            continue
+        print('Checking '+identifier, flush=True)
+        try:
+            row = newer_version(client, job)
+        except httpx.TransportError as exc:
+            raise RuntimeError("Couldn't reach the online catalog (is the internet down?). "
+                               'Nothing was changed.') from exc
+        if row is None:
+            if not everything:
+                print(f'{identifier} is already the newest version ({job.get("version")}).', flush=True)
+            continue
+        row['title'] = job.get('title', row['title'])
+        if job.get('added'):
+            row['added'] = True
+        row['replaces'] = {'path': job['path'], 'version': job.get('version', '')}
+        plan['jobs'][plan['jobs'].index(job)] = row
+        print(f'Updating {identifier}: {job.get("version")} -> {row["version"]} '
+              f'({row["bytes"]/1_000_000_000:.2f} GB to download).', flush=True)
+        selected.append(identifier)
+    return selected
+
+
+def finish_replacements(home, plan):
+    """Remove the old file of each update whose new version is downloaded and
+    verified. Never touches a file another archive in the plan still uses."""
+    in_use = {(home/row['path']).resolve() for row in plan['jobs']}
+    finished = []
+    for job in plan['jobs']:
+        old = job.get('replaces')
+        if not old or job.get('status') != 'downloaded' or not job.get('checksum_verified'):
+            continue
+        path = (home/old['path']).resolve()
+        path.relative_to(home.resolve())
+        if path.suffix in {'.zim', '.pmtiles'} and path not in in_use and path.is_file():
+            path.unlink()
+        job.pop('replaces')
+        finished.append(job)
+        print(f'Updated {job["title"]} to {job["version"]} (was {old.get("version") or "older"}). '
+              'The old copy was removed.', flush=True)
+    return finished
 
 
 def load_plan(path):
@@ -569,6 +671,10 @@ def main():
                         help='Add a Kiwix archive by catalog name to the saved plan (other archives keep their versions) and download it; repeatable')
     parser.add_argument('--verify-all', action='store_true',
                         help='Read every finished archive again to check its checksum, even if it is unchanged')
+    parser.add_argument('--check-updates', action='store_true',
+                        help='List archives that have a newer version, with sizes; downloads nothing')
+    parser.add_argument('--update', action='append', metavar='ID',
+                        help="Download an archive's newest version, then remove the old copy; 'all' for every one; repeatable")
     parser.add_argument('--until-done', action='store_true',
                         help='Keep going through internet outages, waiting and retrying until every archive is downloaded')
     args = parser.parse_args()
@@ -593,7 +699,18 @@ def main():
                 plan = build_plan(client)
             if plan.get('profile') != 'english-worldwide':
                 raise RuntimeError('Unexpected preparation profile.')
+            if (args.check_updates or args.update) and not (output.exists() or output.with_suffix('.json.bak').is_file()):
+                raise RuntimeError('There is no library on this drive yet. Run Download-Apex-Library.cmd first.')
+            if args.check_updates:
+                report_updates(client, plan)
+                return
             only = args.only
+            if args.update:
+                only = start_updates(client, plan, args.update)
+                save_plan(output, plan)
+                if not only:
+                    print('Nothing to update.', flush=True)
+                    return
             if args.add:
                 added, present = add_resources(client, plan, args.add)
                 for identifier in added:
@@ -615,6 +732,8 @@ def main():
             if shutil.disk_usage(home).free < pending+HEADROOM:
                 raise RuntimeError('The remaining plan does not fit with 20 GiB headroom. Existing files were kept.')
             outcome = run_batch(client, home, output, plan, selected, until_done=args.until_done)
+            if finish_replacements(home, plan):
+                save_plan(output, plan)
             wait, round_no = UNTIL_DONE_FIRST_WAIT, 1
             while outcome in ('network', 'drive') and args.until_done:
                 if outcome == 'drive':
@@ -627,6 +746,8 @@ def main():
                 _sleep(wait)
                 wait, round_no = min(wait * 2, UNTIL_DONE_MAX_WAIT), round_no + 1
                 outcome = run_batch(client, home, output, plan, selected, until_done=True)
+                if finish_replacements(home, plan):
+                    save_plan(output, plan)
             print('Archives require prepared NOMAD readers. Courses, medical database ingestion, map assets and AI/RAG setup remain visible in the plan.', flush=True)
             if outcome == 'drive':
                 raise RuntimeError("The library drive was disconnected. Plug it back in and run this again; "
@@ -638,6 +759,27 @@ def main():
                 raise RuntimeError('Some archives need attention (see the Pending lines above): retrying would not fix '
                                    'them. Every other finished archive and partial file is kept.')
             print('Every archive in this batch is downloaded and checksum-verified.', flush=True)
+
+
+def report_updates(client, plan):
+    print(f'Checking {len(plan["jobs"])} archives for newer versions. Nothing is downloaded.', flush=True)
+    updates, failed = find_updates(client, plan)
+    for identifier, reason in failed:
+        print(f"Couldn't check {identifier}: {reason}", flush=True)
+    under_way = [row['id'] for row in plan['jobs'] if row.get('replaces')]
+    if under_way:
+        print('Update already started (run --update again to finish): '+', '.join(under_way), flush=True)
+    if not updates:
+        print('Everything checked is up to date.', flush=True)
+        return
+    print('Newer versions:', flush=True)
+    for job, row in sorted(updates, key=lambda item: item[1]['bytes']):
+        print(f'  {job["id"]}: {job.get("version")} -> {row["version"]}, {row["bytes"]/1_000_000_000:.2f} GB', flush=True)
+    total = sum(row['bytes'] for _, row in updates)
+    print(f'{len(updates)} newer, {total/1_000_000_000:.1f} GB in all. Kiwix publishes whole new files (there are no '
+          '"only the new articles" patches), so each update downloads that archive again; the old copy keeps '
+          'working until the new one is checked, then it is removed. Update one with: '
+          'Update-Apex-Library.cmd NAME', flush=True)
 
 
 STOPPED_BY_CTRL_C = ('Library preparation stopped: you pressed Ctrl+C. Everything downloaded so far is kept; '
