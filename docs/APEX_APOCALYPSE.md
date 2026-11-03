@@ -133,6 +133,19 @@ going until it's all there.
 
 The same thing from a terminal: `prepare_apocalypse_library.py --max-download-gb 90 --until-done`.
 
+**Find a pack: `Find-Apex-Pack.cmd`.** It searches the Kiwix catalog and
+lists exact names, sizes, versions and languages, smallest first, and downloads
+nothing. A language word (`arabic`, `french`, ...) filters by language; the
+other words search titles and descriptions:
+
+```powershell
+cd C:\Users\alexk\Apex
+.\Find-Apex-Pack.cmd arabic medicine
+.\Add-Apex-Pack.cmd NAME
+```
+
+`Add-Apex-Pack.cmd NAME [NAME...]` adds and downloads just those packs, as `--add` below.
+
 **Add one more pack: `--add`.** Give a Kiwix catalog name (the archive's file
 name without the `_YYYY-MM.zim` date, e.g. `wikivoyage_en_all_maxi`):
 

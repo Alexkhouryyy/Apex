@@ -103,13 +103,26 @@ List them before suggesting anything, so you don't propose what's already there:
 (Get-Content D:\Apex-Apocalypse\english-worldwide-plan.json | ConvertFrom-Json).jobs | Select-Object id, status, @{n='GB';e={[math]::Round($_.bytes/1e9,2)}} | Sort-Object id
 ```
 
-Then check the new name exists and see its size, without changing anything:
+**Never guess a pack name.** Have the owner search the catalog from the laptop
+(it downloads nothing; a language word such as `arabic` or `french` filters by
+language, the other words search titles and descriptions):
 
 ```powershell
-curl.exe -s "https://library.kiwix.org/catalog/v2/entries?name=wikivoyage_en_all_maxi" | Select-String 'application/x-zim'
+cd C:\Users\alexk\Apex
+.\Find-Apex-Pack.cmd arabic medicine
 ```
 
-Then add and download it (repeat `--add` for several):
+Each line starts with the exact name, then size, version, language and title;
+"(already in your library)" marks what's there. Good searches for Lebanon:
+`arabic`, `arabic medicine`, `arabic wikipedia`, `first aid`, `water`, `repair`.
+Then add the chosen one (several names allowed):
+
+```powershell
+cd C:\Users\alexk\Apex
+.\Add-Apex-Pack.cmd NAME
+```
+
+The same thing without the launcher (repeat `--add` for several):
 
 ```powershell
 cd C:\Users\alexk\Apex

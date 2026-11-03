@@ -782,3 +782,71 @@ def test_the_update_launcher_lists_by_default_and_updates_named_archives():
     text = (Path(__file__).resolve().parents[1] / 'Update-Apex-Library.cmd').read_text(encoding='utf-8')
     assert '--check-updates' in text and '--update %~1' in text and '--until-done' in text
     assert 'set "RC=%errorlevel%"' in text, 'pause would otherwise hide a failure'
+
+
+# ---------------------------------------------------------------- --find: real names from the catalog
+
+def catalog_search(entries, seen):
+    """A fake Kiwix search: entries are (title, summary, language, [zim filenames with sizes])."""
+    def handle(request):
+        seen.append(dict(request.url.params))
+        body = ''.join(
+            f'<entry><title>{title}</title><summary>{summary}</summary><language>{lang}</language>'
+            + ''.join(f'<link type="application/x-zim" href="https://mirror.test/{name}.meta4" length="{size}"/>'
+                      for name, size in files) + '</entry>'
+            for title, summary, lang, files in entries)
+        return httpx.Response(200, text=f'<feed xmlns="http://www.w3.org/2005/Atom">{body}</feed>')
+    return httpx.Client(transport=httpx.MockTransport(handle))
+
+
+def test_find_turns_a_language_word_into_a_language_filter_and_lists_real_names():
+    seen = []
+    entries = [('ويكيبيديا طب', 'Medical articles', 'ara',
+                [('wikipedia_ar_medicine_maxi_2026-07.zim', 1_100_000_000),
+                 ('wikipedia_ar_medicine_maxi_2026-01.zim', 900_000_000)]),   # newest listed first
+               ('Arabic first aid', '', 'ara', [('firstaid_ar_2025-03.zim', 20_000_000)]),
+               ('Broken', '', 'ara', [('not-a-zim.pdf', 5), ('nosize_2026-01.zim', 0)])]
+    with catalog_search(entries, seen) as client:
+        rows = library.find_packs(client, ['Arabic', 'medicine'], have={'firstaid_ar'})
+    assert seen[0]['lang'] == 'ara' and seen[0]['q'] == 'medicine'
+    assert [r['id'] for r in rows] == ['firstaid_ar', 'wikipedia_ar_medicine_maxi'], 'smallest first, junk dropped'
+    newest = rows[1]
+    assert newest['version'] == '2026-07' and newest['bytes'] == 1_100_000_000, 'newest version only'
+    assert rows[0]['in_plan'] and not rows[1]['in_plan']
+    assert all(library.KIWIX_ID.fullmatch(r['id']) for r in rows), 'every listed name works with --add'
+
+
+def test_find_needs_something_to_look_for():
+    with catalog_search([], []) as client, pytest.raises(RuntimeError, match='what to look for'):
+        library.find_packs(client, ['  '])
+
+
+def test_find_with_no_internet_says_so():
+    def down(request):
+        raise httpx.ConnectError('[Errno 11001] getaddrinfo failed')
+    with httpx.Client(transport=httpx.MockTransport(down)) as client, pytest.raises(RuntimeError, match='internet'):
+        library.find_packs(client, ['arabic'])
+
+
+def test_find_from_the_command_line_needs_no_drive_and_downloads_nothing(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(library.apocalypse, 'enabled', lambda: False)
+    monkeypatch.setattr(library.apocalypse, 'library_root', lambda: tmp_path / 'unplugged')
+    monkeypatch.setattr(library, 'wait_for_drive', lambda *a, **k: pytest.fail('a search needs no drive'))
+    monkeypatch.setattr(library, 'download_with_retries', lambda *a, **k: pytest.fail('nothing may download'))
+    monkeypatch.setattr(library.sys, 'argv', ['prepare_apocalypse_library.py', '--find', 'arabic'])
+    search = catalog_search([('Wikivoyage', 'Travel guide', 'ara', [('wikivoyage_ar_all_maxi_2026-02.zim', 50_000_000)])], [])
+    monkeypatch.setattr(library.httpx, 'Client', lambda **kw: search)
+    library.main()
+    out = capsys.readouterr().out
+    assert 'wikivoyage_ar_all_maxi  0.05 GB  2026-02  [ara] Wikivoyage - Travel guide' in out
+    assert 'Add-Apex-Pack.cmd NAME' in out
+
+
+def test_the_pack_launchers_search_then_add():
+    root = Path(__file__).resolve().parents[1]
+    find = (root / 'Find-Apex-Pack.cmd').read_text(encoding='utf-8')
+    add = (root / 'Add-Apex-Pack.cmd').read_text(encoding='utf-8')
+    assert '--find %WORDS%' in find and 'set "RC=%errorlevel%"' in find
+    assert '--add %~1' in add and '--until-done' in add
+    for name in ('Find-Apex-Pack.cmd', 'Add-Apex-Pack.cmd'):
+        assert b'\r\n' in (root / name).read_bytes(), 'Windows line endings'

@@ -76,7 +76,8 @@ Resident log: `Get-Content "$env:USERPROFILE\.apex\resident.log" -Tail 40`.
 Other launchers: `.\start-apex.bat` (Apex only, in the background),
 `.\Start-Apex-Celine-Fast.cmd` (just the voice server),
 `.\Download-Apex-Library.cmd 90` (offline library; see `apocalypse-library`),
-`.\Update-Apex-Library.cmd` (lists newer library versions; add names to update them).
+`.\Update-Apex-Library.cmd` (lists newer library versions; add names to update them),
+`.\Find-Apex-Pack.cmd arabic medicine` then `.\Add-Apex-Pack.cmd NAME` (more offline packs).
 If the console closed ("it turned off"), give them the start command again.
 Downloads and installs pick up where they stopped.
 
