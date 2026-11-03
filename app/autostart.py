@@ -136,7 +136,7 @@ def _windows_install() -> str:
         r"Software\Microsoft\Windows\CurrentVersion\Run",
         0, winreg.KEY_SET_VALUE,
     )
-    value = f'"{python_exe}" "{_MAIN_PY}" --resident'
+    value = f'"{python_exe}" -X utf8 "{_MAIN_PY}" --resident'   # UTF-8 text, as every launcher
     winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, value)
     winreg.CloseKey(key)
     return f"Installed HKCU registry key: {APP_NAME} -> {value}"

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import urllib.request
 import urllib.error
 import uuid
@@ -17,6 +18,32 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 WINDOWS = sys.platform == 'win32'
+
+
+def describe_failure(exc, label, root=ROOT, home=None):
+    """One console line for a startup failure that still says where it happened:
+    'message (at agent/longterm.py:582 in load_memory_files)', from the last frame
+    in Apex's own code. The full traceback is saved to ~/.apex/last-startup-error.txt
+    (the line says so), because a bare message like "'charmap' codec can't decode
+    byte 0x9d" doesn't name the file it came from."""
+    text = str(exc) or type(exc).__name__
+    root = Path(root).resolve()
+    for frame in reversed(traceback.extract_tb(exc.__traceback__)):
+        if frame.filename.startswith('<'):
+            continue                                   # <string>, <frozen ...>: not a file
+        path = Path(frame.filename).resolve()
+        if path.is_relative_to(root) and not {'site-packages', '.venv', 'venv'} & set(path.parts):
+            text += f' (at {path.relative_to(root).as_posix()}:{frame.lineno} in {frame.name})'
+            break
+    try:
+        report = Path(home or Path.home()) / '.apex' / 'last-startup-error.txt'
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(f'{label}, {time.strftime("%Y-%m-%d %H:%M:%S")}\n'
+                          + ''.join(traceback.format_exception(exc)), encoding='utf-8')
+        text += f'. Details: {report}'
+    except OSError:
+        pass
+    return text
 
 
 def port_in_use(port, host='127.0.0.1'):
@@ -301,5 +328,5 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print('\nApex and Qwen stopped.')
     except Exception as exc:
-        print(f'Launcher stopped: {exc}', file=sys.stderr)
+        print(f'Launcher stopped: {describe_failure(exc, "Apex launcher")}', file=sys.stderr)
         raise SystemExit(1)

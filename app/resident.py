@@ -33,7 +33,7 @@ def _setup_logging() -> None:
         os.makedirs(parent, exist_ok=True)
 
     handler = logging.handlers.RotatingFileHandler(
-        log_path, maxBytes=10 * 1024 * 1024, backupCount=5
+        log_path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8'
     )
     handler.setFormatter(logging.Formatter(
         "%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S"
