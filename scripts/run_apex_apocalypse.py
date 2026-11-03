@@ -71,5 +71,6 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print('Apex Apocalypse stopped.')
     except Exception as exc:
-        print(f'Apocalypse stopped: {exc}', file=sys.stderr)
+        from scripts.run_apex_qwen import describe_failure
+        print(f'Apocalypse stopped: {describe_failure(exc, "Apocalypse")}', file=sys.stderr)
         raise SystemExit(1)

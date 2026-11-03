@@ -24,6 +24,7 @@ def environment():
     env = env_values(ROOT / '.env')
     env.update(os.environ)
     env['DASHBOARD_ENABLED'] = 'true'  # native voice and screen help use this local backend
+    env['PYTHONUTF8'] = '1'            # text files as UTF-8, as every other launcher (see text_file.py)
     # Feature defaults (desktop Companion on, wake phrases off) live in config.py,
     # the same for every launcher; nothing else is injected.
     return env

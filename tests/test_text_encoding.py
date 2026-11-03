@@ -73,6 +73,8 @@ def _unencoded_text_calls(path):
             yield node.lineno, 'read_text'
         if name == 'write_text' and 'encoding' not in kw and len(node.args) < 2:
             yield node.lineno, 'write_text'
+        if name in ('FileHandler', 'RotatingFileHandler', 'TimedRotatingFileHandler') and 'encoding' not in kw:
+            yield node.lineno, name                     # a log line with Arabic or an emoji must not fail
         if name == 'open' and isinstance(f, ast.Name) and 'encoding' not in kw:
             mode = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == 'mode'), None)
             mode = mode.value if isinstance(mode, ast.Constant) else 'r'
@@ -88,3 +90,45 @@ def test_no_apex_code_reads_or_writes_text_in_the_windows_default_encoding():
                                  'scripts/setup_apex_apocalypse.py')]
     found = [f'{p.relative_to(ROOT)}:{line} {what}' for p in files for line, what in _unencoded_text_calls(p)]
     assert not found, 'say encoding="utf-8" (or use text_file.read_text): ' + ', '.join(found)
+
+
+def test_a_startup_failure_says_where_and_saves_the_details(tmp_path):
+    from scripts.run_apex_qwen import describe_failure
+    from agent import longterm
+    try:                                                  # the laptop's error, raised "in" Apex's own code
+        exec(compile('b"\\x9d".decode("cp1252")', str(Path(longterm.__file__)), 'exec'))
+    except UnicodeDecodeError as exc:
+        line = describe_failure(exc, 'Apocalypse', home=tmp_path)
+    assert line.startswith("'charmap' codec can't decode byte 0x9d")
+    assert '(at agent/longterm.py:1 in <module>)' in line
+    report = tmp_path / '.apex' / 'last-startup-error.txt'
+    assert f'Details: {report}' in line
+    saved = report.read_text(encoding='utf-8')
+    assert saved.startswith('Apocalypse, ') and 'UnicodeDecodeError' in saved and 'Traceback' in saved
+
+
+def test_frames_outside_apex_and_pseudo_files_are_skipped(tmp_path):
+    from scripts.run_apex_qwen import describe_failure
+    try:
+        exec(compile('raise ValueError("boom")', '<string>', 'exec'))
+    except ValueError as exc:
+        line = describe_failure(exc, 'Apex launcher', home=tmp_path)
+    assert line.startswith('boom (at tests/test_text_encoding.py:') and '<string>' not in line
+
+
+def test_both_launchers_report_failures_with_the_location():
+    for name in ('run_apex_qwen.py', 'run_apex_apocalypse.py'):
+        assert 'describe_failure(exc, ' in (ROOT / 'scripts' / name).read_text(encoding='utf-8')
+
+
+def test_the_supervisor_sign_in_and_autostart_paths_run_in_utf8_mode(monkeypatch):
+    from types import SimpleNamespace
+    from scripts import apex_supervisor, start_screen_companion
+    seen = []
+    monkeypatch.setattr(apex_supervisor.subprocess, 'run',
+                        lambda cmd, cwd, env: seen.append(env) or SimpleNamespace(returncode=0))
+    apex_supervisor.run(['--resident'])
+    assert seen[0]['PYTHONUTF8'] == '1'
+    assert start_screen_companion.environment()['PYTHONUTF8'] == '1'
+    autostart = (ROOT / 'app/autostart.py').read_text(encoding='utf-8')
+    assert '''value = f'"{python_exe}" -X utf8 "{_MAIN_PY}" --resident\'''' in autostart

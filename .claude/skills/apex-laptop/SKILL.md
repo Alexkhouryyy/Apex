@@ -72,6 +72,8 @@ cd C:\Users\alexk\Apex
 ```
 
 Resident log: `Get-Content "$env:USERPROFILE\.apex\resident.log" -Tail 40`.
+A launcher that stops at startup says where (`... (at agent/x.py:123 in f)`) and
+saves the full error: `Get-Content "$env:USERPROFILE\.apex\last-startup-error.txt"`.
 
 Other launchers: `.\start-apex.bat` (Apex only, in the background),
 `.\Start-Apex-Celine-Fast.cmd` (just the voice server),

@@ -48,6 +48,7 @@ def run(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:]) or ["--resident"]
     env = dict(os.environ)
     env[SUPERVISOR_ENV] = "1"
+    env["PYTHONUTF8"] = "1"     # text files as UTF-8, as every other launcher (see text_file.py)
 
     starts: list[float] = []
     while True:
