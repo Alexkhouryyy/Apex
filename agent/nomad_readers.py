@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from xml.etree import ElementTree as ET
 
@@ -15,6 +16,7 @@ READERS = {
     'tools': ('Data tools', 'nomad_cyberchef'),
 }
 CATALOG_PATH = '/catalog/v2/entries?count=50&start=0'
+COURSES_PATH = '/api/public/v1/channels'     # Kolibri's own list of the channels imported on this device
 
 
 def installed(row):
@@ -46,6 +48,20 @@ def catalog_entries(content):
     return sum(bool((row.findtext(atom+'id') or '').strip()) and
                bool((row.findtext(atom+'title') or '').strip())
                for row in feed.findall(atom+'entry'))
+
+
+def course_channels(content):
+    """The imported Kolibri channels (courses), from its public channel list."""
+    if len(content) > 4 * 1024 * 1024:
+        raise ValueError('Course list is too large.')
+    try:
+        data = json.loads(content)
+    except ValueError as exc:
+        raise ValueError('The courses app did not return a channel list.') from exc
+    if not isinstance(data, list):
+        raise ValueError('The courses app did not return a channel list.')
+    return [row for row in data if isinstance(row, dict)
+            and str(row.get('id') or '').strip() and str(row.get('name') or '').strip()]
 
 
 async def status(client, nomad_ready):
@@ -81,6 +97,17 @@ async def status(client, nomad_ready):
             result['state'] = 'address_unavailable'
             return result
         result['url'] = url
+        if key == 'courses':
+            try:
+                response = await client.get(url + COURSES_PATH)
+                response.raise_for_status()
+                channels = course_channels(response.content)
+                result.update(ready=True, content_ready=bool(channels), catalog_entries=len(channels),
+                              state='available' if channels else 'empty',
+                              channels=[str(row['name'])[:80] for row in channels[:20]])
+                return result
+            except (httpx.HTTPError, ValueError):
+                pass                               # an older Kolibri: fall back to "the app answers"
         try:
             response = await client.get(url + (CATALOG_PATH if key == 'library' else '/'))
             response.raise_for_status()

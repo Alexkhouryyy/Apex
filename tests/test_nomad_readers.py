@@ -190,3 +190,93 @@ def test_reader_page_behavior():
                           capture_output=True,text=True,encoding='utf-8',timeout=30)
     assert result.returncode==0,result.stdout+result.stderr
     assert 'no remote links or setup/download requests' in result.stdout
+
+
+# ---------------------------------------------------------------- Kolibri courses
+
+CHANNELS = [{'id': 'c1', 'name': 'Khan Academy (English)'}, {'id': 'c2', 'name': 'PhET'},
+            {'id': '', 'name': 'no id'}, 'junk']
+
+
+def test_course_channels_keeps_only_real_channels():
+    assert [r['name'] for r in nomad_readers.course_channels(json.dumps(CHANNELS).encode())] == \
+        ['Khan Academy (English)', 'PhET']
+    for bad in (b'{"detail": "x"}', b'<html>', b'[' + b' ' * (5 * 1024 * 1024) + b']'):
+        with pytest.raises(ValueError):
+            nomad_readers.course_channels(bad)
+
+
+def _courses_status(answer):
+    def handle(request):
+        assert request.method == 'GET' and request.url.host == '127.0.0.1'
+        if request.url.port == 8080:
+            return httpx.Response(200, json=[dict(service('courses'), ui_location='8310')])
+        return answer(request)
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle), follow_redirects=False) as client:
+            return {row['id']: row for row in await nomad_readers.status(client, True)}['courses']
+    return asyncio.run(run())
+
+
+def test_readiness_counts_imported_courses():
+    row = _courses_status(lambda r: httpx.Response(200, json=CHANNELS) if r.url.path == nomad_readers.COURSES_PATH
+                          else pytest.fail('one request is enough'))
+    assert row['state'] == 'available' and row['content_ready'] is True and row['catalog_entries'] == 2
+    assert row['channels'] == ['Khan Academy (English)', 'PhET'] and row['url'] == 'http://127.0.0.1:8310'
+
+
+def test_kolibri_without_courses_is_empty_not_ready_content():
+    row = _courses_status(lambda r: httpx.Response(200, json=[]))
+    assert row['state'] == 'empty' and row['ready'] is True and row['content_ready'] is False
+
+
+def test_a_kolibri_without_the_channel_list_still_counts_as_answering():
+    row = _courses_status(lambda r: httpx.Response(404) if r.url.path == nomad_readers.COURSES_PATH
+                          else httpx.Response(200, text='<html>Kolibri</html>'))
+    assert row['state'] == 'app_available' and row['content_ready'] is False
+
+
+def test_courses_guide_waits_for_kolibri_then_lists_and_opens_it(monkeypatch, capsys):
+    tries = []
+    def handle(request):
+        tries.append(request.url.path)
+        if len(tries) < 3:
+            raise httpx.ConnectError('still starting')
+        return httpx.Response(200, json=CHANNELS)
+    opened, waits = [], []
+    monkeypatch.setattr(setup.webbrowser, 'open', opened.append)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        names = setup.courses_guide(client, 'http://127.0.0.1:8310', sleep=waits.append)
+    assert names == ['Khan Academy (English)', 'PhET'] and opened == ['http://127.0.0.1:8310']
+    assert len(waits) == 2 and set(tries) == {nomad_readers.COURSES_PATH}
+    out = capsys.readouterr().out
+    assert 'Courses already imported (2)' in out and 'Device > Channels > Import > Kolibri Studio' in out
+    assert 'skips the files it already has' in out and out.count('first start can take') == 1
+
+
+def test_courses_guide_gives_up_with_a_plain_message(monkeypatch):
+    clock = iter(range(0, 10_000, 100)).__next__
+    monkeypatch.setattr(setup.webbrowser, 'open', lambda url: pytest.fail('nothing to open'))
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503))) as client, \
+            pytest.raises(RuntimeError, match='did not answer'):
+        setup.courses_guide(client, 'http://127.0.0.1:8310', sleep=lambda s: None, clock=clock)
+
+
+def test_courses_step_installs_kolibri_then_guides(prepared, monkeypatch):
+    calls, _ = prepared
+    guided = []
+    monkeypatch.setattr(setup, 'courses_guide', lambda client, url, **kw: guided.append(url))
+    setup.prepare_nomad_readers(['courses'], guide_courses=True)
+    assert ('POST', '/api/system/services/install', {'service_name': 'nomad_kolibri_2'}) in calls
+    assert guided == ['http://127.0.0.1:8090']
+    assert not any(path.startswith('/api/maps') or path == '/api/zim/rescan-library' for _, path, _ in calls)
+
+
+def test_courses_flag_and_launcher(monkeypatch):
+    import sys
+    prepare = Mock(); monkeypatch.setattr(setup, 'prepare_nomad_readers', prepare)
+    monkeypatch.setattr(sys, 'argv', ['setup', '--courses'])
+    setup.main()
+    prepare.assert_called_once_with(['courses'], guide_courses=True)
+    launcher = (Path(__file__).resolve().parents[1] / 'Setup-Apex-Courses.cmd').read_bytes()
+    assert b'setup_apex_apocalypse.py --courses' in launcher and b'\r\n' in launcher

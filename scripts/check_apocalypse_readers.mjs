@@ -54,8 +54,17 @@ r.response(200,{...readerState,storage:{...state.storage,available:true},nomad:{
 ]}});r.response(200,session());r.node('refresh').click();await settle();
 assert.match(r.node('reader-statuses').children[0].textContent,/no titles are listed/);
 assert.equal(r.node('upload').disabled,false);
+r.response(200,{...readerState,storage:{...state.storage,available:true},nomad:{...readerState.nomad,readers:[
+ {id:'courses',label:'Courses',state:'available',ready:true,catalog_entries:7,url:'http://127.0.0.1:8310',
+  channels:['<img src=x onerror=alert(1)>','B','C','D','E','F','G']},
+ {id:'courses',label:'Courses',state:'empty',ready:true,catalog_entries:0,url:'http://127.0.0.1:8310'},
+]}});r.response(200,session());r.node('refresh').click();await settle();
+const courses=r.node('reader-statuses').children;
+assert.match(courses[0].textContent,/7 course channels imported: <img src=x onerror=alert\(1\)>, B, C, D, E, …\./);
+assert.ok(!courses[0].innerHTML?.includes('<img'),'channel names are text, never markup');
+assert.match(courses[1].textContent,/no courses are imported yet\. Run Setup-Apex-Courses\.cmd/);
 assert.ok(r.calls.every(([url,options])=>url.startsWith('/api/apocalypse/')&&(!options.method||options.method==='GET')));
-console.log('Passed: reader catalog, remapped local link, course import distinction, unavailable drive, empty library, no remote links or setup/download requests.');
+console.log('Passed: reader catalog, remapped local link, course import distinction, imported course count, unavailable drive, empty library, no remote links or setup/download requests.');
 
 // Saved model text must remain inert; only the configured local reader's
 // content citations become anchors. Never render model output as HTML.
