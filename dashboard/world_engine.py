@@ -1,6 +1,7 @@
 """Apex-owned lifecycle and authenticated gateway for the pinned GEV engine."""
 from __future__ import annotations
 
+import text_file as _text_file
 import atexit
 import asyncio
 import hmac
@@ -77,7 +78,7 @@ class EngineRuntime:
 
     def status(self):
         provenance = ENGINE / 'APEX_UPSTREAM.json'
-        metadata = json.loads(provenance.read_text()) if provenance.exists() else {}
+        metadata = json.loads(_text_file.read_text(provenance)) if provenance.exists() else {}
         return {'installed': (ENGINE / 'node_modules/vite/package.json').exists(),
                 'running': bool(self.process and self.process.poll() is None),
                 'revision': metadata.get('revision'), 'repository': metadata.get('repository'),

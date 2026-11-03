@@ -8,6 +8,7 @@ Safety: every self-mod goes through the existing voice-confirm safety layer
 (see agent/safety.py — patterns include "update_system_prompt" and
 "register_new_tool").
 """
+import text_file as _text_file
 import json
 import os
 from pathlib import Path
@@ -23,7 +24,7 @@ def _load() -> dict:
     if not OVERLAY_PATH.exists():
         return {"prompt_addition": "", "tools": []}
     try:
-        return json.loads(OVERLAY_PATH.read_text())
+        return json.loads(_text_file.read_text(OVERLAY_PATH))
     except Exception:
         return {"prompt_addition": "", "tools": []}
 
@@ -32,10 +33,10 @@ def _save(overlay: dict) -> None:
     # backup the current before overwriting
     if OVERLAY_PATH.exists():
         try:
-            BACKUP_PATH.write_text(OVERLAY_PATH.read_text())
+            BACKUP_PATH.write_text(_text_file.read_text(OVERLAY_PATH), encoding='utf-8')
         except Exception:
             pass
-    OVERLAY_PATH.write_text(json.dumps(overlay, indent=2))
+    OVERLAY_PATH.write_text(json.dumps(overlay, indent=2), encoding='utf-8')
 
 
 def get_prompt_addition() -> str:
@@ -144,7 +145,7 @@ def dispatch(name: str, inputs: dict) -> Optional[str]:
 def revert(restore_backup: bool = False) -> str:
     """Clear all self-mods (or restore the previous backup)."""
     if restore_backup and BACKUP_PATH.exists():
-        OVERLAY_PATH.write_text(BACKUP_PATH.read_text())
+        OVERLAY_PATH.write_text(_text_file.read_text(BACKUP_PATH), encoding='utf-8')
         _dynamic_tool_handlers.clear()
         load_dynamic_handlers()
         return "Restored previous overlay from backup."

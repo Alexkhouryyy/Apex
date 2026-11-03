@@ -130,7 +130,8 @@ def launch_environment(root, environ=None):
                APEX_APOCALYPSE_HOME=env.get('APEX_APOCALYPSE_HOME', r'D:\Apex-Apocalypse'),
                DASHBOARD_HOST='127.0.0.1', DASHBOARD_PORT=env.get('APEX_APOCALYPSE_PORT', '7862'),
                OPENAI_STT_ENGINE='local', RELAY_ENABLED='false', NODE_WORKER_ENABLED='false',
-               SUBSCRIPTION_ENABLED='false', CONSTELLATION_AUTO='false')
+               SUBSCRIPTION_ENABLED='false', CONSTELLATION_AUTO='false',
+               PYTHONUTF8='1')                  # text files as UTF-8 whatever the launcher (see text_file.py)
     return env
 
 

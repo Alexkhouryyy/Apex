@@ -12,6 +12,7 @@ Recall strategy:
 """
 from __future__ import annotations
 
+import text_file as _text_file
 import os
 import re
 import sqlite3
@@ -579,8 +580,8 @@ _INJECTION_PATTERNS = _re.compile(
 def load_memory_files() -> dict:
     """Return {memory: str, user: str} — empty strings if files don't exist yet."""
     _APEX_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    m = _MEMORY_FILE.read_text() if _MEMORY_FILE.exists() else ""
-    u = _USER_FILE.read_text() if _USER_FILE.exists() else ""
+    m = _text_file.read_text(_MEMORY_FILE) if _MEMORY_FILE.exists() else ""
+    u = _text_file.read_text(_USER_FILE) if _USER_FILE.exists() else ""
     return {"memory": m.strip(), "user": u.strip()}
 
 
@@ -619,7 +620,7 @@ def save_memory_entry(
         return "Rejected: content matches security pattern."
 
     _APEX_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    current = path.read_text().strip() if path.exists() else ""
+    current = _text_file.read_text(path).strip() if path.exists() else ""
 
     if action == "add":
         entry = (content or "").strip()
@@ -634,7 +635,7 @@ def save_memory_entry(
             while parts and len(" § ".join(parts) + " § " + entry) > limit:
                 parts.pop(0)
             proposed = (" § ".join(parts) + (" § " if parts else "") + entry).strip(" §")
-        path.write_text(proposed)
+        path.write_text(proposed, encoding='utf-8')
         return f"Added. [{len(proposed)}/{limit} chars used]"
 
     if action == "replace":
@@ -645,7 +646,7 @@ def save_memory_entry(
         proposed = current.replace(old_text, (content or "").strip(), 1).strip()
         if len(proposed) > limit:
             return f"Too long after replace: {len(proposed)}/{limit} chars."
-        path.write_text(proposed)
+        path.write_text(proposed, encoding='utf-8')
         return "Replaced."
 
     if action == "remove":
@@ -654,7 +655,7 @@ def save_memory_entry(
         if old_text not in current:
             return f"Not found: {old_text!r}"
         parts = [p.strip() for p in current.split("§") if p.strip() and old_text not in p]
-        path.write_text(" § ".join(parts))
+        path.write_text(" § ".join(parts), encoding='utf-8')
         return "Removed."
 
     return f"Unknown action: {action!r}"

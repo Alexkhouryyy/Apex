@@ -444,7 +444,7 @@ def _study_build(card, title, parts, notes=None):
         if drafted:
             import json as _json, time as _time
             record = {"by": "ai", "at": int(_time.time()), "summary": "", "parts": drafted}
-            (study_import.study_dir() / f"{manifest['id']}.notes.json").write_text(_json.dumps(record, indent=1))
+            (study_import.study_dir() / f"{manifest['id']}.notes.json").write_text(_json.dumps(record, indent=1), encoding='utf-8')
     try:
         refresh_study_tool()
     except Exception:

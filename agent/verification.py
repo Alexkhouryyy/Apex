@@ -143,7 +143,7 @@ def _check_contains(spec: str, detail: str) -> tuple[bool, str]:
             return False, "no required substring given (put it in `detail`)"
         if not os.path.isfile(p):
             return False, f"missing: {p}"
-        text = open(p, "r", errors="replace").read()
+        text = open(p, "r", encoding="utf-8", errors="replace").read()
         return (needle in text), (f"found {needle!r}" if needle in text else f"{needle!r} not in {p}")
     except Exception as e:
         return False, f"check could not run: {e}"

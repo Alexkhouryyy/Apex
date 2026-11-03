@@ -102,7 +102,7 @@ longterm.init_db()
 for path in sorted(pathlib.Path("agent").glob("*.py")):
     if path.stem.startswith("_"):
         continue
-    text = path.read_text(errors="replace")
+    text = path.read_text(encoding="utf-8", errors="replace")
     if "def init_db" not in text and "def init_push_table" not in text:
         continue
     try:
@@ -127,7 +127,7 @@ def _modules_with_init_db() -> list[str]:
     for path in (REPO / "agent").glob("*.py"):
         if path.stem.startswith("_"):
             continue
-        text = path.read_text(errors="replace")
+        text = path.read_text(encoding="utf-8", errors="replace")
         if "def init_db" in text or "def init_push_table" in text:
             out.append(f"agent.{path.stem}")
     return out
@@ -159,7 +159,7 @@ def _sql_strings(path: Path):
     """
     import ast
     try:
-        tree = ast.parse(path.read_text(errors="replace"))
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
     except (SyntaxError, UnicodeDecodeError):
         return
     for node in ast.walk(tree):

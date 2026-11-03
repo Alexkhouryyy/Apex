@@ -112,7 +112,7 @@ def _do_rollback(rewrite_id: int, name: str, old_source: str, reason: str, skill
         return
     try:
         path = skills_mod._skill_path(name)
-        path.write_text(old_source)
+        path.write_text(old_source, encoding='utf-8')
         skills_mod._load(name)
     except Exception as e:
         print(f"[Rollback] File restore failed for {name!r}: {e}")

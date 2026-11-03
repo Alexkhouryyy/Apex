@@ -13,6 +13,7 @@ never change.
 """
 from __future__ import annotations
 
+import text_file as _text_file
 import gzip
 import hashlib
 import json
@@ -283,14 +284,14 @@ def import_model(raw: bytes, *, file_name: str = '', title: str = '', category: 
                    'source': 'file'} for p in parts],
     }
     (root / f'{model_id}.glb.gz').write_bytes(gzip.compress(raw, 6, mtime=0))
-    (root / f'{model_id}.json').write_text(json.dumps(manifest, indent=1, ensure_ascii=False) + '\n')
+    (root / f'{model_id}.json').write_text(json.dumps(manifest, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
     return manifest
 
 
 def remove(model_id: str) -> None:
     root = study_dir()
     path = root / f'{model_id}.json'
-    if not path.is_file() or not json.loads(path.read_text()).get('imported'):
+    if not path.is_file() or not json.loads(_text_file.read_text(path)).get('imported'):
         raise StudyImportError('Only imported models can be removed.')
     for suffix in ('.json', '.glb.gz', '.notes.json'):
         (root / f'{model_id}{suffix}').unlink(missing_ok=True)
@@ -343,7 +344,7 @@ def draft_notes(manifest: dict, complete, about: str = '') -> dict:
     if not notes:
         raise StudyImportError('No usable notes came back. Try again.')
     record = {'by': 'ai', 'at': int(time.time()), 'summary': summary, 'parts': notes}
-    (study_dir() / f"{manifest['id']}.notes.json").write_text(json.dumps(record, indent=1, ensure_ascii=False) + '\n')
+    (study_dir() / f"{manifest['id']}.notes.json").write_text(json.dumps(record, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
     return record
 
 
@@ -353,7 +354,7 @@ def with_notes(manifest: dict) -> dict:
     if not manifest.get('imported') or not path.is_file():
         return manifest
     try:
-        record = json.loads(path.read_text())
+        record = json.loads(_text_file.read_text(path))
     except (OSError, json.JSONDecodeError):
         return manifest
     out = dict(manifest, parts=[dict(p) for p in manifest['parts']], validation=dict(manifest['validation']))

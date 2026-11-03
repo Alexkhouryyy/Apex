@@ -24,6 +24,7 @@ with `env`. Header values get the same `${VAR}` expansion, and a
 credential-shaped header written literally is warned about by name at
 discovery. See `agent/mcp_catalog.py` for the placeholder convention.
 """
+import text_file as _text_file
 import asyncio
 import json
 import os
@@ -108,7 +109,7 @@ def _load_mcp_configs() -> dict:
     _source_of.clear()
     for path in _find_settings_files():
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(_text_file.read_text(path))
             for k, v in data.get("mcpServers", {}).items():
                 if not k.startswith("_"):
                     servers[k] = v

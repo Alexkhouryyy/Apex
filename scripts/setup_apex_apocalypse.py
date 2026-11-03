@@ -185,7 +185,7 @@ def nomad_build_dockerfile(original):
 
 def nomad_files(home):
     """Build original NOMAD source; keep generated secrets/data outside Apex Git."""
-    manifest=json.loads((ROOT/'integrations/project-nomad/UPSTREAM.json').read_text())
+    manifest=json.loads((ROOT/'integrations/project-nomad/UPSTREAM.json').read_text(encoding='utf-8'))
     archive=ROOT/'integrations/project-nomad-source.zip'
     if hashlib.sha256(archive.read_bytes()).hexdigest()!=manifest['archive_sha256']:
         raise RuntimeError('Pinned NOMAD source archive changed. Stopped before extracting or executing it.')

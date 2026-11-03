@@ -1,4 +1,5 @@
 """Held-out capability/error-complementarity selection; no self-rated model scores."""
+import text_file as _text_file
 from itertools import combinations
 import json
 import math
@@ -57,6 +58,6 @@ def select(profile, available, *, domain="general", size=3, token_cap=None):
 
 
 def configured_panel(path, available, domain):
-    profile = json.loads(Path(path).read_text())
+    profile = json.loads(_text_file.read_text(Path(path)))
     choice = select(profile, available, domain=domain, size=min(3, len(available)))
     return choice["models"] if choice["status"] == "calibrated" else None
