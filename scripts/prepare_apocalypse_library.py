@@ -273,6 +273,68 @@ def finish_replacements(home, plan):
     return finished
 
 
+LANGUAGES = {'arabic': 'ara', 'english': 'eng', 'french': 'fra', 'spanish': 'spa', 'german': 'deu',
+             'armenian': 'hye', 'turkish': 'tur', 'persian': 'fas', 'italian': 'ita', 'portuguese': 'por'}
+ZIM_FILE = re.compile(r'^(?P<id>[a-z0-9][a-z0-9_.-]{1,99})_(?P<version>\d{4}-\d{2})\.zim$')
+
+
+def find_packs(client, words, have=()):
+    """Search the Kiwix catalog. A language word (arabic, french, ...) filters by
+    language; the other words search titles and descriptions. Returns the newest
+    version of each match as dicts: id (the name --add takes), title, summary,
+    language, version, bytes, in_plan. Nothing is downloaded or changed."""
+    words = [w.strip().lower() for w in words if w.strip()]
+    language = next((LANGUAGES[w] for w in words if w in LANGUAGES), None)
+    query = ' '.join(w for w in words if w not in LANGUAGES)
+    if not query and not language:
+        raise RuntimeError('Say what to look for, e.g.: arabic medicine, first aid, repair, survival.')
+    params = {'count': 200, 'start': 0}
+    if query:
+        params['q'] = query
+    if language:
+        params['lang'] = language
+    try:
+        response = client.get(CATALOG, params=params)
+        response.raise_for_status()
+    except httpx.TransportError as exc:
+        raise RuntimeError("Couldn't reach the Kiwix catalog (is the internet down?).") from exc
+    atom = '{http://www.w3.org/2005/Atom}'
+    found = {}
+    for entry in ET.fromstring(response.content).iter(atom+'entry'):
+        for link in entry.iter(atom+'link'):
+            if link.get('type') != 'application/x-zim':
+                continue
+            filename = urlsplit(link.get('href', '').removesuffix('.meta4')).path.rsplit('/', 1)[-1]
+            match = ZIM_FILE.fullmatch(filename)
+            size = int(link.get('length') or 0)
+            if not match or size <= 0:
+                continue
+            row = {'id': match['id'], 'version': match['version'], 'bytes': size,
+                   'title': (entry.findtext(atom+'title') or match['id']).strip(),
+                   'summary': (entry.findtext(atom+'summary') or '').strip(),
+                   'language': (entry.findtext(atom+'language') or '').strip(),
+                   'in_plan': match['id'] in have}
+            if match['id'] not in found or row['version'] > found[match['id']]['version']:
+                found[match['id']] = row
+    return sorted(found.values(), key=lambda row: row['bytes'])
+
+
+def report_packs(client, words, have=()):
+    rows = find_packs(client, words, have)
+    if not rows:
+        print('Nothing in the Kiwix catalog matches that. Try fewer or broader words.', flush=True)
+        return rows
+    print(f'{len(rows)} match(es), smallest first. "maxi" has pictures; "nopic"/"mini" are smaller text-only versions.',
+          flush=True)
+    for row in rows:
+        mark = '  (already in your library)' if row['in_plan'] else ''
+        about = f" - {row['summary'][:90]}" if row['summary'] else ''
+        print(f"  {row['id']}  {row['bytes']/1_000_000_000:.2f} GB  {row['version']}  "
+              f"[{row['language'] or '?'}] {row['title']}{about}{mark}", flush=True)
+    print('Add one with: Add-Apex-Pack.cmd NAME  (NAME is the first word of its line)', flush=True)
+    return rows
+
+
 def load_plan(path):
     """The saved plan, or its previous copy if a power cut damaged it."""
     try:
@@ -671,6 +733,8 @@ def main():
                         help='Add a Kiwix archive by catalog name to the saved plan (other archives keep their versions) and download it; repeatable')
     parser.add_argument('--verify-all', action='store_true',
                         help='Read every finished archive again to check its checksum, even if it is unchanged')
+    parser.add_argument('--find', nargs='+', metavar='WORD',
+                        help='Search the Kiwix catalog (e.g. --find arabic medicine) and list names and sizes; downloads nothing')
     parser.add_argument('--check-updates', action='store_true',
                         help='List archives that have a newer version, with sizes; downloads nothing')
     parser.add_argument('--update', action='append', metavar='ID',
@@ -686,6 +750,15 @@ def main():
         raise RuntimeError('--plan-output requires --plan-only.')
     home = apocalypse.library_root()
     output = args.plan_output or home/PLAN_NAME
+    if args.find:
+        # Only reads the catalog: needs no library drive and takes no lock.
+        try:
+            have = {row['id'] for row in load_plan(output)['jobs']}
+        except (OSError, ValueError, KeyError, TypeError):
+            have = set()
+        with httpx.Client(follow_redirects=True, trust_env=False, timeout=httpx.Timeout(60, connect=20)) as client:
+            report_packs(client, args.find, have)
+        return
     wait_for_drive(output.parent if args.plan_only else home, args.until_done)
     with preparation_lock(output.parent if args.plan_only else home):
         with httpx.Client(follow_redirects=True, trust_env=False, timeout=httpx.Timeout(120, connect=20)) as client:
