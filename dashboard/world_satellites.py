@@ -1,4 +1,5 @@
 """CelesTrak station OMMs; persistent cooldown and explicit source-error recovery."""
+import text_file as _text_file
 import asyncio
 import json
 import os
@@ -72,7 +73,7 @@ def _read():
         return {'snapshot': None, 'next_attempt': 0, 'paused': False, 'failed': False}
     if path.stat().st_size > _MAX_BYTES:
         raise ValueError('Station cache too large')
-    data = json.loads(path.read_text())
+    data = json.loads(_text_file.read_text(path))
     if (not isinstance(data, dict) or not _number(data.get('next_attempt'), 0, wall_time() * 1000 + 86400000)
             or not isinstance(data.get('paused'), bool) or not isinstance(data.get('failed'), bool)):
         raise ValueError('Invalid station cache')
@@ -90,7 +91,7 @@ def _write(data):
     path = _cache_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + '.tmp')
-    temporary.write_text(json.dumps(data))
+    temporary.write_text(json.dumps(data), encoding='utf-8')
     temporary.replace(path)
 
 

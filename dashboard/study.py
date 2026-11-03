@@ -1,4 +1,5 @@
 """Authenticated assembly data and presentation controls."""
+import text_file as _text_file
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from agent import assembly, study_projects
@@ -148,7 +149,7 @@ async def draft_study_notes(model_id: str, request: Request):
     from agent import provider, study_import
     try:
         body = await _small_json(request)
-        manifest = json.loads(assembly.model_path(model_id).read_text())
+        manifest = json.loads(_text_file.read_text(assembly.model_path(model_id)))
         record = await asyncio.to_thread(
             study_import.draft_notes, manifest,
             lambda system, user: provider.complete(config.BACKGROUND_MODEL, system, user, max_tokens=8000),

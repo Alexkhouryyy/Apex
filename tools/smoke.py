@@ -647,7 +647,7 @@ ROUTE_PARAMS = {
 
 def dashboard_get_routes() -> tuple[list[str], list[str]]:
     """(callable routes, skipped routes) parsed from the server source."""
-    src = (REPO / "dashboard" / "server.py").read_text(errors="replace")
+    src = (REPO / "dashboard" / "server.py").read_text(encoding="utf-8", errors="replace")
     routes = sorted(set(re.findall(r'@app\.get\("([^"]+)"', src)))
     callable_routes, skipped = [], []
     for route in routes:

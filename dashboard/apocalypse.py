@@ -1,6 +1,7 @@
 """Owner-only offline readiness, local document storage and offline chat."""
 from __future__ import annotations
 
+import text_file as _text_file
 import asyncio
 import json
 from pathlib import Path
@@ -149,7 +150,7 @@ async def status():
         free = shutil.disk_usage(disk if disk.exists() else disk.parent).free
     except OSError:
         free = None
-    provenance = json.loads((ROOT/'integrations/project-nomad/UPSTREAM.json').read_text())
+    provenance = json.loads(_text_file.read_text(ROOT/'integrations/project-nomad/UPSTREAM.json'))
     return {'active': mode.enabled(), 'model': {'selected': selected, 'downloaded': selected in models,
             'available': models, 'server_ready': tags is not None, 'response_verified': False},
             'storage': {'path': str(disk), 'free_bytes': free, 'available': disk.is_dir()}, 'documents': documents(),

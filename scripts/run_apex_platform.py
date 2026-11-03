@@ -143,6 +143,7 @@ def main(argv=None):
     apex_env = dict(os.environ)
     for key in ('APEX_APOCALYPSE', 'HF_HUB_OFFLINE', 'TRANSFORMERS_OFFLINE', 'APEX_PLATFORM_ID'):
         apex_env[key] = normal[key]
+    apex_env['PYTHONUTF8'] = offline['PYTHONUTF8'] = '1'   # both children read text as UTF-8 (text_file.py)
 
     def fresh_offline():
         """The Apocalypse child's environment from the .env as it is now."""

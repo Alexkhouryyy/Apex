@@ -42,7 +42,7 @@ Icon=utilities-terminal
 Terminal=false
 X-GNOME-Autostart-enabled=true
 """
-    target.write_text(content)
+    target.write_text(content, encoding='utf-8')
     target.chmod(0o644)
     return f"Installed: {target}"
 
@@ -89,7 +89,7 @@ def _macos_install() -> str:
 </dict>
 </plist>
 """
-    target.write_text(content)
+    target.write_text(content, encoding='utf-8')
     # Best-effort launchctl load — never fatal
     try:
         import subprocess

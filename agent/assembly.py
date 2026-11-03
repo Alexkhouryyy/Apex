@@ -4,6 +4,7 @@ Study controls never alter board meshes or manufacture anything. Sessions and
 history are temporary; an expired/restarted session returns a clear error.
 """
 from __future__ import annotations
+import text_file as _text_file
 from collections import OrderedDict
 from copy import deepcopy
 import json
@@ -41,13 +42,13 @@ def model_path(model_id='dc-motor'):
 
 def model(model_id='dc-motor'):
     from agent import study_import
-    return study_import.with_notes(json.loads(model_path(model_id).read_text()))
+    return study_import.with_notes(json.loads(_text_file.read_text(model_path(model_id))))
 
 
 def asset_path(model_id):
     """The subject's geometry file, or None (the DC motor is drawn by the page)."""
     path = model_path(model_id)
-    data = json.loads(path.read_text())
+    data = json.loads(_text_file.read_text(path))
     name = _LEGACY_ASSETS.get(model_id) or data.get('asset_file')
     if not data.get('asset') or not isinstance(name, str) or not re.fullmatch(r'[a-z0-9][a-z0-9.-]*\.glb\.gz', name):
         return None
@@ -66,7 +67,7 @@ def library():
             if not _ID.fullmatch(path.stem) or path.stem in seen:
                 continue
             try:
-                m = json.loads(path.read_text())
+                m = json.loads(_text_file.read_text(path))
             except (OSError, json.JSONDecodeError):
                 continue
             if not isinstance(m, dict) or m.get('id') != path.stem or not isinstance(m.get('parts'), list):

@@ -13,6 +13,7 @@ Vault layout:
   ├── Daily/              One note per day — Apex appends observations here
   └── Skills/             Mirrors of procedural skills (read-only copies for browsing)
 """
+import text_file as _text_file
 import json
 import re
 import time
@@ -51,11 +52,11 @@ def _write_obsidian_config() -> None:
             "defaultViewMode": "source",
             "strictLineBreaks": False,
             "spellcheck": False,
-        }, indent=2))
+        }, indent=2), encoding='utf-8')
     # Minimal community plugins list (empty — no plugins required)
     plugins = od / "community-plugins.json"
     if not plugins.exists():
-        plugins.write_text("[]")
+        plugins.write_text("[]", encoding='utf-8')
 
 
 def _build_frontmatter(title: str, tags: list[str] = None, extra: dict = None) -> str:
@@ -120,19 +121,19 @@ def write_note(
         link_section = "## See also\n" + "  ".join(f"[[{l}]]" for l in links) + "\n\n"
 
     if path.exists():
-        existing = path.read_text()
+        existing = _text_file.read_text(path)
         # Preserve frontmatter, bump updated date, replace body
         fm_match = re.match(r"^---\n.*?\n---\n", existing, re.DOTALL)
         if fm_match:
             old_fm = fm_match.group(0)
             new_fm = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", old_fm)
-            path.write_text(new_fm + link_section + content.strip() + "\n")
+            path.write_text(new_fm + link_section + content.strip() + "\n", encoding='utf-8')
         else:
-            path.write_text(_build_frontmatter(title, tags, extra_fm) + link_section + content.strip() + "\n")
+            path.write_text(_build_frontmatter(title, tags, extra_fm) + link_section + content.strip() + "\n", encoding='utf-8')
         _after_write(path)
         return f"Updated note: {path.relative_to(VAULT_DIR)}"
 
-    path.write_text(_build_frontmatter(title, tags, extra_fm) + link_section + content.strip() + "\n")
+    path.write_text(_build_frontmatter(title, tags, extra_fm) + link_section + content.strip() + "\n", encoding='utf-8')
     _after_write(path)
     return f"Created note: {path.relative_to(VAULT_DIR)}"
 
@@ -143,7 +144,7 @@ def append_note(title: str, text: str, folder: str = "Notes") -> str:
     path = _note_path(title, folder)
     if not path.exists():
         return write_note(title, text, folder)
-    path.write_text(path.read_text().rstrip() + "\n\n" + text.strip() + "\n")
+    path.write_text(_text_file.read_text(path).rstrip() + "\n\n" + text.strip() + "\n", encoding='utf-8')
     _after_write(path)
     return f"Appended to: {path.relative_to(VAULT_DIR)}"
 
@@ -156,8 +157,8 @@ def daily_note_path() -> Path:
     if not path.exists():
         path.write_text(
             _build_frontmatter(today, tags=["daily"]) +
-            f"# {today}\n\n"
-        )
+            f"# {today}\n\n",
+        encoding='utf-8')
     return path
 
 
@@ -165,7 +166,7 @@ def append_daily(text: str) -> str:
     """Append an observation to today's daily note."""
     path = daily_note_path()
     ts = time.strftime("%H:%M")
-    path.write_text(path.read_text().rstrip() + f"\n\n**{ts}** — {text.strip()}\n")
+    path.write_text(_text_file.read_text(path).rstrip() + f"\n\n**{ts}** — {text.strip()}\n", encoding='utf-8')
     _after_write(path)
     return f"Daily note updated ({path.name})."
 
@@ -190,7 +191,7 @@ def list_notes(folder: str = None) -> list[dict]:
 def read_note(title: str, folder: str = "Notes") -> Optional[str]:
     """Return note content, or None if it doesn't exist."""
     path = _note_path(title, folder)
-    return path.read_text() if path.exists() else None
+    return _text_file.read_text(path) if path.exists() else None
 
 
 def entity_to_note(name: str, kind: str, properties: dict) -> str:
@@ -221,8 +222,8 @@ def init_vault() -> str:
             "| Daily/ | Daily observations from Apex (one note per day) |\n"
             "| Skills/ | Copies of procedural skills for browsing |\n"
             "| Planets/ | One journal per Constellation expert — what each specialist has learned |\n\n"
-            "Open this folder in Obsidian to see Apex's mind as a graph.\n"
-        )
+            "Open this folder in Obsidian to see Apex's mind as a graph.\n",
+        encoding='utf-8')
 
     # Migrate memory files from old ~/.apex/memory/ location if they exist there
     old_dir = Path.home() / ".apex" / "memory"
@@ -232,8 +233,8 @@ def init_vault() -> str:
         old = old_dir / fname
         new = new_mem_dir / fname
         if old.exists() and not new.exists():
-            new.write_text(old.read_text())
-            old.write_text(f"# Moved\n\nThis file has moved to:\n`{new}`\n")
+            new.write_text(_text_file.read_text(old), encoding='utf-8')
+            old.write_text(f"# Moved\n\nThis file has moved to:\n`{new}`\n", encoding='utf-8')
             migrated.append(fname)
 
     note_count = sum(1 for _ in VAULT_DIR.rglob("*.md") if ".obsidian" not in str(_))

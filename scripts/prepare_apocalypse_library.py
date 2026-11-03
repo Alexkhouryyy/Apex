@@ -33,7 +33,7 @@ HEADROOM = 20 * 1024**3
 
 
 def original_collections():
-    manifest = json.loads((ROOT/'integrations/project-nomad/UPSTREAM.json').read_text())
+    manifest = json.loads((ROOT/'integrations/project-nomad/UPSTREAM.json').read_text(encoding='utf-8'))
     archive = ROOT/'integrations/project-nomad-source.zip'
     if hashlib.sha256(archive.read_bytes()).hexdigest() != manifest['archive_sha256']:
         raise RuntimeError('Pinned NOMAD archive changed; content preparation stopped.')

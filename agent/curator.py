@@ -3,6 +3,7 @@
 Covers both Python skills in /skills/ (via skill_usage SQLite table) and
 Markdown procedural skills in ~/.apex/skills/ (via .usage.json sidecar).
 """
+import text_file as _text_file
 import json
 import tarfile
 import time
@@ -66,7 +67,7 @@ def _backup(ts: str) -> Optional[Path]:
 
 def _load_usage() -> dict:
     usage_file = _SKILLS_MD_DIR / ".usage.json"
-    return json.loads(usage_file.read_text()) if usage_file.exists() else {}
+    return json.loads(_text_file.read_text(usage_file)) if usage_file.exists() else {}
 
 
 def _archive_md(name: str) -> None:
@@ -80,10 +81,10 @@ def _archive_md(name: str) -> None:
 def _mark_stale_md(path: Path) -> None:
     if (path.parent / '.apex-import.json').exists():
         return  # Reviewed files are immutable, including their frontmatter.
-    text = path.read_text()
+    text = _text_file.read_text(path)
     if "state: stale" not in text:
         text = text.replace("use_count:", "state: stale\nuse_count:", 1)
-        path.write_text(text)
+        path.write_text(text, encoding='utf-8')
 
 
 def _llm_dedup(client, skills: list[dict]) -> list[str]:
@@ -120,7 +121,7 @@ def _list_all_names_and_descs() -> list[dict]:
                 continue
             try:
                 from agent.skill_md import _parse_frontmatter
-                fm = _parse_frontmatter(p.read_text())
+                fm = _parse_frontmatter(_text_file.read_text(p))
                 out.append({"name": fm.get("name", p.parent.name), "description": fm.get("description", "")})
             except Exception:
                 pass
@@ -203,7 +204,7 @@ def run(dry_run: bool = False, client=None) -> str:
         _LOGS_DIR.mkdir(parents=True, exist_ok=True)
         log_dir = _LOGS_DIR / ts
         log_dir.mkdir(exist_ok=True)
-        (log_dir / "REPORT.md").write_text(report_str)
+        (log_dir / "REPORT.md").write_text(report_str, encoding='utf-8')
         _set_last_run()
 
     return report_str

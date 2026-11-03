@@ -37,6 +37,10 @@ def launch_environment(local_voice=True):
         env.update(TTS_ENGINE='voicebox', VOICEBOX_URL='http://127.0.0.1:17494',
                    VOICEBOX_PROFILE='celine')
     env['APEX_SUPERVISED'] = '1'
+    # Every Apex process reads and writes text as UTF-8, however it was launched
+    # (without this, Windows Python uses cp1252 and a file another launch wrote
+    # as UTF-8 stops startup with "'charmap' codec can't decode").
+    env['PYTHONUTF8'] = '1'
     return env
 
 

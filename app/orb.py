@@ -13,6 +13,7 @@ Requires: pywebview, pystray, pynput (pip install pywebview pystray pynput pillo
 """
 from __future__ import annotations
 
+import text_file as _text_file
 import json
 import threading
 from pathlib import Path
@@ -44,14 +45,14 @@ _COLLAPSED_W, _COLLAPSED_H = 140, 140
 
 def _load_state() -> dict:
     try:
-        return json.loads(_WINDOW_STATE_FILE.read_text()) if _WINDOW_STATE_FILE.exists() else {}
+        return json.loads(_text_file.read_text(_WINDOW_STATE_FILE)) if _WINDOW_STATE_FILE.exists() else {}
     except Exception:
         return {}
 
 
 def _save_state(state: dict) -> None:
     _WINDOW_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _WINDOW_STATE_FILE.write_text(json.dumps(state))
+    _WINDOW_STATE_FILE.write_text(json.dumps(state), encoding='utf-8')
 
 
 def _make_icon():

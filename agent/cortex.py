@@ -148,8 +148,8 @@ def _execute_tool(tool: str, inputs: dict, *, raise_errors: bool = False) -> str
             return str(results)[:500] if results else "No web results found."
         elif tool == "read_file":
             path = inputs.get("path", "")
-            with open(path) as f:
-                return f.read(2000)
+            import text_file
+            return text_file.read_text(path, limit=8000)[:2000]
         elif tool in ("search_memory", "recall"):
             results = longterm.recall(inputs.get("query", ""), limit=5)
             return "\n".join(r.get("content", "") for r in results)[:500]
