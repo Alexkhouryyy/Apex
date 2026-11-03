@@ -155,7 +155,7 @@
         if(row.id==='library'&&row.ready&&/^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/.test(row.url||''))readerURL=row.url;
         if(row.id==='library'&&row.ready&&row.state==='available'&&/^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/.test(row.url||''))libraryAvailable=true;
         const li=document.createElement('li');
-        const message=row.state==='available'?row.catalog_entries+' titles listed in the library catalog.':row.state==='app_available'?(row.id==='courses'?'App answered. Imported courses still need checking.':'App answered. Open it to check your saved content.'):readerMessages[row.state]||readerMessages.unknown;
+        const message=row.id==='courses'&&row.state==='available'?row.catalog_entries+' course channel'+(row.catalog_entries===1?'':'s')+' imported'+((row.channels||[]).length?': '+row.channels.slice(0,5).join(', ')+(row.channels.length>5?', …':''):'')+'.':row.id==='courses'&&row.state==='empty'?'Kolibri answered, but no courses are imported yet. Run Setup-Apex-Courses.cmd while online.':row.state==='available'?row.catalog_entries+' titles listed in the library catalog.':row.state==='app_available'?(row.id==='courses'?'App answered. Imported courses still need checking.':'App answered. Open it to check your saved content.'):readerMessages[row.state]||readerMessages.unknown;
         li.textContent=row.label+': '+message;
         if(row.ready&&/^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/.test(row.url||'')){const a=document.createElement('a');a.href=row.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=' Open '+row.label;li.append(a);}
         $('reader-statuses').append(li);

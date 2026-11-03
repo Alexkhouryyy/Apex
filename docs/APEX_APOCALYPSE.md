@@ -207,8 +207,16 @@ Once Docker is installed and its image storage is on a drive with room:
    plan or request models, course imports or map downloads.
    `--nomad-apps` installs all four reader/data-tool apps and rescans books;
    it no longer bundles map preparation. Check each app before disconnecting.
-3. In Kolibri, finish its first-run setup and import the English channels you
-   want. Video courses are not included in the ZIM preparation queue.
+3. Courses: run `Setup-Apex-Courses.cmd` (or `Setup-Apex-Apocalypse.cmd --courses`).
+   It installs Kolibri inside NOMAD the first time (or starts it), waits for it
+   (its first start can take minutes), lists the courses already imported, opens
+   Kolibri in the browser and prints the steps: finish Kolibri's first-run
+   questions (personal use), then menu > Device > Channels > Import > Kolibri
+   Studio, filter by language, pick topics; Kolibri shows sizes first. A dropped
+   import is started again and skips files it already has. The Apocalypse page
+   then shows how many course channels are imported (read from Kolibri's own
+   channel list) instead of only "app answered". Courses are not part of the ZIM
+   download queue.
 4. Configure NOMAD AI/RAG and its embedding model separately. Its default
    Ollama host port 11434 is already used by native Ollama on this machine;
    do not install a competing default container or download through a daemon

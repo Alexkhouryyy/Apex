@@ -159,6 +159,13 @@ references for Lebanon, repair/how-to, survival, maps). For each suggestion give
 its size and the `_maxi` vs `_nopic` trade-off. Medical references are source
 material, not personal medical advice: say so when suggesting them.
 
+**Courses (Kolibri):** `.\Setup-Apex-Courses.cmd` (Docker Desktop and NOMAD
+running, i.e. `Start-Apex-Platform.cmd`). It starts/installs Kolibri, lists
+imported courses, opens it and prints the import steps (Device > Channels >
+Import > Kolibri Studio). Video channels are large: suggest one topic first on
+slow internet; a dropped import is restarted and skips what it has. Don't invent
+channel names; the owner filters Kolibri's own list by language (Arabic too).
+
 Things that are **not** ZIM downloads and need NOMAD itself (Docker running,
 `Setup-Apex-Apocalypse.cmd`): Kolibri courses (channel imports), the FDA drug
 database (NOMAD ingestion), map fonts/styles, and AI/RAG embeddings. They stay

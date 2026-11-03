@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 from urllib.parse import urlsplit
+import webbrowser
 from zipfile import ZipFile
 
 import httpx
@@ -277,7 +278,54 @@ NOMAD_NOT_RUNNING = ('NOMAD is not running ({base} did not answer). Open Docker 
                      'step again in a second Command Prompt.')
 
 
-def prepare_nomad_readers(readers=None, maps=False):
+COURSE_STEPS = """How to add courses (Kolibri runs in your browser):
+  1. First time only: Kolibri asks a few setup questions. Choose the option for
+     personal use on your own, and create your account. Remember its password.
+  2. Open the menu (top left) > Device > Channels > Import > Kolibri Studio.
+  3. Pick a channel. The list can be filtered by language (English, Arabic...).
+     Choose whole topics or single lessons; Kolibri shows the size before you start.
+     Video channels are big: start with one topic.
+  4. If the internet drops or the power goes, start the same import again:
+     Kolibri skips the files it already has.
+  Examples to look for: Khan Academy, CK-12, PhET Interactive Simulations.
+  Courses are saved in NOMAD's storage on the library drive."""
+
+COURSES_WAIT = 600              # Kolibri's very first start sets up its database: allow minutes
+
+
+def courses_guide(client, url, *, open_browser=True, sleep=time.sleep, clock=time.monotonic):
+    """Wait for Kolibri to answer, say which courses it already has, open it, and
+    print the import steps. Returns the imported channel names."""
+    deadline = clock() + COURSES_WAIT
+    announced = False
+    while True:
+        try:
+            response = client.get(url+nomad_readers.COURSES_PATH, timeout=10)
+            response.raise_for_status()
+            channels = nomad_readers.course_channels(response.content)
+            break
+        except (httpx.HTTPError, ValueError):
+            if clock() >= deadline:
+                raise RuntimeError(f'Kolibri is running but did not answer at {url} within {COURSES_WAIT // 60} '
+                                   'minutes. Open it in the browser to see why, or run this again.')
+            if not announced:
+                print('Waiting for Kolibri to finish starting (the first start can take a few minutes)...', flush=True)
+                announced = True
+            sleep(5)
+    names = [str(row['name']) for row in channels]
+    if names:
+        print(f'Courses already imported ({len(names)}): '+', '.join(names[:10])+(', ...' if len(names) > 10 else ''),
+              flush=True)
+    else:
+        print('No courses are imported yet.', flush=True)
+    print(COURSE_STEPS, flush=True)
+    print('Kolibri: '+url, flush=True)
+    if open_browser:
+        webbrowser.open(url)
+    return names
+
+
+def prepare_nomad_readers(readers=None, maps=False, guide_courses=False):
     """Use original NOMAD APIs after Docker storage and the stack are ready."""
     if apocalypse.enabled():
         raise RuntimeError('App installation and map preparation require an online preparation session.')
@@ -345,6 +393,13 @@ def prepare_nomad_readers(readers=None, maps=False):
             print(f'Library catalog answered: {count} titles listed (up to 50). Open {url} to read an article.', flush=True)
             if not count:
                 print('The catalog is empty. Check the downloaded ZIM files in nomad/storage/zim and rescan in NOMAD.', flush=True)
+        if guide_courses:
+            kolibri = services().get(nomad_readers.READERS['courses'][1], {})
+            url = nomad_readers.local_reader_url(kolibri.get('ui_location'))
+            if not url:
+                raise RuntimeError('Kolibri is running, but its local address is unavailable. Check it in NOMAD.')
+            courses_guide(client, url)
+            return
         if maps:
             call('POST', '/api/maps/download-base-assets', {})
             call('POST', '/api/maps/setup-world-basemap', {})
@@ -359,6 +414,7 @@ def main():
     readers_group=p.add_mutually_exclusive_group()
     readers_group.add_argument('--nomad-apps',action='store_true',help='Install all four NOMAD readers/data tools; content and maps are separate (online)')
     readers_group.add_argument('--nomad-readers',action='store_true',help='Install the information-library reader only, unless --reader selects others (online)')
+    readers_group.add_argument('--courses',action='store_true',help='Start Kolibri, list imported courses, open it and show how to import more (online)')
     p.add_argument('--reader',action='append',choices=tuple(nomad_readers.READERS),help='Select a reader with --nomad-readers; may be repeated')
     p.add_argument('--nomad-maps',action='store_true',help='Explicitly download map assets and prepare the worldwide basemap (online)')
     p.add_argument('--model',default=apocalypse.model_name())
@@ -367,6 +423,11 @@ def main():
     home=apocalypse.library_root()
     if args.reader and not args.nomad_readers:
         p.error('--reader requires --nomad-readers.')
+    if args.courses:
+        if args.nomad or args.nomad_start or args.library or args.nomad_maps:
+            p.error('--courses is a separate step after NOMAD is ready.')
+        prepare_nomad_readers(['courses'], guide_courses=True)
+        return
     if args.nomad_apps or args.nomad_readers or args.nomad_maps:
         if args.nomad or args.nomad_start or args.library:
             p.error('Reader/map preparation is a separate step after NOMAD is ready.')
