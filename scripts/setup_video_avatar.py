@@ -63,7 +63,7 @@ def status(home=HOME):
     return {
         'python': env_python(home).exists(),
         'musetalk': (musetalk / 'musetalk').is_dir(),
-        'packages': marker.exists() and marker.read_text().strip() == COMMIT,
+        'packages': marker.exists() and marker.read_text(encoding='utf-8').strip() == COMMIT,
         'weights': all(w.exists() for w in weights),
         'missing_weights': [str(w.relative_to(musetalk)) for w in weights if not w.exists()],
     }
@@ -99,7 +99,7 @@ def install(home=HOME):
         for package in MMLAB:
             run([py, '-m', 'mim', 'install', package])
         run([py, '-m', 'pip', 'install', 'huggingface_hub'] + SERVER)
-        (home / 'env' / '.apex-installed').write_text(COMMIT)
+        (home / 'env' / '.apex-installed').write_text(COMMIT, encoding='utf-8')
     if not status(home)['weights']:
         print('4/4  Downloading the weights from Hugging Face...', flush=True)
         script = ('import os, sys\n'

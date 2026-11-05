@@ -193,7 +193,8 @@ def start_voice(qwen_python, server, opener):
         print('Celine voice: port 17494 is used by another program. Apex starts without the local voice.', flush=True)
         return None, False
     try:
-        process = subprocess.Popen([str(qwen_python), '-u', str(ROOT / server)], cwd=ROOT)
+        process = subprocess.Popen([str(qwen_python), '-u', str(ROOT / server)], cwd=ROOT,
+                                   env=dict(os.environ, PYTHONUTF8='1'))   # UTF-8 text, as Apex itself
     except OSError as exc:   # a damaged python.exe (power cut, antivirus): no voice, but Apex still starts
         print(f'Celine voice: could not start ({exc}). Apex starts without it.', flush=True)
         return None, False

@@ -82,7 +82,7 @@ def install(target=TARGET, download=_download):
     manifest = dict(version=VERSION,
                     packages=[{k: p[k] for k in ('name', 'version', 'license', 'url', 'integrity')} for p in PACKAGES],
                     files={name: hashlib.sha256(data).hexdigest() for name, data in staged.items()})
-    (target / 'manifest.json').write_text(json.dumps(manifest, indent=1))
+    (target / 'manifest.json').write_text(json.dumps(manifest, indent=1), encoding='utf-8')
     return manifest
 
 
@@ -93,7 +93,7 @@ def status(target=TARGET):
     if not manifest_path.exists():
         return dict(installed=False, version=None, problem='Not installed. Run Setup-Apex-Speech-Model.cmd.')
     try:
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
         files = manifest['files']
     except (ValueError, KeyError):
         return dict(installed=False, version=None, problem='The manifest is unreadable. Run the setup again.')

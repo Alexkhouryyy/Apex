@@ -16,13 +16,13 @@ def main():
     args = parser.parse_args()
     if args.output.resolve() in {p.resolve() for p in (args.contract, args.observations, args.artifact)}:
         parser.error("output must not overwrite evaluation inputs")
-    contract = learning_eval.Contract.from_dict(json.loads(args.contract.read_text()))
-    observations = json.loads(args.observations.read_text())
-    receipt = learning_eval.evaluate(contract, artifact_sha=learning_eval.artifact_digest(args.artifact.read_text()), **observations)
+    contract = learning_eval.Contract.from_dict(json.loads(args.contract.read_text(encoding='utf-8')))
+    observations = json.loads(args.observations.read_text(encoding='utf-8'))
+    receipt = learning_eval.evaluate(contract, artifact_sha=learning_eval.artifact_digest(args.artifact.read_text(encoding='utf-8')), **observations)
     if args.candidate_id:
         learning_registry.freeze_contract(contract)
         learning_registry.attach_receipt(args.candidate_id, receipt)
-    args.output.write_text(json.dumps(receipt, indent=2) + "\n")
+    args.output.write_text(json.dumps(receipt, indent=2) + "\n", encoding='utf-8')
     print("PASS" if receipt["passed"] else "FAIL: " + ", ".join(receipt["reasons"]))
 
 

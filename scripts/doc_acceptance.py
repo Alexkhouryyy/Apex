@@ -136,7 +136,7 @@ def make_sample(folder):
                                        'Suppliers': [['Name', 'Phone'], ['Hardware store', '01 234 567']]})
     make_text_pdf(folder / 'notes.pdf', ['Outlet circuit check', 'Electrician visit Friday 10:00'])
     make_scanned_pdf(folder / 'scan.pdf')
-    (folder / 'facts.json').write_text(json.dumps(SAMPLE_FACTS, indent=1))
+    (folder / 'facts.json').write_text(json.dumps(SAMPLE_FACTS, indent=1), encoding='utf-8')
     return folder
 
 

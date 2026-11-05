@@ -67,6 +67,6 @@ manifest=dict(id='openmotor-125',revision='1.0',geometry_revision='1',title='Ope
  limitations='Converted from the published OpenMotor STEP assembly. CAD-kernel checks found 616 solid occurrences and no invalid solids; this is not a performance or manufacturing validation. The viewer exposes 135 named mesh occurrences, some containing multiple solids. A geometry-free Insulation node was omitted by conversion. Mesh bounds are approximate; display colors are not material properties. No simulation or independent engineering review.',
  validation=dict(purpose='Detailed source-geometry inspection',geometry='Published STEP converted to a tessellated view; original source included',dimensions='Source mm; mesh bounding sizes only; no tolerance validation',materials='Source appearance only; material properties not verified',physics='No electrical, magnetic, thermal or load simulation',review='616 solids passed kernel validity checks; independent engineering review pending'),
  sources=[dict(id='cad',title='OpenMotor hardware · pinned source',url='https://github.com/eMotres/OpenMotor-Hardware/tree/1e1e56d7cf64ea393793ca5c06189251f87b6e98',license='CERN-OHL-W-2.0')],parts=parts)
-p=ROOT/'data/assemblies/openmotor-125.json';p.write_text(json.dumps(manifest,indent=2)+'\n');print('Parts',len(parts),'bounds mm',dims)
+p=ROOT/'data/assemblies/openmotor-125.json';p.write_text(json.dumps(manifest,indent=2)+'\n', encoding='utf-8');print('Parts',len(parts),'bounds mm',dims)
 
 TEMP.cleanup()

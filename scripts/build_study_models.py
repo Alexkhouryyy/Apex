@@ -307,7 +307,7 @@ def build(spec):
     if motion:
         assert not set(motion.get('tracks', {})) - set(ids) and not set(motion.get('ghost', [])) - set(ids), spec['id']
         manifest['motion'] = oriented_motion(motion, R)
-    (ROOT / 'data/assemblies' / f"{spec['id']}.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False) + '\n')
+    (ROOT / 'data/assemblies' / f"{spec['id']}.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
     return len(parts), vertex_count(parts), len(glb)
 
 

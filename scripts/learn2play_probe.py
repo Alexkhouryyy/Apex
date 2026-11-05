@@ -22,7 +22,7 @@ def probe(repo, output):
     dirty=subprocess.run(['git','-C',str(repo),'status','--porcelain','--untracked-files=no'],check=True,capture_output=True,text=True).stdout
     if dirty:raise ValueError('upstream source has local modifications')
     if output.resolve().is_relative_to(repo):raise ValueError('output must remain outside the upstream checkout')
-    seeds=json.loads((repo/'default_seeds.json').read_text())['seeds']
+    seeds=json.loads((repo/'default_seeds.json').read_text(encoding='utf-8'))['seeds']
     results=[]
     with tempfile.TemporaryDirectory() as work:
         for game,seed in seeds.items():
@@ -38,7 +38,7 @@ def probe(repo, output):
                 results.append({'game':game,'seed':seed,'protocol_completed':False,'error':'timeout'})
     report={'schema':'apex-learn2play-probe/v1','revision':head,'license':'not found; external checkout only',
             'real_model_calls':0,'agent_learning_measured':False,'games':results}
-    output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(report,indent=2)+'\n')
+    output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(report,indent=2)+'\n', encoding='utf-8')
     return report
 
 
