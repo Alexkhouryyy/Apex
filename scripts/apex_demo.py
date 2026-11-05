@@ -107,7 +107,7 @@ class FakeAppService:
         self.path = path
 
     def notes(self):
-        return json.loads(self.path.read_text()) if self.path.exists() else ['Buy shelving']
+        return json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else ['Buy shelving']
 
     def install(self, apps):
         apps.tools = lambda: list(self.TOOLS)
@@ -121,7 +121,7 @@ class FakeAppService:
                 notes.append(body['arguments']['text'])
             elif body['tool_slug'] == 'DEMO_DELETE_NOTES':
                 notes = []
-            self.path.write_text(json.dumps(notes))
+            self.path.write_text(json.dumps(notes), encoding='utf-8')
             return dict(data=dict(notes=notes), log_id='log_' + hashlib.sha256(json.dumps(notes).encode()).hexdigest()[:12])
         apps._request = request
 
@@ -200,14 +200,14 @@ def phase_build(d, args):
     continuity.save_project(b, handoff_b, continuity.project(b)['revision'])
     continuity.snapshot('dashboard:demo-b')
     out.append(step('Create project B', PASS, f'Workspace {b[:8]} created with its own handoff; it is now the active board.'))
-    (d / 'state.json').write_text(json.dumps(dict(a=a, b=b, doc=doc['id'], handoff_a=handoff, items=items)))
+    (d / 'state.json').write_text(json.dumps(dict(a=a, b=b, doc=doc['id'], handoff_a=handoff, items=items)), encoding='utf-8')
     return out
 
 
 def phase_resume(d, args):
     """A fresh process: nothing in memory, only what was saved."""
     from agent import continuity, documents
-    state = json.loads((d / 'state.json').read_text())
+    state = json.loads((d / 'state.json').read_text(encoding='utf-8'))
     out = []
     pa = continuity.project(state['a'])
     expected = state['handoff_a']
@@ -251,9 +251,9 @@ def _confirm(args, d):
         if granted and args['mode'] == 'live':
             print(f'\n{reason}\nTool: {tool}\nArguments: {planned}', flush=True)
             granted = input('Type YES to send exactly this, anything else to refuse: ').strip() == 'YES'
-        entries = json.loads(log.read_text()) if log.exists() else []
+        entries = json.loads(log.read_text(encoding='utf-8')) if log.exists() else []
         entries.append(dict(reason=reason, granted=granted, at=time.time()))
-        log.write_text(json.dumps(entries))
+        log.write_text(json.dumps(entries), encoding='utf-8')
         return granted
     return ask
 
@@ -332,7 +332,7 @@ def phase_crash(d, args):
 
     def write_then_hang(name, inputs):
         result = real(name, inputs)
-        (d / 'crash.ready').write_text(result)
+        (d / 'crash.ready').write_text(result, encoding='utf-8')
         time.sleep(3600)
     core._execute_tool = write_then_hang
     ledger = d / 'ledger.txt'
@@ -361,7 +361,7 @@ def phase_recover(d, args):
     out.append(step('No continuing without a review', PASS if refused else FAIL,
                     'Continuing before the uncertain action was checked was refused.' if refused else 'It continued without a review.'))
     ledger = d / 'ledger.txt'
-    before = ledger.read_text().count(LEDGER_LINE) if ledger.exists() else 0
+    before = ledger.read_text(encoding='utf-8').count(LEDGER_LINE) if ledger.exists() else 0
     keys = {f'{i}:{j}' for i, s in enumerate(run['steps']) for j, e in enumerate(s['evidence']) if e['status'] == 'outcome_unknown'}
     observed = (f'Checked {ledger.name}: the line is there {before} time(s), so the append happened before the crash.'
                 if before else f'Checked {ledger.name}: the line is not there, so the append did not happen.')
@@ -370,7 +370,7 @@ def phase_recover(d, args):
     cont = task_recovery.continue_run(rid, f'Make sure `{ledger}` holds the line `{LEDGER_LINE}` exactly once. '
                                       'Inspect it first; do not append if it is already there.', 0.05, DemoAgent())
     done = _wait(team, cont['id'])
-    after = ledger.read_text().count(LEDGER_LINE) if ledger.exists() else 0
+    after = ledger.read_text(encoding='utf-8').count(LEDGER_LINE) if ledger.exists() else 0
     tools = [e['tool'] for s in done['steps'] for e in s['evidence']]
     out.append(step('Recover without repeating the action', PASS if after == 1 and done['status'] == 'done' else FAIL,
                     f"Continuation '{done['status']}', tools used: {tools or 'none'}. The line appears {after} time(s) "
@@ -387,14 +387,14 @@ def run_phase(name, d):
         raise SystemExit(f'Refusing to run: the database is {longterm.DB_PATH}, not the demo folder.')
     longterm.init_db()                        # what Apex's startup does, on the demo's own database
     mcp_policy.init_db()
-    args = json.loads((d / 'args.json').read_text())
+    args = json.loads((d / 'args.json').read_text(encoding='utf-8'))
     if args['mode'] == 'fixture' and name in ('build',):
         install_model_fixture()
     try:
         results = PHASES[name](d, args)
     except Exception as exc:                  # a crashed phase is a failed step, with its reason
         results = [step(f'{name} phase', FAIL, f'{type(exc).__name__}: {exc}'[:500])]
-    (d / f'{name}.json').write_text(json.dumps(results))
+    (d / f'{name}.json').write_text(json.dumps(results), encoding='utf-8')
 
 
 # ---------------------------------------------------------------- driver
@@ -417,7 +417,7 @@ def _child(name, d, mode, fault=None, timeout=600):
     path = d / f'{name}.json'
     if not path.exists():
         return [step(f'{name} phase', FAIL, f'The phase exited with code {proc.returncode} and wrote no result.')]
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding='utf-8'))
 
 
 def _crash(d, mode, fault=None):
@@ -431,7 +431,7 @@ def _crash(d, mode, fault=None):
     proc.kill()
     proc.wait(timeout=30)
     return [step('Interrupt a task mid-action', PASS if landed else FAIL,
-                 f'The task process was killed right after its write ({ready.read_text()[:120] if landed else "the write never happened"}) '
+                 f'The task process was killed right after its write ({ready.read_text(encoding="utf-8")[:120] if landed else "the write never happened"}) '
                  'and before Apex recorded the result.')]
 
 
@@ -446,7 +446,7 @@ def report(d, mode, results):
         lines.append(f"| {i} | {r['step']} | **{r['status'].upper()}** | {r['evidence'].replace('|', '/')} |")
     lines += ['', ' · '.join(f'{k}: {v}' for k, v in counts.items()), '']
     (d / 'report.md').write_text('\n'.join(lines), encoding='utf-8')
-    (d / 'report.json').write_text(json.dumps(dict(mode=mode, at=stamp, counts=counts, steps=results), indent=1))
+    (d / 'report.json').write_text(json.dumps(dict(mode=mode, at=stamp, counts=counts, steps=results), indent=1), encoding='utf-8')
     return '\n'.join(lines), counts
 
 
@@ -480,7 +480,7 @@ def main(argv=None):
         args.update(read_tool='app__demo__DEMO_LIST_NOTES', write_tool='app__demo__DEMO_CREATE_NOTE',
                     write_args={'text': 'Order white steel shelving'}, check_tool='app__demo__DEMO_LIST_NOTES',
                     expect='Order white steel shelving')
-    (d / 'args.json').write_text(json.dumps(args))
+    (d / 'args.json').write_text(json.dumps(args), encoding='utf-8')
     print(f'Apex demonstration ({mode}) in {d}', flush=True)
 
     results = []

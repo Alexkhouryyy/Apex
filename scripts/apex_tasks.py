@@ -222,7 +222,7 @@ def run_one(d, task, mode, fault):
                             "FROM usage_log WHERE call_site LIKE ?", (f'team/{rid}/%',)).fetchone()
     checks.append(('Cost recorded in Apex\'s ledger', ledger[1] == run['calls'] and abs(ledger[0] - run['cost_usd']) < 1e-9,
                    f'{ledger[1]} calls, ${ledger[0]:.4f} in usage_log; runner says {run["calls"]} calls, ${run["cost_usd"]:.4f}'))
-    (work / 'receipt.json').write_text(json.dumps(run.get('receipt', {}), indent=1))
+    (work / 'receipt.json').write_text(json.dumps(run.get('receipt', {}), indent=1), encoding='utf-8')
     verdict = PASS if all(ok for _, ok, _ in checks) else FAIL
     return dict(task=task['id'], title=task['title'], verdict=verdict, model=model, seconds=seconds,
                 cost_usd=round(ledger[0], 6), calls=ledger[1], input_tokens=ledger[2], output_tokens=ledger[3],
@@ -259,14 +259,14 @@ def report(d, mode, results):
     passed = sum(r['verdict'] == PASS for r in results)
     lines.append(f"{passed}/{len(results)} tasks pass · total ${sum(r['cost_usd'] for r in results):.4f}")
     (d / 'report.md').write_text('\n'.join(lines), encoding='utf-8')
-    (d / 'report.json').write_text(json.dumps(dict(mode=mode, at=stamp, results=results), indent=1))
+    (d / 'report.json').write_text(json.dumps(dict(mode=mode, at=stamp, results=results), indent=1), encoding='utf-8')
     return '\n'.join(lines)
 
 
 def history(base=HOME):
     rows = []
     for path in sorted(base.glob('*/report.json')):
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding='utf-8'))
         for r in data['results']:
             rows.append(f"{data['at']:<17} {data['mode']:<8} {r['model'][:22]:<22} {r['task']:<17} {r['verdict'].upper():<5} "
                         f"${r['cost_usd']:<8.4f} {r['seconds']:>6}s")
@@ -289,7 +289,7 @@ def main(argv=None):
         return 0
     if a.one:
         d = Path(a.dir)
-        mode = json.loads((d / 'mode.json').read_text())['mode']
+        mode = json.loads((d / 'mode.json').read_text(encoding='utf-8'))['mode']
         task = next(t for t in TASKS if t['id'] == a.one)
         try:
             result = run_one(d, task, mode, os.getenv('APEX_TASKS_FAULT'))
@@ -297,7 +297,7 @@ def main(argv=None):
             result = dict(task=task['id'], title=task['title'], verdict=FAIL, model=os.getenv('AGENT_MODEL', '?'), seconds=0,
                           cost_usd=0.0, calls=0, input_tokens=0, output_tokens=0, tools=[],
                           checks=[dict(check='Task ran', passed=False, evidence=f'{type(exc).__name__}: {exc}'[:500])])
-        (d / f'{task["id"]}.json').write_text(json.dumps(result))
+        (d / f'{task["id"]}.json').write_text(json.dumps(result), encoding='utf-8')
         return 0
     if a.model and not a.live:
         p.error('--model only works with --live')
@@ -306,7 +306,7 @@ def main(argv=None):
     mode = 'live' if a.live else 'fixture'
     d = Path(a.out or HOME / time.strftime('%Y%m%d-%H%M%S')).expanduser().resolve()
     d.mkdir(parents=True, exist_ok=True)
-    (d / 'mode.json').write_text(json.dumps(dict(mode=mode)))
+    (d / 'mode.json').write_text(json.dumps(dict(mode=mode)), encoding='utf-8')
     print(f'Apex task suite ({mode}) in {d}', flush=True)
     results = []
     for task in TASKS:
@@ -314,7 +314,7 @@ def main(argv=None):
         subprocess.run([sys.executable, str(Path(__file__).resolve()), '--one', task['id'], '--dir', str(d)],
                        env=_env(d, mode, a.model, a.fault), cwd=str(ROOT), timeout=1200)
         path = d / f'{task["id"]}.json'
-        results.append(json.loads(path.read_text()) if path.exists() else dict(
+        results.append(json.loads(path.read_text(encoding='utf-8')) if path.exists() else dict(
             task=task['id'], title=task['title'], verdict=FAIL, model='?', seconds=0, cost_usd=0.0, calls=0,
             input_tokens=0, output_tokens=0, tools=[], checks=[dict(check='Task ran', passed=False, evidence='the task process wrote no result')]))
     print('\n' + report(d, mode, results) + f'\n\nReport: {d / "report.md"}')

@@ -63,7 +63,7 @@ def run(output, incidents=None):
                          'p95_ms':statistics.quantiles(timings,n=20)[18]},
             'replay':{'seeded_incidents':len(attacks) if incidents else 0,'repetitions':replay_count,'real_effects':0},
             'learning_gate':{'positive_fixture_passed':valid['passed'],'reward_hacking_rejections':hacks}}
-    output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(result,indent=2)+'\n')
+    output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(result,indent=2)+'\n', encoding='utf-8')
     return result
 
 

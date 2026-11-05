@@ -13,9 +13,9 @@ def main():
     args = parser.parse_args()
     if args.cases.resolve() == args.output.resolve():
         parser.error("output must not overwrite the input")
-    cases = [json.loads(line) for line in args.cases.read_text().splitlines() if line.strip()]
+    cases = [json.loads(line) for line in args.cases.read_text(encoding='utf-8').splitlines() if line.strip()]
     report = evaluate(cases)
-    args.output.write_text(json.dumps(report, indent=2) + "\n")
+    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding='utf-8')
 
 
 if __name__ == "__main__":

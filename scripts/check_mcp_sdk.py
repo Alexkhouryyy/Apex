@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def sdk_requirement(path):
-    requirements = [line.split("#", 1)[0].strip() for line in Path(path).read_text().splitlines()]
+    requirements = [line.split("#", 1)[0].strip() for line in Path(path).read_text(encoding='utf-8').splitlines()]
     matches = [line for line in requirements if re.match(r"^mcp(?=[<=>!~\s\[]|$)", line)]
     if len(matches) != 1:
         raise ValueError(f"Expected one MCP SDK requirement in {path}.")

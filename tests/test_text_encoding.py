@@ -69,9 +69,10 @@ def _unencoded_text_calls(path):
         f, kw = node.func, {k.arg for k in node.keywords}
         name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ''
         helper = isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id in ('_text_file', 'text_file', 'doc_convert')
-        if name == 'read_text' and not helper and 'encoding' not in kw:
+        method = isinstance(f, ast.Attribute)               # Path.read_text, not a local read_text()
+        if name == 'read_text' and method and not helper and 'encoding' not in kw:
             yield node.lineno, 'read_text'
-        if name == 'write_text' and 'encoding' not in kw and len(node.args) < 2:
+        if name == 'write_text' and method and 'encoding' not in kw and len(node.args) < 2:
             yield node.lineno, 'write_text'
         if name in ('FileHandler', 'RotatingFileHandler', 'TimedRotatingFileHandler') and 'encoding' not in kw:
             yield node.lineno, name                     # a log line with Arabic or an emoji must not fail
@@ -83,11 +84,8 @@ def _unencoded_text_calls(path):
 
 
 def test_no_apex_code_reads_or_writes_text_in_the_windows_default_encoding():
-    files = [p for d in ('agent', 'app', 'dashboard', 'voice', 'tools') for p in (ROOT / d).rglob('*.py')]
-    files += [ROOT / n for n in ('main.py', 'config.py', 'env_file.py', 'text_file.py',
-                                 'scripts/run_apex_qwen.py', 'scripts/run_apex_platform.py',
-                                 'scripts/run_apex_apocalypse.py', 'scripts/prepare_apocalypse_library.py',
-                                 'scripts/setup_apex_apocalypse.py')]
+    files = [p for d in ('agent', 'app', 'dashboard', 'voice', 'tools', 'scripts') for p in (ROOT / d).rglob('*.py')]
+    files += [ROOT / n for n in ('main.py', 'config.py', 'env_file.py', 'text_file.py')]
     found = [f'{p.relative_to(ROOT)}:{line} {what}' for p in files for line, what in _unencoded_text_calls(p)]
     assert not found, 'say encoding="utf-8" (or use text_file.read_text): ' + ', '.join(found)
 
@@ -132,3 +130,16 @@ def test_the_supervisor_sign_in_and_autostart_paths_run_in_utf8_mode(monkeypatch
     assert start_screen_companion.environment()['PYTHONUTF8'] == '1'
     autostart = (ROOT / 'app/autostart.py').read_text(encoding='utf-8')
     assert '''value = f'"{python_exe}" -X utf8 "{_MAIN_PY}" --resident\'''' in autostart
+
+
+def test_celine_s_voice_server_also_runs_in_utf8_mode(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+    from scripts import run_apex_qwen as launcher
+    monkeypatch.delenv('PYTHONUTF8', raising=False)
+    monkeypatch.setattr(launcher, 'port_in_use', lambda *a, **k: False)
+    spawn = Mock(return_value=Mock())
+    monkeypatch.setattr(launcher.subprocess, 'Popen', spawn)
+    python = tmp_path / 'python.exe'
+    python.touch()
+    launcher.start_voice(python, 'scripts/qwen_fast_server.py', opener=None)
+    assert spawn.call_args.kwargs['env']['PYTHONUTF8'] == '1'

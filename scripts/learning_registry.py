@@ -15,8 +15,8 @@ def main():
     canary=sub.add_parser('canary');canary.add_argument('id');canary.add_argument('--correct',action='store_true');canary.add_argument('--permission-violation',action='store_true');canary.add_argument('--contradiction',action='store_true')
     args=parser.parse_args();registry.init_db()
     if args.action=='list':result=registry.listing()
-    elif args.action=='freeze':result={'contract_sha':registry.freeze_contract(learning_eval.Contract.from_dict(json.loads(args.contract.read_text())))}
-    elif args.action=='propose':result=registry.propose(args.name,args.artifact.read_text(),json.loads(args.object.read_text()),failure_class=args.failure_class)
+    elif args.action=='freeze':result={'contract_sha':registry.freeze_contract(learning_eval.Contract.from_dict(json.loads(args.contract.read_text(encoding='utf-8'))))}
+    elif args.action=='propose':result=registry.propose(args.name,args.artifact.read_text(encoding='utf-8'),json.loads(args.object.read_text(encoding='utf-8')),failure_class=args.failure_class)
     elif args.action=='promote':result=registry.promote(args.id,expected_active=args.expected_active)
     else:result=registry.canary(args.id,correct=args.correct,permission_violation=args.permission_violation,contradiction=args.contradiction)
     print(json.dumps(result,indent=2))

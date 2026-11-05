@@ -29,11 +29,11 @@ def pilot(output):
     source_path=Path(__file__).resolve().parents[1]/'agent/citation_checks.py'
     cost=dict(tokens=0,usd=0,source='deterministic Python execution; no inference or learning spend')
     receipt=evaluate(contract,baseline,candidate,verifier,baseline_cost=cost,candidate_cost=cost,learning_cost=cost,
-                     artifact_sha=artifact_digest(source_path.read_text()),evidence_source='synthetic exact-quote execution')
+                     artifact_sha=artifact_digest(source_path.read_text(encoding='utf-8')),evidence_source='synthetic exact-quote execution')
     result={'schema':'apex-citation-pilot/v1','evidence_type':'synthetic deterministic execution',
             'baseline':'deliberately weak first-word fixture; not current Apex',
             'real_model_calls':0,'production_promotion_supported':False,'contract':asdict(contract),'receipt':receipt}
-    output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(result,indent=2)+'\n')
+    output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(result,indent=2)+'\n', encoding='utf-8')
     return result
 
 
