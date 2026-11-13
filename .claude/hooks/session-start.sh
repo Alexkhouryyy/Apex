@@ -13,7 +13,9 @@ cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
 if ! python -m pip install -q --disable-pip-version-check --root-user-action=ignore -r requirements.txt -r requirements-research.txt; then
   # A distro-installed pip/setuptools can refuse to be upgraded in place.
   python -m pip install -q --disable-pip-version-check --root-user-action=ignore --ignore-installed pip setuptools
-  python -m pip install -q --disable-pip-version-check --root-user-action=ignore -r requirements.txt -r requirements-research.txt
+  # Other distro-installed packages (PyJWT, cryptography) can't be uninstalled
+  # either: install over them instead of replacing them.
+  python -m pip install -q --disable-pip-version-check --root-user-action=ignore --ignore-installed -r requirements.txt -r requirements-research.txt
 fi
 
 # Node: jsdom for the page checks, Playwright for the *_browser checks. Kept
