@@ -1,0 +1,304 @@
+{
+  "subsystem": "Voice and Celine (speech in/out, wake word, local Qwen voice, Voices page)",
+  "summary": "Celine's voice is a local Qwen voice-cloning server on your GPU. Your launchers start it next to Apex. If it is missing, still warming up, busy or crashed, Apex falls back to the PC's own Windows voice, and that fallback is well built and well tested with fakes. The browser Companion's Voice mode (local Whisper transcription plus streamed Celine audio) and the Voices page are wired and tested, but nothing has run on the laptop since the UTF-8 fix. Resident mode is the path you actually use, and it has real problems. A Ctrl+Space voice turn sends the WHOLE reply to Celine with a 20-second limit, so any answer longer than about 3-4 sentences comes out in the robot PC voice. It answers as Apex, not with Celine's personality, even though it speaks in her voice. On Windows the only way to stop her mid-sentence is to talk over her.",
+  "features": [
+    {
+      "name": "Celine's local voice server (fast, streamed Qwen)",
+      "what": "A small server on 127.0.0.1:17494 that speaks any cloned voice (Celine by default) on your RTX GPU. First audio arrives in about a second once it has warmed up. Your launcher starts it in the background and Apex never waits for it.",
+      "how_to_use": "Automatic: Start-Apex-Platform.cmd / Start-Apex-All.cmd run scripts/run_apex_qwen.py --fast --resident, which starts scripts/qwen_fast_server.py and sets TTS_ENGINE=voicebox, VOICEBOX_URL=http://127.0.0.1:17494, VOICEBOX_PROFILE=celine for Apex. The console prints 'Celine voice: ready.'",
+      "status": "built_untested_on_pc",
+      "evidence": "scripts/run_apex_qwen.py:61-75 (launch_environment forces the Celine voice settings), :176-205 (start_voice, optional and never blocks), :208-330 (main loop, health probes, 'stopped answering' notices); scripts/run_apex_platform.py:187 (Platform launcher starts it with --fast --resident); scripts/qwen_fast_server.py:103-228 (routes /health, /profiles, /generate/stream, /generate/pcm, loopback-only middleware :112-118, one-generation GPU lock :155-157). Tests: tests/test_apex_launcher.py (35), tests/test_qwen_fast_server.py (12), tests/test_qwen_server.py (4). The docstring at qwen_fast_server.py:3-5 says it was measured on the RTX 4070 laptop, so an earlier version has run there. The current launcher has not been tried since the charmap fix.",
+      "setup_needed": "Run Test-Apex-Fast-Voice.cmd once. It builds %USERPROFILE%\\apex-qwen-fast-env (several GB of CUDA PyTorch plus the 1.7B model, so it needs internet). You also need a voice: %USERPROFILE%\\Downloads\\celine.ogg or a folder in %USERPROFILE%\\apex-voices. Without one the server exits and Apex uses the PC voice (qwen_fast_server.py:240-243)."
+    },
+    {
+      "name": "PC-voice fallback (startup resilience for speech)",
+      "what": "When Celine's server is not installed, warming up, busy, out of GPU memory, stopped, or the audio library cannot load, Apex says the sentence in the Windows voice (pyttsx3) instead of saying nothing. It prints one notice, at most every 5 minutes, and tries Celine again after 30 seconds.",
+      "how_to_use": "Automatic for every spoken reply when TTS_ENGINE=voicebox, which is the default and is what your launcher sets.",
+      "status": "built_untested_on_pc",
+      "evidence": "voice/tts.py:24-50 (speak routes voicebox to the fallback), :108-118 (cool-downs and the 20 s budget), :297-357 (_speak_voicebox_or_fallback: busy, outage, playback-failed and no-audio-library cases, never repeats a sentence), :251-278 (_speak_system never raises); scripts/run_apex_qwen.py:255-277 (launcher notices). Tests: tests/test_startup_resilience.py (about 21 of its 50 tests are speech), tests/test_voicebox_live.py (23).",
+      "setup_needed": "None. The Windows SAPI voice and pyttsx3 are part of the normal install."
+    },
+    {
+      "name": "Push-to-talk voice turn in resident mode (Ctrl+Space)",
+      "what": "Press Ctrl+Space anywhere. Apex opens the mic, records until you stop talking (1.5 s of silence, at most 60 s), transcribes with local Whisper 'base' on the CPU, runs the turn with a screenshot, then speaks the whole reply in Celine's voice (or the PC voice).",
+      "how_to_use": "Hotkey Ctrl+Space (RESIDENT_GLOBAL_HOTKEY). Ctrl+Alt+M mutes.",
+      "status": "partial",
+      "evidence": "app/resident.py:333-336 (Whisper warm-up thread), :347-418 (_do_turn: listen() at :363, agent.run at :394 with no persona, _voice_speak(reply) at :410); voice/stt.py:47-102 (listen), :105-120 (warm_up). It works for short answers. Long answers drop to the PC voice (see gaps). No test drives voice/stt.py directly; tests/test_resident.py covers the turn with fakes.",
+      "setup_needed": "A working default microphone. The Whisper 'base' model must already be in the Hugging Face cache, or the first use downloads it (internet needed)."
+    },
+    {
+      "name": "Companion page Voice mode (talk to Celine in the browser)",
+      "what": "In the Companion page, Voice mode records you in the browser, transcribes on the laptop with local Whisper, answers as Celine, and streams her audio so it starts playing within about a second. It also records how long each stage of the turn takes.",
+      "how_to_use": "Page http://127.0.0.1:7860/companion (the launcher opens it with --open), then click Voice mode. Ctrl+Alt+T toggles Voice mode from any window while that page is open.",
+      "status": "built_untested_on_pc",
+      "evidence": "dashboard/companion.py:642-670 (/api/companion/transcribe, which uses voice/browser_stt.py), :499-500 (Celine persona when her voice is selected); dashboard/server.py:2084-2175 (/api/speak/stream relays /generate/pcm with first-byte, stall and total deadlines), :2177-2215 (/api/speak whole-WAV fallback); voice/voicebox.py:186-206 (streaming_supported, pcm_request). Tests: tests/test_speak_stream.py (8), tests/test_browser_stt.py (4), tests/test_celine.py (13), tests/test_look_now.py (25).",
+      "setup_needed": "Allow the microphone in the browser once. Headphones are recommended (docs/CELINE.md:45)."
+    },
+    {
+      "name": "Celine hotkeys: Look now (Ctrl+Alt+C) and Talk (Ctrl+Alt+T)",
+      "what": "Ctrl+Alt+C makes Celine look at your screen and answer in the open Companion page. Ctrl+Alt+T turns Voice mode on or off in that page from anywhere.",
+      "how_to_use": "Hotkeys Ctrl+Alt+C and Ctrl+Alt+T (CELINE_HOTKEY, CELINE_TALK_HOTKEY). The Companion page must be open.",
+      "status": "built_untested_on_pc",
+      "evidence": "config.py:400,404 (defaults); app/resident.py:627-632 (bound in resident mode when the dashboard is on), :600-605 (only reported as live if the hotkey listener started); main.py:505-513 (same in main.py via agent/look_now.py:257-291). Tests: tests/test_look_now.py (25).",
+      "setup_needed": "pynput for global hotkeys (part of the install). The Companion page must be open in a browser."
+    },
+    {
+      "name": "Celine's personality (Celine.md)",
+      "what": "When Celine's voice is selected in the Companion, she answers as Celine (warm, short, honest) instead of the usual Apex identity. You can rewrite her personality in Celine.md in your vault, and the change applies from the next reply.",
+      "how_to_use": "Automatic in Companion turns with the CELINE voice. Edit Documents\\Apex\\Celine.md (VAULT_PATH) to change her personality.",
+      "status": "working",
+      "evidence": "agent/celine.py:51-70 (personality, persona_block, wanted); agent/core.py:3757-3764 (persona == 'celine' replaces the Apex persona block); dashboard/companion.py:499-500 (the only caller that sets persona='celine'). Tests: tests/test_celine.py (13). It is NOT used for resident Ctrl+Space turns (see gaps).",
+      "setup_needed": "None. Celine.md is optional."
+    },
+    {
+      "name": "Voices page (record, check and save cloned voices)",
+      "what": "Record about 25 seconds of someone who agreed to it, or upload a recording. Apex checks length, loudness, distortion and background noise, and uses Whisper to check that the words match the script. Then it saves the voice so the Qwen server can speak with it straight away. Removing a voice moves it to a .trash folder.",
+      "how_to_use": "Page http://127.0.0.1:7860/voices (also linked as '+ New voice' in the Companion). Try plays a sample through /api/speak.",
+      "status": "built_untested_on_pc",
+      "evidence": "dashboard/voices.py:87-171 (GET /voices, GET /api/voices, POST /api/voices/check, POST /api/voices, DELETE /api/voices/{id}, master-token and consent checks :35-37, :134-135); dashboard/server.py:164-165 (router included), :277 (page path); voice/voice_check.py:90-131 (checks); scripts/voice_library.py:78-106 (re-read on every request, so no restart is needed). Tests: tests/test_voices.py (13).",
+      "setup_needed": "The fast voice server running for Try. A quiet room."
+    },
+    {
+      "name": "Voicebox desktop-app mode (the older route)",
+      "what": "Instead of Apex's own Qwen server, Apex can speak through the separate Voicebox desktop app on port 17493 using its Qwen preset or cloned profiles. setup_voicebox.py tests it and writes the setting to .env.",
+      "how_to_use": "Command: .venv\\Scripts\\python.exe scripts\\setup_voicebox.py [--profile NAME]. Voice picker via /api/voicebox/profiles.",
+      "status": "off_by_default",
+      "evidence": "config.py:720-722 (VOICEBOX_URL default 17493); voice/voicebox.py:47-183 (resolve_engine, profiles, synthesize); scripts/setup_voicebox.py:17-44; dashboard/server.py:2750-2760. Tests: tests/test_voicebox.py (11), tests/test_voicebox_live.py (23). Your launcher overrides this to the Apex server on 17494 (run_apex_qwen.py:69-71).",
+      "setup_needed": "Install and run the Voicebox app with Qwen CustomVoice 1.7B downloaded."
+    },
+    {
+      "name": "Wake phrases ('Apex ...' and 'Hey Celly ...')",
+      "what": "An always-open microphone running a tiny Whisper model in 2-second windows. Saying 'Apex, ...' starts a resident voice turn, and 'Hey Celly, ...' asks Celine in the Companion. The phrase must start what you say, so 'the apex predator' does not wake it.",
+      "how_to_use": "Off. Set WAKE_WORD_ENABLED=true and/or CELINE_WAKE_ENABLED=true in .env and restart.",
+      "status": "off_by_default",
+      "evidence": "config.py:93 (WAKE_WORD_ENABLED False), :408 (CELINE_WAKE_ENABLED False); app/resident.py:608-650 (_configure_attention shares one listener and honours mute); voice/wake.py:26-60 (matches_wake_phrase), :62-151 (listener, loads Whisper 'tiny'). main.py only uses the --wake flag (main.py:161, :533-537). Tests: tests/test_wake.py (10), tests/test_resident.py, tests/test_look_now.py.",
+      "setup_needed": "A flag in .env. The Whisper 'tiny' model downloads on first use."
+    },
+    {
+      "name": "Barge-in (stop her by talking)",
+      "what": "While Apex speaks, a second mic stream listens. If you talk loudly (four times the silence threshold), the speech stops. The ESC and Space keys also stop it, but only in a Unix terminal.",
+      "how_to_use": "Speak over her. There is no working keyboard stop on Windows.",
+      "status": "partial",
+      "evidence": "voice/interrupt.py:42-77 (VAD watcher, threshold at :68), :79-104 (key watcher uses termios, so on Windows it does nothing without telling you); voice/tts.py:34-38 (started for every speak()). app/resident.py has no interrupt or stop wiring at all. No direct tests of voice/interrupt.py; tests/test_main_gestures.py covers main.py's stop gesture only.",
+      "setup_needed": "Headphones, or she may cut herself off through the speakers (docs/CELINE.md:45-51)."
+    },
+    {
+      "name": "Main dashboard chat microphone",
+      "what": "The mic button in the main dashboard chat records you and sends the audio to OpenAI Whisper for transcription.",
+      "how_to_use": "Dashboard chat page, mic button.",
+      "status": "off_by_default",
+      "evidence": "dashboard/static/app.js:2019-2038 (posts to /api/transcribe, alerts on error); dashboard/server.py:2061-2080 (/api/transcribe returns 503 without OPENAI_API_KEY, with no local fallback). No test covers /api/transcribe.",
+      "setup_needed": "OPENAI_API_KEY and internet. Use the Companion page for local, offline transcription instead."
+    },
+    {
+      "name": "Cloud voices (OpenAI / ElevenLabs speech, OpenAI transcription)",
+      "what": "Optional paid cloud voices and transcription instead of Celine and local Whisper.",
+      "how_to_use": "Set TTS_ENGINE=openai or elevenlabs, or OPENAI_STT_ENGINE=openai, plus the key in .env.",
+      "status": "off_by_default",
+      "evidence": "config.py:80-84,140; voice/tts.py:59-98 (needs ffplay on PATH, falls back only if ffplay fails); voice/stt.py:13-41.",
+      "setup_needed": "API key, internet, and ffplay (FFmpeg) on PATH."
+    },
+    {
+      "name": "Voice timing report",
+      "what": "Each Companion voice turn records how many milliseconds each stage took (transcription, first word, first sound) so slow stages can be found.",
+      "how_to_use": "Automatic from the Companion page. Read it with python -m agent.voice_timing or the Companion's timing summary endpoint.",
+      "status": "working",
+      "evidence": "agent/voice_timing.py:80-216; dashboard/companion.py:692-701 (record), :838-844 (summary). Tests: tests/test_voice_timing.py (20).",
+      "setup_needed": "None."
+    },
+    {
+      "name": "Hands-free browser speech detector",
+      "what": "An optional 14 MB Silero voice-activity model that runs in the browser, so hands-free Companion mode can tell speech from noise. Without it, hands-free mode goes by loudness only.",
+      "how_to_use": "Run Setup-Apex-Speech-Model.cmd once (it is hash-checked). Add --check to only check it.",
+      "status": "off_by_default",
+      "evidence": "Setup-Apex-Speech-Model.cmd; scripts/fetch_speech_model.py:1-20; dashboard/companion.py:710 (/api/companion/speech-model); dashboard/static/companion.js:1094. Tests: tests/test_speech_model.py (8).",
+      "setup_needed": "A one-time download (internet)."
+    },
+    {
+      "name": "main.py voice mode (not your launcher)",
+      "what": "Running python main.py without --resident gives a spoken greeting, streaming transcription with partial text shown on the dashboard, and replies spoken sentence by sentence.",
+      "how_to_use": "Command: python main.py (add --wake for the wake word, --text for text only).",
+      "status": "built_untested_on_pc",
+      "evidence": "main.py:257, :526-560 (greeting, wake, listen_streaming), :737-751 (StreamingSpeaker); voice/streamer.py (no tests); voice/stt.py:123-219 (listen_streaming, no tests).",
+      "setup_needed": "None, but your launchers never use this mode."
+    },
+    {
+      "name": "Original whole-section Qwen server and fast-voice installer",
+      "what": "scripts/qwen_server.py is the older server that makes the whole section before sending anything (19.8 s for 2.1 s of speech). Test-Apex-Fast-Voice.cmd installs and benchmarks the fast engine.",
+      "how_to_use": "Start-Apex-Celine.cmd (old server) or Test-Apex-Fast-Voice.cmd (install and measure).",
+      "status": "partial",
+      "evidence": "scripts/qwen_server.py:35-60 (GPU memory retry), scripts/test_fast_qwen.py:14-42 (pinned installer); qwen_fast_server.py:5-6 (19.8 s figure). With the old server, every resident sentence would hit the 20 s budget in voice/tts.py:116 and fall back to the PC voice.",
+      "setup_needed": "%USERPROFILE%\\apex-qwen-env (old) or apex-qwen-fast-env (fast)."
+    }
+  ],
+  "files_covered": [
+    "voice/tts.py",
+    "voice/stt.py",
+    "voice/wake.py",
+    "voice/interrupt.py",
+    "voice/voicebox.py",
+    "voice/streamer.py",
+    "voice/browser_stt.py",
+    "voice/voice_check.py",
+    "agent/celine.py",
+    "agent/voice_timing.py",
+    "agent/persona.py",
+    "agent/core.py",
+    "agent/look_now.py",
+    "dashboard/voices.py",
+    "dashboard/static/voices.js",
+    "dashboard/server.py",
+    "dashboard/companion.py",
+    "dashboard/static/app.js",
+    "scripts/run_apex_qwen.py",
+    "scripts/run_apex_platform.py",
+    "scripts/qwen_server.py",
+    "scripts/qwen_fast_server.py",
+    "scripts/voice_library.py",
+    "scripts/setup_voicebox.py",
+    "scripts/test_fast_qwen.py",
+    "scripts/fetch_speech_model.py",
+    "app/resident.py",
+    "main.py",
+    "config.py",
+    "Start-Apex-Platform.cmd",
+    "Start-Apex-All.cmd",
+    "Start-Apex-Celine.cmd",
+    "Start-Apex-Celine-Fast.cmd",
+    "Test-Apex-Fast-Voice.cmd",
+    "Setup-Apex-Speech-Model.cmd",
+    "docs/CELINE.md",
+    "docs/VOICES.md",
+    "docs/FAST_VOICE_TEST.md",
+    "docs/LOCAL_QWEN.md",
+    "docs/VOICEBOX.md",
+    "tests/test_startup_resilience.py"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_voicebox.py",
+      "tests/test_voicebox_live.py",
+      "tests/test_wake.py",
+      "tests/test_browser_stt.py",
+      "tests/test_voices.py",
+      "tests/test_celine.py",
+      "tests/test_voice_timing.py",
+      "tests/test_speech_model.py",
+      "tests/test_qwen_fast_server.py",
+      "tests/test_qwen_server.py",
+      "tests/test_apex_launcher.py",
+      "tests/test_speak_stream.py",
+      "tests/test_look_now.py",
+      "tests/test_startup_resilience.py",
+      "tests/test_fast_voice_measurement.py",
+      "tests/test_main_gestures.py",
+      "tests/test_gesture_misfires.py",
+      "tests/test_text_encoding.py"
+    ],
+    "approx_test_count": 220
+  },
+  "gaps": [
+    {
+      "issue": "In resident mode (your launcher), any spoken reply longer than about 3-4 sentences comes out in the robot PC voice instead of Celine's. A Ctrl+Space turn sends the WHOLE reply (up to 4000 characters) to Celine as one piece. The fast server builds the full WAV before returning it, at about 0.9x real time, but voice/tts.py gives one piece only 20 seconds (the comment says 'one sentence'). So roughly anything over about 300 characters times out, is spoken by Windows, and turns Celine off for the next 30 seconds. The abandoned generation also keeps the GPU busy, so the Companion can get 'busy' (409) for a while. main.py does not have this problem because it splits replies into sentences (StreamingSpeaker).",
+      "severity": "high",
+      "evidence": "voice/tts.py:116 (SYNTH_BUDGET = 20.0), :118 and :129-142 (_chunks splits only at 4000 characters), :332-337 (timeout leads to cool-down and PC voice); app/resident.py:410 (_voice_speak(reply) with the whole reply); scripts/qwen_fast_server.py:4-5 (RTF about 0.9), :159-187 (/generate/stream joins all chunks before replying, abandon_on_cancel=False)",
+      "fix_hint": "In tts._speak_voicebox_or_fallback, split into sentences (reuse voice/streamer._SENTENCE_END) before synthesizing, or use the /generate/pcm streaming path when voicebox.streaming_supported() says yes. Add a test that a 900-character reply is synthesized as several short pieces.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines. Then ran a scratchpad simulation: voicebox.synthesize faked to take time in proportion to text length at the measured rate, and the budget scaled the same way. A 200-character reply played in Celine's voice. 400- and 900-character replies went entirely to _speak_system (the PC voice) and printed 'Celine's voice is slow right now'. tests/test_startup_resilience.py:105-118 only tests a hung server, not a long reply."
+    },
+    {
+      "issue": "Resident Ctrl+Space turns speak in Celine's cloned voice (the launcher forces VOICEBOX_PROFILE=celine) but answer with the normal Apex identity and style, not Celine's personality or name. Ask 'what's your name?' and you hear Celine's voice say Apex. agent/celine.py was written to prevent exactly this mismatch, but only the Companion page ever passes persona='celine'.",
+      "severity": "medium",
+      "evidence": "app/resident.py:394-395 (agent.run without persona); agent/core.py:3759-3767 (Celine persona only when persona == 'celine', otherwise the Apex persona); dashboard/companion.py:499-500 (the only caller); scripts/run_apex_qwen.py:69-71",
+      "fix_hint": "In app/resident._do_turn pass persona='celine' if celine.wanted(config.TTS_ENGINE, config.VOICEBOX_PROFILE) else None, and add a resident test.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines. grep 'celine|persona' in app/resident.py finds only hotkey bookkeeping and no persona argument. grep of agent/core.py shows persona is used only at :3759 and :3998."
+    },
+    {
+      "issue": "On Windows there is no way to stop Celine mid-reply in resident mode except talking loudly over her. The ESC/Space key watcher uses termios, which does not exist on Windows, so it fails silently. The mute hotkey (Ctrl+Alt+M) only sets a flag and does not cut off speech, and app/resident.py has no stop or interrupt wiring at all. Through laptop speakers, her own voice can also trip the loudness detector and cut her off (the docs admit this).",
+      "severity": "medium",
+      "evidence": "voice/interrupt.py:79-104 (termios import inside a try/except that just returns), :68 (VAD threshold SILENCE_THRESHOLD*4); app/resident.py:120-135 (mute does not interrupt), :436-445 (_on_mute_hotkey); docs/CELINE.md:45-51",
+      "fix_hint": "Have the mute hotkey (or a new stop hotkey) call voice.interrupt.trigger(), and use msvcrt or pynput for the ESC watcher on Windows.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines. grep 'interrupt|trigger()' over app/resident.py, app/tray.py and app/hotkey.py returned nothing. The only termios use in voice/ and app/ is voice/interrupt.py:83."
+    },
+    {
+      "issue": "The main dashboard chat's mic button only works with an OpenAI API key and internet. /api/transcribe has no local Whisper fallback, even though local transcription already exists (voice/browser_stt.py, used by the Companion). Offline, or without an OpenAI key, the mic pops up 'Voice input failed: OPENAI_API_KEY not set'. There is no test for /api/transcribe.",
+      "severity": "medium",
+      "evidence": "dashboard/server.py:2061-2064; dashboard/static/app.js:2027-2035",
+      "fix_hint": "Make /api/transcribe call voice.browser_stt.transcribe(data, name, 'local') when there is no OpenAI key (as /api/companion/transcribe does), and add a test.",
+      "confirmed": true,
+      "how_confirmed": "Read both lines. grep for '/api/transcribe' in tests/ found no test."
+    },
+    {
+      "issue": "The docs and a config comment say the Celine launchers turn the 'Hey Celly' wake phrase on. They don't: launch_environment says 'No feature defaults are injected here', and no launcher or script sets CELINE_WAKE_ENABLED. This matches your choice to keep it off, but the docs are wrong.",
+      "severity": "low",
+      "evidence": "docs/CELINE.md:131-139; config.py:405-408; scripts/run_apex_qwen.py:64-66",
+      "fix_hint": "Fix the docs and config comment to say it is off unless CELINE_WAKE_ENABLED=true is in .env.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines. grep CELINE_WAKE over scripts/ and *.cmd returned nothing."
+    },
+    {
+      "issue": "main.py ignores WAKE_WORD_ENABLED and only uses the --wake flag, although config.py says 'every launcher reads this same default'. Its spoken prompt also says \"Say 'hey agent'\" when the phrases are 'apex...'. This does not affect you in resident mode.",
+      "severity": "low",
+      "evidence": "main.py:161, :533-537; config.py:89-93",
+      "fix_hint": "Use args.wake or config.WAKE_WORD_ENABLED, and say 'Say Apex'.",
+      "confirmed": true,
+      "how_confirmed": "grep for WAKE_WORD_ENABLED in main.py found no match. Read main.py:537."
+    },
+    {
+      "issue": "Several docs are stale. They tell you to start with Start-Apex-Celine-Fast.cmd (you use Start-Apex-Platform.cmd). FAST_VOICE_TEST.md says the Companion is not switched to streaming, but /api/speak/stream now exists.",
+      "severity": "low",
+      "evidence": "docs/CELINE.md:9; docs/VOICES.md:13; docs/LOCAL_QWEN.md:13; docs/FAST_VOICE_TEST.md:33-35; dashboard/server.py:2095",
+      "fix_hint": "Point the docs at Start-Apex-Platform.cmd and remove the stale streaming note.",
+      "confirmed": true,
+      "how_confirmed": "Read the doc lines and the route."
+    },
+    {
+      "issue": "There are no direct tests for the microphone recording and transcription code you use on every Ctrl+Space turn (voice/stt.py), for the sentence-by-sentence speaker (voice/streamer.py), or for voice/interrupt.py.",
+      "severity": "low",
+      "evidence": "voice/stt.py, voice/streamer.py, voice/interrupt.py",
+      "fix_hint": "Add fake-sounddevice tests for listen() silence/end detection and for the StreamingSpeaker sentence split.",
+      "confirmed": true,
+      "how_confirmed": "grep for 'voice.stt', 'voice import stt', 'StreamingSpeaker' and 'voice.interrupt' in tests/*.py: stt and streamer have no hits, and interrupt only appears as monkeypatched in other tests."
+    },
+    {
+      "issue": "Dead code. stt.listen_for_wake_word wakes on the bare word 'hey' anywhere in a sentence, and tts._speak_voicebox is unused.",
+      "severity": "low",
+      "evidence": "voice/stt.py:227-264; voice/tts.py:237-241",
+      "fix_hint": "Delete both.",
+      "confirmed": true,
+      "how_confirmed": "grep across the repo outside tests/ finds no callers."
+    },
+    {
+      "issue": "The Whisper model size and device are hard-coded ('base', 'cpu'), so you cannot move speech recognition to the GPU or change the model from .env. The 'base' and 'tiny' models download from Hugging Face on first use. If the cache is empty during an internet outage, voice input fails.",
+      "severity": "low",
+      "evidence": "config.py:72-73; voice/stt.py:44-50; voice/wake.py:99-101",
+      "fix_hint": "Read WHISPER_MODEL and WHISPER_DEVICE from the environment, and check the cache in Test-Apex-Hardware.",
+      "confirmed": false,
+      "how_confirmed": "Read config.py:72-73. Whether the models are already cached on the laptop could not be checked from here."
+    },
+    {
+      "issue": "With the OpenAI or ElevenLabs voice, a network error raises out of speak() and the reply is simply not spoken (resident only logs 'TTS failed'). The ElevenLabs request has no timeout, so on a bad connection it can hang the turn.",
+      "severity": "low",
+      "evidence": "voice/tts.py:59-98 (requests.post at :95 has no timeout; only an ffplay failure falls back); app/resident.py:409-412",
+      "fix_hint": "Wrap the cloud engines in the same PC-voice fallback and add timeout=30.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines. These engines are off by default."
+    }
+  ],
+  "needs_from_owner": [
+    "After updating, run Start-Apex-Platform.cmd and check that the console reaches 'Celine voice: ready.' with no 'charmap' error. If it stops, send ~/.apex/last-startup-error.txt.",
+    "Check that %USERPROFILE%\\apex-qwen-fast-env\\Scripts\\python.exe exists. If it doesn't, run Test-Apex-Fast-Voice.cmd once while you have internet.",
+    "Check that Celine's recording is there: %USERPROFILE%\\Downloads\\celine.ogg or a folder in %USERPROFILE%\\apex-voices. Without it her server exits and you get the PC voice.",
+    "Press Ctrl+Space and ask something with a long answer (for example 'explain how a car battery works'). Tell us whether the voice switches from Celine to the robot voice part-way or for the whole answer.",
+    "Open http://127.0.0.1:7860/companion, click Voice mode and talk. Note whether her audio starts within about a second, and whether she cuts herself off through the speakers (try with and without headphones).",
+    "Open http://127.0.0.1:7860/voices, record a 25-second test voice and press Try.",
+    "Say whether you have an OPENAI_API_KEY in .env. Without one, the mic button in the main dashboard chat will not work, and only the Companion's mic does.",
+    "Check that %USERPROFILE%\\.cache\\huggingface\\hub has the faster-whisper 'base' (and 'tiny') models, so voice input works during an internet outage."
+  ],
+  "rating": {
+    "score": 5,
+    "why": "Well-built fallbacks and many fake-based tests, but your real path (resident Ctrl+Space) loses Celine's voice on longer answers, uses the wrong personality, has no stop key on Windows, and nothing has run on the laptop since the UTF-8 fix."
+  }
+}

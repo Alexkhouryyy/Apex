@@ -1,0 +1,320 @@
+{
+  "subsystem": "Screen Companion (desktop bubble, follow, look-now, screen drawing, dictation, hotkeys)",
+  "summary": "The Screen Companion is a large, carefully built feature: a hidden always-on-top bubble that F8 opens for screen help or dictation, a drawing layer (Ctrl+Alt+D), Celine marking things on your screen by herself, and a bubble that follows your cursor (Ctrl+Alt+F). The logic is well tested here (about 135 focused tests pass), but every Windows piece (WebView2 window, hotkeys, overlay, follow, dictation) has only ever run against fakes and has never been tried on your laptop. It only works in resident mode and only after Setup-Apex-Screen-Companion.cmd has installed pywebview. One real regression: adding the draw/follow hotkeys made F8 stop being swallowed, so F8 now also reaches whatever app you are in.",
+  "features": [
+    {
+      "name": "Browser Companion page (chat with Celine)",
+      "what": "A chat page where you type or talk to Apex/Celine, with Discuss and Work modes, streaming answers, tool results and saved history.",
+      "how_to_use": "Open http://127.0.0.1:7860/companion (also /drive) in a browser; Start-Apex-Platform prints the link.",
+      "status": "working",
+      "evidence": "dashboard/companion.py:22-26 (GET /companion, /drive), :410 POST /api/companion/chat; dashboard/server.py:136-137 includes the router; tests/test_companion.py (25 tests, passed here); scripts/check_companion_ui.cjs",
+      "setup_needed": "None beyond a working model key."
+    },
+    {
+      "name": "Desktop Companion window (native bubble, starts hidden)",
+      "what": "A small always-on-top Windows window that loads the Companion page inside WebView2. It starts hidden with Apex and pops up when you press a hotkey; Chat expands it for typing.",
+      "how_to_use": "Automatic at resident start; F8 opens it, Esc/Stop/F8 hides it; tray menu 'Screen Companion' opens it full size; the 'Chat' button expands it.",
+      "status": "built_untested_on_pc",
+      "evidence": "Started only in resident mode: app/resident.py:293-299 (COMPANION_DESKTOP_ENABLED, default True at config.py:417); process launch agent/desktop_companion.py:155-190; window app/companion_desktop.py:411-639; routes dashboard/companion.py:37-90; tray app/resident.py:518-533 + app/tray.py:84; tests/test_screen_companion_desktop.py (24 tests, 3 real-Windows ones skipped here), scripts/check_companion_desktop_ui.cjs",
+      "setup_needed": "Run Setup-Apex-Screen-Companion.cmd once: pywebview (requirements-screen-companion.txt) is NOT in requirements.txt, so without it the window never starts (agent/desktop_companion.py:162-163) and F8/Ctrl+Alt+D/Ctrl+Alt+F are never bound."
+    },
+    {
+      "name": "F8: screen help (look now)",
+      "what": "Press F8 from any app: Apex grabs a screenshot of the monitor your mouse is on, shows the bubble, opens the microphone and Celine answers about what is on screen. F8 again stops.",
+      "how_to_use": "Hotkey F8 (COMPANION_HOTKEY). Choose 'Screen help' in the bubble's F8-action dropdown (the default).",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/desktop_companion.py:48-66 on_hotkey -> agent/look_now.py:201-209 on_hotkey -> :105-130 request() with capture_frame() :66-77 -> desktop activate; page side dashboard/static/companion.js:1454-1466; tests/test_look_now.py (25), tests/test_screen_companion_desktop.py:127-146,463",
+      "setup_needed": "Setup-Apex-Screen-Companion.cmd; microphone permission on first use; a model that accepts images (owner uses deepseek-flash; docs/DEEPSEEK.md:4 claims image support, not verified here)."
+    },
+    {
+      "name": "Ctrl+Alt+C: look now (older Celine hotkey)",
+      "what": "Same as F8 screen help. If the desktop window is running it uses it; otherwise it hands the screenshot to an open browser Companion tab.",
+      "how_to_use": "Hotkey Ctrl+Alt+C (CELINE_HOTKEY). Works in resident mode and in normal main.py mode.",
+      "status": "built_untested_on_pc",
+      "evidence": "config.py:400; resident binding app/resident.py:627-632; main.py:505-513; agent/look_now.py:201-209; long-poll route dashboard/companion.py:678-688; tests/test_look_now.py",
+      "setup_needed": "Browser fallback needs the /companion page open (it must have polled within 40 s, agent/look_now.py:34)."
+    },
+    {
+      "name": "Ctrl+Alt+T: talk (Voice mode on/off)",
+      "what": "Starts or stops Voice mode in the Companion without taking a screenshot.",
+      "how_to_use": "Hotkey Ctrl+Alt+T (CELINE_TALK_HOTKEY).",
+      "status": "built_untested_on_pc",
+      "evidence": "config.py:404; app/resident.py:628-629; agent/look_now.py:212-222; companion.js:1461 talkHotkey; tests/test_look_now.py",
+      "setup_needed": "Companion window or page open."
+    },
+    {
+      "name": "'Hey Celly' wake phrase",
+      "what": "Say the wake phrase and Celine looks at your screen; words after it become the question.",
+      "how_to_use": "Say 'hey celly ...' once enabled.",
+      "status": "off_by_default",
+      "evidence": "config.py:408 CELINE_WAKE_ENABLED default False (owner's choice); app/resident.py:633-651; agent/look_now.py:225-235; tests/test_look_now.py, tests/test_resident.py",
+      "setup_needed": "CELINE_WAKE_ENABLED=true in .env, a working microphone and the local speech model; costs CPU all the time."
+    },
+    {
+      "name": "Dictate into another app",
+      "what": "Pick 'Dictate' in the bubble, click a text field in any Windows app, press F8 and speak; each pause types your words into that field. It refuses password fields and stops if the field changes.",
+      "how_to_use": "Bubble dropdown 'F8 action' -> Dictate, then click a field and press F8; F8 again stops.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/desktop_companion.py:53-63; app/desktop_dictation.py:36-102 (UI Automation via pythonnet, tools/windows_input.type_unicode); app/companion_desktop.py:275-278, 552-556; companion.js:1403-1415, 1474-1494; tests/test_companion_creation.py (14), scripts/check_companion_dictation_ui.cjs",
+      "setup_needed": "Setup-Apex-Screen-Companion.cmd (pythonnet comes with pywebview); microphone; local Whisper transcription."
+    },
+    {
+      "name": "Draw on your screen yourself (sketch canvas)",
+      "what": "Opens a transparent drawing layer over the live screen where you draw, box, circle or write; undo/redo, erase, and save your marks as an SVG (never the screen pixels).",
+      "how_to_use": "Ctrl+Alt+D from any app (COMPANION_DRAW_HOTKEY), or the 'Draw' button in the bubble.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/desktop_companion.py:69-75; app/companion_desktop.py:280-313, 580-584; app/screen_canvas.py:140-296; tests/test_companion_follow.py (Marks/hit/export_svg), tests/test_companion_creation.py:109,188 (real Tk canvas child, Windows-only parts faked)",
+      "setup_needed": "Setup-Apex-Screen-Companion.cmd; Windows only."
+    },
+    {
+      "name": "Celine points and draws on screen by herself (screen_draw)",
+      "what": "During screen help Celine is told to mark what she talks about with arrows, circles or numbered steps drawn on a click-through overlay that fades after 2-30 s.",
+      "how_to_use": "Automatic during F8 / Ctrl+Alt+C screen help in the desktop window (not from a browser screen share).",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/screen_guidance.py:24-98 (frame must be fresh <120 s, window shown, mode 'screen'); tool gate agent/core.py:4111-4112, dispatch :2483-2485; agent/desktop_companion.py:275-290 waits for overlay confirmation; app/screen_overlay.py; dashboard/companion.py:577-584; tests/test_screen_companion_desktop.py:72-125,353-379",
+      "setup_needed": "Desktop window running; a model that both sees images and calls tools reliably; Windows."
+    },
+    {
+      "name": "Bubble follows the mouse cursor",
+      "what": "While the compact bubble is shown, it rides just below-right of your pointer, flips near screen edges, stays off the taskbar, and stops moving when you expand Chat or hide it. Your on/off choice is remembered.",
+      "how_to_use": "On by default; 'Follow' button in the bubble or Ctrl+Alt+F (COMPANION_FOLLOW_HOTKEY) toggles it.",
+      "status": "built_untested_on_pc",
+      "evidence": "config.py:420 COMPANION_FOLLOW_CURSOR default true; app/follow.py:31-181 (pure placement + Follower thread), Windows calls :185-247; app/companion_desktop.py:72-86, 315-330, 443-451, 585-599; tests/test_companion_follow.py (27 tests, all with fakes)",
+      "setup_needed": "Windows only; remembered in %LOCALAPPDATA%\\Apex\\Companion\\follow.json."
+    },
+    {
+      "name": "Bubble flies to what Celine marked",
+      "what": "After a confirmed drawing, the following bubble moves next to the mark (and visits numbered steps 1,2,3 in order), then returns to the pointer.",
+      "how_to_use": "Automatic when Follow is on and Celine draws.",
+      "status": "built_untested_on_pc",
+      "evidence": "app/companion_desktop.py:345-360 point_bubble, :600-608; app/follow.py:57-87, 134-141; tests/test_companion_follow.py:282-293",
+      "setup_needed": "Follow on; screen_draw working."
+    },
+    {
+      "name": "Microphone permission prompt (once)",
+      "what": "The first time voice starts after a hotkey, a Windows dialog asks to allow the microphone; the answer is saved.",
+      "how_to_use": "Automatic; delete %LOCALAPPDATA%\\Apex\\Companion\\permissions.json to be asked again.",
+      "status": "built_untested_on_pc",
+      "evidence": "app/companion_desktop.py:363-386, 492-516; tests/test_screen_companion_desktop.py:179",
+      "setup_needed": "Windows microphone privacy must allow desktop apps."
+    },
+    {
+      "name": "Keep Apex's own windows out of screenshots",
+      "what": "Hides the bubble, drawing toolbar and guidance overlay while a screenshot is taken so Celine sees your app, not Apex.",
+      "how_to_use": "Automatic.",
+      "status": "built_untested_on_pc",
+      "evidence": "app/window_capture.py:80-143; agent/desktop_companion.py:207-226; agent/look_now.py:72; app/companion_desktop.py:496-500 (exclude_from_capture); tests/test_screen_companion_desktop.py, tests/test_companion_creation.py",
+      "setup_needed": "Windows 10 2004+ for capture exclusion."
+    },
+    {
+      "name": "Tray mute stops Companion hotkeys",
+      "what": "Muting from the tray (or Ctrl+Alt+M) stops native help and blocks F8/Ctrl+Alt+D/Ctrl+Alt+F/Ctrl+Alt+C from starting anything new; F8 can still stop.",
+      "how_to_use": "Tray Mute or Ctrl+Alt+M.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/desktop_companion.py:37-45, 64-84; app/resident.py:621-631; tests/test_screen_companion_desktop.py:463-473",
+      "setup_needed": "Resident mode."
+    },
+    {
+      "name": "Hands-free voice in the Companion",
+      "what": "Talk without pressing a button: it listens, sends each utterance after a pause, speaks the reply, then listens again. Optional Silero speech model tells voice from noise.",
+      "how_to_use": "Companion page settings: 'Hands-free conversation'. Optional Setup-Apex-Speech-Model.cmd.",
+      "status": "built_untested_on_pc",
+      "evidence": "dashboard/companion.py:642-675 (POST /api/companion/transcribe, local Whisper), :710-729 speech-model status; docs/HANDS_FREE_COMPANION.md; scripts/check_companion_voice_ui.cjs (simulated media)",
+      "setup_needed": "Microphone; faster-whisper model download on first use; speech model install (14 MB, needs internet once)."
+    },
+    {
+      "name": "Sectioned voice playback",
+      "what": "Replies are spoken sentence by sentence (up to 180 chars per section), so the first sentence plays sooner; Stop silences at once.",
+      "how_to_use": "Automatic in Voice mode.",
+      "status": "built_untested_on_pc",
+      "evidence": "docs/COMPANION_VOICE_PLAYBACK.md; companion.js speech queue; scripts/check_speech_queue.cjs (simulated media)",
+      "setup_needed": "A voice engine (device voice, local Qwen/Celine, or OpenAI)."
+    },
+    {
+      "name": "Proactive comments on a shared screen",
+      "what": "In the browser page you share a window; every 30 s/1 min/2 min Apex looks and only speaks if it has something useful.",
+      "how_to_use": "Companion page: share screen, then enable 'Proactive comments' and pick an interval.",
+      "status": "off_by_default",
+      "evidence": "docs/HANDS_FREE_COMPANION.md:58-76; dashboard/companion.py:574-591 (proactive turns forced to one call, 400 tokens via agent/core.py:4105); tests/test_companion.py",
+      "setup_needed": "Must be switched on each time; uses API credits for every check (image calls)."
+    },
+    {
+      "name": "Durable / reconnectable turns",
+      "what": "A Companion request keeps running on the PC even if the browser (phone, car) disconnects, and can be picked up again; a restart marks unfinished ones 'interrupted'.",
+      "how_to_use": "Automatic for the car/drive view; GET /api/companion/jobs.",
+      "status": "working",
+      "evidence": "agent/companion_jobs.py:1-67; dashboard/companion.py:97-131; companion.js:821-874; tests/test_companion.py, tests/test_drive_spatial.py",
+      "setup_needed": "None."
+    },
+    {
+      "name": "Login startup for the Companion",
+      "what": "Registers a Windows sign-in entry that starts Apex resident hidden so F8 works after boot.",
+      "how_to_use": "Setup-Apex-Screen-Companion.cmd (remove with --uninstall).",
+      "status": "off_by_default",
+      "evidence": "scripts/setup_screen_companion.py:18-23, 100-125; scripts/start_screen_companion.py:22-27, 100-111 (sets PYTHONUTF8=1); tests/test_screen_companion_desktop.py:280-352",
+      "setup_needed": "Run the setup once; this is a separate launch path from Start-Apex-Platform.cmd."
+    },
+    {
+      "name": "Old desktop orb",
+      "what": "Older floating dashboard window with its own tray and Ctrl+Shift+\\ hotkey.",
+      "how_to_use": "Only if COMPANION_DESKTOP_ENABLED=false and ORB_ENABLED=true.",
+      "status": "off_by_default",
+      "evidence": "app/resident.py:300-312; app/orb.py; config.py:413-414; no tests found for app/orb.py",
+      "setup_needed": "Effectively retired: never runs with the owner's defaults."
+    }
+  ],
+  "files_covered": [
+    "app/companion_desktop.py",
+    "app/follow.py",
+    "app/hotkey.py",
+    "app/screen_canvas.py",
+    "app/screen_overlay.py",
+    "app/window_capture.py",
+    "app/desktop_dictation.py",
+    "app/orb.py",
+    "app/resident.py",
+    "app/tray.py",
+    "main.py",
+    "config.py",
+    "agent/desktop_companion.py",
+    "agent/look_now.py",
+    "agent/screen_guidance.py",
+    "agent/companion.py",
+    "agent/companion_jobs.py",
+    "agent/core.py",
+    "agent/provider.py",
+    "agent/live_status.py",
+    "tools/hardware_check.py",
+    "dashboard/companion.py",
+    "dashboard/server.py",
+    "dashboard/static/companion.js",
+    "docs/SCREEN_COMPANION.md",
+    "docs/HANDS_FREE_COMPANION.md",
+    "docs/COMPANION_VOICE_PLAYBACK.md",
+    "docs/DEEPSEEK.md",
+    "scripts/setup_screen_companion.py",
+    "scripts/start_screen_companion.py",
+    "scripts/run_apex_platform.py",
+    "Start-Apex-Platform.cmd",
+    "Setup-Apex-Screen-Companion.cmd",
+    "requirements-screen-companion.txt",
+    ".github/workflows/screen-companion.yml",
+    "tests/test_screen_companion_desktop.py",
+    "tests/test_companion_follow.py"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_companion.py",
+      "tests/test_companion_follow.py",
+      "tests/test_look_now.py",
+      "tests/test_screen_companion_desktop.py",
+      "tests/test_companion_creation.py",
+      "tests/test_resident.py",
+      "tests/test_startup_resilience.py",
+      "tests/test_drive_spatial.py",
+      "scripts/check_companion_ui.cjs",
+      "scripts/check_companion_desktop_ui.cjs",
+      "scripts/check_companion_dictation_ui.cjs",
+      "scripts/check_companion_voice_ui.cjs",
+      "scripts/check_companion_in_board_ui.cjs"
+    ],
+    "approx_test_count": 115
+  },
+  "gaps": [
+    {
+      "issue": "F8 is no longer a 'private' Windows hotkey. Since Ctrl+Alt+D and Ctrl+Alt+F were added to the same hotkey manager, F8 goes through pynput instead of Windows RegisterHotKey, so F8 is NOT swallowed: the app you are in also receives F8 (Excel/Word: extend-selection mode; VS Code and browser dev tools: debugger resume), including the very field you are about to dictate into. A clash with another program owning F8 is also no longer detected.",
+      "severity": "medium",
+      "evidence": "app/hotkey.py:116-121 (RegisterHotKey path only when exactly ONE binding); agent/desktop_companion.py:183-189 binds F8 + Ctrl+Alt+D + Ctrl+Alt+F on one GlobalHotkeys; introduced by commit 0486195",
+      "fix_hint": "Give F8 its own GlobalHotkeys instance (or teach GlobalHotkeys to use WindowsFunctionHotkey for each bare F-key binding and pynput for the rest), and add a test that F8 still takes the RegisterHotKey path when draw/follow hotkeys are also bound.",
+      "confirmed": true,
+      "how_confirmed": "Read app/hotkey.py:116 and agent/desktop_companion.py:184-189; ran a python snippet building the binding dict from config defaults: 3 bindings -> RegisterHotKey condition is False. The only real-key test (tests/test_screen_companion_desktop.py:261) binds a single <f24>, so nothing covers the 3-binding case."
+    },
+    {
+      "issue": "The desktop Companion is 'on by default' but cannot start unless Setup-Apex-Screen-Companion.cmd was run: pywebview is only in requirements-screen-companion.txt, and Start-Apex-Platform/install-apex.bat never install it. Without it the window never starts and F8, Ctrl+Alt+D and Ctrl+Alt+F are never bound (they are bound only after the pywebview check). It is reported in the live status and hardware check, but nothing on the dashboard or in the launcher tells you.",
+      "severity": "medium",
+      "evidence": "config.py:417 (COMPANION_DESKTOP_ENABLED default True); agent/desktop_companion.py:162-163 raises before hotkeys are bound at :179-189; requirements.txt has no pywebview (only requirements-screen-companion.txt:2); install-apex.bat:39; mitigations agent/live_status.py:162-163, tools/hardware_check.py:361-369",
+      "fix_hint": "Have Start-Apex-Platform print one clear line ('Desktop Companion not installed: run Setup-Apex-Screen-Companion.cmd') when find_spec('webview') is None, or bind F8 anyway with a fallback to the browser Companion.",
+      "confirmed": true,
+      "how_confirmed": "Grepped requirements*.txt and install-apex.bat for webview; read the order of the find_spec check vs. hotkey binding in agent/desktop_companion.py:155-189; read the live_status and hardware_check messages that do surface it."
+    },
+    {
+      "issue": "Desktop Companion, F8, Ctrl+Alt+D and Ctrl+Alt+F exist only in resident mode. 'main.py' without --resident (e.g. --text/--voice) only binds Ctrl+Alt+C / Ctrl+Alt+T to the browser page. Fine for the owner's launcher, but docs present F8 as the Companion key without saying so.",
+      "severity": "low",
+      "evidence": "app/resident.py:293-299 is the only caller of desktop_companion.start (grep); main.py:505-513 starts only look_now",
+      "fix_hint": "Mention 'resident mode only' next to F8 in docs/SCREEN_COMPANION.md.",
+      "confirmed": true,
+      "how_confirmed": "Grepped main.py and app/resident.py for desktop_companion/look_now."
+    },
+    {
+      "issue": "Doc overclaims: docs/SCREEN_COMPANION.md says 'Windows CI checks the actual native shell and overlay'. A workflow file exists (.github/workflows/screen-companion.yml, windows-latest), but per the owner there is no working Windows CI, and the 3 real-Windows tests are skipped everywhere else.",
+      "severity": "low",
+      "evidence": "docs/SCREEN_COMPANION.md:347; .github/workflows/screen-companion.yml:36-39; tests/test_screen_companion_desktop.py:224,260,380 (skipif os.name!='nt')",
+      "fix_hint": "Reword to 'Windows-only tests exist but are not run automatically; check on the laptop'.",
+      "confirmed": false,
+      "how_confirmed": "Read the doc line and the workflow file; could not query GitHub Actions run history through the proxy, so whether it ever ran is unknown."
+    },
+    {
+      "issue": "Stale doc: docs/COMPANION_VOICE_PLAYBACK.md says 'Text generation still finishes before speech starts', but the page now speaks each sentence while the reply is still streaming.",
+      "severity": "low",
+      "evidence": "docs/COMPANION_VOICE_PLAYBACK.md:9-10 vs dashboard/static/companion.js:902-904 (startLiveSpeech)",
+      "fix_hint": "Update the doc paragraph.",
+      "confirmed": true,
+      "how_confirmed": "Read both lines."
+    },
+    {
+      "issue": "Ctrl+Alt+D / Ctrl+Alt+F pressed while the desktop window is still (re)starting can be silently lost: 'activate' events are held until the page is ready, but 'sketch' and 'follow' events are processed at once, the error is only logged to desktop.log, and the event is marked done.",
+      "severity": "low",
+      "evidence": "app/companion_desktop.py:530-534 (activate waits for bridge._ready) vs :580-599 (sketch/follow do not); after = item['seq'] at :609",
+      "fix_hint": "Treat 'sketch'/'follow' like 'activate' (break and retry) until bridge._ready is set.",
+      "confirmed": false,
+      "how_confirmed": "Read the command loop; whether the page is usually ready before a user presses the key depends on timing I could not reproduce."
+    },
+    {
+      "issue": "During Celine's pointing tour the bubble parks beside the mark for up to 30 s regardless of where your pointer is, and the bubble is not click-through, so it may cover what you are about to click.",
+      "severity": "low",
+      "evidence": "app/follow.py:148-153 (focus point replaces the cursor); app/companion_desktop.py:89-102 (only WS_EX_NOACTIVATE, not WS_EX_TRANSPARENT)",
+      "fix_hint": "Skip the tour step (fall back to the pointer) when the pointer is inside the bubble's target rectangle, or make the compact bubble click-through while touring.",
+      "confirmed": false,
+      "how_confirmed": "Read the code; real effect needs the laptop."
+    },
+    {
+      "issue": "Screen help depends on the chat model accepting screenshots. The owner appears to use deepseek-flash; the provider adapter sends the screenshot as an OpenAI-style image_url part. docs/DEEPSEEK.md claims image support, but nothing here proves the live API accepts it; if it does not, every F8 screen-help turn fails.",
+      "severity": "low",
+      "evidence": "agent/provider.py:284-291; agent/core.py:4010-4019; docs/DEEPSEEK.md:3-4",
+      "fix_hint": "Press F8 once on the laptop with deepseek-flash and confirm the answer describes the screen; if it errors, route screen turns to a vision-capable model.",
+      "confirmed": false,
+      "how_confirmed": "Read the adapter; could not call the DeepSeek API from here."
+    },
+    {
+      "issue": "Dead config: SCREEN_HOTKEY is defined but nothing reads it.",
+      "severity": "low",
+      "evidence": "config.py:397",
+      "fix_hint": "Remove it or wire it.",
+      "confirmed": true,
+      "how_confirmed": "grep -rn SCREEN_HOTKEY over all .py files outside tests: only config.py."
+    },
+    {
+      "issue": "The old desktop orb (app/orb.py) has no tests and can only run when the desktop Companion is turned off; with defaults it is dead code.",
+      "severity": "low",
+      "evidence": "app/resident.py:293-312; app/orb.py; no tests import app.orb",
+      "fix_hint": "Delete it or mark it deprecated in docs.",
+      "confirmed": true,
+      "how_confirmed": "grep for app.orb / run_orb in tests returned nothing."
+    }
+  ],
+  "needs_from_owner": [
+    "Run Setup-Apex-Screen-Companion.cmd once (if you have not), then start with Start-Apex-Platform.cmd; check %LOCALAPPDATA%\\Apex\\Companion\\desktop.log for errors.",
+    "Run Test-Apex-Hardware.cmd and confirm the 'Companion window and hotkeys are installed' line and the display-scale line.",
+    "Press F8 over another app: bubble appears beside the pointer, microphone prompt appears once, Celine describes the right screen. Note whether F8 also did something inside that app (e.g. Excel/Word).",
+    "Ask Celine 'where is the Save button?' during F8 help: does an arrow appear on the right spot and does the bubble fly to it?",
+    "Press Ctrl+Alt+D: drawing layer opens; draw, undo, save an SVG, Done. Press Ctrl+Alt+F: bubble toggles between cursor and corner.",
+    "Pick 'Dictate' in the bubble, click a Notepad field, press F8, speak, pause: text should type in; switch field and confirm it stops.",
+    "Confirm deepseek-flash actually accepts screenshots (an F8 turn that answers about the screen, not an error).",
+    "Tray Mute, then press F8/Ctrl+Alt+D: nothing should start. Unmute.",
+    "On your 125%/150% laptop screen, check the bubble does not land off-screen or under the taskbar."
+  ],
+  "rating": {
+    "score": 6,
+    "why": "Well designed and heavily unit-tested, but every Windows-facing part is untried on the laptop, needs a separate setup, and F8 regressed to a non-swallowed key."
+  }
+}
