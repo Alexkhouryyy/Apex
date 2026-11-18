@@ -1,0 +1,404 @@
+{
+  "subsystem": "Dashboard shell, security, install/launchers, ops, testing and CI",
+  "summary": "The dashboard server, its token login, origin checks, the fail-closed bind and the resident/platform launchers are carefully built and heavily unit-tested on Linux. But the two launchers the owner actually uses have never succeeded on his laptop since the UTF-8 fix. The real Windows CI job has been failing for weeks and currently dies part-way through, so Windows coverage is worse than it looks. The repo also contains a committed copy of a real-looking dashboard token and VAPID private key, and with no token set every owner page (Home, Setup, Settings) is locked while the API is open to DNS rebinding. The older install-apex.bat, start-apex.bat and stop-apex.bat are stale and point at the wrong Python.",
+  "features": [
+    {
+      "name": "Main launcher: Start-Apex-Platform.cmd",
+      "what": "One console that starts Apex in resident mode with Celine's fast voice, the offline Apocalypse dashboard, and NOMAD (only if Docker Desktop is running and its images are already cached). If one service fails, the other keeps running; Ctrl+C stops what it started.",
+      "how_to_use": "Double-click Start-Apex-Platform.cmd (add --offline-only or --no-nomad). It opens /apocalypse and /home when ready.",
+      "status": "built_untested_on_pc",
+      "evidence": "Start-Apex-Platform.cmd:8 (-X utf8 scripts\\run_apex_platform.py --open); scripts/run_apex_platform.py:109-285 (spawns run_apex_qwen.py --fast --resident at :176, health waits 240 s/1200 s, restart on exit 42); start_cached_nomad :67-92 (--pull never --no-build); PYTHONUTF8=1 for both children :136. Tests: tests/test_platform_launcher.py (26). The UTF-8 fix has not been re-tried on the laptop; on real Windows CI the test run is killed inside this test file (see gaps).",
+      "setup_needed": ".venv created by Apex.bat; Docker Desktop open for NOMAD; APEX_APOCALYPSE_HOME pointing at D:."
+    },
+    {
+      "name": "Resident launcher: Start-Apex-All.cmd (run_apex_qwen.py --fast --resident)",
+      "what": "Starts Celine's local Qwen voice server, then Apex resident mode, waits for /health, opens the Companion page, keeps Celine warm across dashboard Restarts (exit 42), and falls back to the PC's own voice if Celine dies or never loads.",
+      "how_to_use": "Double-click Start-Apex-All.cmd. Keep the window open; Ctrl+C stops Apex and Celine.",
+      "status": "built_untested_on_pc",
+      "evidence": "Start-Apex-All.cmd:10; scripts/run_apex_qwen.py:55-69 (PYTHONUTF8=1, APEX_SUPERVISED=1), :206-333 (restart only on exit 42, max 5 per 2 min, voice fallback messages, taskkill /T on Windows :111-123). Tests: tests/test_apex_launcher.py (35), tests/test_startup_resilience.py (50).",
+      "setup_needed": "Fast voice environment from Test-Apex-Fast-Voice.cmd (~\\apex-qwen-fast-env); NVIDIA GPU."
+    },
+    {
+      "name": "Restart / Update buttons in the dashboard",
+      "what": "Settings can restart Apex (the launcher brings it back on exit code 42) and pull new code with git.",
+      "how_to_use": "Main dashboard (/) settings: Restart and Update buttons.",
+      "status": "off_by_default",
+      "evidence": "dashboard/server.py:2277-2300 (/api/control/update, /api/control/restart, master token only via _control_guard :2250); agent/control.py:50-54,206 (EXIT_RESTART=42, APEX_SUPERVISED); scripts/apex_supervisor.py:48-73. Tests: tests/test_control.py (39).",
+      "setup_needed": "DASHBOARD_TOKEN set and signed in with it; must be launched by a launcher that sets APEX_SUPERVISED (Start-Apex-All/Platform/start-apex.bat do, the login autostart from install-apex.bat does not)."
+    },
+    {
+      "name": "Dashboard web server and page shell",
+      "what": "FastAPI server on 127.0.0.1:7860 that serves every Apex page (/, /home, /setup, /companion, /apps, /apocalypse, /code, /work, /world, ...) plus /health and ~200 API routes. Started in both main.py and resident mode.",
+      "how_to_use": "Automatic at startup; open http://127.0.0.1:7860/ (launchers print and open the address).",
+      "status": "working",
+      "evidence": "dashboard/server.py:137-169 (17 routers), :319-327 (/health with launch_id/platform_id), :2685-2734 start_in_background; main.py:407-426 and app/resident.py:272-290 both start it. Tests: tests/test_dashboard_security.py (11), tests/test_dashboard_bind.py (4), tools/smoke.py boot test (tests/test_smoke.py 14) in CI.",
+      "setup_needed": ""
+    },
+    {
+      "name": "Dashboard login with the master token (DASHBOARD_TOKEN)",
+      "what": "All API calls need 'Authorization: Bearer <token>'. The master token unlocks owner pages and settings; without it set, the dashboard runs open on localhost but every owner page (Home, Setup, Apps, Environment/plugins, Settings, Restart, Update, Missions) refuses with 403.",
+      "how_to_use": "Set DASHBOARD_TOKEN in .env (python scripts/set_env_key.py DASHBOARD_TOKEN <password>), restart, type the token in the page's login box.",
+      "status": "off_by_default",
+      "evidence": "config.py:133 (default empty); dashboard/server.py:227-310 middleware (tokenless = everything allowed but is_master never set :262-263); owner gates dashboard/home.py:14-18, dashboard/apps.py:14-17, dashboard/server.py:2250; dashboard/world_setup.py:29-33 /api/setup/access tells the page whether a token exists; dashboard/static/setup.js:46-48. Tests: tests/test_dashboard_security.py, tests/test_world_setup.py (6), tests/test_doctor.py.",
+      "setup_needed": "Set DASHBOARD_TOKEN in .env. tools/doctor.py flags it as FAIL when empty (ran it: '[FAIL] The dashboard')."
+    },
+    {
+      "name": "Per-device tokens and phone pairing link",
+      "what": "The master token can mint revocable tokens for a phone or other device and produce a pairing URL; device tokens can use Apex but cannot change settings, restart or mint tokens.",
+      "how_to_use": "Dashboard settings: device list / pair; API /api/auth/tokens, /api/pair/info, /api/devices.",
+      "status": "off_by_default",
+      "evidence": "dashboard/server.py:1125-1195; agent/access_tokens.py. Tests: tests/test_access_tokens.py (6), tests/test_dashboard_security.py.",
+      "setup_needed": "Master DASHBOARD_TOKEN; PUBLIC_BASE_URL / Tailscale for a phone."
+    },
+    {
+      "name": "Brute-force throttle",
+      "what": "More than 10 bad tokens from one IP within 60 s returns 429 for that IP.",
+      "how_to_use": "Automatic.",
+      "status": "working",
+      "evidence": "dashboard/ratelimit.py:11-34; dashboard/server.py:222-224,287-289,309. Tests: tests/test_ratelimit.py (5).",
+      "setup_needed": ""
+    },
+    {
+      "name": "Cross-site request protection (origin check)",
+      "what": "Every POST/PUT/DELETE must come from the dashboard's own origin (or a browser extension with a valid bearer token), so a random website cannot make Apex do things.",
+      "how_to_use": "Automatic.",
+      "status": "partial",
+      "evidence": "dashboard/server.py:232-245 calls dashboard/companion.py:201-216 _check_origin, which compares Origin with the request's own Host. No Host-header allow-list, so DNS rebinding passes when no token is set (see gaps). Tests: tests/test_dashboard_security.py.",
+      "setup_needed": "Setting DASHBOARD_TOKEN closes the gap."
+    },
+    {
+      "name": "Fail-closed public bind",
+      "what": "If DASHBOARD_HOST is 0.0.0.0 (or any non-loopback) and no token is set, the server refuses and binds 127.0.0.1 instead; the launchers compute the same address.",
+      "how_to_use": "Automatic.",
+      "status": "working",
+      "evidence": "dashboard/server.py:2702-2710; scripts/run_apex_qwen.py:72-81. Tests: tests/test_dashboard_bind.py (4), tests/test_apex_launcher.py.",
+      "setup_needed": ""
+    },
+    {
+      "name": "Signed inbound webhooks (Telegram, Discord, Twilio, Slack, Signal, IoT, WhatsApp)",
+      "what": "Webhook paths skip bearer auth but each verifies its provider's signature; a startup audit prints the state of each one.",
+      "how_to_use": "Automatic once a channel is configured.",
+      "status": "off_by_default",
+      "evidence": "dashboard/server.py:212-216 (_WEBHOOK_PATHS), :781-960 handlers catching webhook_auth.WebhookRejected; dashboard/webhook_auth.py:194 audit(), printed from start_in_background (server.py:2734). Tests: tests/test_webhook_auth.py (25).",
+      "setup_needed": "Each channel's keys and a public URL."
+    },
+    {
+      "name": "Browser-extension API access (CORS)",
+      "what": "chrome-extension:// and moz-extension:// origins may call the API with a bearer token.",
+      "how_to_use": "Automatic for the Apex browser extension.",
+      "status": "off_by_default",
+      "evidence": "dashboard/server.py:172-181 (CORSMiddleware, credentials off), :238-240.",
+      "setup_needed": "Extension installed and given a token."
+    },
+    {
+      "name": "JavaScript/WASM MIME pinning for Windows",
+      "what": "Forces .js/.mjs/.css/.wasm content types so a Windows registry that maps .js to text/plain cannot break module pages (board, three.js).",
+      "how_to_use": "Automatic.",
+      "status": "working",
+      "evidence": "dashboard/server.py:183-207.",
+      "setup_needed": ""
+    },
+    {
+      "name": "Apex Home page (/home)",
+      "what": "Owner page for identity, project continuity and corrections, task recovery, imported skills and recent team runs. The platform launcher opens it when Apex is ready.",
+      "how_to_use": "Open http://127.0.0.1:7860/home and sign in with the master token.",
+      "status": "off_by_default",
+      "evidence": "dashboard/home.py:14-18 (owner only), :62-167 (16 routes), included at dashboard/server.py:151; page dashboard/static/home.html + home.js (login overlay on 401/403, home.js:7). Tests: tests/test_continuity.py (16). No page check for home.js.",
+      "setup_needed": "DASHBOARD_TOKEN."
+    },
+    {
+      "name": "Setup page (/setup)",
+      "what": "Owner diagnostics: World View engine install, model/provider key status, Celine voice server and profile check, Composio key, and a read-only check of the World View upstream for updates.",
+      "how_to_use": "Open /setup with the master token.",
+      "status": "off_by_default",
+      "evidence": "dashboard/world_setup.py:24-80 (/setup, /api/setup/access public, /api/setup/status owner-only); dashboard/static/setup.js:43-60. Tests: tests/test_world_setup.py (6); scripts/check_setup_ui.cjs runs in CI (.github/workflows/tests.yml:230).",
+      "setup_needed": "DASHBOARD_TOKEN; Setup-Apex-World.cmd for the engine."
+    },
+    {
+      "name": "Environment / skills / plugins management",
+      "what": "Owner panel to inspect a repository, preview and import skill procedures, develop a new skill, and preview/install/enable/configure plugins.",
+      "how_to_use": "Main dashboard (/) panels loaded from environment.js and plugins.js; API /api/environment/*.",
+      "status": "off_by_default",
+      "evidence": "dashboard/environment.py:7-97 (owner dependency on every route), included dashboard/server.py:163; dashboard/static/index.html loads environment.js/plugins.js. Tests: tests/test_environment.py (14); scripts/check_environment_ui.cjs exists but is not in CI.",
+      "setup_needed": "DASHBOARD_TOKEN; network for repository intake."
+    },
+    {
+      "name": ".env reader for any Windows encoding (env_file.py)",
+      "what": "Reads .env saved as UTF-8, UTF-8 with BOM, UTF-16 (PowerShell >>) or cp1252 (Notepad ANSI), including a UTF-8 file with UTF-16 lines appended, and says once which it used.",
+      "how_to_use": "Automatic in config and every launcher.",
+      "status": "working",
+      "evidence": "env_file.py:21-64; used by scripts/run_apex_qwen.py:56, scripts/start_screen_companion.py:22. Tests: tests/test_env_file.py (6).",
+      "setup_needed": ""
+    },
+    {
+      "name": "Text-file reader for the charmap crash (text_file.py) and UTF-8 mode everywhere",
+      "what": "Reads Apex's own text files as UTF-8 first, then cp1252, so a memory file written by one launch no longer crashes the next with \"'charmap' codec can't decode byte 0x9d\". Launchers also set PYTHONUTF8=1 for every child process.",
+      "how_to_use": "Automatic.",
+      "status": "built_untested_on_pc",
+      "evidence": "text_file.py:18-39; PYTHONUTF8 in scripts/run_apex_qwen.py:70,197, scripts/run_apex_platform.py:136, scripts/apex_supervisor.py:53, scripts/start_screen_companion.py:24, app/autostart.py:139. Tests: tests/test_text_encoding.py (10), including a scan that forbids default-encoding reads (:86) and checks every launch path (:54, :122). Fix merged, not re-run on the laptop.",
+      "setup_needed": "Re-run Start-Apex-Platform.cmd on the laptop."
+    },
+    {
+      "name": "Hardware check (Test-Apex-Hardware.cmd)",
+      "what": "Measures memory, disks, GPU (nvidia-smi), displays, screen capture, webcam and hand detection, microphone, speakers, Celine's voice (makes one real sentence), the PC fallback voice, whether Apex and its desktop pieces are installed, and internet. Saves a dated report under %LOCALAPPDATA%\\Apex\\hardware and lists what changed since last time. Changes nothing.",
+      "how_to_use": "Double-click Test-Apex-Hardware.cmd (full, with a hands-on demo; quit Apex first for the camera) or 'Test-Apex-Hardware.cmd quick'.",
+      "status": "built_untested_on_pc",
+      "evidence": "Test-Apex-Hardware.cmd:10-20; tools/hardware_check.py:46-489 (checks registered with @check, per-check timeout :393, report :412-489). Tests: tests/test_hardware_check.py (11, with fakes); passed on the real Windows CI runner on 2026-11-05 (no camera/GPU there). Never run on the laptop.",
+      "setup_needed": ".venv; quit Apex for the camera test."
+    },
+    {
+      "name": "Doctor (python -m tools.doctor)",
+      "what": "Plain-language health check: model key, memory DB, missing tables, camera, pinch calibration, MCP servers, relay, dashboard token, Python dependencies; each FAIL says what to run.",
+      "how_to_use": "Command: .venv\\Scripts\\python.exe -m tools.doctor (no .cmd wrapper and no dashboard button).",
+      "status": "working",
+      "evidence": "tools/doctor.py:45-271; ran it here: it printed a [FAIL] for the empty DASHBOARD_TOKEN and exited 0. Tests: tests/test_doctor.py (15).",
+      "setup_needed": ""
+    },
+    {
+      "name": "Boot smoke test (python -m tools.smoke)",
+      "what": "Boots Apex with test settings and checks the dashboard answers; used in CI.",
+      "how_to_use": "Command: python -m tools.smoke (developer tool).",
+      "status": "working",
+      "evidence": "tools/smoke.py; .github/workflows/tests.yml 'Boot smoke test' step passed on 2026-11-05. Tests: tests/test_smoke.py (14).",
+      "setup_needed": ""
+    },
+    {
+      "name": "Structural audits: wiring_audit, sql_audit, autonomy_audit",
+      "what": "wiring_audit finds code that is never called, sql_audit checks SQL/table drift, autonomy_audit maps what Apex can reach with nobody watching against a reviewed list.",
+      "how_to_use": "Developer commands: python -m tools.wiring_audit / tools.sql_audit; autonomy is enforced by tests.",
+      "status": "working",
+      "evidence": "tools/wiring_audit.py, tools/sql_audit.py, tools/autonomy_audit.py; CI step 'Structural audits (informational - never fails the build)' (.github/workflows/tests.yml:238-243). Tests: tests/test_wiring.py (13), tests/test_sql_audit.py (6), tests/test_autonomy.py (14).",
+      "setup_needed": ""
+    },
+    {
+      "name": "Isolated test runner (scripts/run_tests.py)",
+      "what": "Runs pytest with a fresh temp DB/vault/sandbox, UTF-8 mode and no laptop .env, so tests never touch real data.",
+      "how_to_use": "Command: .venv\\Scripts\\python.exe -X utf8 scripts\\run_tests.py [tests...] (docs/TESTING.md).",
+      "status": "working",
+      "evidence": "scripts/run_tests.py:14-71. Tests: tests/test_test_runner.py (2).",
+      "setup_needed": ""
+    },
+    {
+      "name": "GitHub Actions CI (Tests, Screen Companion, REA workflows)",
+      "what": "Linux job runs the full suite, smoke test, ~50 page checks and audits. Windows jobs run the Code IDE checks and the FULL suite on a real Windows runner.",
+      "how_to_use": "Automatic on push/PR to main.",
+      "status": "broken",
+      "evidence": "/.github/workflows/tests.yml:80-97 (windows-code job: full suite on windows-latest), :14-79 (code-ide on ubuntu+windows), :111-243 (verify). GitHub Actions on main: the last 10 'Tests' runs (2026-10-30 to 2026-11-05) all concluded 'failure'. In run 41994150534 the Linux 'verify' job passed, but 'windows-code' died inside tests\\test_platform_launcher.py and 'code-ide (ubuntu)' failed at 'npm audit'.",
+      "setup_needed": ""
+    },
+    {
+      "name": "Login autostart and quiet launchers (install-apex.bat, start-apex.bat, stop-apex.bat, Setup-Apex-Screen-Companion.cmd)",
+      "what": "Older install path: installs packages, makes .env, registers a Windows Run key that starts main.py --resident at login, and start/stop batch files. Setup-Apex-Screen-Companion registers its own login launcher instead.",
+      "how_to_use": "Double-click install-apex.bat once; start-apex.bat / stop-apex.bat later.",
+      "status": "partial",
+      "evidence": "install-apex.bat:38-39 installs into system Python (py -3), not .venv; :84 app.autostart install; :92 'pyw -3 main.py --resident'; :110 prints http://localhost:5000; app/autostart.py:139 Run key '-X utf8 main.py --resident' (no voice server, no supervisor); start-apex.bat:13 'pyw -3 scripts\\apex_supervisor.py'; stop-apex.bat:12 uses wmic; scripts/setup_screen_companion.py:59-71 replaces the same Run key with start_screen_companion.py. Tests: tests/test_text_encoding.py:122 (UTF-8 flags only), tests/test_screen_companion_desktop.py (24).",
+      "setup_needed": "Use Apex.bat to create .venv instead."
+    },
+    {
+      "name": "Apex.bat / Apex.ps1 first-run installer and terminal UI",
+      "what": "Creates .venv, installs requirements once (marker .venv\\.apex_ready), repairs .env and starts the terminal UI (main.py --tui) with a restart loop.",
+      "how_to_use": "Double-click Apex.bat.",
+      "status": "working",
+      "evidence": "Apex.bat:39-67 (venv + pip), :142 main.py --tui; Apex.ps1:36-75. No unit tests for the batch files.",
+      "setup_needed": "Python 3.11+ installed."
+    },
+    {
+      "name": "Cloud deploy (Dockerfile, railway.toml, setup.sh)",
+      "what": "Container build with requirements-cloud.txt that runs main.py --text on 0.0.0.0:7860 with a /health check.",
+      "how_to_use": "Railway or docker build.",
+      "status": "off_by_default",
+      "evidence": "Dockerfile:1-21; railway.toml:1-8. Without DASHBOARD_TOKEN the server falls back to 127.0.0.1 (server.py:2706-2710), so the Railway health check cannot reach it - fail closed.",
+      "setup_needed": "A Railway account and DASHBOARD_TOKEN set in the Railway variables."
+    },
+    {
+      "name": "Claude Code session hook and project skills",
+      "what": "Cloud coding sessions auto-install Python and Node test dependencies. Project skills give the agent laptop command recipes, library help and the ship-apex checklist.",
+      "how_to_use": "Automatic in Claude Code cloud sessions.",
+      "status": "working",
+      "evidence": ".claude/settings.json (SessionStart hook); .claude/hooks/session-start.sh (exits early unless CLAUDE_CODE_REMOTE=true); .claude/skills/{apex-laptop,apocalypse-library,clone-app,composio,ship-apex}.",
+      "setup_needed": ""
+    }
+  ],
+  "files_covered": [
+    "dashboard/server.py",
+    "dashboard/home.py",
+    "dashboard/environment.py",
+    "dashboard/ratelimit.py",
+    "dashboard/world_setup.py",
+    "dashboard/companion.py",
+    "dashboard/apps.py",
+    "dashboard/static/setup.js",
+    "dashboard/static/home.js",
+    "env_file.py",
+    "text_file.py",
+    "config.py",
+    "main.py",
+    "app/resident.py",
+    "app/autostart.py",
+    "agent/control.py",
+    "tools/hardware_check.py",
+    "tools/doctor.py",
+    "tools/autonomy_audit.py",
+    "Test-Apex-Hardware.cmd",
+    "scripts/run_apex_qwen.py",
+    "scripts/run_apex_platform.py",
+    "scripts/apex_supervisor.py",
+    "scripts/start_screen_companion.py",
+    "scripts/setup_screen_companion.py",
+    "scripts/run_tests.py",
+    "scripts/create-env.bat",
+    "install-apex.bat",
+    "Apex.bat",
+    "Apex-Diagnose.bat",
+    "start-apex.bat",
+    "stop-apex.bat",
+    "Start-Apex-Platform.cmd",
+    "Start-Apex-All.cmd",
+    "Dockerfile",
+    "railway.toml",
+    ".github/workflows/tests.yml",
+    ".github/workflows/screen-companion.yml",
+    ".github/workflows/rea.yml",
+    ".claude/settings.json",
+    ".claude/hooks/session-start.sh",
+    "docs/TESTING.md",
+    "docs/start-apex.md",
+    "docs/FIRST_RELEASE_CHECKLIST.md",
+    "docs/PROVE_IT.md",
+    "tests/test_platform_launcher.py",
+    "tests/test_startup_resilience.py",
+    "tests/test_text_encoding.py"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_access_tokens.py",
+      "tests/test_apex_launcher.py",
+      "tests/test_dashboard_bind.py",
+      "tests/test_dashboard_security.py",
+      "tests/test_doctor.py",
+      "tests/test_env_file.py",
+      "tests/test_environment.py",
+      "tests/test_hardware_check.py",
+      "tests/test_platform_launcher.py",
+      "tests/test_ratelimit.py",
+      "tests/test_smoke.py",
+      "tests/test_sql_audit.py",
+      "tests/test_webhook_auth.py",
+      "tests/test_wiring.py",
+      "tests/test_world_setup.py",
+      "tests/test_world_windows_launcher.py",
+      "tests/test_text_encoding.py",
+      "tests/test_startup_resilience.py",
+      "tests/test_test_runner.py",
+      "tests/test_autonomy.py",
+      "tests/test_control.py",
+      "tests/test_continuity.py",
+      "tests/test_resident.py",
+      "tests/test_screen_companion_desktop.py"
+    ],
+    "approx_test_count": 537
+  },
+  "gaps": [
+    {
+      "issue": "Real secrets are committed to the repo: scripts/create-env.bat writes DASHBOARD_TOKEN=[the real token], a VAPID private key, the owner's email and a Tailscale IP with DASHBOARD_HOST=0.0.0.0. The same token is in scripts/check_companion_voice_ui.cjs and tests/test_set_env_key.py. Anyone who can read the repo or a clone of it has the master dashboard token, which can run commands on the laptop if it is the live one.",
+      "severity": "high",
+      "evidence": "scripts/create-env.bat:8-13; scripts/check_companion_voice_ui.cjs:55-56; tests/test_set_env_key.py:26-28",
+      "fix_hint": "Change DASHBOARD_TOKEN and VAPID keys on the laptop now. Delete scripts/create-env.bat (its own comment says 'then DELETE this file'), replace the token in the test and page check with a dummy, and consider scrubbing git history.",
+      "confirmed": true,
+      "how_confirmed": "Read the file; 'git ls-files scripts/create-env.bat' shows it is tracked (added in 676cf72, 2026-10-02); grep found the same token in the page check and test. Could not check whether the GitHub repo is public."
+    },
+    {
+      "issue": "Windows CI is red, and the full suite has not finished on real Windows for weeks. The 'windows-code' job runs the whole suite on windows-latest, and the pytest process dies inside tests/test_platform_launcher.py with no summary. The cause is the 25th of its 26 tests, test_a_ctrl_c_right_after_a_child_starts_still_stops_it, calling os.kill(os.getpid(), SIGINT), which on Windows terminates the process. So nothing after 'p' (test_resident, test_startup_resilience, test_text_encoding, test_screen_companion_desktop...) has run on Windows since then. The last complete Windows run (2026-10-30) had 3 failures, including test_startup_resilience voice-status tests. This also contradicts the brief's 'there is no Windows CI'.",
+      "severity": "high",
+      "evidence": "tests/test_platform_launcher.py:277-292 (os.kill at :284); .github/workflows/tests.yml:80-97; GitHub Actions run 41994150534 job 127133163271 log ends 'tests\\test_platform_launcher.py ........................' then '##[error]Process completed with exit code 1'",
+      "fix_hint": "Skip that test on Windows (or raise KeyboardInterrupt via signal.raise_signal / a monkeypatched handler instead of os.kill), then fix the startup_resilience failures the 2026-10-30 Windows run reported. Treat the Windows job as the gate before laptop re-tries.",
+      "confirmed": true,
+      "how_confirmed": "Listed the last 10 'Tests' runs on main via the GitHub API (all 'failure'), read the job steps for run 41994150534 and the tail of the windows-code log, read the 2026-10-30 log ('3 failed, 4445 passed, 239 skipped', FAILED tests/test_startup_resilience.py::test_a_voice_that_crashed_after_answering_is_not_called_starting), and read the test's os.kill line. Then ran 'pytest --collect-only' on that file: it holds 26 tests and the Windows log shows exactly 24 dots, so the process died on the 25th test, test_a_ctrl_c_right_after_a_child_starts_still_stops_it (the os.kill one; on Windows os.kill with SIGINT calls TerminateProcess). Not reproduced on Windows myself."
+    },
+    {
+      "issue": "With no DASHBOARD_TOKEN, the dashboard is open to DNS rebinding. The origin check compares Origin with the request's own Host header and there is no Host allow-list, so a malicious web page that rebinds its domain to 127.0.0.1 passes as same-origin and can POST (e.g. /api/chat to an agent with shell access) and read GET APIs (memories, tasks).",
+      "severity": "medium",
+      "evidence": "dashboard/companion.py:201-216; dashboard/server.py:232-245,262-263 (tokenless dispatch); no TrustedHostMiddleware anywhere in dashboard/",
+      "fix_hint": "Reject requests whose Host is not 127.0.0.1/localhost/[::1]/the configured PUBLIC_BASE_URL or Tailscale name (TrustedHostMiddleware), or require DASHBOARD_TOKEN always.",
+      "confirmed": true,
+      "how_confirmed": "Ran a TestClient snippet with DASHBOARD_TOKEN='' and base_url http://evil.example:7860: POST /api/companion/cancel/abc with Origin http://evil.example:7860 returned 200, while Origin http://other.example returned 403. grep found no TrustedHost or Host check."
+    },
+    {
+      "issue": "Default config leaves the owner locked out of his own owner pages. DASHBOARD_TOKEN defaults to empty, and then is_master is never set, so /home (which Start-Apex-Platform.cmd opens), /setup, Apps, Environment/plugins, Settings, Restart and Update all answer 403 and show a login box that cannot be satisfied. This is deliberate, but no installer sets a token (install-apex.bat and Apex.bat do not), and only doctor and the Setup page explain it.",
+      "severity": "medium",
+      "evidence": "config.py:133; dashboard/server.py:262-263, 2240-2256; dashboard/home.py:14-18; scripts/run_apex_platform.py:216 opens /home; dashboard/static/setup.js:48",
+      "fix_hint": "Have Apex.bat or the first start generate a random DASHBOARD_TOKEN into .env and print it once, or treat a loopback-only tokenless request as master when bound to 127.0.0.1 (after fixing the Host check above).",
+      "confirmed": true,
+      "how_confirmed": "Read the middleware and owner() gates; ran tools.doctor here, which reports '[FAIL] The dashboard: DASHBOARD_TOKEN is empty'; grep shows no launcher writes a token except the committed create-env.bat."
+    },
+    {
+      "issue": "install-apex.bat is stale and leads somewhere else. It installs packages into system Python (py -3), not the .venv every Start-*.cmd and Test-Apex-Hardware.cmd require, yet those scripts say 'Run install-apex.bat first' when .venv is missing. It also prints dashboard http://localhost:5000 (real port 7860), tells him to say 'Apex, what time is it?' (the wake phrase is off by default), and registers a login Run key that starts bare main.py --resident: no Celine voice server, no supervisor, so dashboard Restart cannot come back.",
+      "severity": "medium",
+      "evidence": "install-apex.bat:38-39, 84, 92, 104-110; Start-Apex-Platform.cmd:4; Test-Apex-Hardware.cmd:11; app/autostart.py:139; config.py:93 WAKE_WORD_ENABLED False",
+      "fix_hint": "Point the 'missing .venv' messages at Apex.bat, and either delete install-apex.bat or rewrite it to create .venv and register the Start-Apex-All path.",
+      "confirmed": true,
+      "how_confirmed": "Read install-apex.bat in full (no 'venv' anywhere), the .cmd error messages and app/autostart.py's Run-key value."
+    },
+    {
+      "issue": "Login-autostart conflicts with the real launcher. install-apex.bat or Setup-Apex-Screen-Companion.cmd registers an HKCU Run entry that starts Apex at sign-in. If either was ever run, Apex is already on port 7860 at login, and Start-Apex-Platform.cmd then refuses with 'An Apex service is already running'.",
+      "severity": "low",
+      "evidence": "app/autostart.py:124-142; scripts/setup_screen_companion.py:59-71; scripts/run_apex_platform.py:129-130",
+      "fix_hint": "Have the platform launcher detect an Apex it can attach to (as start_screen_companion.py does), or document checking the Run key.",
+      "confirmed": false,
+      "how_confirmed": "Read the code paths; whether the laptop has the Run key is unknown."
+    },
+    {
+      "issue": "start-apex.bat and stop-apex.bat do not match the real install. start-apex.bat runs 'pyw -3' (system Python, not .venv) with no console, so a missing package fails silently. stop-apex.bat relies on wmic, which newer Windows 11 builds no longer ship, and its WINDOWTITLE filter never matches pythonw.",
+      "severity": "low",
+      "evidence": "start-apex.bat:13; stop-apex.bat:8-12",
+      "fix_hint": "Use .venv\\Scripts\\pythonw.exe; replace wmic with PowerShell Get-CimInstance Win32_Process.",
+      "confirmed": true,
+      "how_confirmed": "Read both files; wmic removal is a known Windows 11 24H2 change, not tested on the laptop."
+    },
+    {
+      "issue": "Docs overclaim for plain main.py: docs/start-apex.md says every launcher, including plain main.py, starts with the desktop Companion on. Only resident mode starts it; main.py (text/TUI) never calls desktop_companion.",
+      "severity": "low",
+      "evidence": "docs/start-apex.md:41-46; app/resident.py:293-298; main.py (grep desktop_companion: no match)",
+      "fix_hint": "Say 'resident mode (Start-Apex-All/Platform, start-apex.bat, sign-in)' instead of 'plain main.py'.",
+      "confirmed": true,
+      "how_confirmed": "grep -n desktop_companion main.py returned nothing; read app/resident.py:293-298."
+    },
+    {
+      "issue": "The brute-force throttle checks the lockout before checking the token, keys on client IP and never forgets IPs. Behind 'tailscale serve' every client is 127.0.0.1, so 10 wrong tokens from anywhere lock the owner out for 60 s even with the right token.",
+      "severity": "low",
+      "evidence": "dashboard/server.py:287-289; dashboard/ratelimit.py:16,29-31",
+      "fix_hint": "Check a correct token before the lockout, prune empty IP entries.",
+      "confirmed": true,
+      "how_confirmed": "Read the middleware order: is_locked() at :288 runs before compare_digest at :297."
+    },
+    {
+      "issue": "Code IDE CI job fails at 'npm audit --omit=dev --audit-level=moderate' on Ubuntu, so the IDE acceptance steps after it are skipped on every run.",
+      "severity": "low",
+      "evidence": "/.github/workflows/tests.yml:37-39; run 41994150534 job 'code-ide (ubuntu-latest)' step 6 failure",
+      "fix_hint": "Update the flagged IDE dependency or pin an audit exception.",
+      "confirmed": true,
+      "how_confirmed": "Read the job step conclusions from the GitHub API."
+    },
+    {
+      "issue": "Home and Environment page scripts have no page check in CI. scripts/check_environment_ui.cjs exists but tests.yml does not run it, and there is no check for home.js.",
+      "severity": "low",
+      "evidence": ".github/workflows/tests.yml:230 (only check_setup_ui.cjs); scripts/check_environment_ui.cjs",
+      "fix_hint": "Add check_environment_ui.cjs and a home.js check to the verify job.",
+      "confirmed": true,
+      "how_confirmed": "grep of the workflows for check_environment_ui/check_home found nothing."
+    }
+  ],
+  "needs_from_owner": [
+    "Rotate DASHBOARD_TOKEN and the VAPID keys now if the laptop still uses the values in scripts/create-env.bat, and tell us whether the GitHub repo (Alexkhouryyy/Apex) is public.",
+    "After 'git pull', re-run Start-Apex-Platform.cmd and paste the whole console, especially whether the 'charmap' error is gone and whether 'Apex + Celine: ready' appears.",
+    "Check that .env has a DASHBOARD_TOKEN and that typing it on /home and /setup unlocks them.",
+    "Run Test-Apex-Hardware.cmd (quit Apex first for the camera) and send the saved report from %LOCALAPPDATA%\\Apex\\hardware.",
+    "Run '.venv\\Scripts\\python.exe -m tools.doctor' and paste the output.",
+    "Check whether a login Run entry exists (reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v Apex); if it does, Apex may already be running when you double-click the platform launcher.",
+    "Open Docker Desktop before Start-Apex-Platform.cmd if you want NOMAD and Kolibri courses."
+  ],
+  "rating": {
+    "score": 5,
+    "why": "Careful, well-tested server and launcher code. But a leaked master token, red Windows CI that stops mid-suite, owner pages locked by default and stale install scripts mean it is not yet trustworthy on the one laptop that matters."
+  }
+}

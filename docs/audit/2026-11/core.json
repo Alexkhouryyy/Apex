@@ -1,0 +1,368 @@
+{
+  "subsystem": "Core brain, model routing, safety, budget, resident app",
+  "summary": "The brain (agent/core.py) is big, heavily tested and works the same in every mode, and the always-on resident app you launch (tray, Ctrl+Space, dashboard, scheduler, awareness) is wired and has its own tests. But resident mode, which is the only mode you use, skips several start-up steps that only main.py does: sub-agents are never switched on, the nightly reflection and weekly self-review are never scheduled, the skill curator never runs, and the dashboard's Guardian/Time Capsule panels are never connected. Separately, the morning briefing cannot be scheduled at all (a confirmed crash in the trigger code), every 'risky' tool (run Python, run a skill, make an image, press Enter in a browser) is always refused in resident mode with no way to say yes, and DeepSeek errors skip the friendly error/fallback path and can hang for up to 10 minutes on a bad connection.",
+  "features": [
+    {
+      "name": "Resident (always-on) mode",
+      "what": "Runs Apex quietly in the background: no greeting at start-up, a tray icon, global hotkeys, the dashboard, the scheduler and the awareness monitor, with the log written to ~/.apex/resident.log.",
+      "how_to_use": "Start-Apex-Platform.cmd / Start-Apex-All.cmd -> scripts/run_apex_qwen.py --fast --resident -> main.py --resident -> app/resident.py run_resident()",
+      "status": "built_untested_on_pc",
+      "evidence": "main.py:162 (--resident flag), main.py:180-183 (handoff), app/resident.py:162-596 (run_resident); tests/test_resident.py (37 tests), tests/test_resident_feedback.py (10), tests/test_startup_resilience.py (50). Last laptop run died on the charmap decode error before reaching it; the UTF-8 fix has not been tried on the laptop yet.",
+      "setup_needed": "DEEPSEEK_API_KEY in .env when AGENT_MODEL=deepseek-flash (main.py:171-176 refuses to start otherwise)."
+    },
+    {
+      "name": "Wake hotkey and mute hotkey",
+      "what": "Ctrl+Space starts a voice turn (listen, think, speak). Ctrl+Alt+M mutes or unmutes Apex.",
+      "how_to_use": "Hotkeys Ctrl+Space and Ctrl+Alt+M (change them with RESIDENT_GLOBAL_HOTKEY / RESIDENT_MUTE_HOTKEY in .env)",
+      "status": "built_untested_on_pc",
+      "evidence": "config.py:100-101, app/resident.py:545-549 (bind + start), app/resident.py:427-445 (_on_hotkey_wake/_on_mute_hotkey), app/resident.py:347-418 (_do_turn); tests/test_resident.py",
+      "setup_needed": "pynput global hooks on Windows."
+    },
+    {
+      "name": "Wake word ('Apex ...')",
+      "what": "Hands-free start by saying 'Apex' followed by a request. A bare 'Apex' just opens the microphone.",
+      "how_to_use": "Set WAKE_WORD_ENABLED=true in .env",
+      "status": "off_by_default",
+      "evidence": "config.py:93 (default False), app/resident.py:617 (no phrases when off), app/resident.py:655 (_extract_request); tests/test_resident.py",
+      "setup_needed": "WAKE_WORD_ENABLED=true (you chose to keep it off)."
+    },
+    {
+      "name": "Tray icon",
+      "what": "A coloured dot in the Windows tray (idle, listening, thinking, speaking, muted) with a menu: Screen Companion, Wake now, Mute 15 min / 1 hour / until quit, Unmute, Open dashboard, Show recent activity, Quit Apex.",
+      "how_to_use": "Click the tray icon",
+      "status": "built_untested_on_pc",
+      "evidence": "app/tray.py:70-96, app/resident.py:528-542; there is no dedicated tray test file (tray behaviour is only covered indirectly through tests/test_resident.py)",
+      "setup_needed": "pystray + Pillow (if missing, the tray turns itself off and Apex keeps running)."
+    },
+    {
+      "name": "Wake audit log",
+      "what": "Writes one line for every wake or hotkey turn (what it heard and what it did) to ~/.apex/wake_audit.log, so you can check what Apex reacted to.",
+      "how_to_use": "Automatic; tray > 'Show recent activity', or open ~/.apex/wake_audit.log",
+      "status": "working",
+      "evidence": "app/audit.py:1-62, config.py:99, app/resident.py:414, 502-510; tests/test_resident.py imports app.audit",
+      "setup_needed": ""
+    },
+    {
+      "name": "Autostart at Windows login",
+      "what": "Adds a registry Run key so Apex resident starts when you log in.",
+      "how_to_use": "python -m app.autostart install | uninstall | status (install-apex.bat step 5 runs it)",
+      "status": "built_untested_on_pc",
+      "evidence": "app/autostart.py:124-142 (writes '\"pythonw\" -X utf8 main.py --resident'), install-apex.bat:84; only tests/test_text_encoding.py touches it. Note: it starts main.py directly, not your Start-Apex-Platform launcher, so there is no Celine voice server and no restart supervisor.",
+      "setup_needed": "Run the install command once."
+    },
+    {
+      "name": "Model choice and providers (DeepSeek, Claude, OpenAI, Gemini, Ollama)",
+      "what": "Picks the client from the model name. deepseek-flash goes through an OpenAI-compatible adapter with thinking turned off. Startup refuses to run when the key for that provider is missing.",
+      "how_to_use": "AGENT_MODEL in .env, or --model on the command line, or the model picker on the dashboard",
+      "status": "working",
+      "evidence": "config.py:21-31, agent/provider.py:21-46 (provider_for), 324-350 (_translate_kwargs, deepseek-flash thinking disabled), 552-585 (get_client), main.py:171-176; tests/test_provider_deepseek.py (28), tests/test_model_capabilities.py (13)",
+      "setup_needed": "DEEPSEEK_API_KEY"
+    },
+    {
+      "name": "Smart routing (cheap model for simple questions)",
+      "what": "Would send short or simple questions to a cheaper model. It is hard-wired off, and it would do nothing for DeepSeek anyway because the cheap model is a Claude model and routing never switches provider.",
+      "how_to_use": "None: SMART_ROUTING_ENABLED is a constant in config.py and cannot be turned on from .env",
+      "status": "off_by_default",
+      "evidence": "config.py:38 (SMART_ROUTING_ENABLED = False, no getenv), config.py:46, agent/router.py:73-86 (cross-provider returns current model); tests/test_provider_routing.py (8)",
+      "setup_needed": "Edit config.py by hand, and point ROUTING_SIMPLE_MODEL at a DeepSeek or Ollama model."
+    },
+    {
+      "name": "Cloud fallback on API errors (OpenRouter)",
+      "what": "If the main model fails with a temporary error, Apex retries once through OpenRouter.",
+      "how_to_use": "Automatic once OPENROUTER_API_KEY is set",
+      "status": "partial",
+      "evidence": "agent/core.py:4138-4161 catches only anthropic.APIError; agent/resilience.py:40-67. A DeepSeek/OpenAI-adapter error is not an anthropic.APIError (checked by running a snippet), so for your model the fallback never fires; tests/test_resilience.py (33) only cover Anthropic errors.",
+      "setup_needed": "OPENROUTER_API_KEY"
+    },
+    {
+      "name": "Spending caps (daily and per session)",
+      "what": "Before every paid model call Apex reserves the estimated cost and refuses the call if it would go over $5 a day or $2 a session (the defaults). Local Ollama models are free and never blocked.",
+      "how_to_use": "Dashboard budget panel: GET/POST /api/budget (changing it needs the master token)",
+      "status": "working",
+      "evidence": "agent/budget.py:30-34 (defaults), 205-243 (reserve), agent/telemetry.py:213-218, 270-288 (every create/stream reserves), agent/core.py:4062 (pre-flight), dashboard/server.py:646-666; tests/test_provider_budget.py (26)",
+      "setup_needed": "None for deepseek-flash (priced at config.py:293)."
+    },
+    {
+      "name": "Usage telemetry and turn replay",
+      "what": "Logs every model call (tokens, cost, how long it took) and every turn, so the dashboard can show spending and replay a session.",
+      "how_to_use": "Dashboard: /api/telemetry, /api/telemetry/sessions, /api/replay/{session_id}, /api/turns/search",
+      "status": "working",
+      "evidence": "agent/telemetry.py:105-160 (record), dashboard/server.py:637-670; covered by tests/test_provider_budget.py and tests/test_incident_replay.py (no dedicated telemetry test file)",
+      "setup_needed": ""
+    },
+    {
+      "name": "Safety gate for risky tools",
+      "what": "A list of about 20 patterns (run Python, run a skill, recursive delete, shutdown, piping curl into a shell, sending SMS, unlocking doors, generating images, pressing Enter in a browser...) needs your yes. In resident mode there is nobody to ask, so the answer is always NO and you get a 'blocked' notification.",
+      "how_to_use": "Automatic. In --text/--tui/voice mode you answer y/N or by voice; in resident mode it always refuses.",
+      "status": "partial",
+      "evidence": "agent/safety.py:7-31 (_RULES), 82-115 (check), app/resident.py:138-159 (resident_confirm returns False), 251-252; agent/core.py:2469-2471; tests/test_safety.py (27), tests/test_resident.py",
+      "setup_needed": "None. There is no dashboard 'approve' button for these actions."
+    },
+    {
+      "name": "Second-opinion safety review by a model",
+      "what": "Tools that can do damage (bash, write_file, edit_file, browser click, email, SMS...) are shown to a cheap model, which can add a confirmation but never remove one. If the reviewer cannot be reached, a confirmation is required.",
+      "how_to_use": "Automatic (SAFETY_LLM_REVIEW=true, SAFETY_REVIEW_REQUIRED=true by default)",
+      "status": "working",
+      "evidence": "config.py:213-217, agent/command_review.py:35-40 (REVIEWABLE_TOOLS), 88-130; agent/safety.py:103-115; tests/test_command_review.py (14)",
+      "setup_needed": "The reviewer is PROACTIVE_MODEL, which is deepseek-flash for you, so it needs internet. Set SAFETY_REVIEW_MODEL=ollama/... for an offline reviewer."
+    },
+    {
+      "name": "Write approvals (memories and skills)",
+      "what": "Memory, note and skill writes can be held for your approval on the dashboard instead of being saved straight away.",
+      "how_to_use": "Dashboard approvals list; approve/reject",
+      "status": "working",
+      "evidence": "agent/approvals.py:63-231, agent/core.py:2294-2305, dashboard/home.py:143; tests/test_cortex_approval.py and others",
+      "setup_needed": "MEMORY_WRITE_APPROVAL / SKILL_WRITE_APPROVAL flags"
+    },
+    {
+      "name": "Scheduler (reminders and recurring tasks)",
+      "what": "Apex can schedule a prompt to run later (once, every N minutes, or on a cron schedule). A task that came due while the PC was off runs once when Apex starts again. Results are spoken and pushed to your phone.",
+      "how_to_use": "Ask Apex ('every day at 8 remind me...'); dashboard /api/tasks (GET/POST/DELETE)",
+      "status": "partial",
+      "evidence": "agent/scheduler.py:60-75 (init, UTC), 77-118 (schedule), 147-178 (_fire_task), 181-191 (_make_trigger hard-codes timezone='UTC'), 225-265 (catch-up after downtime); main.py:277, app/resident.py:222; dashboard/server.py:452-466; tests/test_scheduler.py (9). Cron times are in UTC (2-3 hours off Beirut time) and a timezone passed in params crashes the trigger.",
+      "setup_needed": ""
+    },
+    {
+      "name": "Morning briefing schedule",
+      "what": "A daily spoken digest at a time you choose.",
+      "how_to_use": "Dashboard POST /api/briefing (enable / time / timezone)",
+      "status": "broken",
+      "evidence": "agent/briefing.py:123-127 passes timezone in trigger_params; agent/scheduler.py:184 adds timezone='UTC' again -> TypeError -> 'Unknown trigger_type'. Reproduced with a snippet. main.py:350-353 only (resident never calls it). No test for install_briefing_task.",
+      "setup_needed": "Needs a code fix."
+    },
+    {
+      "name": "Sub-agents and plans (spawn_subagent, run_plan)",
+      "what": "The main agent can hand a job to a researcher, coder, browser, analyst, writer or planner sub-agent running in parallel, or run a small dependency plan of them.",
+      "how_to_use": "Automatic when the model calls the tools (agent/core.py:3095-3097)",
+      "status": "partial",
+      "evidence": "agent/orchestrator.py:60-70 (refuses when no factory is set), main.py:281-285 sets the factory; app/resident.py never does (grep finds set_agent_factory only in main.py). Ran a snippet: orchestrator.spawn() returns 'Orchestrator not initialised.'. tests/test_orchestrator.py (6), tests/test_subagent_scope.py (10) monkeypatch the factory.",
+      "setup_needed": "None in --text/--tui; does not work in resident mode."
+    },
+    {
+      "name": "Sub-agent role limits",
+      "what": "Each sub-agent role only gets its own tools (for example, a researcher cannot run bash).",
+      "how_to_use": "Automatic",
+      "status": "working",
+      "evidence": "agent/subagent_scope.py, agent/core.py:2463-2466; tests/test_subagent_scope.py (10)",
+      "setup_needed": ""
+    },
+    {
+      "name": "Live status block in the prompt",
+      "what": "Every turn tells the model which parts are running right now (is Celine's voice ready or on the PC's own voice, which hotkeys are bound, the Companion), so she stops claiming she can't do things.",
+      "how_to_use": "Automatic",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/live_status.py:1-243, agent/core.py:3581-3586, 3753, 3828; app/resident.py:601-606 (marks Celine hotkeys live); tests/test_startup_resilience.py, tests/test_look_now.py",
+      "setup_needed": ""
+    },
+    {
+      "name": "Claude subscription mode",
+      "what": "Runs the conversation on a Claude Max/Pro subscription through the claude CLI instead of paid API credits.",
+      "how_to_use": "SUBSCRIPTION_ENABLED=true in .env",
+      "status": "off_by_default",
+      "evidence": "config.py:623-630, agent/subscription.py:265-355, agent/core.py:3872-3934 (only for Anthropic models, so it does nothing while you use deepseek-flash); tests/test_subscription.py (31)",
+      "setup_needed": "claude CLI installed and logged in; an Anthropic AGENT_MODEL."
+    },
+    {
+      "name": "Control page (settings, update, restart)",
+      "what": "Edit .env settings from the dashboard, git-pull an update, and restart Apex (the launcher brings it back).",
+      "how_to_use": "Dashboard: /api/control/settings, /api/control/update, /api/control/restart, /api/control/capabilities",
+      "status": "partial",
+      "evidence": "agent/control.py:95-110 (known_keys = every UPPERCASE name in config), 170-199 (set_setting), 202-250 (restart, exit 42), scripts/run_apex_qwen.py:66 (APEX_SUPERVISED=1) and 242-268 (restart loop); dashboard/server.py:2254-2338; tests/test_control.py (39). Around 34 of the listed settings are hard-coded constants that .env never changes.",
+      "setup_needed": "Launch through the launcher so restart works."
+    },
+    {
+      "name": "Node capabilities probe",
+      "what": "At start-up, checks what this PC can actually do (camera, mic, GPU and so on) and records it as yes/no/unknown.",
+      "how_to_use": "Automatic at boot; dashboard /api/control/capabilities",
+      "status": "working",
+      "evidence": "agent/capabilities.py, main.py:206-207, app/resident.py:180-181, dashboard/server.py:2324-2336; tests/test_capabilities.py (24)",
+      "setup_needed": ""
+    },
+    {
+      "name": "Chat threads (saved conversations)",
+      "what": "Saved dashboard conversations you can list, open, create and delete.",
+      "how_to_use": "Dashboard chat sidebar: /api/chat/threads",
+      "status": "working",
+      "evidence": "agent/conversations.py, dashboard/server.py:1725-1750; tests/test_conversations.py (17)",
+      "setup_needed": ""
+    },
+    {
+      "name": "Persona and preferences",
+      "what": "A JARVIS-style character is placed at the front of the system prompt (Celine's persona replaces it when she speaks), and learned preferences are used by goals and reflection.",
+      "how_to_use": "Automatic",
+      "status": "working",
+      "evidence": "agent/persona.py (36 lines), agent/core.py:3757-3768; agent/prefs.py used by agent/goals.py and agent/reflection.py; tests/test_persona.py (8), tests/test_prefs.py (3)",
+      "setup_needed": ""
+    },
+    {
+      "name": "One database setup list (schema) for both start paths",
+      "what": "Creates every table from one shared list, so text mode and resident mode cannot drift apart on tables.",
+      "how_to_use": "Automatic at boot",
+      "status": "working",
+      "evidence": "agent/schema.py:32-75, main.py:204, app/resident.py:178-179; tests/test_schema.py (11)",
+      "setup_needed": ""
+    },
+    {
+      "name": "Threads 'serendipity engine'",
+      "what": "Would show surprising links between memories from different areas of your life ('thread of the day').",
+      "how_to_use": "Nothing: no page, route, tool or scheduled job calls it",
+      "status": "planned_or_stub",
+      "evidence": "agent/threads.py (206 lines); only agent/schema.py:40 creates its table; grep finds no other importer; tests/test_threads.py (5)",
+      "setup_needed": "Needs a dashboard card or a tool to surface it."
+    },
+    {
+      "name": "Terminal UI (--tui) and text mode",
+      "what": "Streams answers in a terminal and lets you interrupt and redirect. Text mode is the same without voice.",
+      "how_to_use": "python main.py --tui  or  python main.py --text",
+      "status": "working",
+      "evidence": "main.py:154-165, tui/app.py, tui/streamer.py; tests/test_tui.py (6)",
+      "setup_needed": "Not used by your launcher."
+    }
+  ],
+  "files_covered": [
+    "main.py", "config.py", "agent/core.py", "agent/router.py", "agent/provider.py", "agent/subscription.py",
+    "agent/budget.py", "agent/telemetry.py", "agent/safety.py", "agent/command_review.py", "agent/approvals.py",
+    "agent/scheduler.py", "agent/briefing.py", "agent/orchestrator.py", "agent/subagent_scope.py", "agent/skills.py",
+    "agent/vault.py", "agent/control.py", "agent/live_status.py", "agent/threads.py", "agent/schema.py",
+    "agent/resilience.py", "app/resident.py", "app/tray.py", "app/autostart.py", "app/audit.py",
+    "scripts/run_apex_qwen.py", "scripts/setup_screen_companion.py", "dashboard/server.py"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_resident.py", "tests/test_resident_feedback.py", "tests/test_startup_resilience.py", "tests/test_tui.py",
+      "tests/test_safety.py", "tests/test_command_review.py", "tests/test_scheduler.py", "tests/test_provider_budget.py",
+      "tests/test_provider_routing.py", "tests/test_provider_deepseek.py", "tests/test_subscription.py", "tests/test_orchestrator.py",
+      "tests/test_subagent_scope.py", "tests/test_control.py", "tests/test_capabilities.py", "tests/test_conversations.py",
+      "tests/test_persona.py", "tests/test_prefs.py", "tests/test_threads.py", "tests/test_schema.py", "tests/test_wiring.py",
+      "tests/test_resilience.py", "tests/test_model_capabilities.py", "tests/test_text_encoding.py"
+    ],
+    "approx_test_count": 430
+  },
+  "gaps": [
+    {
+      "issue": "Sub-agents never work in resident mode, the only mode you use. main.py switches the orchestrator on; app/resident.py never does, so spawn_subagent and run_plan always answer 'Orchestrator not initialised.'",
+      "severity": "high",
+      "evidence": "main.py:281-285; agent/orchestrator.py:60,70; app/resident.py (no set_agent_factory call)",
+      "fix_hint": "Call orchestrator.set_agent_factory(AgentCore) in run_resident (better: move it into a shared boot helper next to schema.init_all) and add a wiring test that boots both paths.",
+      "confirmed": true,
+      "how_confirmed": "Grepped the whole repo for set_agent_factory / _agent_factory: the only production setter is main.py:285. Ran a snippet in a fresh process: orchestrator.spawn('researcher','t') -> 'Orchestrator not initialised.'"
+    },
+    {
+      "issue": "The morning briefing can never be scheduled: briefing passes a timezone in trigger_params and the scheduler adds timezone='UTC' again, so CronTrigger raises 'multiple values for keyword argument timezone', _make_trigger returns None, and schedule() reports 'Unknown trigger_type: cron'. Enabling it on the dashboard silently fails. The default timezone is also America/New_York.",
+      "severity": "high",
+      "evidence": "agent/briefing.py:116,123-127; agent/scheduler.py:181-191, 98-100",
+      "fix_hint": "In _make_trigger, use params.pop('timezone', 'UTC'); default the briefing timezone to Asia/Beirut; add a test for install_briefing_task.",
+      "confirmed": true,
+      "how_confirmed": "Ran scheduler._make_trigger('cron', {'hour':8,'minute':0,'timezone':'Asia/Beirut'}) and it printed the TypeError and returned None. grep shows no test calls install_briefing_task."
+    },
+    {
+      "issue": "In resident mode every pattern-matched 'risky' tool is always refused, even when you yourself asked by hotkey or on the dashboard: run_python, python_exec, run_skill, generate_image, browser_press Enter, browser clicks on submit/send, sms_send, update_system_prompt, register_new_tool. The same goes for any bash/write_file/edit_file call the model reviewer flags, or every one of them when the reviewer can't be reached (offline or slow internet). There is no approve button anywhere.",
+      "severity": "high",
+      "evidence": "app/resident.py:138-159 (resident_confirm returns False), 251-252; agent/safety.py:7-31, 103-115; agent/command_review.py:35-40; config.py:217",
+      "fix_hint": "Route resident confirmations to a dashboard/Companion/phone approval with a timeout (reuse the approvals or pending_actions UI), and let an owner turn (by_owner=True) confirm by voice. Set SAFETY_REVIEW_MODEL to a local ollama model so it works offline.",
+      "confirmed": true,
+      "how_confirmed": "Read resident_confirm and safety.check; grepped for other set_confirm_fn callers (only node_worker.py:128, and only when unset, and resident overrides it afterwards). agent/approvals.py only covers memory/skill writes, not safety confirmations."
+    },
+    {
+      "issue": "DeepSeek (your model) errors bypass the error handling: core.run catches only anthropic.APIError, but the DeepSeek adapter raises openai.* errors. So no OpenRouter fallback and no friendly message; in resident mode you hear 'Something went wrong: Connection error'. The OpenAI client is also built with its defaults (600-second read timeout, 2 retries), not API_MAX_RETRIES, so on a bad Lebanese connection one turn can hang for many minutes while holding the turn lock.",
+      "severity": "high",
+      "evidence": "agent/core.py:4138-4161; agent/provider.py:514-533 (OpenAIAdapter, no timeout/max_retries), 575-578; agent/resilience.py:40-67 (anthropic types only)",
+      "fix_hint": "Translate openai.APIConnectionError/RateLimitError/APIStatusError into the resilience categories (or catch openai.APIError next to anthropic.APIError), and pass timeout=(e.g. 60s) and max_retries=config.API_MAX_RETRIES when building OpenAI(...).",
+      "confirmed": true,
+      "how_confirmed": "Ran a snippet: issubclass(openai.APIConnectionError, anthropic.APIError) is False; openai.OpenAI(...).timeout is read=600, max_retries=2. grep found no 'openai.' error handling in agent/ or tests/. resident _do_turn (app/resident.py:392-404) catches Exception and speaks the raw message."
+    },
+    {
+      "issue": "Resident mode skips other start-up steps that only main.py does: the 'Nightly reflection' and 'Weekly self-evaluation' scheduled tasks are never created, the morning briefing is never installed, the Skill Curator thread never runs, saved skills are not pre-loaded (list_skills is empty until one is run by name), the vault/Constellation are not initialised at boot, and the dashboard's Guardian and Time Capsule panels are never connected (always empty, and their toggle does not reach the running monitor).",
+      "severity": "medium",
+      "evidence": "main.py:285, 301, 307, 311, 320-353, 360-376, 415-418 vs app/resident.py:162-330; dashboard/server.py:1028-1062",
+      "fix_hint": "Move all shared boot steps into one function (like schema.init_all) that both main.py and run_resident call; add a test asserting both paths call it.",
+      "confirmed": true,
+      "how_confirmed": "Grepped for set_guardian, set_timecapsule, skills.load_all, init_vault, constellation init, install_briefing_task, 'Nightly reflection', CURATOR_ENABLED: each appears only in main.py. Read server.py:1036-1062: the endpoints return an empty log when the ref is None."
+    },
+    {
+      "issue": "Cron schedules run in UTC, and nothing tells the model so. 'Every day at 8' fires at 10:00 or 11:00 Beirut time; the built-in nightly reflection (hour 3) and weekly review (Mon 8:00) are also UTC. Fixed-date reminders ('2026-12-01 09:00') are read as UTC too.",
+      "severity": "medium",
+      "evidence": "agent/scheduler.py:68-70, 184; agent/core.py:1365-1375 (tool description has no timezone); main.py:330, 345",
+      "fix_hint": "Schedule in the PC's local timezone (tzlocal) or add an APEX_TIMEZONE setting, and say which zone in the schedule_task tool description.",
+      "confirmed": true,
+      "how_confirmed": "Read _make_trigger and the BackgroundScheduler(timezone='UTC') constructor, and the tool schema text at core.py:1365-1375; tests/test_scheduler.py only uses UTC."
+    },
+    {
+      "issue": "Budget reservations left by a crash or power cut are never released and never expire. They keep counting against today's (and every later day's) $5 cap, and there is no dashboard button to clear them. Repeated power cuts slowly eat the daily allowance until paid calls are refused.",
+      "severity": "medium",
+      "evidence": "agent/budget.py:157-162 (no time filter on budget_reservations), 241-249; agent/telemetry.py:150-153 (the only release, after a recorded response)",
+      "fix_hint": "Expire reservations older than, say, an hour (counting them as estimated spend once), or add a 'clear stuck reservations' action on the budget panel.",
+      "confirmed": true,
+      "how_confirmed": "Ran a snippet against a temp DB: reserve() a deepseek-flash call (~$0.07), skipped record(), switched to session 2 -> reservations() still showed daily_reserved 0.0702."
+    },
+    {
+      "issue": "The $2 'session' cap covers the whole life of the resident process (one session id per boot). Background awareness/cortex calls count too, so a resident left running for days can hit the cap and refuse every paid call until restarted, with a message that does not say a restart clears it.",
+      "severity": "medium",
+      "evidence": "agent/budget.py:30-34, 135-145, 176-191; app/resident.py:187-188 (one start_session per boot)",
+      "fix_hint": "Raise the session default for resident mode, roll the session over daily, or make the message say 'restart Apex or raise session_usd on the dashboard'.",
+      "confirmed": true,
+      "how_confirmed": "Read the session_id lifecycle (telemetry.set_session once in run_resident) and the _limit_error session branch."
+    },
+    {
+      "issue": "The Control page offers about 34 settings that config.py hard-codes and never reads from .env (for example SMART_ROUTING_ENABLED, MAX_ITERATIONS, MAX_SUBAGENTS, THINKING_BUDGET, CURATOR_ENABLED, PROACTIVE_ENABLED). Saving one says 'takes effect when Apex restarts', but it never does, which is the exact trap set_setting's own docstring says it prevents.",
+      "severity": "medium",
+      "evidence": "agent/control.py:95-110, 170-199; config.py:32, 38, 47, 126",
+      "fix_hint": "Only list keys that config.py reads through getenv/_flag (or make those constants env-readable).",
+      "confirmed": true,
+      "how_confirmed": "Ran an AST snippet over config.py: 34 top-level UPPERCASE assignments with no getenv/_flag/environ, including the 7 named. Checked that config.py has no generic env-override loop (grep for globals()/setattr found none)."
+    },
+    {
+      "issue": "Resident start-up messages say \"Say 'Apex' or press Ctrl+Space\" even though the wake word is off by default, and the hotkey text is hard-coded, not taken from RESIDENT_GLOBAL_HOTKEY.",
+      "severity": "low",
+      "evidence": "app/resident.py:559-561; config.py:93, 100",
+      "fix_hint": "Build the message from WAKE_WORD_ENABLED and the configured hotkey.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines."
+    },
+    {
+      "issue": "Tray 'Open dashboard' opens the configured host/port, not the address the dashboard actually bound to (main.py and the Companion use the real one).",
+      "severity": "low",
+      "evidence": "app/resident.py:495-500 vs 287",
+      "fix_hint": "Use _dashboard_url.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines."
+    },
+    {
+      "issue": "Autostart at login launches main.py --resident directly, not the platform launcher. A login start has no Celine voice server, no restart supervisor (dashboard Restart becomes a shutdown) and no PYTHONUTF8 environment (only -X utf8).",
+      "severity": "low",
+      "evidence": "app/autostart.py:139; scripts/run_apex_qwen.py:62-70; agent/control.py:202-213",
+      "fix_hint": "Point the Run key at Start-Apex-Platform.cmd (or run_apex_qwen.py --fast --resident).",
+      "confirmed": false,
+      "how_confirmed": "Read the code; not exercised on Windows."
+    },
+    {
+      "issue": "agent/threads.py (the memory 'serendipity engine') is dead code: its table is created, but nothing surfaces it.",
+      "severity": "low",
+      "evidence": "agent/threads.py; agent/schema.py:40",
+      "fix_hint": "Wire it to a dashboard card or delete it.",
+      "confirmed": true,
+      "how_confirmed": "grep for imports of agent.threads outside tests found none."
+    },
+    {
+      "issue": "Smart routing cannot be turned on from .env, and even if enabled it does nothing for DeepSeek (the cheap model is Claude and routing never crosses provider).",
+      "severity": "low",
+      "evidence": "config.py:38, 46; agent/router.py:83-85",
+      "fix_hint": "Make it env-readable and default ROUTING_SIMPLE_MODEL to the active provider's cheap model.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines."
+    }
+  ],
+  "needs_from_owner": [
+    "Re-run Start-Apex-Platform.cmd after pulling the UTF-8 fix and paste ~/.apex/resident.log if it stops again (the charmap crash fix has not been tried on the laptop).",
+    "Check the tray icon appears and Ctrl+Space starts a turn; tell us if Ctrl+Space clashes with a Windows keyboard-language shortcut on your PC.",
+    "Check that DEEPSEEK_API_KEY is in C:\\Users\\alexk\\Apex\\.env and AGENT_MODEL=deepseek-flash.",
+    "Open the dashboard budget panel (/api/budget) and check daily_reserved after a power cut; if it is not 0 while nothing is running, stuck reservations are eating your cap.",
+    "Decide whether you want resident mode to be able to run Python/skills/images at all; today it always refuses them.",
+    "Say whether you used the morning briefing or scheduled reminders; both are affected by the UTC/timezone bugs.",
+    "If you want Apex to start at login, say so: the current autostart skips your platform launcher."
+  ],
+  "rating": {
+    "score": 5,
+    "why": "The core loop, budget and safety are well built and heavily tested, but in your real resident mode with DeepSeek, sub-agents are off, risky tools are always refused, the briefing scheduler is broken, schedules are in UTC, and network errors skip the fallback and can hang."
+  }
+}

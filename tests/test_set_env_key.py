@@ -23,9 +23,9 @@ import set_env_key  # noqa: E402
 
 FULL_ENV = (
     "ANTHROPIC_API_KEY=your_key_here\n"
-    "DASHBOARD_TOKEN=whowantstobeking\n"
-    "VAPID_PUBLIC_KEY=BO85Dfthavj4eQI7wRCJqfTzYBsZXavZ\n"
-    "VAPID_PRIVATE_KEY=ivdILszBHFRqT-lndO62FO_Zlw\n"
+    "DASHBOARD_TOKEN=test-dashboard-token\n"
+    "VAPID_PUBLIC_KEY=test-vapid-public-key\n"
+    "VAPID_PRIVATE_KEY=test-vapid-private-key\n"
     "TELEGRAM_BOT_TOKEN=123456:ABC\n"
     "# a comment\n"
     "OPENAI_API_KEY=your_openai_key_here\n"
@@ -42,9 +42,9 @@ def test_replacing_the_key_preserves_every_other_line(tmp_path):
     text = env.read_text()
     assert "ANTHROPIC_API_KEY=sk-ant-real" in text
     assert "your_key_here" not in text
-    for survivor in ("DASHBOARD_TOKEN=whowantstobeking",
-                     "VAPID_PRIVATE_KEY=ivdILszBHFRqT-lndO62FO_Zlw",
-                     "VAPID_PUBLIC_KEY=BO85Dfthavj4eQI7wRCJqfTzYBsZXavZ",
+    for survivor in ("DASHBOARD_TOKEN=test-dashboard-token",
+                     "VAPID_PRIVATE_KEY=test-vapid-private-key",
+                     "VAPID_PUBLIC_KEY=test-vapid-public-key",
                      "TELEGRAM_BOT_TOKEN=123456:ABC",
                      "# a comment",
                      "OPENAI_API_KEY=your_openai_key_here"):
