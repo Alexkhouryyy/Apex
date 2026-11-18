@@ -1,0 +1,368 @@
+{
+  "subsystem": "Autonomy and proactivity (awareness, cortex, goals, missions, council, forge, self-improvement)",
+  "summary": "This is the part of Apex that watches your PC in the background, speaks up when something looks important, works on goals you set, runs multi-round Missions, and tries to improve itself (forged tools, self-modification, reflection, auto-rollback). Almost all of it is real code with a lot of tests (about 720 test functions), and resident mode now starts the same awareness monitor as main.py. But on your Windows laptop several pieces are weaker than the docs suggest: the active-window watcher only works on Linux, so most Guardian Angel triggers can never fire. The Council can never meet with DeepSeek alone. Anything that needs a yes/no safety confirmation is refused automatically in resident mode. The weekly self-evaluation and nightly reflection jobs are only scheduled by main.py, not by resident mode.",
+  "features": [
+    {
+      "name": "Awareness monitor (background watcher)",
+      "what": "A background thread that records what you do: which window is active, what you copy, and file changes in Documents/Desktop/Downloads. Every 15 seconds it runs Guardian, Time Capsule, restraint and reflection checks.",
+      "how_to_use": "Automatic at startup in both main.py and resident mode (AWARENESS_ENABLED=true by default). The events appear in the dashboard Logs/live feed.",
+      "status": "partial",
+      "evidence": "agent/awareness.py:246-442 (AwarenessMonitor, _review_loop), build_monitor agent/awareness.py:505-590; started in main.py:383-391 and app/resident.py:227-249. The window watcher calls xdotool only (agent/awareness.py:83-99), so on Windows it fails silently every 2 s. Clipboard needs pyperclip (requirements.txt:17); files need watchdog (requirements.txt:14). Tests: tests/test_resident.py, tests/test_startup_resilience.py (startup wiring), none for ActiveWindowWatcher.",
+      "setup_needed": "None to start it. On Windows the active-window part does nothing, because there is no Windows code path."
+    },
+    {
+      "name": "Proactive 'Heads up' speak-ups",
+      "what": "Every 60 seconds, if anything happened, it sends the last 20 events to the background model (deepseek-flash for you) and asks whether something is urgent. If the model says yes, Celine says 'Heads up. ...' out loud.",
+      "how_to_use": "Automatic. Turn off with --no-proactive (PROACTIVE_ENABLED). Guardian, cortex and Time Capsule keep running.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/awareness.py:420-441 and _proactive_check agent/awareness.py:519-540; config.py:29-31 (PROACTIVE_MODEL falls back to BACKGROUND_MODEL, i.e. deepseek-flash), config.py:87.",
+      "setup_needed": "A working model key. On Windows it only has clipboard and file events to judge from, because window titles never arrive."
+    },
+    {
+      "name": "Guardian Angel",
+      "what": "Watches for 'commitment moments': a secret pasted from the clipboard, an angry message about to be sent, a purchase, a destructive git commit, or a calendar clash. When one fires, it speaks one warning line and sends a high-priority notification.",
+      "how_to_use": "Automatic (GUARDIAN_ANGEL_ENABLED=true). Turn it on or off from the Guardian panel on the dashboard (/api/guardian, /api/guardian/toggle).",
+      "status": "partial",
+      "evidence": "agent/guardian.py:32-70 patterns, :101-170 detection uses window_title + clipboard; :286-297 speak + notify. Wired in agent/awareness.py:552-582. Dashboard routes dashboard/server.py:1037,1044. Tests: tests/test_guardian.py (15). In resident mode, dash.set_guardian() is never called (only main.py:414), so the dashboard Guardian log may stay empty there.",
+      "setup_needed": "On Windows only the clipboard-based triggers (secrets, commit commands) can fire. Message, shopping and calendar triggers need window titles, which are Linux-only today."
+    },
+    {
+      "name": "World model (live context snapshot)",
+      "what": "Every 5 minutes the background model writes a short summary of your goals, recent activity and entities. The cortex and the prompt use it.",
+      "how_to_use": "Automatic. View it at /api/world-state.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/world_model.py:68-130; ticked in agent/awareness.py:369-378 (every 300 s, force=True, even when there are no goals); route dashboard/server.py:1459. Tests: tests/test_reflection_heartbeat.py (14), tests/test_world_state_fresh.py (3).",
+      "setup_needed": "A model key. It costs one model call every 5 minutes whenever Apex runs."
+    },
+    {
+      "name": "Autonomous Cortex (works on your goals by itself)",
+      "what": "Every 5 minutes, if you have active goals, it picks ONE small action. Read-only actions (web search, read a file, search memory, Python in the Docker sandbox) run at once. Writing files, bash, email and SMS are staged for your approval.",
+      "how_to_use": "Set a goal (say 'set a goal to ...' or use the Goals tab). Approve or reject staged actions in the Approvals tab (/api/pending-actions).",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/cortex.py:21-35 ALLOWLIST, :142-178 executor (run_python only in the Docker sandbox, :156-165), :217-326 tick (returns None with no active goals, :226-228). Routes dashboard/server.py:1199,1209,1220. Tests: tests/test_cortex_approval.py (11), tests/test_cortex_search.py (6), tests/test_autonomy.py (14).",
+      "setup_needed": "Active goals. Docker Desktop running for run_python, which was not running on the last laptop run, so those actions are skipped."
+    },
+    {
+      "name": "Approvals tab",
+      "what": "One page listing cortex-staged actions, tools Apex forged for itself, and staged memory/skill writes. Nothing listed there runs until you approve it.",
+      "how_to_use": "Dashboard → Approvals tab.",
+      "status": "working",
+      "evidence": "dashboard/static/index.html:899-915; dashboard/static/app.js:2631,2683,2704; routes dashboard/server.py:1199-1231,1393,1406. Tests: tests/test_cortex_approval.py, tests/test_skill_forge.py.",
+      "setup_needed": "None. Note: approving a staged risky action in resident mode is still refused by the safety layer (see gaps)."
+    },
+    {
+      "name": "Goals and completion contracts (verification)",
+      "what": "Long-term goals (day/week/month/quarter) with progress notes. A goal can carry checkable 'contracts' (a command exits 0, a file exists, a file contains text) that must pass before Apex calls it done.",
+      "how_to_use": "Goals tab, or say 'set a goal ...', 'verify goal 3'. Tools set_goal, list_goals, update_goal, add_goal_contract, verify_goal (agent/core.py:1592-1668).",
+      "status": "working",
+      "evidence": "agent/goals.py, agent/verification.py; routes dashboard/server.py:488,493,516. Tests: tests/test_goals.py (26), tests/test_verification.py (17).",
+      "setup_needed": "Command contracts need the Docker sandbox."
+    },
+    {
+      "name": "Weekly self-evaluation",
+      "what": "Every Monday at 08:00 Apex reviews the last 7 days of work and suggests one focus for the week.",
+      "how_to_use": "Automatic only if it was ever scheduled by main.py. You can also ask 'how have I been doing?' (evaluate_recent_work tool, agent/core.py:1670,3181).",
+      "status": "partial",
+      "evidence": "Scheduled only in main.py:320-332. app/resident.py has no equivalent (grep finds no 'Weekly self' in app/resident.py). Tool path tested in tests/test_goals.py.",
+      "setup_needed": "In resident mode (your launcher) the weekly job is never created unless main.py was run once on this database."
+    },
+    {
+      "name": "Initiative (Apex proposes goals from evidence)",
+      "what": "During memory consolidation, Apex looks for stalled goals and similar evidence and proposes new goals. They go through the Approvals gate; you can decline them.",
+      "how_to_use": "Automatic inside reflection consolidation (agent/reflection.py:263-266). Proposals appear in Approvals.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/initiative.py:79-229; gate agent/approvals.py:167,226. Tests: tests/test_initiative.py (22), tests/test_outcome_measurement.py (16).",
+      "setup_needed": "Reflection consolidation must run (it is triggered by the awareness loop when due)."
+    },
+    {
+      "name": "Missions page",
+      "what": "You give Apex a goal and a finish line it can check (a command, a file, or text in a file). It works in rounds (researcher, coder, reviewer team) until the checks pass, and stops if it gets stuck, runs out of budget or rounds, or needs you. Missions survive a restart and keep Windows awake while they work.",
+      "how_to_use": "Open http://localhost:7860/missions (linked from the dashboard and the Work page). Fill in the title, task and checks, then press Start. Pause, Stop and Resume buttons are on each mission.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/missions.py (validate :99-143, run :301-353, supervisor :403-434, _keep_awake :250-258); dashboard/missions.py routes /missions, /api/missions, /api/missions/{id}/{pause|stop|resume}; included at dashboard/server.py:166-167; supervisor started in set_agent dashboard/server.py:57-60 (both modes call set_agent). Tests: tests/test_missions.py (15 functions, more with parametrize). No scripts/check_*.cjs page check for missions.js.",
+      "setup_needed": "The master dashboard token if one is set. Docker Desktop running for 'command' checks; without Docker, only file/contains checks are accepted. Model spend counts against the mission's $ cap."
+    },
+    {
+      "name": "Morning briefing",
+      "what": "A daily scheduled turn where Celine speaks the weather, news on your topics and your follow-ups.",
+      "how_to_use": "Dashboard → Briefing tab: enable it and set the time, timezone, location and topics. 'Run now' button (/api/briefing/run_now).",
+      "status": "off_by_default",
+      "evidence": "agent/briefing.py:17-23 (enabled=false, timezone America/New_York), :98-129; routes dashboard/server.py:1515-1551; installed at boot only in main.py:349-353, but enabling from the dashboard writes the job into the persistent scheduler, which resident mode runs. No tests import agent.briefing.",
+      "setup_needed": "Enable it in the Briefing tab and change the timezone to Asia/Beirut (the default is America/New_York)."
+    },
+    {
+      "name": "Notifications and Restraint (when NOT to interrupt)",
+      "what": "All Apex notifications (push, Telegram fallback, dashboard toast) go through notify.py. Restraint can hold low-value pings until you are back and learns which pings landed.",
+      "how_to_use": "Automatic (RESTRAINT_ENABLED=true). Held items: /api/restraint, release with /api/restraint/release.",
+      "status": "working",
+      "evidence": "agent/notify.py:133-148, agent/restraint.py; release tick agent/awareness.py:385-395; routes dashboard/server.py:1820,1841. Tests: tests/test_notify.py (11), tests/test_restraint.py (26).",
+      "setup_needed": "Phone push or Telegram must be paired to reach you away from the PC."
+    },
+    {
+      "name": "Perception log (searchable history of what Apex saw)",
+      "what": "Every awareness event is saved to SQLite with full-text search, so you can ask 'what was I doing at 3pm yesterday?'.",
+      "how_to_use": "Ask Celine (tools query_perception, recall_at_time) or use /api/perception.",
+      "status": "working",
+      "evidence": "agent/perception.py:68-78 (log_event), :81+ query; agent/awareness.py:50-59 persists every event; route dashboard/server.py:1469. Tests: tests/test_perception.py (8).",
+      "setup_needed": "None. There is no redaction or retention limit (see gaps)."
+    },
+    {
+      "name": "Outcomes, observed outcomes and auto-rollback of bad skill rewrites",
+      "what": "It tracks thumbs-up/down per skill and per reflection, plus outcomes Apex saw for itself. If a skill rewrite lowers your approval rate, it is rolled back automatically.",
+      "how_to_use": "Rate replies with 👍/👎. Dashboard → Evolution/Telemetry tabs (/api/outcomes/*, POST /api/outcomes/check-rollback). The rollback check also runs at the end of every reflection.",
+      "status": "working",
+      "evidence": "agent/outcomes.py, agent/observed.py, agent/rollback.py; called from agent/reflection.py:359; routes dashboard/server.py:724-744. Tests: tests/test_observed.py (26), tests/test_rollback.py (14), tests/test_outcome_measurement.py (16).",
+      "setup_needed": "You must rate replies. It needs a minimum number of rated turns before it acts."
+    },
+    {
+      "name": "Self-modification (Apex edits its own prompt and adds tools)",
+      "what": "Apex can add to its own system prompt and register new Python tools, saved in ~/.voice_agent_overlay.json, with a revert option.",
+      "how_to_use": "Dashboard → Self-mod tab (/api/selfmod, /api/selfmod/prompt, /api/selfmod/revert), or ask Celine (register_new_tool, revert_self_mod).",
+      "status": "partial",
+      "evidence": "agent/self_mod.py:73-157 (exec of tool code :76); safety rules agent/safety.py:23-25 always ask; app/resident.py:138-159 resident_confirm always answers NO, set at app/resident.py:252. The dashboard routes dashboard/server.py:552-564 call self_mod directly, so the dashboard path works. Tests: tests/test_self_mod.py (28).",
+      "setup_needed": "In resident mode, voice/chat requests to change the prompt or add a tool are always blocked. Use the dashboard Self-mod tab instead."
+    },
+    {
+      "name": "Skill Forge (Apex writes its own tools)",
+      "what": "You describe a capability. Apex drafts a Python tool, tests it in the Docker sandbox, and stages it in Approvals. Nothing is registered until you approve it.",
+      "how_to_use": "Dashboard → Skills tab 'Develop skill' form (dashboard/environment.py:38), or say 'Learn how to ...' (develop_skill tool, agent/core.py:2086,3347). The Constellation can also call it (agent/constellation.py:595).",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/skill_forge.py:120-160 approve via self_mod, :201-233 Docker validation, :414-507 acquire/develop. Tests: tests/test_skill_forge.py (20), tests/test_environment.py. The automatic 'capability gap' path attempt_forge (agent/skill_forge.py:235) has no production caller.",
+      "setup_needed": "Docker Desktop running for offline execution tests. Network tools only get a syntax check."
+    },
+    {
+      "name": "Council (multi-model debate)",
+      "what": "Claude, GPT and Gemini (and optionally an Ollama model) answer independently, debate, and a Claude chair writes one final answer with confidence and disagreements. Stats record whether it was worth the cost.",
+      "how_to_use": "Dashboard → Council tab (/api/council), type /council <question> in main.py text mode (main.py:681-700), or let the model call the 'council' tool (agent/core.py:2099).",
+      "status": "off_by_default",
+      "evidence": "agent/council.py:26-31 roster (no DeepSeek), :149-175 availability by ANTHROPIC/OPENAI/GEMINI/OLLAMA key, :238-246 needs 2 members, :319 chair hard-coded to claude-opus-5. agent/consensus.py, agent/council_stats.py, agent/council_readout.py, agent/council_selection.py (COUNCIL_PROFILE_PATH, empty by default). Tests: tests/test_consensus.py (11), tests/test_council_stats.py (18), tests/test_council_readout.py (15), tests/test_council_events.py (5), tests/test_compare.py. Checked with a snippet: with only DEEPSEEK_API_KEY, available_members()==[] and convene() returns the 'needs at least 2 members' message.",
+      "setup_needed": "At least two of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY (or OLLAMA_COUNCIL_MODEL + OLLAMA_BASE_URL). Without an Anthropic key the chair call fails."
+    },
+    {
+      "name": "Compare (blind model comparison)",
+      "what": "The same question goes to several models. Answers are shown with the model names hidden; you pick the best, and that builds a personal leaderboard.",
+      "how_to_use": "Dashboard → Compare tab (/api/compare/run, /pick, /synthesize, /leaderboard).",
+      "status": "off_by_default",
+      "evidence": "agent/compare.py (reuses the council roster); routes dashboard/server.py:1850-1891. Tests: tests/test_compare.py (6).",
+      "setup_needed": "The same keys as the Council. DeepSeek is not on the roster."
+    },
+    {
+      "name": "Constellation / Team of expert 'planets'",
+      "what": "Twelve domain experts with their own memory journals answer in parallel, and the main model combines their answers. It uses your background model (deepseek-flash), so it works with your keys.",
+      "how_to_use": "Dashboard → Team tab (/api/constellation, /api/constellation/chat), or the consult_experts tool (agent/core.py:2119). Auto-convening is off (CONSTELLATION_AUTO=false).",
+      "status": "working",
+      "evidence": "agent/constellation.py; config.py:58-64; routes dashboard/server.py:1974-2040; init() only in main.py:310-311, but init only creates the vault folder (agent/constellation.py:717-723). Tests: tests/test_constellation.py (21), tests/test_provider_deepseek.py.",
+      "setup_needed": "None beyond a model key. Set CONSTELLATION_AUTO=true if you want it to convene by itself on high-stakes questions."
+    },
+    {
+      "name": "Concept Genesis (testable hypotheses)",
+      "what": "Generates hypotheses together with the evidence and critique needed to test them, and keeps a record of what happened.",
+      "how_to_use": "Ask Celine; the model calls the apex_hypothesis tool (agent/core.py:2731-2732).",
+      "status": "working",
+      "evidence": "agent/genesis.py (1092 lines), agent/core.py:186-200. Tests: tests/test_genesis.py (84), tests/test_genesis_tool.py (26).",
+      "setup_needed": "None."
+    },
+    {
+      "name": "Apex Forge (3D-print checker/exporter)",
+      "what": "Not self-improvement despite the name. It checks whether a 3D mesh is printable (walls, overhangs, build volume) and exports STL/3MF.",
+      "how_to_use": "Ask Celine to check, make or export a part (apex_forge tool, agent/core.py:849,2734).",
+      "status": "working",
+      "evidence": "agent/forge.py; agent/core.py:285-424; config.py:679-692. Tests: tests/test_forge.py (85), tests/test_forge_tool.py (27).",
+      "setup_needed": "None. Printer settings are in .env (FORGE_*)."
+    },
+    {
+      "name": "Tool self-recovery hints",
+      "what": "When a tool fails (for example a mistyped path), Apex adds a concrete next step to the error, such as 'did you mean plans.md next to it'.",
+      "how_to_use": "Automatic on every tool call.",
+      "status": "working",
+      "evidence": "agent/recovery.py, used by agent/core.py. Tests: tests/test_recovery.py (12).",
+      "setup_needed": "None."
+    },
+    {
+      "name": "API failure handling and OpenRouter fallback",
+      "what": "Sorts API failures into types, shows a clear message, and can retry through OpenRouter when the main provider is overloaded.",
+      "how_to_use": "Automatic. The fallback needs OPENROUTER_API_KEY.",
+      "status": "off_by_default",
+      "evidence": "agent/resilience.py:9-10,79-81; config.py:34-36. Tests: tests/test_resilience.py (33), tests/test_startup_resilience.py (50).",
+      "setup_needed": "OPENROUTER_API_KEY in .env for the fallback. The default FALLBACK_MODEL is an old Claude 3.5 Sonnet id."
+    },
+    {
+      "name": "Task recovery (continue an interrupted team run)",
+      "what": "After a team run is cut off (for example by a power cut), you review what it did and then continue it on purpose. It never blindly replays the run.",
+      "how_to_use": "Dashboard home/continuity API: POST /runs/{id}/review then /runs/{id}/continue (dashboard/home.py:152-164).",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/task_recovery.py (51 lines); dashboard/home.py:8,152-164; tests/test_continuity.py:139-140 (only error paths seen).",
+      "setup_needed": "None."
+    },
+    {
+      "name": "Incident recording and replay",
+      "what": "Records decisions so they can be replayed later as a boundary test bench.",
+      "how_to_use": "Set INCIDENT_RECORDING_ENABLED=true; files go to ~/.apex/incidents.",
+      "status": "off_by_default",
+      "evidence": "agent/incident_replay.py:185; config.py:38-39. Tests: tests/test_incident_replay.py (18).",
+      "setup_needed": "The env flag."
+    },
+    {
+      "name": "Session replay eval harness",
+      "what": "Developer harness that replays recorded turns and scores them structurally.",
+      "how_to_use": "None for you. It is only usable from Python; no page, route or CLI.",
+      "status": "planned_or_stub",
+      "evidence": "agent/eval.py has no importer outside tests (grep). Tests: tests/test_eval.py (21) cover scoring only.",
+      "setup_needed": "A developer and an Anthropic key."
+    }
+  ],
+  "files_covered": [
+    "agent/awareness.py", "agent/cortex.py", "agent/world_model.py", "agent/guardian.py", "agent/perception.py",
+    "agent/briefing.py", "agent/missions.py", "agent/council.py", "agent/constellation.py", "agent/skill_forge.py",
+    "agent/self_mod.py", "agent/safety.py", "agent/initiative.py", "agent/notify.py", "agent/restraint.py",
+    "agent/goals.py", "agent/verification.py", "agent/compare.py", "agent/consensus.py", "agent/council_stats.py",
+    "agent/council_readout.py", "agent/council_selection.py", "agent/genesis.py", "agent/forge.py", "agent/eval.py",
+    "agent/recovery.py", "agent/resilience.py", "agent/task_recovery.py", "agent/incident_replay.py", "agent/rollback.py",
+    "agent/outcomes.py", "agent/observed.py", "agent/team.py", "agent/core.py", "agent/app_context.py", "agent/reflection.py",
+    "dashboard/missions.py", "dashboard/server.py", "dashboard/home.py", "dashboard/environment.py",
+    "dashboard/static/missions.html", "dashboard/static/index.html", "dashboard/static/app.js",
+    "main.py", "app/resident.py", "config.py", "requirements.txt", "tools/wiring_audit.py",
+    "docs/USE_ALL_OF_APEX.md", "docs/CAPABILITY_MATRIX.md", "README.md"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_restraint.py", "tests/test_rollback.py", "tests/test_council_readout.py", "tests/test_autonomy.py",
+      "tests/test_reflection_heartbeat.py", "tests/test_world_state_fresh.py", "tests/test_missions.py", "tests/test_guardian.py",
+      "tests/test_initiative.py", "tests/test_cortex_approval.py", "tests/test_cortex_search.py", "tests/test_eval.py",
+      "tests/test_compare.py", "tests/test_consensus.py", "tests/test_constellation.py", "tests/test_self_mod.py",
+      "tests/test_skill_forge.py", "tests/test_forge.py", "tests/test_forge_tool.py", "tests/test_genesis.py",
+      "tests/test_genesis_tool.py", "tests/test_council_events.py", "tests/test_council_stats.py", "tests/test_verification.py",
+      "tests/test_outcome_measurement.py", "tests/test_observed.py", "tests/test_recovery.py", "tests/test_resilience.py",
+      "tests/test_startup_resilience.py", "tests/test_incident_replay.py", "tests/test_notify.py", "tests/test_goals.py",
+      "tests/test_perception.py", "tests/test_resident.py", "tests/test_continuity.py", "tests/test_wiring.py"
+    ],
+    "approx_test_count": 720
+  },
+  "gaps": [
+    {
+      "issue": "On Windows the awareness window watcher never sees any window. It only calls xdotool (a Linux tool), fails silently every 2 seconds, and has no Windows branch. As a result Guardian Angel's message, shopping and calendar triggers can never fire on your laptop, and the proactive 'Heads up' review only sees clipboard and file events. agent/app_context.py has a pygetwindow path, but awareness does not use it, and pygetwindow is not in requirements.txt.",
+      "severity": "high",
+      "evidence": "agent/awareness.py:83-99; agent/guardian.py:101-170 (window_title drives MESSAGE/SHOPPING/CALENDAR/COMMIT_TITLE); agent/app_context.py:6; requirements.txt (no pygetwindow)",
+      "fix_hint": "Add a Windows branch (ctypes GetForegroundWindow + GetWindowTextW, no extra dependency) to ActiveWindowWatcher, with a fake-based test.",
+      "confirmed": true,
+      "how_confirmed": "Read agent/awareness.py:83-99 (only xdotool, exceptions swallowed). grep -rn 'GetForegroundWindow|win32gui' agent tools app found nothing. No test covers ActiveWindowWatcher."
+    },
+    {
+      "issue": "Every clipboard copy (first 200 characters, including passwords and API keys) is stored forever in the SQLite perception log and sent to the cloud model in the 60-second proactive review. Guardian even recognises secrets (SENSITIVE_CLIPBOARD), but nothing redacts them before they are stored or sent, and the perception log has no retention limit.",
+      "severity": "high",
+      "evidence": "agent/awareness.py:116-122 and :50-59 (AwarenessLog.add -> perception.log_event); agent/perception.py:68-78 (plain INSERT, no DELETE/prune anywhere); agent/awareness.py:420-438 (summary sent to model); agent/guardian.py:67-70",
+      "fix_hint": "Run SENSITIVE_CLIPBOARD (and a password-manager window check) before log.add, store '[redacted secret]' instead, and add a retention prune (for example 30 days) for perception_log.",
+      "confirmed": true,
+      "how_confirmed": "Read the add/log_event code path. grep for 'DELETE|prune|retention' in agent/perception.py found only the FTS trigger and no prune."
+    },
+    {
+      "issue": "Resident mode (your real launcher) refuses every action that needs a safety confirmation, with no way to say yes. Asking Celine by voice or chat to register a tool, change her prompt or revert self-mod is always blocked. Approving a staged cortex 'sms_send', or a risky bash/write_file, in the Approvals tab still runs through safety.check and is refused again.",
+      "severity": "medium",
+      "evidence": "app/resident.py:138-159 (resident_confirm returns False), :252; agent/safety.py:23-25 (self-mod rules match everything), :84-127; agent/cortex.py:171-174 (approved actions go through core._execute_tool -> safety.check at agent/core.py:2470)",
+      "fix_hint": "Treat a dashboard approval as the confirmation (pass an 'already approved' flag through approve_action), and route resident confirmations to a companion or dashboard prompt instead of an automatic NO.",
+      "confirmed": true,
+      "how_confirmed": "Read resident_confirm and safety.check. Confirmed approve_action calls cortex._execute_tool, which calls agent.core._execute_tool, whose inner dispatcher calls safety.check first (agent/core.py:2455-2471). The dashboard Self-mod routes (dashboard/server.py:552-564) bypass this, so that workaround exists."
+    },
+    {
+      "issue": "Resident mode skips several startup jobs that main.py installs: the weekly self-evaluation (Mon 08:00), the nightly reflection job (03:00), the morning-briefing re-install, the Skill Curator thread, constellation.init(), the orchestrator sub-agent factory, and dash.set_guardian/set_timecapsule. You only run resident mode, so these never start unless main.py was run once on the same database.",
+      "severity": "medium",
+      "evidence": "main.py:285-380 and :414-417 vs app/resident.py:165-320; grep for 'Weekly self|Nightly reflection|install_briefing|curator|set_guardian|set_timecapsule|orchestrator' in app/resident.py found no matches",
+      "fix_hint": "Move these into one shared boot helper (like awareness.build_monitor) that both main.py and app/resident.py call, and add a test that both paths install the same scheduled jobs.",
+      "confirmed": true,
+      "how_confirmed": "Ran grep -nE on app/resident.py for each of these names: no hits. Read main.py:225-420. Note: reflection consolidation still runs in resident mode via the awareness loop (agent/awareness.py:397-410), so only the scheduled 'Nightly reflection' prompt job is missing."
+    },
+    {
+      "issue": "The Council and Compare can never run on your setup if DeepSeek is your only key. DeepSeek is not on the roster, and the chair is hard-coded to claude-opus-5, so even with GPT and Gemini keys but no Anthropic key the final synthesis fails. The README and USE_ALL_OF_APEX present /council as a normal feature.",
+      "severity": "medium",
+      "evidence": "agent/council.py:26-31, :149-175, :238-246, :319; README.md:91,147; docs/USE_ALL_OF_APEX.md:62",
+      "fix_hint": "Add deepseek-flash (DEEPSEEK_API_KEY) to the roster and pick the chair from the available members (prefer AGENT_MODEL) instead of hard-coding Claude.",
+      "confirmed": true,
+      "how_confirmed": "Ran a python snippet with only DEEPSEEK_API_KEY and AGENT_MODEL=deepseek-flash: council.available_members() returned [] and convene() returned 'The council needs at least 2 members with API keys configured.'"
+    },
+    {
+      "issue": "The cortex 'Apex wants to act' notification links to /?tab=cortex, but no dashboard tab is called 'cortex'; the approvals live in data-tab='approvals'. Tapping the toast does nothing, and opening the push link lands on the Command overview instead of the Approvals list.",
+      "severity": "medium",
+      "evidence": "agent/cortex.py:319; dashboard/static/index.html:55-87 (no cortex tab), :900 (tab-approvals); dashboard/static/app.js:3106-3112 and :3164-3170",
+      "fix_hint": "Change the url to '/?tab=approvals' (skill_forge.py:304,478 also points to tab=skills while the approval lives in Approvals).",
+      "confirmed": true,
+      "how_confirmed": "grep 'data-tab=' in index.html found no 'cortex'. Read app.js:3106-3112: an unknown tab falls back to loadTab('overview')."
+    },
+    {
+      "issue": "Turning the morning briefing off in the Briefing tab does not remove the scheduled job: install_briefing_task returns 'disabled' before its cancel loop, so a previously enabled briefing keeps firing every day.",
+      "severity": "medium",
+      "evidence": "agent/briefing.py:106-114; dashboard/server.py:1529-1535",
+      "fix_hint": "Cancel existing [BRIEFING] tasks before the enabled check, and add tests (agent/briefing.py has none).",
+      "confirmed": true,
+      "how_confirmed": "Ran a snippet with scheduler.list_tasks patched to return one [BRIEFING] task and get_config returning enabled=false: install_briefing_task() returned 'Morning briefing disabled.' and cancelled=[]."
+    },
+    {
+      "issue": "The proactive 'Heads up' speak-up bypasses Restraint. It calls speak() directly instead of going through notify, so the 'learn when not to interrupt' logic never applies to the most frequent interruption source.",
+      "severity": "low",
+      "evidence": "agent/awareness.py:436-438; agent/notify.py:133-138 (restraint only inside notify)",
+      "fix_hint": "Route the observation through notify.notify(kind='proactive') or ask restraint.should_hold before speaking.",
+      "confirmed": true,
+      "how_confirmed": "Read both code paths."
+    },
+    {
+      "issue": "The morning briefing defaults to timezone America/New_York, so if you enable it without changing the field, it fires at the wrong hour in Lebanon.",
+      "severity": "low",
+      "evidence": "agent/briefing.py:17-23",
+      "fix_hint": "Default to the system local timezone (tzlocal) or Asia/Beirut from .env.",
+      "confirmed": true,
+      "how_confirmed": "Read the defaults dict."
+    },
+    {
+      "issue": "skill_forge.attempt_forge, the automatic 'when the agent can't do something it writes a tool' path described in the module docstring, has no production caller. Only develop/acquire (on your request) are wired.",
+      "severity": "low",
+      "evidence": "agent/skill_forge.py:1-12, :235; grep -rn attempt_forge agent app dashboard tools main.py found only the definition",
+      "fix_hint": "Either wire it into the 'no tool for that' path or remove it and fix the docstring.",
+      "confirmed": true,
+      "how_confirmed": "grep across production code; it is referenced only in tests."
+    },
+    {
+      "issue": "The world model is rebuilt with a model call every 5 minutes for as long as Apex runs, even with no active goals and no events. That is about 288 background calls a day, all failing during internet outages.",
+      "severity": "low",
+      "evidence": "agent/awareness.py:369-378 (force=True every 300 s); agent/world_model.py:68-130",
+      "fix_hint": "Skip the rebuild when there are no new events and no active goals, and back off when offline.",
+      "confirmed": true,
+      "how_confirmed": "Read the loop; no goal or event guard before _wm.build."
+    },
+    {
+      "issue": "missions._stop_round stops the last recorded round, not the round currently running. Pause and stop still work only because _wait() separately notices the status change.",
+      "severity": "low",
+      "evidence": "agent/missions.py:180-182, :231-236, :356-367",
+      "fix_hint": "Stop f\"{mid}-r{len(rounds)+1}\" (the live round id) instead.",
+      "confirmed": true,
+      "how_confirmed": "Read the code. tests/test_missions.py:171-185 passes through the _wait path, so the behaviour is right but this helper is dead weight."
+    },
+    {
+      "issue": "In resident mode the dashboard's Guardian log and Time Capsule panel are always empty. Only main.py hands the running Guardian and Time Capsule to the dashboard (dash.set_guardian / set_timecapsule). The on/off toggle still works, because it flips config.GUARDIAN_ANGEL_ENABLED, which the Guardian reads on every check.",
+      "severity": "low",
+      "evidence": "main.py:414-417; app/resident.py:276-284 (no set_guardian); dashboard/server.py:1037-1051; agent/guardian.py:210,316-317",
+      "fix_hint": "Call dash.set_guardian(awareness_monitor.guardian) and dash.set_timecapsule(...) in app/resident.py next to attach_live_feed.",
+      "confirmed": true,
+      "how_confirmed": "grep set_guardian in app/resident.py found no hits. Read guardian_get, which returns an empty log when _guardian_ref is None."
+    },
+    {
+      "issue": "Several modules have no tests or no page check: agent/briefing.py (no test imports it), agent/eval.py (no entry point), missions.js (no scripts/check_*.cjs), and ActiveWindowWatcher.",
+      "severity": "low",
+      "evidence": "grep of tests/ for 'briefing' only hits constellation's convene_briefing; ls scripts/check_*.cjs shows none for missions",
+      "fix_hint": "Add tests/test_briefing.py and a check_missions_ui.cjs.",
+      "confirmed": true,
+      "how_confirmed": "grep and ls as described."
+    }
+  ],
+  "needs_from_owner": [
+    "Re-run Start-Apex-Platform.cmd after the UTF-8 fix and confirm resident.log shows 'Autonomous cortex + awareness monitor started (resident).'",
+    "Start Docker Desktop before using Missions with command checks, Skill Forge, or cortex run_python; without Docker these are skipped or refused.",
+    "Say which API keys are in .env (ANTHROPIC/OPENAI/GEMINI/DEEPSEEK/OPENROUTER). With DeepSeek only, Council and Compare cannot run.",
+    "If you want the morning briefing, enable it in the Briefing tab and set the timezone to Asia/Beirut.",
+    "Set at least one goal and watch whether the cortex stages or runs anything in the Approvals tab over an hour.",
+    "Run one small real mission on /missions (a file/contains check) to prove the loop on the laptop.",
+    "Decide whether you are comfortable with clipboard contents being stored and sent to the model; if not, set AWARENESS_ENABLED=false until redaction is added."
+  ],
+  "rating": {
+    "score": 5,
+    "why": "There is lots of real, well-tested code, but on your Windows resident setup the window watching is blind, secrets are logged, Council needs keys you may not have, and resident mode silently refuses or skips several autonomy paths."
+  }
+}
