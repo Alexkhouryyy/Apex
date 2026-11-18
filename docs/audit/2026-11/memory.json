@@ -1,0 +1,378 @@
+{
+  "subsystem": "Memory, knowledge, vault, documents, learning",
+  "summary": "Apex's memory works in resident mode: you can tell it to remember, recall or forget things by voice or chat. It loads your top 15 memories and the APEX_MEMORY/APEX_USER files at startup, consolidates them every 6 hours from the awareness heartbeat, and keeps Obsidian-style notes, a documents editor and cited research answers. The weak spots: the Memory page's own 'Save' form is broken (HTTP 422). Start-Apex-Platform.cmd forces Hugging Face offline mode, and nothing pre-downloads the embedding model, so the Knowledge base and semantic recall can quietly drop to keyword matching. Some background jobs (skill curator, Time Capsule log) are wired only in main.py, not in resident mode. The research-grade 'governed memory' layer is API-only and no normal turn ever uses it.",
+  "features": [
+    {
+      "name": "Long-term memory (remember / recall / forget)",
+      "what": "Apex saves facts, preferences, decisions and projects to a SQLite database (~/.voice_agent_memory.db) and finds them again by meaning, using the all-MiniLM-L6-v2 embeddings, or by keywords when the embedding model is missing.",
+      "how_to_use": "Automatic, and on request: say or type 'remember that...', 'what do you know about...', 'forget memory #12'. The model calls the remember/recall/forget tools.",
+      "status": "working",
+      "evidence": "agent/longterm.py:344-415 (remember/recall), 486-489 (forget is a hard DELETE); tool dispatch agent/core.py:2975-3008; tool schemas agent/core.py:1223-1261; tests/test_memory.py (23), tests/test_memory_lazy_runtime.py (3), 15 test files call longterm.remember/recall",
+      "setup_needed": "Semantic recall needs the embedding model cached on the laptop (see gaps). Without it, recall falls back to substring/keyword matching."
+    },
+    {
+      "name": "Memory page (Memory tab)",
+      "what": "Dashboard table of saved memories with search and a Forget button, plus a 'Remember something' form.",
+      "how_to_use": "Dashboard -> Memory tab. Search box and Forget work. The Save form at the top is broken.",
+      "status": "partial",
+      "evidence": "dashboard/static/index.html:60 (tab), 258-265 (form); dashboard/static/app.js:576,696,707; routes dashboard/server.py:429-446; form code dashboard/static/scoped-memory.js:36 double-encodes the body (see gaps); check scripts/check_scoped_memory_ui.cjs stubs api() and so hides the bug",
+      "setup_needed": "None. Until the Save form is fixed, add memories by telling Apex."
+    },
+    {
+      "name": "Startup memory + memory files (APEX_MEMORY.md / APEX_USER.md)",
+      "what": "At boot the top 15 memories become the conversation's starting summary. The two Markdown memory files in the vault's Memory folder go into every system prompt (2200 + 1375 chars). Apex edits them with its memory tool.",
+      "how_to_use": "Automatic. Edit the files by hand in <VAULT_PATH>/Memory/ (default ~/Documents/Apex/Memory) or ask Apex to update its memory/user profile.",
+      "status": "working",
+      "evidence": "app/resident.py:188-198 and main.py:218-231 (same in both); agent/longterm.py:561-660 (memory files); agent/core.py:3776-3792 (prompt block)",
+      "setup_needed": "None"
+    },
+    {
+      "name": "Conversation summarization with fact flush",
+      "what": "When a chat gets long, older messages are squeezed into a rolling summary, and any durable facts are saved to long-term memory.",
+      "how_to_use": "Automatic",
+      "status": "working",
+      "evidence": "agent/memory.py:99-173; tests/test_memory.py",
+      "setup_needed": "Uses PROACTIVE_MODEL/BACKGROUND_MODEL (config.py:25-31). These follow AGENT_MODEL from .env, not the model picked on the dashboard."
+    },
+    {
+      "name": "Knowledge base (RAG over your files)",
+      "what": "Indexes folders of notes, code, PDFs and Office files into chunks with embeddings, then answers 'search my files for...' with the best chunks and their paths.",
+      "how_to_use": "Dashboard -> Knowledge base tab (stats, Reindex form, search box), or ask Apex (kb_search / kb_reindex tools).",
+      "status": "partial",
+      "evidence": "agent/knowledge.py:68-186; routes dashboard/server.py:472-490; UI dashboard/static/app.js:1520-1533; tools agent/core.py:1456-1480, 3114-3118. No direct unit tests of reindex/search (only tool-name checks in tests/test_subagent_scope.py, tests/test_apocalypse.py)",
+      "setup_needed": "Embedding model must be cached. Folders are indexed only when you press Reindex. Files you delete stay in the index."
+    },
+    {
+      "name": "Obsidian vault notes (apex_note tool)",
+      "what": "Apex writes and appends Markdown notes, daily notes and entity notes into a folder you can open in Obsidian (Memory, Notes, People, Projects, Daily, Skills, Planets).",
+      "how_to_use": "Ask Apex to 'make a note', 'add to today's daily note', 'list my notes'. Open VAULT_PATH (default ~/Documents/Apex) in Obsidian. The Documents tab also has a '-> Vault' button.",
+      "status": "working",
+      "evidence": "agent/vault.py:95-204 (each writer calls _ensure(), so folders appear even without init_vault); agent/core.py:3306-3338 (apex_note dispatch); tests/test_vault_index.py, tests/test_constellation.py, tests/test_working_context.py import vault. No test drives the apex_note tool itself",
+      "setup_needed": "Optional: set VAULT_PATH in .env (for example to D: or a synced folder)."
+    },
+    {
+      "name": "Vault semantic search (vault_index)",
+      "what": "Keeps an index of the vault so Apex can find the right note without opening every file. It re-indexes changed notes in the background at every startup.",
+      "how_to_use": "Automatic indexing at boot (both modes). Ask 'search my notes for...' (apex_note action=search).",
+      "status": "working",
+      "evidence": "agent/vault_index.py:124-352; startup app/resident.py:186-187 and main.py:216-217; agent/core.py:3322-3331; tests/test_vault_index.py (28)",
+      "setup_needed": "Without the embedding model it falls back to keyword search, and its results say so."
+    },
+    {
+      "name": "Reflection / memory consolidation + Reflections tab",
+      "what": "Every 6 hours Apex reviews recent sessions, memories, goals and awareness events. It proposes insights and memory changes, and applies the ones it rates as 85%+ confident on its own; the rest wait for your review. The same pass refines failing skills, distils preferences and runs the lessons and initiative passes.",
+      "how_to_use": "Automatic, from the awareness heartbeat. Dashboard -> Reflections tab to accept or reject pending ones or 'Run now'. Or say 'reflect on the last day'.",
+      "status": "working",
+      "evidence": "agent/awareness.py:400-409 (heartbeat trigger, both modes since resident builds the same monitor at app/resident.py:226-246); agent/reflection.py:217-275, 277-372, 477-509; routes dashboard/server.py:578-596; UI dashboard/static/app.js:802-958; tests/test_reflection.py (26), tests/test_reflection_heartbeat.py (14)",
+      "setup_needed": "AWARENESS_ENABLED=true (default, config.py:108) and a working background model (BACKGROUND_MODEL follows AGENT_MODEL from .env)."
+    },
+    {
+      "name": "Profile digest (me.md)",
+      "what": "Hourly background loop that writes a short 'about me' profile (me.md) from your high-importance memories, and skips the file if you have edited it yourself.",
+      "how_to_use": "Automatic. Read or edit ~/Documents/Apex/me.md.",
+      "status": "working",
+      "evidence": "agent/reflection.py:570-650; started in app/resident.py:264-269 and main.py:233-239; PROFILE_DIGEST_ENABLED default true (config.py:424); tests/test_reflection.py covers profile_digest",
+      "setup_needed": "None"
+    },
+    {
+      "name": "Knowledge graph (entities and relations)",
+      "what": "People, projects, places and concepts with typed links between them. Similar names are merged using embeddings.",
+      "how_to_use": "Dashboard -> Knowledge graph tab (browse, search 2 hops, delete). Ask Apex to link things (entity_upsert / entity_relate / entity_query / entity_graph tools). Reflection also adds entities.",
+      "status": "partial",
+      "evidence": "agent/entities.py (221 lines); routes dashboard/server.py:598-640; UI dashboard/static/app.js:728-783; tools agent/core.py:1710-1765, 3212-3234. No dedicated tests: only tests/test_reflection.py checks the digest shape, and tests/test_board_jarvis.py touches it",
+      "setup_needed": "Fuzzy merging needs the embedding model."
+    },
+    {
+      "name": "Lessons (procedural memory: what works)",
+      "what": "Learns from tool-call outcomes which approaches succeed or fail, writes them up as short lessons, retires stale ones, and adds the active lessons to the prompt.",
+      "how_to_use": "Automatic (runs with reflection every 6h; injected through goals.active_goals_for_prompt).",
+      "status": "working",
+      "evidence": "agent/lessons.py:298-376; agent/reflection.py:247-257; agent/goals.py:274-275; tests/test_lessons.py (26)",
+      "setup_needed": "None"
+    },
+    {
+      "name": "Time Capsule (long-horizon callbacks)",
+      "what": "Notices goal-like or emotional statements ('I want to start running') and, weeks later, asks how it is going. At most 2 a day.",
+      "how_to_use": "Automatic, spoken. Toggle and log on the dashboard Time Capsule panel.",
+      "status": "partial",
+      "evidence": "agent/timecapsule.py:193-401; built in agent/awareness.py:568-574 (both modes); dashboard/server.py:1054-1076; resident never calls dash.set_timecapsule (only main.py:417-418), so the panel's log is always empty in resident mode; tests/test_timecapsule.py (20), no API test",
+      "setup_needed": "TIME_CAPSULE_MODEL (defaults to PROACTIVE_MODEL) must reach a working provider."
+    },
+    {
+      "name": "Turn feedback (thumbs up/down)",
+      "what": "Rate the last answer by chat thumbs, voice ('that was perfect', 'that's wrong') or /feedback in the console. This feeds the reranker, outcomes and skill rollback.",
+      "how_to_use": "Thumbs buttons in dashboard chat; spoken phrases (both modes); '/feedback +1 comment' only in the main.py console.",
+      "status": "working",
+      "evidence": "agent/feedback.py; app/resident.py:373-396 (voice phrases in resident); main.py:622-660; dashboard/server.py:682-720; tests/test_feedback.py (15), tests/test_resident_feedback.py (10)",
+      "setup_needed": "None"
+    },
+    {
+      "name": "Best-of-n reranker (learning loop)",
+      "what": "Generates 2-4 candidate answers and picks the one closest to what you have rated well before.",
+      "how_to_use": "Set RERANK_ENABLED=true in .env. It costs N times the generation per final answer.",
+      "status": "off_by_default",
+      "evidence": "config.py:172-173; agent/core.py:4256-4306; agent/reranker.py; tests/test_reranker.py (12), tests/test_rerank_wiring.py (11), tests/test_reranker_integrity.py (6)",
+      "setup_needed": "RERANK_ENABLED=true, and enough feedback for it to have learned something."
+    },
+    {
+      "name": "Trajectory capture + Learning tab",
+      "what": "Records every tool call's error, recovery and duration. The Learning tab shows reliability and reranker stats.",
+      "how_to_use": "Automatic. Dashboard -> Learning tab.",
+      "status": "working",
+      "evidence": "agent/core.py:2429 (_traj.record on every tool call); dashboard/server.py:1897-1912; dashboard/static/app.js:2720; tests/test_trajectory.py (8)",
+      "setup_needed": "None"
+    },
+    {
+      "name": "Skill curator",
+      "what": "Every 7 days, when Apex has been idle, archives stale skills and de-duplicates them.",
+      "how_to_use": "Automatic, but only under main.py. API only: /api/curator/status, /api/curator/run, /api/curator/rollback. No page uses them.",
+      "status": "partial",
+      "evidence": "main.py:358-375 (thread started only here); nothing in app/resident.py; dashboard/server.py:2656-2685; no static page references /api/curator; tests only tests/test_skill_md_usage.py (regression on archiving fresh skills)",
+      "setup_needed": "In resident mode it never runs."
+    },
+    {
+      "name": "Documents editor (Files & documents tab)",
+      "what": "A Markdown document store with an AI edit button (improve, shorten, fix grammar, change tone), export to the vault, and 'save research as document'.",
+      "how_to_use": "Dashboard -> Files & documents tab; '-> Vault' button; Research tab 'Save'. Or ask Apex (document_write / document_list / document_read).",
+      "status": "working",
+      "evidence": "agent/documents.py; dashboard/server.py:1915-1972; dashboard/static/app.js:2411-2592; tools agent/core.py:1680-1708; tests/test_documents.py (8)",
+      "setup_needed": "AI edit uses config.AGENT_MODEL (agent/documents.py:152), not the model you picked on the dashboard."
+    },
+    {
+      "name": "Office/PDF to text (doc_convert)",
+      "what": "Turns Word, PowerPoint, Excel and PDF files into text for the knowledge base, file reading and demos, using markitdown.",
+      "how_to_use": "Automatic when Apex reads or indexes such files.",
+      "status": "working",
+      "evidence": "agent/doc_convert.py; used by agent/knowledge.py:46-53 and tools/files.py; requirements.txt:16 pins markitdown 0.1.8; tests/test_doc_convert.py (10)",
+      "setup_needed": "markitdown installed in .venv. Scanned PDFs report needs_ocr and are skipped."
+    },
+    {
+      "name": "Cited answers (Research tab / research tool)",
+      "what": "Web research where every claim carries a [n] citation you can open, with a citation gate and support audit.",
+      "how_to_use": "Dashboard -> Research tab, or ask Apex to 'research ...'.",
+      "status": "working",
+      "evidence": "agent/answers.py (784 lines); agent/core.py:2907-2912; dashboard/server.py:1752-1820; tests/test_answers.py (98)",
+      "setup_needed": "Internet and a search provider. Slow links in Lebanon will make it slow."
+    },
+    {
+      "name": "Working context for the cloud relay",
+      "what": "A redacted slice of memory that the optional cloud relay may read, so it can answer while the laptop is off.",
+      "how_to_use": "Only if you set up the relay (RELAY_ENABLED).",
+      "status": "off_by_default",
+      "evidence": "agent/working_context.py:152; config.py:452 RELAY_ENABLED=False; tests/test_working_context.py (16)",
+      "setup_needed": "Relay server, RELAY_URL and RELAY_TOKEN."
+    },
+    {
+      "name": "Governed / scoped research memory (memory_governance, memory_router, memory_fusion, context_graph)",
+      "what": "Experimental, owner-approved evidence store with scopes, purposes and reversible context selection. Normal chat turns do not read it.",
+      "how_to_use": "Owner-only API under /api/research/memory. The Memory tab shows records only if some exist. No page creates them.",
+      "status": "planned_or_stub",
+      "evidence": "dashboard/research.py:14-75; agent/core.py:3936,3970 (memory_context parameter has no caller anywhere); dashboard/static/scoped-memory.js:1-27 labels them 'unused'; REVERSIBLE_CONTEXT_ENABLED=False (config.py:43); tests/test_research_memory.py, test_research_boundaries.py, test_research_collaboration.py, test_research_router.py, test_research_fusion.py, test_research_context.py",
+      "setup_needed": "Not usable day to day."
+    },
+    {
+      "name": "Learning registry / evaluation contracts / citation checks / memory selection benchmark",
+      "what": "Offline developer tooling for promoting skill versions behind evidence, checking exact quotes and benchmarking memory selection.",
+      "how_to_use": "Developer scripts: scripts/learning_gate.py, scripts/learning_registry.py, scripts/citation_pilot.py, scripts/memory_selection.py.",
+      "status": "planned_or_stub",
+      "evidence": "agent/learning_registry.py, agent/learning_eval.py, agent/citation_checks.py, agent/memory_selection.py; tests/test_research_learning.py (9), tests/test_research_citations.py (1), tests/test_memory_selection.py (12)",
+      "setup_needed": "Not owner-facing."
+    },
+    {
+      "name": "File event filter",
+      "what": "Drops noisy file-watcher events (temp files, caches) before they reach awareness and memory.",
+      "how_to_use": "Automatic.",
+      "status": "working",
+      "evidence": "agent/file_events.py; used by agent/awareness.py; tests/test_file_events.py (3)",
+      "setup_needed": "None"
+    }
+  ],
+  "files_covered": [
+    "agent/longterm.py",
+    "agent/memory.py",
+    "agent/knowledge.py",
+    "agent/vault.py",
+    "agent/vault_index.py",
+    "agent/reflection.py",
+    "agent/timecapsule.py",
+    "agent/lessons.py",
+    "agent/documents.py",
+    "agent/core.py",
+    "agent/awareness.py",
+    "agent/telemetry.py",
+    "agent/memory_governance.py",
+    "agent/memory_fusion.py",
+    "agent/memory_router.py",
+    "agent/memory_selection.py",
+    "agent/entities.py",
+    "agent/context_graph.py",
+    "agent/working_context.py",
+    "agent/learning_eval.py",
+    "agent/learning_registry.py",
+    "agent/curator.py",
+    "agent/doc_convert.py",
+    "agent/citation_checks.py",
+    "agent/answers.py",
+    "agent/reranker.py",
+    "agent/feedback.py",
+    "agent/file_events.py",
+    "agent/trajectory.py",
+    "main.py",
+    "app/resident.py",
+    "config.py",
+    "dashboard/server.py",
+    "dashboard/research.py",
+    "dashboard/static/index.html",
+    "dashboard/static/app.js",
+    "dashboard/static/scoped-memory.js",
+    "scripts/check_scoped_memory_ui.cjs",
+    "scripts/run_apex_platform.py",
+    "Start-Apex-Platform.cmd",
+    "Start-Apex-All.cmd",
+    "requirements.txt"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_answers.py",
+      "tests/test_doc_convert.py",
+      "tests/test_documents.py",
+      "tests/test_feedback.py",
+      "tests/test_file_events.py",
+      "tests/test_lessons.py",
+      "tests/test_memory.py",
+      "tests/test_memory_lazy_runtime.py",
+      "tests/test_memory_selection.py",
+      "tests/test_reflection.py",
+      "tests/test_reflection_heartbeat.py",
+      "tests/test_rerank_wiring.py",
+      "tests/test_reranker.py",
+      "tests/test_reranker_integrity.py",
+      "tests/test_research_boundaries.py",
+      "tests/test_research_citations.py",
+      "tests/test_research_collaboration.py",
+      "tests/test_research_context.py",
+      "tests/test_research_fusion.py",
+      "tests/test_research_learning.py",
+      "tests/test_research_memory.py",
+      "tests/test_research_router.py",
+      "tests/test_resident_feedback.py",
+      "tests/test_timecapsule.py",
+      "tests/test_trajectory.py",
+      "tests/test_vault_index.py",
+      "tests/test_working_context.py",
+      "tests/test_skill_md_usage.py",
+      "scripts/check_scoped_memory_ui.cjs"
+    ],
+    "approx_test_count": 390
+  },
+  "gaps": [
+    {
+      "issue": "The Memory page's 'Remember something' Save button always fails with HTTP 422. scoped-memory.js passes body: JSON.stringify({...}) to app.js api(), which stringifies it a second time, so the server gets a JSON string instead of an object. The page check stubs api() with a fake that expects a string, so it passes while the real page fails.",
+      "severity": "high",
+      "evidence": "dashboard/static/scoped-memory.js:36; dashboard/static/app.js:72-80 (body: JSON.stringify(opts.body)); dashboard/server.py:434-444 (payload: dict); scripts/check_scoped_memory_ui.cjs:7 (JSON.parse(options.body) encodes the wrong contract)",
+      "fix_hint": "In scoped-memory.js pass body:{content:...,kind:...} (a plain object) like every other caller in app.js. Change the check's api stub to receive an object, so the double-encode would fail it.",
+      "confirmed": true,
+      "how_confirmed": "Read app.js api() and confirmed it is the global api (team.js's api is IIFE-scoped). Ran a FastAPI TestClient snippet with an identical 'payload: dict' route and a double-JSON-encoded body: 422 'Input should be a valid dictionary'. Ran node: JSON.stringify of the stringified object yields a quoted string."
+    },
+    {
+      "issue": "Start-Apex-Platform.cmd sets HF_HUB_OFFLINE=1 / TRANSFORMERS_OFFLINE=1 for Apex, and nothing in the repo pre-downloads the all-MiniLM-L6-v2 embedding model. If it was never cached on the laptop, the Knowledge base refuses to index or search ('Embedding model unavailable... check internet', which is misleading because internet is not the problem). Memory recall and vault search drop to keyword matching, new memories get no embedding, and entity fuzzy-merge is off. All of this is quiet except one console line.",
+      "severity": "medium",
+      "evidence": "scripts/run_apex_platform.py:121,143-146,187; agent/longterm.py:44-51 (SentenceTransformer('all-MiniLM-L6-v2'), failure is cached as False for the process); agent/knowledge.py:72-74,135-137; no other reference to MiniLM in scripts/ or setup .cmd files",
+      "fix_hint": "Download the model during setup (Apex.bat or a Setup step) or in Test-Apex-Hardware. Or exempt it from offline mode / point SENTENCE_TRANSFORMERS_HOME at a bundled copy. Show 'embedding model missing' on the Memory/Knowledge pages.",
+      "confirmed": true,
+      "how_confirmed": "Read the launcher (sets the env vars and passes apex_env to run_apex_qwen.py --resident) and grepped the whole repo for MiniLM/model download. Only longterm.py loads it, and lazily. Not run on Windows: if the laptop ever ran Start-Apex-All.cmd (no offline flag) and used memory, the model may already be cached."
+    },
+    {
+      "issue": "The Knowledge base never removes files you delete or move. Reindex only adds or updates, and the 'removed' counter is hard-coded to 0, so search keeps returning chunks of files that no longer exist.",
+      "severity": "medium",
+      "evidence": "agent/knowledge.py:75-78 (deleted = 0, never incremented), 101-126; remove_path() (128-132) has no caller in the repo",
+      "fix_hint": "At the end of reindex(), delete kb_chunks rows whose path is under the reindexed roots but no longer exists, and count them in 'removed'. Add a test.",
+      "confirmed": true,
+      "how_confirmed": "Ran a scratchpad snippet with a temp DB and a fake embedding model: indexed a folder, deleted the file, reindexed ('0 removed'). stats() still showed 1 file and search('hello') still returned a.md."
+    },
+    {
+      "issue": "The skill curator (weekly archive/dedup of stale skills) is started only by main.py. Resident mode, the owner's only launcher, never runs it, and no dashboard page calls /api/curator/*.",
+      "severity": "medium",
+      "evidence": "main.py:358-375; app/resident.py has no 'curator' reference; dashboard/server.py:2656-2685; no dashboard/static file references api/curator",
+      "fix_hint": "Move the curator tick into a shared helper started from both main.py and app/resident.py (as schema.init_all and build_monitor were). Add a button on the Skills tab.",
+      "confirmed": true,
+      "how_confirmed": "grep -rn curator app/ and agent/*.py (only telemetry's call-site name) and dashboard/static: no hits besides main.py and the routes."
+    },
+    {
+      "issue": "In resident mode the Time Capsule panel's log is always empty: app/resident.py never calls dash.set_timecapsule(), so /api/timecapsule returns log=[] even though the capsule is capturing and speaking. The Guardian log has the same omission.",
+      "severity": "medium",
+      "evidence": "main.py:415-418 (set_guardian/set_timecapsule); app/resident.py:271-288 (only set_agent and attach_live_feed); dashboard/server.py:1063-1067 (log=[] when _timecapsule_ref is None)",
+      "fix_hint": "In app/resident.py, after dash.set_agent, call dash.set_guardian(awareness_monitor.guardian) and dash.set_timecapsule(awareness_monitor.timecapsule) when present. Better: move it into awareness.attach_live_feed.",
+      "confirmed": true,
+      "how_confirmed": "grep 'set_timecapsule|set_guardian' app/resident.py found nothing; read server.py lines 1054-1076. The toggle still works because tick() reads config each time (agent/timecapsule.py:218)."
+    },
+    {
+      "issue": "Reflection auto-applies its own suggestions when it rates them 85%+ confident, including 'forget' and 'supersedes_id' actions that hard-DELETE your memories. No approval, no trash, no undo. MEMORY_WRITE_APPROVAL does not cover this path.",
+      "severity": "medium",
+      "evidence": "agent/reflection.py:144 (prompt offers {type: forget}), 328-347 (auto-apply at config.REFLECTION_AUTO_APPLY_THRESHOLD=0.85, config.py:317), 477-492; agent/longterm.py:486-489 (DELETE FROM memories)",
+      "fix_hint": "Never auto-apply forget/supersede: keep them pending for review. Or soft-delete (status column) with an undo on the Reflections tab.",
+      "confirmed": true,
+      "how_confirmed": "Read the prompt, the auto-apply loop and _apply_action. grep MEMORY_WRITE_APPROVAL: only longterm.save_memory_entry (longterm.py:600) and vault.py:106 check it."
+    },
+    {
+      "issue": "Picking a model on the dashboard (for example deepseek-flash) changes only the chat model. config.AGENT_MODEL and BACKGROUND_MODEL keep the .env value (default claude-opus-5). Memory consolidation, summarization, profile digest, Time Capsule extraction and the Documents AI-edit then still call that model, and fail quietly if there is no Anthropic key.",
+      "severity": "medium",
+      "evidence": "dashboard/server.py:410-423 -> agent/core.py:3665 (sets self._model only); config.py:21,25-31; agent/telemetry.py:196-209 (background sites use config.BACKGROUND_MODEL); agent/documents.py:152",
+      "fix_hint": "Either persist the chosen model as AGENT_MODEL/BACKGROUND_MODEL, or show on the Models page which model background memory jobs use. Ask the owner to set AGENT_MODEL=deepseek-flash in .env.",
+      "confirmed": true,
+      "how_confirmed": "Read set_model and the /api/model route (no config/.env write), config defaults and telemetry._resolve_call. Impact depends on the owner's .env, which I cannot see."
+    },
+    {
+      "issue": "No direct tests for the Knowledge base (knowledge.reindex/search), the entity graph (agent/entities.py), curator.run, the apex_note tool or the /api/timecapsule route.",
+      "severity": "low",
+      "evidence": "grep of tests/: knowledge only appears as tool names (tests/test_subagent_scope.py:24, tests/test_apocalypse.py:79); entities only via tests/test_reflection.py digest shape",
+      "fix_hint": "Add small tests with a fake embedder (as in the snippet used for the KB gap).",
+      "confirmed": true,
+      "how_confirmed": "grep -rl for knowledge.search/reindex, upsert_entity, curator, apex_note, api/timecapsule in tests/"
+    },
+    {
+      "issue": "Knowledge base search loads every chunk and embedding from SQLite on every query (no cap, no vector index), so a big folder (say D: library notes) will make kb_search slow.",
+      "severity": "low",
+      "evidence": "agent/knowledge.py:139-150",
+      "fix_hint": "Cap candidates like longterm._RECALL_CANDIDATE_CAP, or cache vectors in memory.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines. Not benchmarked."
+    },
+    {
+      "issue": "Facts flushed by the summarizer are saved with kind='conversation', which remember() silently rewrites to 'note'. They are never de-duplicated, so the same fact can pile up at importance 6.",
+      "severity": "low",
+      "evidence": "agent/memory.py:171; agent/longterm.py:353-355",
+      "fix_hint": "Use kind='fact' and skip near-duplicates (cosine > 0.9) before inserting.",
+      "confirmed": true,
+      "how_confirmed": "Read both lines."
+    },
+    {
+      "issue": "Resident mode skips vault.init_vault(), so the vault README is never written and old ~/.apex/memory files are never migrated. Folders still appear because every writer calls _ensure(). It also skips main.py's 'Nightly reflection' scheduled task, which is harmless because the awareness heartbeat runs consolidation every 6h.",
+      "severity": "low",
+      "evidence": "main.py:305-307, 334-348; app/resident.py (no init_vault); agent/vault.py:36-41,115",
+      "fix_hint": "Call init_vault() from app/resident.py too.",
+      "confirmed": true,
+      "how_confirmed": "grep init_vault/Nightly reflection in app/resident.py: none."
+    },
+    {
+      "issue": "AgentCore.run(memory_context=...) is never passed by any caller, so the governed-memory scope is never active in normal turns. Its 'Approved evidence panel' messages in remember/recall/forget are dead branches for the owner.",
+      "severity": "low",
+      "evidence": "agent/core.py:3936,3970; agent/core.py:2976-3007; grep memory_context finds only the definition",
+      "fix_hint": "Either wire it to a real page or label the module experimental in docs.",
+      "confirmed": true,
+      "how_confirmed": "grep -rn memory_context across agent/ dashboard/ app/ main.py"
+    }
+  ],
+  "needs_from_owner": [
+    "On the laptop, check whether the embedding model is cached: look for a folder named models--sentence-transformers--all-MiniLM-L6-v2 under C:\\Users\\alexk\\.cache\\huggingface\\hub. If it is missing, run Start-Apex-All.cmd once with internet and say 'remember that test' so it downloads (about 90 MB), then go back to Start-Apex-Platform.cmd.",
+    "Tell us whether .env sets AGENT_MODEL=deepseek-flash, or whether you only pick DeepSeek on the dashboard. If the latter, background memory jobs still try Claude.",
+    "After the UTF-8 fix, open the Memory tab and try the Save form (expected to fail with HTTP 422 until fixed). Telling Apex 'remember ...' by voice works instead.",
+    "Decide whether reflection may delete memories on its own (today it can, at 85% confidence).",
+    "Decide where the vault should live (VAULT_PATH; default C:\\Users\\alexk\\Documents\\Apex). If Documents is redirected to OneDrive, Obsidian may look elsewhere.",
+    "Press Reindex on the Knowledge base tab with the folders you want searchable. Nothing is indexed until you do."
+  ],
+  "rating": {
+    "score": 6,
+    "why": "The core memory, reflection, vault search, documents and cited answers are real, wired in resident mode and well tested. But the Memory page Save is broken, embeddings may be missing under the Platform launcher, the KB keeps deleted files, and several pieces are main.py-only or experimental."
+  }
+}

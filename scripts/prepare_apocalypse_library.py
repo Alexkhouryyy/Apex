@@ -604,6 +604,39 @@ def download_with_retries(client, home, job, checkpoint, *, sleep=time.sleep):
             sleep(wait)
 
 
+def started(job):
+    """Downloaded, part-way through, or an update the owner chose."""
+    return (job.get('status') in ('downloaded', 'downloading') or int(job.get('downloaded_bytes') or 0) > 0
+            or bool(job.get('replaces')))
+
+
+def left_out(jobs, selected, identifiers=None):
+    """The archives a size limit kept out of this batch, for saying so."""
+    chosen = {id(row) for row in selected}
+    return [row for row in jobs if id(row) not in chosen and (not identifiers or row['id'] in identifiers)
+            and row.get('status') != 'downloaded']
+
+
+NOMAD_RESCAN = 'http://127.0.0.1:8080/api/zim/rescan-library'
+
+
+def rescan_library(post=None):
+    """Ask NOMAD to list new or replaced books, so search finds them. Returns
+    True if NOMAD did it; otherwise says how to do it later."""
+    try:
+        if post is not None:
+            post(NOMAD_RESCAN)
+        else:
+            with httpx.Client(trust_env=False, timeout=httpx.Timeout(30, connect=3)) as client:
+                client.post(NOMAD_RESCAN, json={}).raise_for_status()
+        print('NOMAD rescanned the library: the new books show up in search.', flush=True)
+        return True
+    except Exception:
+        print('New books are on the drive. To make them searchable, start Docker Desktop and NOMAD, then run: '
+              'Setup-Apex-Apocalypse.cmd --nomad-readers', flush=True)
+        return False
+
+
 def select_jobs(jobs, identifiers=None, max_download_gb=None):
     """Choose whole archives within a decimal-GB budget; never start a huge partial."""
     identifiers = set(identifiers or [])
@@ -616,7 +649,10 @@ def select_jobs(jobs, identifiers=None, max_download_gb=None):
         raise RuntimeError('The download limit must be a positive, finite number of GB.')
     budget = int(max_download_gb * 1_000_000_000)
     selected = []
-    for row in sorted(candidates, key=lambda row: row['bytes']):
+    # Archives already started (downloaded, part-way, or an update in progress)
+    # claim the budget first: a pack added later must never push out a download
+    # that is half done, like the 127 GB Wikipedia. The rest go smallest first.
+    for row in sorted(candidates, key=lambda row: (not started(row), row['bytes'])):
         # Count full sizes, including saved partials, so a server restarting a
         # transfer cannot expand the selection beyond the chosen archive budget.
         size = int(row['bytes'])
@@ -793,6 +829,12 @@ def main():
                     print(f'{identifier} is already in the plan; kept as it was.', flush=True)
                 only = only or args.add               # --add X downloads X, not the whole plan
             selected = select_jobs(plan['jobs'], only, args.max_download_gb)
+            skipped = left_out(plan['jobs'], selected, only) if args.max_download_gb is not None else []
+            if skipped:
+                print(f'Not in this batch (over the {args.max_download_gb:g} GB limit): '
+                      + ', '.join(f'{row["id"]} ({row["bytes"]/1_000_000_000:.1f} GB)' for row in skipped)
+                      + '. Use a bigger number to include them.', flush=True)
+            had = {row['id'] for row in plan['jobs'] if row.get('status') == 'downloaded' and not row.get('replaces')}
             save_plan(output, plan)
             total = sum(row['bytes'] for row in plan['jobs'])
             print(f'English + worldwide: {len(plan["jobs"])} archives, {total/1024**3:.1f} GiB. '
@@ -821,6 +863,8 @@ def main():
                 outcome = run_batch(client, home, output, plan, selected, until_done=True)
                 if finish_replacements(home, plan):
                     save_plan(output, plan)
+            if any(row.get('status') == 'downloaded' and row['id'] not in had for row in plan['jobs']):
+                rescan_library()                    # new or updated books: make search see them
             print('Archives require prepared NOMAD readers. Courses, medical database ingestion, map assets and AI/RAG setup remain visible in the plan.', flush=True)
             if outcome == 'drive':
                 raise RuntimeError("The library drive was disconnected. Plug it back in and run this again; "
@@ -831,7 +875,8 @@ def main():
             if outcome == 'error':
                 raise RuntimeError('Some archives need attention (see the Pending lines above): retrying would not fix '
                                    'them. Every other finished archive and partial file is kept.')
-            print('Every archive in this batch is downloaded and checksum-verified.', flush=True)
+            print('Every archive in this batch is downloaded and checksum-verified.'
+                  + (f' {len(skipped)} did not fit the size limit (listed above).' if skipped else ''), flush=True)
 
 
 def report_updates(client, plan):

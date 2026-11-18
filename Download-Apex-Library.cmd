@@ -45,6 +45,6 @@ if errorlevel 1 (
   exit /b 1
 )
 if exist "%RESUME%" del "%RESUME%"
-echo Done. Every archive up to %LIMIT% GB is downloaded and checksum-verified.
+echo Done. Everything that fits in %LIMIT% GB is downloaded and checksum-verified. Anything that did not fit is listed above.
 pause
 exit /b 0

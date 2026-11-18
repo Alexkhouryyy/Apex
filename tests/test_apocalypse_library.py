@@ -850,3 +850,62 @@ def test_the_pack_launchers_search_then_add():
     assert '--add %~1' in add and '--until-done' in add
     for name in ('Find-Apex-Pack.cmd', 'Add-Apex-Pack.cmd'):
         assert b'\r\n' in (root / name).read_bytes(), 'Windows line endings'
+
+
+# ---------------------------------------------------------------- a size limit never drops a started download
+
+def test_packs_added_later_never_push_out_a_download_in_progress():
+    """220 GB tier, about 5 GB spare: 6 GB of added packs used to drop the
+    half-done 127 GB Wikipedia from the batch, which then said 'Done'."""
+    wiki = dict(id='wikipedia_en_all_maxi', bytes=127_000_000_000, status='downloading', downloaded_bytes=43_000_000_000)
+    books = [dict(id=f'book{i}', bytes=11_000_000_000, status='downloaded') for i in range(8)]   # 88 GB done
+    packs = [dict(id='arabic_medicine', bytes=6_000_000_000, status='pending', added=True)]
+    jobs = books + [wiki] + packs
+    selected = library.select_jobs(jobs, max_download_gb=220)
+    assert wiki in selected and all(b in selected for b in books)
+    assert library.left_out(jobs, selected) == packs, 'the new pack waits, and is named'
+
+
+def test_an_update_in_progress_also_keeps_its_place():
+    update = dict(id='medicine', bytes=9_000_000_000, status='pending', replaces={'path': 'x.zim', 'version': '2026-01'})
+    small = [dict(id=f's{i}', bytes=1_000_000_000, status='pending') for i in range(9)]
+    selected = library.select_jobs(small + [update], max_download_gb=9.5)
+    assert selected == [update]
+
+
+def test_whatever_does_not_fit_is_said_and_new_books_are_rescanned(monkeypatch, tmp_path, capsys):
+    wiki = dict(archive(b'wiki'), id='wiki', title='Wiki', bytes=150, status='downloading', downloaded_bytes=50)
+    pack = dict(archive(b'pack'), id='pack', title='Pack', bytes=100)
+    _until_done_setup(monkeypatch, tmp_path, [wiki, pack], ['--max-download-gb', '0.0000002'])
+    monkeypatch.setattr(library, 'download_with_retries',
+                        lambda client, home, job, checkpoint, **kw: job.update(status='downloaded', checksum_verified=True))
+    rescans = []
+    monkeypatch.setattr(library, 'rescan_library', lambda: rescans.append(1))
+    library.main()
+    out = capsys.readouterr().out
+    assert 'Not in this batch (over the 2e-07 GB limit): pack (0.0 GB)' in out
+    assert '1 did not fit the size limit (listed above)' in out
+    assert rescans == [1], 'a newly downloaded book is made searchable'
+
+
+def test_no_rescan_when_nothing_new_arrived(monkeypatch, tmp_path):
+    done = dict(archive(b'one'), id='a', title='A', status='downloaded', checksum_verified=True)
+    _until_done_setup(monkeypatch, tmp_path, [done], [])
+    monkeypatch.setattr(library, 'download_with_retries', lambda *a, **k: None)
+    monkeypatch.setattr(library, 'rescan_library', lambda: pytest.fail('nothing new to rescan'))
+    library.main()
+
+
+def test_rescan_without_nomad_says_how_to_do_it_later(capsys):
+    def refused(url):
+        raise httpx.ConnectError('[WinError 10061]')
+    assert library.rescan_library(post=refused) is False
+    assert 'Setup-Apex-Apocalypse.cmd --nomad-readers' in capsys.readouterr().out
+    assert library.rescan_library(post=lambda url: None) is True
+
+
+def test_finished_archives_outside_the_limit_are_not_listed_as_left_out():
+    finished = dict(id='map', bytes=138_000_000_000, status='downloaded')
+    small = dict(id='guide', bytes=1_000_000_000, status='pending')
+    selected = library.select_jobs([finished, small], max_download_gb=90)
+    assert finished not in selected and library.left_out([finished, small], selected) == []
