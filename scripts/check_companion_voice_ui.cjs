@@ -52,8 +52,8 @@ w.eval(fs.readFileSync(base + 'companion.js', 'utf8'));
   assert.ok($('voice-note').hidden, 'before sign-in the answer is "sign in", not "start a voice server"');
 
   // Log in, exactly as a user does.
-  w.localStorage.setItem('apex_token', 'whowantstobeking');
-  $('token').value = 'whowantstobeking';
+  w.localStorage.setItem('apex_token', 'test-dashboard-token');
+  $('token').value = 'test-dashboard-token';
   $('login-form').dispatchEvent(new w.Event('submit'));
   await tick(); await tick();
 

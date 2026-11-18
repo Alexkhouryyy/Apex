@@ -281,7 +281,9 @@ def test_a_ctrl_c_right_after_a_child_starts_still_stops_it(rig,monkeypatch):
     real=platform.spawn
     def spawn_then_ctrl_c(args,env):
         p=real(args,env)
-        os.kill(os.getpid(),signal.SIGINT)        # lands before the launcher has recorded p
+        # raise_signal runs Python's own Ctrl+C handler on every OS. os.kill with SIGINT
+        # on Windows is TerminateProcess: it killed the whole Windows CI test run here.
+        signal.raise_signal(signal.SIGINT)        # lands before the launcher has recorded p
         return p
     monkeypatch.setattr(platform,'spawn',spawn_then_ctrl_c)
     def loop_reached(_): raise AssertionError('the Ctrl+C was swallowed')
