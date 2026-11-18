@@ -1,0 +1,320 @@
+{
+  "subsystem": "Apex Code (coding sessions on your Claude/ChatGPT plans, editor, terminal, Full IDE, usage)",
+  "summary": "Apex Code is the /code page. You describe a change and your own Claude Code or Codex sign-in does the work in a separate git copy of the project. You watch each step, run checks, get a second opinion, then Keep it or Throw it away. It is one of the biggest and best-tested parts of Apex: 320 tests in tests/test_code_*.py plus 8 page checks, and it works the same in resident mode and in main.py because the routes are always mounted. Almost none of it has been run on your laptop, though. Work-task commits show Codex has run there, but the Code page, the ConPTY terminal, the phone 'Allow once' links and the Full IDE have not. The Full IDE setup file does not work when you double-click it on Windows: it needs a zip built by GitHub CI. The 'specialist plan' tool (run_dependency_plan) always fails in resident mode.",
+  "features": [
+    {
+      "name": "Code page and home screen",
+      "what": "The /code page shows your two plans as rings (ready, resting until a reset time, or not signed in), this week's numbers, a brief box with Safe/Full mode, quick starts and your recent sessions.",
+      "how_to_use": "Dashboard sidebar -> Code, or http://127.0.0.1:7860/code. Ctrl+Enter sends the brief.",
+      "status": "working",
+      "evidence": "dashboard/code.py:67-75 (GET /code, GET /api/code); router mounted in dashboard/server.py:156-160, which runs in both modes (main.py:411 and app/resident.py:274-286 call dash.set_agent/start); sidebar link in dashboard/static/index.html; scripts/check_code_ui.cjs, scripts/check_code_flow.cjs; tests/test_code_studio.py",
+      "setup_needed": "None to open the page. If DASHBOARD_TOKEN is set, enter the master token in /setup, because every Code API route is owner-only (dashboard/code.py:32-34)."
+    },
+    {
+      "name": "Add an existing project or create a new one",
+      "what": "Pick an existing git folder, or type a new folder path and Apex creates it with git and a first README commit. It refuses folders that already exist and folders inside another git project.",
+      "how_to_use": "/code -> Add a project (tick 'Create a new project for my idea' for a new one).",
+      "status": "working",
+      "evidence": "agent/code_studio.py:391-438 (add_project, create_project); dashboard/code.py:147-161; tests/test_code_new_project.py",
+      "setup_needed": "Git must be installed and on PATH."
+    },
+    {
+      "name": "Open workspace: in-browser editor, file tree, search and preview",
+      "what": "Edit a session's copy of the project without any AI plan: file tabs, syntax highlighting, Ctrl+S, New/Rename/Delete file, Ctrl+Shift+F project search, conflict-safe saves (UTF-8 up to 512 KB, keeps CRLF) and a Preview box for a running app's URL.",
+      "how_to_use": "/code -> pick a project -> Open workspace.",
+      "status": "built_untested_on_pc",
+      "evidence": "dashboard/code.py:174-181 (POST /api/code/workspaces), 340-352, 451-476 (tree/search/file routes); agent/code_studio.py:826, 2401-2660; dashboard/static/code_workspace.js; tests/test_code_workspace.py (18 tests, real git on Linux); scripts/check_code_workspace_ui.cjs",
+      "setup_needed": "Git. Go through docs/CODE-WINDOWS-ACCEPTANCE.md steps 2-6 once on the laptop."
+    },
+    {
+      "name": "Persistent terminal",
+      "what": "A real shell for the session's working copy that keeps its state between commands and handles prompts and dev servers. On Windows it runs cmd.exe through ConPTY (pywinpty). Keep or Throw away closes it along with its child processes.",
+      "how_to_use": "Inside a session press Ctrl+` (or use the Terminal tab).",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/code_terminal.py:26-38 (Windows path imports winpty and runs COMSPEC /d /q); dashboard/code.py:293-331 (shell routes); requirements.txt:56 (pywinpty, Windows only); tests/test_code_terminal.py (runs real shells, but only on the OS the tests run on, which here is Linux)",
+      "setup_needed": "pip install -r requirements.txt inside the venv on the laptop so pywinpty is present, then restart Apex."
+    },
+    {
+      "name": "Coding session on your Claude plan (Claude Code)",
+      "what": "Each message runs `claude -p --output-format stream-json` in the session's worktree, on your Claude subscription. API keys are removed from its environment, and Apex refuses to run if Claude Code is signed in with an API key or a cloud account.",
+      "how_to_use": "/code -> choose Claude in the brief -> type or speak the request -> Send.",
+      "status": "off_by_default",
+      "evidence": "agent/code_engines.py:126-161 (command), 570-661 (turn); agent/work_engines.py:69-74 (binary lookup), 198-216 (sign-in check that rejects API-key logins); tests/test_code_studio.py, tests/test_code_boundaries.py (parser fixtures, fake CLIs)",
+      "setup_needed": "Install Claude Code and sign in with your Claude account (Setup-Apex-Work-Plans.cmd, or run `claude` once)."
+    },
+    {
+      "name": "Coding session on your ChatGPT plan (Codex)",
+      "what": "Each message runs `codex exec --json` (resumed with `codex exec resume`) on your ChatGPT sign-in. Safe mode uses the workspace-write sandbox. On Windows Codex is told to write files only with its edit tool, because files it writes from the shell end up locked away from you.",
+      "how_to_use": "/code -> choose ChatGPT -> Send.",
+      "status": "off_by_default",
+      "evidence": "agent/code_engines.py:162-181; agent/work_engines.py:90-97 (Windows note 'Seen on the owner's PC'); commits fbd2d4d and ebd5528 show Codex has been run on the laptop through Work tasks; tests/test_code_studio.py",
+      "setup_needed": "Install Codex and run `codex login` with 'Sign in with ChatGPT'. Optional: WORK_CODEX_WINDOWS_SANDBOX in .env."
+    },
+    {
+      "name": "Safe / Full mode, Plan first, Allow once / Always",
+      "what": "In Safe mode Claude may edit files but may only run git status/diff/log/show, ls, tests and syntax checks, and Codex runs in a sandbox. Full mode allows any command. A blocked command can be allowed once or always for that project. Plan first makes it write a plan without touching files.",
+      "how_to_use": "Mode toggle in the brief; Allow once / Always buttons on a blocked command in the timeline.",
+      "status": "working",
+      "evidence": "agent/code_engines.py:43-54, 133-143, 168-169; agent/code_studio.py:2366-2399 (allow, forget_allowed); dashboard/code.py:281; tests/test_code_studio.py, tests/test_code_boundaries.py",
+      "setup_needed": "A signed-in plan."
+    },
+    {
+      "name": "Branch-per-session safety: checkpoints, Undo, Catch up, Keep, Throw away",
+      "what": "Every session gets its own branch and git worktree under ApexWork\\code. Apex makes a checkpoint after each step. Undo last step restores the files. Keep merges into your branch (it asks first if there is no current proof). Throw away deletes the copy and the branch.",
+      "how_to_use": "Session side panel buttons: Keep it, Undo last step, Catch up, Open folder, Throw away.",
+      "status": "working",
+      "evidence": "agent/code_studio.py:718-770 (_prepare_workspace), 1352 (_checkpoint), 1494-1672 (undo, catch_up, keep, discard); dashboard/code.py:241-265, 535-541; tests/test_code_studio.py (120 test functions, real git), tests/test_code_portable_flow.py",
+      "setup_needed": "Git. The Windows file-lock wait (code_studio.py:1324-1350) has only been tested with fakes."
+    },
+    {
+      "name": "Follow-up queue ('Queue next')",
+      "what": "While a step is running, Send becomes Queue next. Up to 10 follow-ups wait and run in order after each successful step. The queue pauses after a failure, a Stop or a restart, and never resumes on its own after a restart.",
+      "how_to_use": "Type while it works -> Queue next; Pause/Resume/Remove in the Next steps list.",
+      "status": "working",
+      "evidence": "agent/code_studio.py:515-650 (enqueue/pause/resume/drain), 235-249 (_recover pauses after restart); dashboard/code.py:215-239; tests/test_code_queue.py (19 collected, passed here)",
+      "setup_needed": "None."
+    },
+    {
+      "name": "Live timeline",
+      "what": "Shows what the AI is doing as it happens: thinking, a plan checklist, files read, each edit with +/- counts and a diff, each command with its output, blocked commands, checkpoints, and a running clock.",
+      "how_to_use": "Automatic inside a session.",
+      "status": "working",
+      "evidence": "agent/code_engines.py:375-569 (parse Claude/Codex stream); dashboard/code.py:494-527 (SSE /stream), 194-205; dashboard/static/code.js; scripts/check_code_flow.cjs; tests/test_code_studio.py parser fixtures",
+      "setup_needed": "None beyond a plan."
+    },
+    {
+      "name": "Run checks and the proof verdict",
+      "what": "Runs the project's test command (pytest, npm test, or Apex's own runner for the Apex repo) in the worktree. A proof system then compares what the AI claimed ('tests pass') with what was actually run and labels the session verified or not verified.",
+      "how_to_use": "Run checks button; the Build -> Inspect -> Verify -> Keep strip.",
+      "status": "working",
+      "evidence": "agent/code_studio.py:349-362 (default checks), 1781-1891 (run_checks), 1989-2277 (proof, verdict, owner_evidence); dashboard/code.py:267-279; tests/test_code_studio.py",
+      "setup_needed": "Each project needs a checks command, which is auto-detected or set by you."
+    },
+    {
+      "name": "Second opinion (review by the other plan)",
+      "what": "The other plan reads the diff in read-only mode and gives it a rating out of 10.",
+      "how_to_use": "Second opinion button after a step.",
+      "status": "off_by_default",
+      "evidence": "agent/code_studio.py:1672-1779 (review); agent/code_engines.py:47-52 (review tools only Read/Glob/Grep); dashboard/code.py:529-532; tests/test_code_studio.py",
+      "setup_needed": "Both plans signed in to get a true 'other plan' review."
+    },
+    {
+      "name": "Model and effort picker",
+      "what": "Asks the signed-in CLI which models it offers (Codex app-server model/list; Claude stream-json initialize) and shows them with the reasoning-effort levels each supports. Results are cached for 5 minutes. You can also type an exact model ID.",
+      "how_to_use": "Model / effort selectors in the brief.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/code_catalog.py:63-132; dashboard/code.py:78-84; tests/test_code_catalog.py (fake CLI processes only)",
+      "setup_needed": "A signed-in, recent CLI."
+    },
+    {
+      "name": "Usage panel",
+      "what": "For ChatGPT it shows account limits and token activity read from Codex's app-server. For Claude it shows only per-turn token counts: Claude Code exposes no account quota, so the panel says so.",
+      "how_to_use": "Usage panel on /code (refresh button).",
+      "status": "partial",
+      "evidence": "agent/code_usage.py:162-204 (Claude returns an 'unavailable' message at 173-175), 39-70 (turn_usage); dashboard/code.py:87-94; dashboard/static/code_usage.js; tests/test_code_usage.py; scripts/check_code_usage_ui.cjs; docs/code-comparison.md says account limits were never seen live",
+      "setup_needed": "Signed-in Codex for account limits."
+    },
+    {
+      "name": "What Apex knows: brief, rules, decision log, vouched memories",
+      "what": "Each session gets a short brief: your profile, standing rules, this project's rules and decision log, memories you vouched for, measured track record and recent outcomes. Everything is redacted. Rules and the decision log have version history with restore.",
+      "how_to_use": "The 'what Apex knows' chip on /code; Rules tab inside a session; Vouch buttons.",
+      "status": "working",
+      "evidence": "agent/code_brain.py:1-30, 268-296 (brief_block), 482-672 (rules/decisions with history); dashboard/code.py:358-448; dashboard/static/code.js:600-660, 843-901; tests/test_code_studio.py, tests/test_code_boundaries.py; scripts/check_code_ui.cjs",
+      "setup_needed": "None."
+    },
+    {
+      "name": "Apex memory server inside sessions",
+      "what": "The coding tool can read Apex's memory (context, recall, lessons, search_files). Its 'remember' only suggests a memory, which you then approve on the Code page.",
+      "how_to_use": "Automatic. Approve suggestions in the approvals box on /code.",
+      "status": "working",
+      "evidence": "config.py:713 CODE_APEX_MCP default True; agent/code_studio.py:905-922; agent/code_brain.py:366-388, 390; agent/code_engines.py:65-66, 136-139; tests/test_mcp_server.py, tests/test_code_studio.py",
+      "setup_needed": "None (set CODE_APEX_MCP=false to turn it off)."
+    },
+    {
+      "name": "REA reverse-engineering tools in Full-mode sessions",
+      "what": "For a project where you turn REA on, its MCP server (rea-agents@6.4.0 started with npx) joins Full-mode steps only.",
+      "how_to_use": "Project settings -> REA on; then use Full mode.",
+      "status": "off_by_default",
+      "evidence": "config.py:717; agent/code_brain.py:346-363 (Windows uses cmd /c npx); agent/code_studio.py:439, 914; agent/code_engines.py:140-141",
+      "setup_needed": "Node/npx on PATH, Ghidra/Java for deep analysis, and the per-project switch."
+    },
+    {
+      "name": "Away mode: answer a blocked command from your phone",
+      "what": "When Safe mode stops a command, Apex sends your phone a link where you can Allow once or Don't allow for 2 hours (12 hours for night-shift sessions), with any secrets in the command redacted.",
+      "how_to_use": "Tap the phone notification.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/code_studio.py:1205-1318; dashboard/code.py:114-145 (public-by-secret routes); tests/test_code_studio.py",
+      "setup_needed": "Phone paired with a device token and push notifications working. The Telegram fallback has no link (docs/CODE.md:377-378)."
+    },
+    {
+      "name": "Celine and voice: status, actions, narration, dictation",
+      "what": "Celine can read your Code sessions (code_status) and run checks, a review, Stop, or draft a message (code_act). She cannot Keep, Throw away, Allow or Send. The page can read results aloud and transcribe your speech on the PC.",
+      "how_to_use": "Ask Celine about a coding session; 'Read it to me' button; microphone button in the brief.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/core.py:976-1000, 2352-2400; agent/companion.py:33-40; dashboard/static/code_narration.js; dashboard/static/code.js:429-461 (POST /api/companion/transcribe?engine=local); tests/test_companion.py; scripts/check_code_narration.cjs; docs/CODE.md:379-381 admits it was never tried with real Voicebox/Whisper",
+      "setup_needed": "Local speech-to-text and voice working."
+    },
+    {
+      "name": "Night shift (software Work tasks built overnight)",
+      "what": "When the Work agent and 'auto work' are on, Apex takes a linked software task at night, runs it as a Safe-mode Code session, runs checks and the other plan's review, keeps the PC awake, and reports in the morning brief ('/code#overnight').",
+      "how_to_use": "/work -> turn on the always-on agent and auto work, link a Code project, tick 'Apex can take this'.",
+      "status": "off_by_default",
+      "evidence": "agent/work_agent.py:44 (enabled False, auto_work False), 354-359, 422-448 (_night_shift), 526-545; started from dashboard/server.py:62-66, which runs in both modes; agent/code_studio.py:2807-2926 (autopilot, overnight); dashboard/code.py:97-102",
+      "setup_needed": "Switch on in /work. Both plans signed in. Never tried overnight on the laptop (docs/CODE.md:383-386)."
+    },
+    {
+      "name": "Full IDE (Eclipse Theia)",
+      "what": "Opens a full VS Code-like IDE (Theia 1.76) on the session's working copy: language servers, debuggers, tasks and Open VSX extensions. Apex makes it Save All and takes a git checkpoint before an agent action, Keep or Undo. At most 2 IDEs run at once.",
+      "how_to_use": "Inside a session -> Full IDE / Focus IDE.",
+      "status": "off_by_default",
+      "evidence": "agent/code_ide.py:26-33 (installation check needs node + built src-gen + plugins), 166-200; dashboard/code_ide.py:64-207 (routes and HTTP/WebSocket proxy); dashboard/ide_webviews.py (isolated webview origin); tests/test_code_ide.py (real runtime tests skipped unless APEX_IDE_INTEGRATION=1, and 2 were skipped here), tests/test_code_ide_bundle.py; scripts/check_code_ide_ui.cjs",
+      "setup_needed": "Node.js 22/24 and the prebuilt Windows bundle zip from a GitHub Actions run, installed with `python scripts/setup_code_ide.py --from-build <zip>`. Double-clicking Setup-Apex-Code-IDE.cmd is not enough (see gaps)."
+    },
+    {
+      "name": "ChatGPT image generation in sessions",
+      "what": "If your own message asks for an image, Codex is told to use its built-in image tool and save the result to generated_images/. Apex then shows those images in the feed.",
+      "how_to_use": "In a ChatGPT session ask e.g. 'make a logo'.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/code_engines.py:101-105, 593-600; agent/code_studio.py:2576-2590, 2660-2698; docs/code-subscriptions.md",
+      "setup_needed": "A Codex version and ChatGPT account that include image generation."
+    },
+    {
+      "name": "Specialist plan tool (run_dependency_plan)",
+      "what": "Lets the main Apex brain split a big job into a small dependency graph of sub-agents (researcher, coder, writer...) that run in parallel. Despite the file name, it is part of the brain's orchestrator, not the Code page.",
+      "how_to_use": "Automatic: the model may call the run_dependency_plan tool.",
+      "status": "broken",
+      "evidence": "agent/dependency_plan.py; agent/orchestrator.py:153-191 and 68-70 ('Orchestrator not initialised.' when there is no factory); main.py:280-285 sets the factory, app/resident.py never does; tests/test_research_collaboration.py and tests/test_orchestrator.py set the factory themselves",
+      "setup_needed": "None that works in resident mode (see gaps)."
+    }
+  ],
+  "files_covered": [
+    "agent/code_studio.py",
+    "agent/code_engines.py",
+    "agent/code_ide.py",
+    "agent/code_terminal.py",
+    "agent/code_usage.py",
+    "agent/code_brain.py",
+    "agent/code_catalog.py",
+    "agent/dependency_plan.py",
+    "agent/orchestrator.py",
+    "agent/work_engines.py",
+    "agent/work_agent.py",
+    "agent/core.py",
+    "agent/companion.py",
+    "dashboard/code.py",
+    "dashboard/code_ide.py",
+    "dashboard/ide_webviews.py",
+    "dashboard/server.py",
+    "dashboard/static/code.html",
+    "dashboard/static/code.js",
+    "app/resident.py",
+    "main.py",
+    "config.py",
+    "docs/CODE.md",
+    "docs/CODE-WINDOWS-ACCEPTANCE.md",
+    "docs/code-subscriptions.md",
+    "docs/code-comparison.md",
+    "Setup-Apex-Code-IDE.cmd",
+    "scripts/setup_code_ide.py",
+    ".github/workflows/tests.yml",
+    "requirements.txt"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_code_studio.py",
+      "tests/test_code_queue.py",
+      "tests/test_code_workspace.py",
+      "tests/test_code_terminal.py",
+      "tests/test_code_ide.py",
+      "tests/test_code_ide_bundle.py",
+      "tests/test_code_usage.py",
+      "tests/test_code_catalog.py",
+      "tests/test_code_boundaries.py",
+      "tests/test_code_new_project.py",
+      "tests/test_code_portable_flow.py",
+      "tests/test_mcp_server.py",
+      "tests/test_companion.py",
+      "tests/test_research_collaboration.py",
+      "tests/test_orchestrator.py",
+      "scripts/check_code_ui.cjs",
+      "scripts/check_code_flow.cjs",
+      "scripts/check_code_workspace_ui.cjs",
+      "scripts/check_code_ide_ui.cjs",
+      "scripts/check_code_usage_ui.cjs",
+      "scripts/check_code_narration.cjs",
+      "scripts/check_code_ide_browser.cjs",
+      "scripts/check_code_ide_runtime.py"
+    ],
+    "approx_test_count": 330
+  },
+  "gaps": [
+    {
+      "issue": "The Full IDE cannot be installed the way CODE.md says. CODE.md says 'Run Setup-Apex-Code-IDE.cmd once on Windows to build it', but on Windows that .cmd runs setup_code_ide.py with no arguments, and the script then stops with 'Install the prebuilt Windows IDE from the successful GitHub Tests run'. The only working path is a zip that a windows-latest GitHub Actions job builds, and per the known facts there is no Windows CI run you can rely on. Node 22/24 is also required.",
+      "severity": "high",
+      "evidence": "Setup-Apex-Code-IDE.cmd (calls scripts\\setup_code_ide.py with no args); scripts/setup_code_ide.py:26-30, 44-47; docs/CODE.md:17-18; .github/workflows/tests.yml:15-80",
+      "fix_hint": "Have the .cmd look for the bundle zip in Downloads and pass --from-build, or publish the bundle as a release asset. Fix CODE.md to describe the real steps.",
+      "confirmed": true,
+      "how_confirmed": "Read the .cmd and setup_code_ide.py:44-47. Without --from-build or --build, os.name=='nt' always reaches the SystemExit unless a matching bundle marker already exists."
+    },
+    {
+      "issue": "In resident mode (the only way you run Apex) the brain's run_dependency_plan tool always fails. app/resident.py never calls orchestrator.set_agent_factory, so every worker comes back as an error. The tool is still offered to the model, which wastes a turn every time it is called.",
+      "severity": "medium",
+      "evidence": "main.py:280-285 (only place that sets the factory); agent/orchestrator.py:68-70, 174-176; agent/core.py:1396, 3096",
+      "fix_hint": "Set the agent factory in app/resident.py as main.py does (better: in a shared start-up helper), and add a resident-mode test.",
+      "confirmed": true,
+      "how_confirmed": "grep shows set_agent_factory only in main.py. Ran orchestrator.run_plan with two independent nodes at confidence 0.95 and no factory: both returned {'status': 'error', 'reason': 'RuntimeError'}."
+    },
+    {
+      "issue": "CODE.md contradicts itself. Lines 17-21 say the Full IDE has real debuggers, language services and extensions; line 110 says Code 'does not currently include a debugger, a language-server integration or an extension marketplace'.",
+      "severity": "low",
+      "evidence": "docs/CODE.md:17-21 and docs/CODE.md:108-111",
+      "fix_hint": "Reword line 110 so it applies only to the built-in browser editor.",
+      "confirmed": true,
+      "how_confirmed": "Read both passages."
+    },
+    {
+      "issue": "CODE-WINDOWS-ACCEPTANCE.md says 'CI also runs this check on windows-latest'. The workflow file does define windows jobs, but per the known facts no Windows CI actually runs, so the Windows terminal and worktree code has only been tested on Linux and with fakes.",
+      "severity": "low",
+      "evidence": "docs/CODE-WINDOWS-ACCEPTANCE.md:15; .github/workflows/tests.yml:82-97",
+      "fix_hint": "Check GitHub Actions for a green windows-code run, or remove the claim.",
+      "confirmed": false,
+      "how_confirmed": "The workflow exists. I could not see whether it ever ran."
+    },
+    {
+      "issue": "The usage panel can never show Claude account limits. Only per-turn token counts appear for your Claude plan, so 'resting until' for Claude depends on parsing the limit error text after a failure.",
+      "severity": "low",
+      "evidence": "agent/code_usage.py:173-175; agent/code_engines.py:475, 500, 656",
+      "fix_hint": "Leave as is (this is a provider limit), but say it on the page next to the Claude ring.",
+      "confirmed": true,
+      "how_confirmed": "Read the early return for engine=='claude'."
+    },
+    {
+      "issue": "The Windows-only paths have never run on the laptop: the ConPTY terminal (pywinpty), the wait for files Windows holds locked after a step, Codex's windows.sandbox option, and the cmd /c npx launch for REA.",
+      "severity": "low",
+      "evidence": "agent/code_terminal.py:28-35; agent/code_studio.py:1324-1350; agent/code_engines.py:176-177; agent/code_brain.py:360-362",
+      "fix_hint": "Run docs/CODE-WINDOWS-ACCEPTANCE.md steps 1-6 once on the laptop.",
+      "confirmed": true,
+      "how_confirmed": "Read the os.name=='nt' branches. The tests run on Linux here."
+    },
+    {
+      "issue": "IDE extension webviews are served from a second local port bound to 127.0.0.1, so they probably will not load when you open the IDE from your phone through the relay.",
+      "severity": "low",
+      "evidence": "dashboard/ide_webviews.py:15-17",
+      "fix_hint": "Document it as laptop-only, or proxy the webviews through the main port with a separate origin.",
+      "confirmed": false,
+      "how_confirmed": "Inferred from the bind address. Not exercised."
+    }
+  ],
+  "needs_from_owner": [
+    "Run Setup-Apex-Work-Plans.cmd (or `claude` and `codex login`) so both plans show as ready on /code.",
+    "pip install -r requirements.txt inside the Apex .venv (adds pywinpty), restart Apex, then do docs/CODE-WINDOWS-ACCEPTANCE.md steps 1-6 on a scratch project: Open workspace, Ctrl+S, Ctrl+` terminal, Preview, Undo, Keep, Throw away.",
+    "Start one small Claude session and one ChatGPT session in Safe mode and confirm the live timeline, Run checks and Keep work.",
+    "Check whether GitHub Actions ever produced the apex-code-ide-windows-node24 artifact. Without it the Full IDE cannot be installed on Windows (or use --build with Visual Studio C++ Build Tools).",
+    "Pair the phone and trigger a blocked command in Safe mode to see whether the 'Allow once' link arrives and works.",
+    "Decide whether to turn on the Work agent's night shift in /work. It is off by default."
+  ],
+  "rating": {
+    "score": 6,
+    "why": "A large, carefully guarded and heavily tested feature that works in resident mode, but most of it has never been run on your Windows laptop, the Full IDE cannot be installed from its .cmd, and the brain's plan tool is dead in resident mode."
+  }
+}
