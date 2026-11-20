@@ -1,0 +1,410 @@
+{
+ "subsystem": "Channels and remote access (Telegram, Discord, Slack, Signal, WhatsApp, SMS/phone, email, calendar, relay, car, devices, IoT, browser extension)",
+ "summary": "Apex can be reached through many channels: Telegram, Discord, Slack, WhatsApp, Signal, SMS and phone calls through Twilio, a cloud relay with a phone page, the car page over Tailscale, Web Push, Home Assistant and a browser extension. The code is careful about security (signed webhooks, allowlists that refuse everyone by default) and is wired the same way in main.py and in your resident launcher. But every channel is off until you add accounts and keys, none of them has run on your laptop, and most need a public HTTPS address you don't have. For you in Lebanon the realistic paths are Telegram in polling mode, Pairing over Tailscale, and later the relay. There are real bugs: SMS/WhatsApp freeze the dashboard while Apex thinks, Telegram replies can vanish on bad Markdown, the browser extension needs a dashboard token, Apex can't switch Home Assistant devices by itself, and the email, calendar and phone panels in the dashboard are dead code.",
+ "features": [
+  {
+   "name": "Telegram bot (chat with Apex from Telegram)",
+   "what": "Message your own Telegram bot and Apex answers in the same chat, with its own memory per chat. Apex can also send you Telegram messages with the telegram_send tool.",
+   "how_to_use": "Automatic once configured: on the laptop use polling mode (no public address needed). Message the bot from your phone.",
+   "status": "off_by_default",
+   "evidence": "tools/telegram.py:86-107 (start_polling), 182-215 (dispatch_inbound, deny-by-default allowlist at 53-55); started in main.py:377-380 and app/resident.py:324-330 when TELEGRAM_POLLING=true; wired by tools/channels.py:16-28 from main.py:356 and app/resident.py:318; webhook route dashboard/server.py:826-837; config.py:239-248 (all empty/false by default); agent tool telegram_send agent/core.py:1824, 3263; tests/test_telegram.py (4), tests/test_webhook_auth.py, tests/test_audit_fixes.py",
+   "setup_needed": "Create a bot with @BotFather, then in .env: TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT_IDS=<your chat id>, TELEGRAM_POLLING=true. Restart Apex. Needs internet."
+  },
+  {
+   "name": "Telegram as a notification fallback",
+   "what": "When no phone/browser has subscribed to Web Push, proactive nudges (reminders, blocked risky actions) are sent to your allowed Telegram chats instead.",
+   "how_to_use": "Automatic once Telegram is configured.",
+   "status": "off_by_default",
+   "evidence": "agent/notify.py:146-163, 222-233; config.py:388 NOTIFY_TELEGRAM_FALLBACK=True; tests/test_notify.py",
+   "setup_needed": "Telegram bot token and TELEGRAM_ALLOWED_CHAT_IDS."
+  },
+  {
+   "name": "Discord bot",
+   "what": "Talk to Apex with a Discord slash command; Apex can also post to a Discord channel with discord_send.",
+   "how_to_use": "Discord slash command (inbound) or ask Apex to post to Discord (outbound).",
+   "status": "off_by_default",
+   "evidence": "tools/discord.py:57-159; route dashboard/server.py:848-856 (ed25519 signature check); config.py:323-326; agent tool agent/core.py:1836, 3265-3269; tests/test_discord.py (14)",
+   "setup_needed": "Discord application + bot token, DISCORD_PUBLIC_KEY, DISCORD_ALLOWED_USER_IDS, and a PUBLIC HTTPS address registered as the interactions endpoint (a tunnel). Outbound-only needs just the bot token and DISCORD_DEFAULT_CHANNEL_ID."
+  },
+  {
+   "name": "Slack bot",
+   "what": "Mention Apex in an allowed Slack channel and it replies there; Apex can post with slack_send.",
+   "how_to_use": "Slack Events API (inbound) or ask Apex to post to Slack.",
+   "status": "off_by_default",
+   "evidence": "tools/slack.py:60-138; route dashboard/server.py:882-901 (HMAC check, retry de-dup, runs once in executor); config.py:329-331; agent tool agent/core.py:1848, 3271. Only tests: allowlist in tests/test_audit_fixes.py and signature/route in tests/test_webhook_auth.py — dispatch_event itself is untested.",
+   "setup_needed": "Slack app, SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SLACK_ALLOWED_CHANNEL_IDS and a public HTTPS address for the Events URL (a tunnel)."
+  },
+  {
+   "name": "WhatsApp via Twilio",
+   "what": "Text Apex on WhatsApp through a Twilio number and it replies; Apex can send WhatsApp messages with whatsapp_send.",
+   "how_to_use": "WhatsApp message to your Twilio WhatsApp number.",
+   "status": "off_by_default",
+   "evidence": "tools/whatsapp.py:64-119; route dashboard/server.py:912-920 (Twilio signature); config.py:334-335; agent tool agent/core.py:1860, 3273. Only route/allowlist tests (tests/test_webhook_auth.py:98, tests/test_audit_fixes.py).",
+   "setup_needed": "Paid Twilio account with WhatsApp sender, TWILIO_SID, TWILIO_AUTH_TOKEN, WHATSAPP_FROM_NUMBER, WHATSAPP_ALLOWED_NUMBERS, and a public HTTPS webhook address."
+  },
+  {
+   "name": "Signal via signal-cli bridge",
+   "what": "Message Apex on Signal through a self-hosted signal-cli-rest-api Docker container; Apex can send Signal messages with signal_send.",
+   "how_to_use": "Signal message to the number linked in the bridge.",
+   "status": "off_by_default",
+   "evidence": "tools/signal.py:62-115; route dashboard/server.py:932-942 (HMAC X-Apex-Signature or local-only); config.py:338-344; agent tool agent/core.py:1872, 3275. Only route/allowlist tests.",
+   "setup_needed": "Docker Desktop running the bbernhard/signal-cli-rest-api container, a linked Signal number, SIGNAL_CLI_URL, SIGNAL_PHONE_NUMBER, SIGNAL_ALLOWED_NUMBERS, and the bridge configured to post to /signal/webhook. Docker was not running on the last laptop run."
+  },
+  {
+   "name": "SMS via Twilio (send and receive)",
+   "what": "Text Apex from an allowed phone number and it texts back; Apex can text with sms_send; the dashboard has an /api/phone/sms endpoint.",
+   "how_to_use": "SMS to your Twilio number, or ask Apex to text someone.",
+   "status": "off_by_default",
+   "evidence": "tools/phone.py:45-64, 88-98; routes dashboard/server.py:760-791; config.py:228-236; agent tool agent/core.py:1800, 3258; tests/test_webhook_auth.py, tests/test_dashboard_security.py:175-192",
+   "setup_needed": "Paid Twilio number, TWILIO_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, PHONE_ALLOWED_NUMBERS, public HTTPS webhook (relay or tunnel)."
+  },
+  {
+   "name": "Call Apex (phone call, made for the car's hands-free)",
+   "what": "Phone your Twilio number, speak a question, hear 'one moment' while Apex thinks, then hear a short spoken answer; after about 40 s it texts the answer instead.",
+   "how_to_use": "Press the car's phone button and say 'Call Apex' (the contact for your Twilio number).",
+   "status": "built_untested_on_pc",
+   "evidence": "tools/phone.py:101-210 (background think + /twilio/voice/wait polling); routes dashboard/server.py:794-823; docs/CALL_APEX.md; tests/test_call_apex.py (6), tests/test_relay_calls.py",
+   "setup_needed": "Twilio number + Auth Token on the laptop, PHONE_ALLOWED_NUMBERS, the cloud relay with RELAY_TWILIO_AUTH_TOKEN/RELAY_CALLERS/RELAY_PUBLIC_URL/RELAY_PC_URL, Tailscale on both, and TWILIO_PUBLIC_BASE_URL set to the relay address (docs/CALL_APEX.md:78-102)."
+  },
+  {
+   "name": "Apex calls you (call_user)",
+   "what": "Apex can place an outbound phone call that reads a message to you.",
+   "how_to_use": "Ask Apex to call you; or a scheduled/proactive task uses it.",
+   "status": "off_by_default",
+   "evidence": "tools/phone.py:66-79; agent tool agent/core.py:1812, 3260",
+   "setup_needed": "Twilio account and number."
+  },
+  {
+   "name": "Relay mailbox and sealed memory snapshot",
+   "what": "An always-on small server (VPS or Railway) that stores an encrypted copy of Apex's memory and a working-context summary, pushed from the laptop every 30 minutes, so something is reachable while the laptop is off or the power is cut.",
+   "how_to_use": "Automatic once enabled; check it with python -m agent.relay --check or GET /api/control/relay.",
+   "status": "off_by_default",
+   "evidence": "agent/relay.py:72-118 (Fernet seal), 247-300 (push), 835-888 (start_background); started in main.py:208-209 AND app/resident.py:182-183; relay/server.py (stdlib-only, refuses everything without RELAY_SERVER_TOKEN); config.py:452-470 RELAY_ENABLED=False; tests/test_relay.py, test_relay_server.py, test_relay_check.py, test_relay_drain.py, test_relay_railway.py; docs/RELAY_DEPLOY.md, docs/RELAY_RAILWAY.md",
+   "setup_needed": "Rent a server or Railway project, deploy relay/, then in .env: RELAY_ENABLED=true, RELAY_URL, RELAY_TOKEN, RELAY_KEY (python -m agent.relay --new-key). Keep RELAY_KEY safe: lose it and the snapshot is gone."
+  },
+  {
+   "name": "Relay phone page and cloud answerer (/phone on the relay)",
+   "what": "A page on the relay where you can ask Apex a question from your phone while the laptop is off; relay/answer.py answers from the last pushed summary using DeepSeek or Claude, and any action it wants becomes a queued request the laptop checks when it wakes.",
+   "how_to_use": "Open https://<relay>/phone on the phone, enter the relay token, type a question.",
+   "status": "off_by_default",
+   "evidence": "relay/server.py:657-830 (page), 534-600 (questions/reply); relay/answer.py:1-80; agent/relay.py:682-765 (drain_replies, requests become node tasks); tests/test_relay_phone.py, tests/test_relay_answer.py; scripts/check_relay_phone_ui.cjs",
+   "setup_needed": "The deployed relay plus a model key on the server (RELAY_ANSWER_PROVIDER=deepseek to use deepseek-flash) and python answer.py --watch running there."
+  },
+  {
+   "name": "Relay answers calls when the laptop is off",
+   "what": "If the laptop does not answer a forwarded call within 8 s, the relay answers the call itself from the stored summary.",
+   "how_to_use": "Automatic during 'Call Apex'.",
+   "status": "built_untested_on_pc",
+   "evidence": "relay/server.py:335-414 (forward with 8 s timeout, fallback to questions queue); tests/test_relay_calls.py",
+   "setup_needed": "Everything for Call Apex plus the answerer running on the relay."
+  },
+  {
+   "name": "Relay outbox (work left for the laptop while it is off)",
+   "what": "A sealed queue on the relay that the laptop drains when it comes back (notes are applied to memory).",
+   "how_to_use": "No page, button or command puts anything into it today.",
+   "status": "partial",
+   "evidence": "agent/relay.py:561-572 queue() has no caller outside tests/test_relay_drain.py:83-96; drain at agent/relay.py:614-680 runs in the background loop.",
+   "setup_needed": "Relay setup; and a producer that does not exist yet."
+  },
+  {
+   "name": "Delegated tasks for this machine (node worker)",
+   "what": "Lets queued requests (for example from the relay's answerer) run named tools on this laptop, through the same safety checks, only for tools you list.",
+   "how_to_use": "Automatic once enabled; tasks appear in the node_tasks table.",
+   "status": "off_by_default",
+   "evidence": "agent/node_worker.py:170-238, agent/node_tasks.py; started in main.py:210-211 AND app/resident.py:184-185; config.py:478-484 (NODE_WORKER_ENABLED=False, NODE_TASK_TOOLS empty); tests/test_node_worker.py, tests/test_node_tasks.py",
+   "setup_needed": "NODE_WORKER_ENABLED=true and NODE_TASK_TOOLS=<comma list of allowed tools>."
+  },
+  {
+   "name": "Web Push notifications to phone and browser",
+   "what": "Proactive nudges appear as real phone/desktop notifications even when the Apex tab is closed, routed to the device you used most recently.",
+   "how_to_use": "Dashboard: enable notifications on the device, then the 'test push' button.",
+   "status": "off_by_default",
+   "evidence": "agent/notify.py:33-233; routes dashboard/server.py:1084-1118; dashboard/static/app.js:3197-3229; config.py:382-384 (VAPID keys empty); pywebpush in requirements.txt:64; tests/test_notify.py, tests/test_devices.py",
+   "setup_needed": "Run python scripts/gen_vapid_keys.py once; phones need an HTTPS address (Tailscale or a tunnel) for push to work."
+  },
+  {
+   "name": "Pair a phone with a QR code and per-device tokens",
+   "what": "Shows a QR that opens Apex on your phone already signed in with a revocable device token; lists connected devices and lets you revoke tokens.",
+   "how_to_use": "Dashboard: Pairing tab (devices and 'Access tokens' panels), 'Pair a phone'.",
+   "status": "working",
+   "evidence": "dashboard/server.py:1122-1160, 1497 (/api/pair/qr); agent/devices.py; dashboard/static/app.js:258, 3238-3290; dashboard/static/index.html:148, 495-518; tests/test_devices.py, tests/test_access_tokens.py, tests/test_dashboard_security.py",
+   "setup_needed": "Works on the laptop as is. Using it from a phone needs DASHBOARD_TOKEN set and a reachable address (Tailscale)."
+  },
+  {
+   "name": "Car page over Tailscale (Setup-Apex-Car.cmd)",
+   "what": "Turns on a private HTTPS address on your Tailscale network so the phone or car screen can open /drive and talk to Celine.",
+   "how_to_use": "Double-click Setup-Apex-Car.cmd, then open the printed https://<pc>.<tailnet>.ts.net/drive address.",
+   "status": "built_untested_on_pc",
+   "evidence": "Setup-Apex-Car.cmd; scripts/car_setup.py:77-129 (tailscale serve, offers to create DASHBOARD_TOKEN); dashboard/companion.py:206-215 (accepts the https origin only from loopback); tests/test_car_setup.py, tests/test_car_origin.py, tests/test_drive_spatial.py; docs/CAR_AND_SPATIAL.md:12-48",
+   "setup_needed": "Install Tailscale on PC and phone with the same account, enable HTTPS certificates in the Tailscale admin, run the .cmd."
+  },
+  {
+   "name": "Email: read inbox and draft replies (agent tools)",
+   "what": "Apex can list and read your IMAP inbox and draft a reply; sending only happens after you approve it in the Approvals tab.",
+   "how_to_use": "Ask Apex ('check my email', 'draft a reply'); approve in the dashboard Approvals tab.",
+   "status": "off_by_default",
+   "evidence": "tools/email_box.py:89-182; agent tools agent/core.py:2169-2194, 3398-3416 (email_draft stages an approval); agent/approvals.py:136; routes dashboard/server.py:1241-1283 exist but no page shows them (see gaps). No tests mention email_box or the email tools.",
+   "setup_needed": "EMAIL_ADDRESS and an app password in EMAIL_PASSWORD (Gmail needs 2-step verification + app password)."
+  },
+  {
+   "name": "Calendar: upcoming events (read-only CalDAV)",
+   "what": "Apex can read your upcoming calendar events and the awareness loop can warn you about imminent ones.",
+   "how_to_use": "Ask Apex 'what's on my calendar'.",
+   "status": "off_by_default",
+   "evidence": "tools/calendar_box.py:45-103; agent tool agent/core.py:2214, 3419-3424; agent/awareness.py:187; route dashboard/server.py:1285. The caldav package is not in requirements.txt. No tests.",
+   "setup_needed": "pip install caldav, then CALDAV_URL, CALDAV_USERNAME, CALDAV_PASSWORD."
+  },
+  {
+   "name": "Home Assistant (IoT): events in, awareness, on/off switch",
+   "what": "Home Assistant automations can post events that wake Apex; chosen sensors stream into Apex's awareness; IoT can be switched on/off at runtime.",
+   "how_to_use": "Automatic once enabled; toggle with '/iot on|off|status' typed in main.py text mode, or POST /api/iot/toggle.",
+   "status": "partial",
+   "evidence": "tools/iot.py:44-76 (inbound); agent/iot.py:77-177; agent/iot_watcher.py (HA websocket, needs websocket-client); agent/awareness.py:276-280; routes dashboard/server.py:955-990; main.py:661-678 (/iot command, main.py only); config.py:514-523 IOT_ENABLED=False; tests/test_iot.py (22), tests/test_iot_watcher.py. Outbound control tools (iot_call_service, iot_get_state, iot_notify) are not registered as agent tools.",
+   "setup_needed": "Home Assistant on the network, IOT_ENABLED=true, IOT_HA_URL, IOT_HA_TOKEN, IOT_WEBHOOK_SECRET, IOT_TRIGGER_ALLOWED_ENTITIES; for Apex to actually switch things on/off you also need a Home Assistant MCP server."
+  },
+  {
+   "name": "Browser extension (Ctrl+Shift+A side panel)",
+   "what": "A Chrome/Edge side panel that asks Apex about the page you're on and can drop the page into Apex's awareness feed.",
+   "how_to_use": "Load apex-extension/ unpacked in chrome://extensions, set URL + token in its settings, press Ctrl+Shift+A.",
+   "status": "built_untested_on_pc",
+   "evidence": "apex-extension/manifest.json, sidepanel.js:13-20, 67, 118; CORS dashboard/server.py:175-181; middleware dashboard/server.py:233-241 lets extension POSTs through only with a valid bearer token. No tests for the extension itself.",
+   "setup_needed": "DASHBOARD_TOKEN must be set (or a device token pasted). Without a token every message fails with 403."
+  },
+  {
+   "name": "Channels & webhooks dashboard tab",
+   "what": "Shows which channel keys are configured (not whether they actually work).",
+   "how_to_use": "Dashboard: 'Channels & webhooks' tab.",
+   "status": "working",
+   "evidence": "dashboard/static/index.html:71, 147; dashboard/static/environment.js:75; dashboard/static/app.js:257",
+   "setup_needed": "None."
+  },
+  {
+   "name": "Webhook signature checks and startup audit",
+   "what": "Every inbound channel endpoint checks the service's signature before running Apex; unconfigured ones accept only local callers (Discord/Slack refuse all); the posture of each is printed at startup.",
+   "how_to_use": "Automatic; read the startup log.",
+   "status": "working",
+   "evidence": "dashboard/webhook_auth.py:43-200 (verify_*, audit); dashboard/server.py:211-215, 282-284, 2734 (print_audit); tests/test_webhook_auth.py (25), tests/test_dashboard_security.py",
+   "setup_needed": "Set the per-channel secrets for any channel you expose."
+  },
+  {
+   "name": "Public tunnels (Cloudflare / Tailscale Funnel scripts)",
+   "what": "Scripts to publish the dashboard on a public or tailnet HTTPS address so webhooks and phones can reach it.",
+   "how_to_use": "scripts/tunnel-cloudflared.sh, scripts/setup-cloudflare-tunnel.sh, scripts/tunnel-tailscale.sh",
+   "status": "partial",
+   "evidence": "scripts/tunnel-*.sh are bash only; docs/OMNIPRESENCE.md:61-135. The only Windows path is Setup-Apex-Car.cmd (private tailnet, not public).",
+   "setup_needed": "On Windows: install cloudflared or Tailscale manually; set DASHBOARD_TOKEN first."
+  }
+ ],
+ "files_covered": [
+  "tools/telegram.py",
+  "tools/discord.py",
+  "tools/slack.py",
+  "tools/signal.py",
+  "tools/whatsapp.py",
+  "tools/phone.py",
+  "tools/email_box.py",
+  "tools/calendar_box.py",
+  "tools/channels.py",
+  "tools/iot.py",
+  "agent/relay.py",
+  "agent/devices.py",
+  "agent/node_tasks.py",
+  "agent/node_worker.py",
+  "agent/iot.py",
+  "agent/iot_watcher.py",
+  "agent/notify.py",
+  "agent/awareness.py",
+  "agent/core.py",
+  "agent/safety.py",
+  "relay/server.py",
+  "relay/answer.py",
+  "relay/Dockerfile",
+  "dashboard/webhook_auth.py",
+  "dashboard/server.py",
+  "dashboard/companion.py",
+  "dashboard/static/app.js",
+  "dashboard/static/index.html",
+  "dashboard/static/environment.js",
+  "apex-extension/manifest.json",
+  "apex-extension/sidepanel.js",
+  "apex-extension/options.js",
+  "apex-extension/README.md",
+  "config.py",
+  "main.py",
+  "app/resident.py",
+  "Setup-Apex-Car.cmd",
+  "scripts/car_setup.py",
+  "scripts/tunnel-cloudflared.sh",
+  "scripts/tunnel-tailscale.sh",
+  "requirements.txt",
+  "docs/CALL_APEX.md",
+  "docs/OMNIPRESENCE.md",
+  "docs/CAR_AND_SPATIAL.md",
+  "docs/RELAY_DEPLOY.md",
+  "tests/test_dashboard_security.py",
+  "tests/test_audit_fixes.py"
+ ],
+ "tests": {
+  "files": [
+   "tests/test_telegram.py",
+   "tests/test_discord.py",
+   "tests/test_iot.py",
+   "tests/test_iot_watcher.py",
+   "tests/test_webhook_auth.py",
+   "tests/test_call_apex.py",
+   "tests/test_car_origin.py",
+   "tests/test_car_setup.py",
+   "tests/test_devices.py",
+   "tests/test_notify.py",
+   "tests/test_node_tasks.py",
+   "tests/test_node_worker.py",
+   "tests/test_relay.py",
+   "tests/test_relay_answer.py",
+   "tests/test_relay_calls.py",
+   "tests/test_relay_check.py",
+   "tests/test_relay_drain.py",
+   "tests/test_relay_phone.py",
+   "tests/test_relay_railway.py",
+   "tests/test_relay_server.py",
+   "tests/test_audit_fixes.py",
+   "tests/test_dashboard_security.py",
+   "tests/test_access_tokens.py"
+  ],
+  "approx_test_count": 340
+ },
+ "gaps": [
+  {
+   "issue": "SMS and WhatsApp webhooks run the whole Apex turn synchronously inside an async handler. While Apex thinks, the dashboard's event loop is frozen (companion, WebSockets, other requests stall), and any turn longer than Twilio's ~15 s webhook timeout loses the reply. Telegram, Slack and Signal correctly use run_in_executor; Call Apex correctly uses a background thread.",
+   "severity": "medium",
+   "evidence": "dashboard/server.py:781-791 (twilio_inbound_sms calls phone_mod.dispatch_inbound_sms directly), dashboard/server.py:912-920 (whatsapp), tools/phone.py:94-98, tools/whatsapp.py:104-110; contrast dashboard/server.py:835 and 899",
+   "fix_hint": "Ack immediately with empty TwiML and send the reply with sms_send/whatsapp send_message from a worker thread (same pattern as Call Apex's text_later).",
+   "confirmed": true,
+   "how_confirmed": "Re-read both async handlers: no await/run_in_executor around the dispatch call, and dispatch calls _agent_run_fn inline; compared with the Telegram/Slack/Signal handlers which hand off to an executor."
+  },
+  {
+   "issue": "Browser extension cannot send anything unless DASHBOARD_TOKEN is set: the middleware rejects every POST from a chrome-extension:// origin that is not bearer-authenticated, and with no token configured nothing is ever bearer-authenticated. The README implies a local http://localhost:7860 setup works.",
+   "severity": "medium",
+   "evidence": "dashboard/server.py:233-241 and 258-259; apex-extension/README.md:10-14",
+   "fix_hint": "Document that a device token is required (and pre-fill one via the pairing link), or allow extension origins on loopback when no token is configured.",
+   "confirmed": true,
+   "how_confirmed": "Ran a TestClient snippet: POST with Origin chrome-extension://abcdef and DASHBOARD_TOKEN='' returned 403 'Use the same origin as your Apex dashboard.'; with a token and matching Bearer it passed the middleware (404 for the dummy path)."
+  },
+  {
+   "issue": "Telegram replies are sent with parse_mode=Markdown and no plain-text retry. Model replies often contain unbalanced _ or * (file names, snake_case, bullet stars); Telegram then refuses the message with 'can't parse entities' and you simply get no answer, only a line in the log.",
+   "severity": "medium",
+   "evidence": "tools/telegram.py:59-80 (parse_mode Markdown, error returned as string), tools/telegram.py:214 (result ignored)",
+   "fix_hint": "On an API error mentioning entities, resend without parse_mode (or escape/use MarkdownV2 properly).",
+   "confirmed": true,
+   "how_confirmed": "Read send_message and dispatch_inbound: single request with parse_mode='Markdown', failure only returns '[Telegram] API error' which dispatch_inbound discards. The Telegram API's rejection of malformed Markdown is documented behaviour, not run here."
+  },
+  {
+   "issue": "Webhooks without a secret trust any loopback/private peer. Behind a tunnel running on the laptop (cloudflared, as docs/OMNIPRESENCE.md recommends, or tailscale serve/funnel) all internet traffic arrives from 127.0.0.1, so Telegram/Signal/IoT webhooks with no secret accept forged posts from anyone. The body's chat ID / number is the attacker's to choose, so knowing your Telegram chat ID would let a stranger run Apex as you; IoT with an empty allowlist accepts any entity.",
+   "severity": "medium",
+   "evidence": "dashboard/webhook_auth.py:43-71 (peer_is_local used as the escape hatch), 129-141 (telegram), 144-160 (signal), 163-178 (iot); docs/OMNIPRESENCE.md:26, 63-84",
+   "fix_hint": "When PUBLIC_BASE_URL/TWILIO_PUBLIC_BASE_URL is set or a forwarded header is present, stop treating loopback as trusted; or require the secret whenever the channel is configured. Print a loud warning in the startup audit for local-only channels when a tunnel URL is configured.",
+   "confirmed": true,
+   "how_confirmed": "Read peer_is_local/_require and each verify_* function: with no secret they return early for loopback peers; read OMNIPRESENCE which tells you to keep Apex on 127.0.0.1 behind a local tunnel. Not exploitable on the laptop today because no tunnel or channel is configured."
+  },
+  {
+   "issue": "Apex cannot control Home Assistant by itself: iot_call_service, iot_get_state and iot_notify exist in tools/iot.py but are not declared as agent tools or dispatched in agent/core.py, so the safety rules written for iot_call_service never fire. Control only works through a separately configured Home Assistant MCP server (mcp__hass*).",
+   "severity": "medium",
+   "evidence": "tools/iot.py:79-112; agent/safety.py:31-33; agent/core.py:3066-3071 (only mcp__hass gating)",
+   "fix_hint": "Register the three functions as agent tools (with the safety rules) or delete them and point the docs at the HA MCP server.",
+   "confirmed": true,
+   "how_confirmed": "grep for iot_call_service/iot_get_state/iot_notify across agent/, tools/, dashboard/, app/ and main.py found only their definitions and the safety.py rules."
+  },
+  {
+   "issue": "Email inbox, calendar and phone/SMS panels in the dashboard are dead code: loadInbox, loadCalendar and loadPhone are never called and the elements they draw into (inbox-list, cal-range, phone-state, sms-form) exist in no HTML page. The /api/email/*, /api/calendar/events and /api/phone/* routes have no page.",
+   "severity": "medium",
+   "evidence": "dashboard/static/app.js:1053-1245, 1623-1643; dashboard/static/index.html (no matching ids)",
+   "fix_hint": "Either add Inbox/Calendar/Phone sections to a page or delete the dead functions so nobody thinks they exist.",
+   "confirmed": true,
+   "how_confirmed": "grep -rlE 'inbox-list|cal-range|phone-state|sms-form' dashboard/ matched only app.js; grep for callers of loadPhone/loadInbox/loadCalendar found none."
+  },
+  {
+   "issue": "IoT inbound allowlist is allow-all when empty, unlike every other channel (deny-by-default).",
+   "severity": "low",
+   "evidence": "tools/iot.py:39-41",
+   "fix_hint": "Make an empty IOT_TRIGGER_ALLOWED_ENTITIES deny everything.",
+   "confirmed": true,
+   "how_confirmed": "Ran: tools.iot._is_allowed('lock.front_door') with an empty list returned True; telegram._is_allowed(123) with an empty list returned False."
+  },
+  {
+   "issue": "Email and calendar have no tests at all; Slack, WhatsApp and Signal message handling (dispatch) is untested beyond allowlist and signature checks.",
+   "severity": "low",
+   "evidence": "tests/ (no file references email_box, calendar_box, slack.dispatch_event, whatsapp/signal dispatch_inbound)",
+   "fix_hint": "Add fake-IMAP/CalDAV tests and dispatch tests with a stub agent.",
+   "confirmed": true,
+   "how_confirmed": "grep -rlE 'email_box|calendar_box|email_inbox|calendar_events' tests found only an unrelated mention in tests/test_trajectory.py; grep for dispatch_event / whatsapp|signal dispatch_inbound found only route spies in test_webhook_auth.py."
+  },
+  {
+   "issue": "Calendar needs the caldav package, which is not in requirements.txt, so the tool will answer 'caldav isn't installed' on a fresh install.",
+   "severity": "low",
+   "evidence": "tools/calendar_box.py:49-52; requirements.txt",
+   "fix_hint": "Add caldav to requirements (or the setup step).",
+   "confirmed": true,
+   "how_confirmed": "grep -i caldav requirements*.txt returned nothing."
+  },
+  {
+   "issue": "The relay 'outbox' (work left for the laptop while it is off) has no producer: nothing in the app calls agent.relay.queue(), so that half of the relay is plumbing only.",
+   "severity": "low",
+   "evidence": "agent/relay.py:561-572; only caller tests/test_relay_drain.py:83-96",
+   "fix_hint": "Add a producer (e.g. the relay phone page's 'remember this') or drop the claim from the docs.",
+   "confirmed": true,
+   "how_confirmed": "grep for relay.queue across the repo found only the definition and tests."
+  },
+  {
+   "issue": "IoT on/off can only be toggled by typing /iot in main.py's text mode or by a raw POST to /api/iot/toggle; resident mode (the owner's launcher) has no command, tray item or page button for it.",
+   "severity": "low",
+   "evidence": "main.py:661-678; dashboard/server.py:986-990; no 'api/iot' in dashboard/static",
+   "fix_hint": "Add a toggle to the Channels page or tray.",
+   "confirmed": true,
+   "how_confirmed": "grep for '/iot' in app/resident.py and 'api/iot' in dashboard/static returned nothing."
+  },
+  {
+   "issue": "Telegram webhook registration helper set_webhook() is never called by any command or page, so webhook mode must be registered by hand (polling mode is the practical choice on the laptop anyway).",
+   "severity": "low",
+   "evidence": "tools/telegram.py:110-142",
+   "fix_hint": "Expose it as a CLI (python -m tools.telegram --set-webhook) or remove it.",
+   "confirmed": true,
+   "how_confirmed": "grep set_webhook across the repo found only its definition and a config comment."
+  },
+  {
+   "issue": "Stale docstring: tools/signal.py says a blank SIGNAL_ALLOWED_NUMBERS allows anyone; the code denies everyone.",
+   "severity": "low",
+   "evidence": "tools/signal.py:17-18 vs 57-59",
+   "fix_hint": "Fix the docstring.",
+   "confirmed": true,
+   "how_confirmed": "Read both places."
+  },
+  {
+   "issue": "Tunnel scripts are bash (.sh) only; the owner's Windows laptop has no one-click way to get a public HTTPS address, which Discord, Slack, WhatsApp, SMS and Telegram-webhook all need.",
+   "severity": "low",
+   "evidence": "scripts/tunnel-cloudflared.sh, scripts/setup-cloudflare-tunnel.sh, scripts/tunnel-tailscale.sh; docs/OMNIPRESENCE.md:61-135",
+   "fix_hint": "Prefer Telegram polling and the cloud relay for Lebanon; add a .cmd for cloudflared only if a public URL is really wanted.",
+   "confirmed": true,
+   "how_confirmed": "ls scripts | grep tunnel showed only .sh files."
+  },
+  {
+   "issue": "Outlook/Hotmail addresses default to password IMAP/SMTP, which Microsoft has largely switched off for personal accounts in favour of OAuth; email may fail to log in for those addresses.",
+   "severity": "low",
+   "evidence": "tools/email_box.py:26-43",
+   "fix_hint": "Document Gmail app passwords as the supported path, or add OAuth.",
+   "confirmed": false,
+   "how_confirmed": "Not tested; based on Microsoft's published basic-auth retirement, not on this code failing."
+  }
+ ],
+ "needs_from_owner": [
+  "Decide which channel you actually want first. Recommended: Telegram in polling mode (no public address, works on slow internet). Create a bot with @BotFather, put TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT_IDS and TELEGRAM_POLLING=true in .env, restart with Start-Apex-Platform.cmd, then message the bot and confirm a reply arrives.",
+  "Set DASHBOARD_TOKEN in .env (Setup-Apex-Car.cmd offers to) before using the phone, the car page or the browser extension; the extension cannot work without it.",
+  "Install Tailscale on the laptop and phone, run Setup-Apex-Car.cmd, and check that the printed https://...ts.net/drive address opens on the phone and Celine answers.",
+  "Check the Apex startup log for the webhook audit lines (one per channel) and paste them back, so we know what is exposed.",
+  "If you want 'Call Apex' or the relay: it needs a paid Twilio number and a cloud server (VPS or Railway) with Tailscale; tell me whether that is worth paying for given power cuts and internet in Lebanon.",
+  "For email: tell me which provider; Gmail with an app password is the tested-in-principle path.",
+  "If you have Home Assistant at home, say so; otherwise IoT can stay off."
+ ],
+ "rating": {
+  "score": 5,
+  "why": "Well-secured and wired identically in both launch modes with ~340 tests, but everything is off by default, nothing has run on the laptop, most channels need a public address and paid accounts, and there are real bugs (blocking SMS/WhatsApp, lost Telegram replies, extension 403, no HA control, dead dashboard panels)."
+ }
+}

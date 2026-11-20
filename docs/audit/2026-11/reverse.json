@@ -1,0 +1,277 @@
+{
+  "subsystem": "Reverse engineering (Reverse page / REA workspace, and REA inside Apex Code)",
+  "summary": "There are two ways to use REA (Reverse Engineer Anything) in Apex. The first is the Reverse page (/reverse), which opens a program you own in Ghidra and shows its overview, functions, decompiled code and text. The second is a per-project checkbox in Apex Code that gives the coding plan REA's tools in Full mode. Opening a file and the overview should work. The Functions, Strings and decompiled-code views send argument names that the pinned REA 6.4.0 rejects (I checked them against REA's own input schemas), so the main features of the Reverse page will fail on a real binary. The tests did not catch this because they use a fake REA that accepts Apex's invented arguments. The page is also locked out completely whenever DASHBOARD_TOKEN is set. The Apex Code REA toggle is wired and tested with fakes but has never run on the laptop.",
+  "features": [
+    {
+      "name": "Reverse page: open a program",
+      "what": "You type the path of a .exe/.dll or other file you own. Apex starts one REA process (npx rea-agents@6.4.0 mcp), which imports the file into a throwaway Ghidra project. The file itself is never changed.",
+      "how_to_use": "Dashboard sidebar link 'Reverse' (index.html:53) or http://127.0.0.1:<port>/reverse. Paste the path and press Open.",
+      "status": "built_untested_on_pc",
+      "evidence": "Route dashboard/reverse.py:151-154 -> agent/reverse.py:202-230. The router is registered in dashboard/server.py:157,161, the same server in main.py and resident mode (app/resident.py:276). open_binary sends {'path'}, which REA 6.4.0's openBinaryInputSchema accepts (dist/contracts/sessionLifecycleInputs.js:19-26). Tests: tests/test_reverse.py::test_open_inspect_and_close and test_the_api_opens_reads_and_closes, both with a fake REA only.",
+      "setup_needed": "Node.js 22.19+, run `npx rea-agents@6.4.0 setup` once, plus Ghidra and JDK 21 with GHIDRA_INSTALL_DIR and JAVA_HOME in .env for Windows .exe/.dll files. DASHBOARD_TOKEN must be empty, or the page answers 401 (see gaps)."
+    },
+    {
+      "name": "Reverse page: Overview tab",
+      "what": "Shows the file's format, architecture, entry point, function count and segments.",
+      "how_to_use": "Opens automatically after a file is opened (Overview tab).",
+      "status": "partial",
+      "evidence": "agent/reverse.py:247-252 calls binary_overview({}), list_segments({}) and list_architectures({}). The first two pass REA 6.4.0's strict schemas (probe run). list_architectures is a Mach-O-only tool that shells out to macOS `lipo` (REA dist/native/NativeMacOSProvider.js:237-241), so on a Windows PE it will at best show an error card. Page: dashboard/static/reverse.js:103-123.",
+      "setup_needed": "Same as opening a file."
+    },
+    {
+      "name": "Reverse page: Functions list and search",
+      "what": "Supposed to list the functions inside the program and let you search them by name.",
+      "how_to_use": "Functions tab, then type in the search box and press Enter or the search button.",
+      "status": "broken",
+      "evidence": "agent/reverse.py:258-261 sends list_procedures {'limit': N} and search_procedures {'query': q, 'limit': N}. REA 6.4.0 declares list_procedures as z.object({document}).strict() and search_procedures as {pattern, mode, case_sensitive, document}.strict() (dist/contracts/officialToolContracts.js:12-14,41,60; analysisSearchContract.js:3-11). A node probe against REA's real contracts rejected both calls: 'Unrecognized key: limit' and 'expected string, received undefined pattern; Unrecognized keys: query, limit'.",
+      "setup_needed": "Needs a code fix before it can work."
+    },
+    {
+      "name": "Reverse page: function detail (decompiled code, assembly, callers, callees)",
+      "what": "Click a function to see its decompiled C-like code, its assembly, what it calls and what calls it.",
+      "how_to_use": "Functions tab, then click a function in the list.",
+      "status": "broken",
+      "evidence": "agent/reverse.py:280-286 sends {'address': addr} to procedure_info, procedure_pseudo_code, procedure_assembly, procedure_callers and procedure_callees. REA 6.4.0 requires {'procedure': ...} in a strict schema (officialToolContracts.js:47-50,58; toolContractHelpers.js:12). The probe rejected all five calls with 'Unrecognized key: address'. The same call with {'procedure': ...} passed. The list that leads here is broken too.",
+      "setup_needed": "Needs a code fix before it can work."
+    },
+    {
+      "name": "Reverse page: Strings list and search",
+      "what": "Supposed to show the readable text inside the program (messages, URLs, file names), searchable.",
+      "how_to_use": "Strings tab.",
+      "status": "broken",
+      "evidence": "agent/reverse.py:268-271 sends list_strings {'limit'} and search_strings {'query','limit'}. REA's strict schemas reject both (probe: 'Unrecognized key: limit', and pattern missing). Text is shown safely as plain text (reverse.js:170-175, scripts/check_reverse_ui.cjs:64-65), but nothing will arrive.",
+      "setup_needed": "Needs a code fix before it can work."
+    },
+    {
+      "name": "Reverse page: open-session list, close and limits",
+      "what": "Shows the files you have open, at most two at a time. A Close button ends the REA process. A session left untouched for 30 minutes is closed the next time the list is checked.",
+      "how_to_use": "Reverse page: the intro list of open files and the Close button in the workspace header.",
+      "status": "built_untested_on_pc",
+      "evidence": "agent/reverse.py:208-211 (MAX_SESSIONS=2), 290-296 (close), 306-312 (idle reap, which runs only from sessions() and open_binary()). Routes: dashboard/reverse.py:145-148,187-190. Tests: test_only_two_sessions_at_once, test_an_idle_session_is_reaped, check_reverse_ui.cjs close step.",
+      "setup_needed": "None beyond REA."
+    },
+    {
+      "name": "Reverse page: safety gates (read-only allowlist, path checks, owner-only)",
+      "what": "Only REA's reading tools can be called. Files in Windows / Program Files, files off your own drives, empty files and files over 2 GB are refused. With a dashboard token set, only the master token can reach the API.",
+      "how_to_use": "Automatic.",
+      "status": "working",
+      "evidence": "Allowlist agent/reverse.py:44-53, enforced at 176-177. Path checks 68-109. Owner check dashboard/code.py:32-52, used by every /api/reverse route. Tests: test_only_read_only_tools_ever_reach_rea, test_bad_paths_are_refused (x3), test_a_system_folder_and_an_outside_drive_are_refused, test_an_empty_or_huge_file_is_refused, test_the_api_is_owner_only. I ran tests/test_reverse.py: 12 passed.",
+      "setup_needed": "None."
+    },
+    {
+      "name": "Reverse page: 'REA not set up' banner",
+      "what": "If REA cannot be launched, the page says so and disables Open.",
+      "how_to_use": "Automatic on page load.",
+      "status": "working",
+      "evidence": "agent/reverse.py:136-141 -> agent/code_brain.py:351-363 (only checks that npx exists and the package is pinned). reverse.js:48-53. Covered by check_reverse_ui.cjs (ready state).",
+      "setup_needed": "None. Note that it does not check the Node version, Ghidra or the JDK."
+    },
+    {
+      "name": "Apex Code: per-project 'REA reverse-engineering tools (Full mode)' checkbox",
+      "what": "Turns on REA's full MCP tool set (about 170 tools, including ones that run the program) for the Claude Code or Codex plan, in Full-mode steps of that project only. A Safe step says in the feed why REA is missing.",
+      "how_to_use": "/code page, session side panel, Checks section: tick 'REA reverse-engineering tools (Full mode)' (code.html:227, code.js:1386-1391 -> PATCH /api/code/projects/{pid} {rea}).",
+      "status": "off_by_default",
+      "evidence": "DB column agent/code_studio.py:225-227 (default 0). update_project 439-448. Wiring 1032-1035 and _memory_server 905-922 -> code_brain.rea_server/mcp_file 351-385. Engines: agent/code_engines.py:73,140-141 (Claude --allowedTools mcp__rea) and 201-217 (Codex -c mcp_servers.rea.*). Package pin config.py:717 (CODE_REA_PACKAGE=rea-agents@6.4.0). Tests: tests/test_code_studio.py:2073,2092,2110 (fake claude/codex, POSIX only).",
+      "setup_needed": "Node 22.19+ and npx. Ghidra and JDK 21 in .env for native binaries. Tick the box per project and use Full mode. Never tried on the laptop."
+    },
+    {
+      "name": "REA registered in the owner's personal Codex (ChatGPT plan)",
+      "what": "A one-time PowerShell setup registers REA in Codex. Apex's Codex engine then inherits it in every Apex Code session.",
+      "how_to_use": "PowerShell commands in docs/REA-CODEX.md:20-26, then restart Apex and pick the ChatGPT plan on /code.",
+      "status": "off_by_default",
+      "evidence": "docs/REA-CODEX.md:13-52 and docs/CODE.md:32-34. Apex only adds -c overrides (agent/code_engines.py:163-175) and never disables a personally registered mcp_servers.rea. No Apex test covers this path.",
+      "setup_needed": "Node 22.19+, `npx -y rea-agents@6.4.0 setup --client codex --yes`, `codex login`."
+    },
+    {
+      "name": "Project-local REA CLI for cloud/agent tasks (integrations/rea, setup_rea_cloud.sh, check.mjs)",
+      "what": "A pinned npm install of rea-agents 6.4.0 inside the repo, so cloud coding agents can run REA from the shell. A probe checks the MCP handshake, a static JS analysis and that the vendored skill matches.",
+      "how_to_use": "`bash scripts/setup_rea_cloud.sh`, then `node integrations/rea/node_modules/rea-agents/scripts/rea.mjs --help`. For developers and agents, not the owner's daily use.",
+      "status": "off_by_default",
+      "evidence": "integrations/rea/package.json (rea-agents 6.4.0, @modelcontextprotocol/client 2.3.1). scripts/setup_rea_cloud.sh. integrations/rea/check.mjs. CI .github/workflows/rea.yml runs it on ubuntu-latest and windows-latest. node_modules is not installed in this checkout.",
+      "setup_needed": "Node 22.19+/24.11+ and npm registry access once."
+    },
+    {
+      "name": "REA agent skill (.agents/skills/reverse-engineer-anything)",
+      "what": "REA's own workflow instructions, copied for coding agents (Codex/Claude) working on this repo. AGENTS.md points agents to it.",
+      "how_to_use": "Automatic for agents that read AGENTS.md. Nothing for the owner to do.",
+      "status": "working",
+      "evidence": ".agents/skills/reverse-engineer-anything/SKILL.md (version 37, tool_count 170) and references/. Kept identical to the npm package by integrations/rea/check.mjs (compareSkill).",
+      "setup_needed": "None."
+    },
+    {
+      "name": "Screen Companion REA evidence report",
+      "what": "A record of a past REA investigation of the Companion's own JS files, used to justify the Dictate and drawing changes. It is not a runtime feature.",
+      "how_to_use": "Read docs/SCREEN-COMPANION-REA.md.",
+      "status": "working",
+      "evidence": "docs/SCREEN-COMPANION-REA.md:1-89. Its raw evidence lives at /workspace/screen-companion-reference/rea-interaction/ (line 15), which is outside the repo, so only the summary is kept.",
+      "setup_needed": "None."
+    }
+  ],
+  "files_covered": [
+    "agent/reverse.py",
+    "agent/reverse_rea.py",
+    "dashboard/reverse.py",
+    "dashboard/code.py",
+    "dashboard/server.py",
+    "dashboard/static/reverse.js",
+    "dashboard/static/reverse.html",
+    "dashboard/static/index.html",
+    "dashboard/static/code.html",
+    "dashboard/static/code.js",
+    "agent/code_brain.py",
+    "agent/code_studio.py",
+    "agent/code_engines.py",
+    "config.py",
+    "app/resident.py",
+    "integrations/rea/package.json",
+    "integrations/rea/check.mjs",
+    "integrations/rea/NOTICE.md",
+    "scripts/setup_rea_cloud.sh",
+    "scripts/check_reverse_ui.cjs",
+    ".agents/skills/reverse-engineer-anything/SKILL.md",
+    ".github/workflows/rea.yml",
+    "docs/REVERSE.md",
+    "docs/REA-CODEX.md",
+    "docs/SCREEN-COMPANION-REA.md",
+    "docs/CODE.md",
+    "docs/CAPABILITY_MATRIX.md",
+    "tests/test_reverse.py",
+    "tests/test_code_studio.py",
+    "AGENTS.md"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_reverse.py",
+      "tests/test_code_studio.py",
+      "scripts/check_reverse_ui.cjs",
+      "integrations/rea/check.mjs"
+    ],
+    "approx_test_count": 17
+  },
+  "gaps": [
+    {
+      "issue": "The Reverse page sends argument names that REA 6.4.0 rejects. list_procedures and list_strings get an unknown 'limit'. search_procedures and search_strings get 'query'/'limit' instead of the required 'pattern'. All five procedure_* calls get 'address' instead of the required 'procedure'. REA's schemas are strict, so on a real binary the Functions tab, Strings tab and decompiled-code view will all fail. These are the page's main features.",
+      "severity": "high",
+      "evidence": "agent/reverse.py:259,261,269,271,280,284 vs REA 6.4.0 dist/contracts/officialToolContracts.js:12-14,41,43,47-50,58,60-61 and analysisSearchContract.js:3-11",
+      "fix_hint": "Send {} to list_procedures/list_strings and cap the result in Python. Send {'pattern': q} to search_procedures/search_strings, and {'procedure': addr} to the procedure_* tools. Then add a test that validates every argument dict Apex sends against REA's real contracts, for example an extra step in integrations/rea/check.mjs that calls these tools, or a JSON dump of their inputSchemas checked in tests.",
+      "confirmed": true,
+      "how_confirmed": "Ran `npm pack rea-agents@6.4.0` into the scratchpad, installed zod/canonicalize/diff, imported OFFICIAL_TOOL_CONTRACTS and safeParse'd the exact dicts Apex builds. list_segments {} was OK. list_procedures {limit} was REJECTED (Unrecognized key 'limit'). search_* {query,limit} was REJECTED (pattern missing, unrecognized keys). procedure_info/pseudo_code/assembly/callers/callees {address} were REJECTED (procedure missing, unrecognized key 'address'). procedure_pseudo_code {procedure} was OK. I also checked that registerOfficialTools.js:21 really parses input with contract.inputSchema, which is .strict() (officialToolContracts.js:12-13)."
+    },
+    {
+      "issue": "With DASHBOARD_TOKEN set, the Reverse page cannot be used at all. /reverse is missing from the middleware's list of pages a browser may load without a token (/code is on it), and reverse.js sends no Authorization header on any API call and has no login prompt.",
+      "severity": "high",
+      "evidence": "dashboard/server.py:276-277 (exempt list has /code, not /reverse); dashboard/static/reverse.js:15-20 (no auth header) vs dashboard/static/code.js:27-29 (auth() and a login dialog)",
+      "fix_hint": "Add '/reverse' to the exempt page list (it is an empty shell like /code). Give reverse.js the same auth()/401 login handling as code.js.",
+      "confirmed": true,
+      "how_confirmed": "Ran a TestClient snippet against dashboard.server.app with config.DASHBOARD_TOKEN='master-xyz'. GET /reverse returned 401, GET /code returned 200, GET /api/reverse returned 401 without a header and 200 with the master bearer. Grepped reverse.html/js: no token, login or localStorage code at all."
+    },
+    {
+      "issue": "Tests cannot catch the REA argument mismatch. The fake REA in the tests accepts Apex's own invented argument names (it reads inputs['query'] and inputs['address']), and nothing tests the real transport (agent/reverse_rea.py) at all. The 12 passing tests and the page check therefore prove only that Apex agrees with itself.",
+      "severity": "medium",
+      "evidence": "tests/test_reverse.py:38,46 (fake reads 'query' and 'address'); grep for reverse_rea in tests/ found nothing",
+      "fix_hint": "Make the fake validate inputs against a schema snapshot taken from REA 6.4.0, and add one test that drives reverse_rea.Connection against a tiny Python stdio MCP server.",
+      "confirmed": true,
+      "how_confirmed": "Read tests/test_reverse.py lines 16-55. Ran `grep -rn reverse_rea tests/` (no hits). Ran tests/test_reverse.py (12 passed) even though the real schemas reject these calls."
+    },
+    {
+      "issue": "Tool errors from REA are treated as results. reverse_rea._one ignores CallToolResult.isError and returns the error text as if it were data. A rejected or failed call then shows up on the page as 'No functions found.' / 'No text found.' or as raw error JSON, instead of a clear error.",
+      "severity": "medium",
+      "evidence": "agent/reverse_rea.py:76-86; dashboard/static/reverse.js:137-138,168-169",
+      "fix_hint": "If result.isError is true, raise an exception carrying the text, so agent/reverse.py turns it into a plain ReverseError.",
+      "confirmed": true,
+      "how_confirmed": "Read reverse_rea.py:76-86: it never reads result.isError. Confirmed the installed mcp 1.30.0 CallToolResult has an isError field (mcp/types.py:1369)."
+    },
+    {
+      "issue": "Following docs/REA-CODEX.md undoes Apex's 'REA only in Full mode' rule for the Codex engine. Once REA is registered in the owner's personal Codex config, Apex's Codex command never disables mcp_servers.rea, so REA's tools (some of which can run the analysed program) are also available in Safe-mode steps and second-opinion reviews. docs/CODE.md:284-286 promises this never happens.",
+      "severity": "medium",
+      "evidence": "agent/code_engines.py:163-175 and 201-202 (rea only skipped, never disabled, outside Full); docs/REA-CODEX.md:43-46; docs/CODE.md:33 vs 284-286; test tests/test_code_studio.py:2083-2085 only checks that Apex adds no rea override",
+      "fix_hint": "Outside Full mode, pass `-c mcp_servers.rea.enabled=false` (or the equivalent override in the installed Codex version) to Codex, and add a test for it. Alternatively, drop the personal-registration route from the docs.",
+      "confirmed": true,
+      "how_confirmed": "Read code_engines.py chatgpt branch 160-179 and _codex_mcp 196-218: no flag ignores or disables user-config MCP servers. Grepped for CODEX_HOME, enabled=false and ignore_user_config: none found. Whether Codex exec loads ~/.codex/config.toml MCP servers comes from Codex's documented behaviour, which REA-CODEX.md:43-46 itself relies on."
+    },
+    {
+      "issue": "The Overview tab calls list_architectures. In REA that is a Mach-O-only native tool that runs macOS `lipo`, so on the owner's Windows PE files it will produce an error card.",
+      "severity": "low",
+      "evidence": "agent/reverse.py:251; REA dist/contracts/native/nativeToolContracts.js:73 and dist/native/NativeMacOSProvider.js:237-241",
+      "fix_hint": "Drop list_architectures, or call it only for Mach-O files.",
+      "confirmed": true,
+      "how_confirmed": "Read the REA 6.4.0 source in the scratchpad: the tool's description says 'thin or universal Mach-O slices', and the provider runs lipo."
+    },
+    {
+      "issue": "Idle sessions are not closed on a timer. The 30-minute idle close only happens when someone loads the session list or opens another file, so a Ghidra/Java process can sit in memory for hours. docs/REVERSE.md:21 says an untouched file 'closes itself after 30 minutes'.",
+      "severity": "low",
+      "evidence": "agent/reverse.py:209,243,306-312",
+      "fix_hint": "Run the reaper on a small background timer, or from the scheduler.",
+      "confirmed": true,
+      "how_confirmed": "Read the code: _reap_idle_locked is called only from open_binary and sessions()."
+    },
+    {
+      "issue": "reverse.shutdown() is dead code. Neither main.py, app/resident.py nor the dashboard ever calls it, so stopping or crashing Apex leaves cleanup of the REA/Ghidra child processes to the OS. On Windows the process chain is cmd -> npx -> node -> Java, and tree-kill in mcp needs pywin32 job objects.",
+      "severity": "low",
+      "evidence": "agent/reverse.py:315-322; grep shows callers only in tests/test_reverse.py:64,77",
+      "fix_hint": "Call reverse.shutdown() from the dashboard shutdown hook and app/resident.py's stop path.",
+      "confirmed": true,
+      "how_confirmed": "Ran grep -rn 'shutdown()' piped to grep -i rever across the repo: only the definition and the tests."
+    },
+    {
+      "issue": "The 'ready' check only confirms that npx exists and that the package is pinned. It does not check the Node version, Ghidra or the JDK, so the page can say ready and then fail on Open with a raw REA error.",
+      "severity": "low",
+      "evidence": "agent/reverse.py:136-141; agent/code_brain.py:351-363",
+      "fix_hint": "Cache the result of `npx rea-agents@6.4.0 providers --json` and show what is missing.",
+      "confirmed": true,
+      "how_confirmed": "Read both functions."
+    },
+    {
+      "issue": "The docs overclaim. CAPABILITY_MATRIX marks Reverse as TESTED including 'imports', and REVERSE.md says it shows 'what it imports' and that JavaScript/Electron, websites, .NET and Android work without Ghidra. The page has no imports view, takes only a file path (no websites), and calls only native procedure/string tools.",
+      "severity": "low",
+      "evidence": "docs/CAPABILITY_MATRIX.md:67; docs/REVERSE.md:8,55-57; dashboard/static/reverse.js (tabs: overview, functions, strings only)",
+      "fix_hint": "Mark it as untested with a known argument bug, and remove 'imports' and 'websites' until they are built.",
+      "confirmed": true,
+      "how_confirmed": "Read the doc lines and the whole of reverse.js."
+    },
+    {
+      "issue": "Celine, voice and chat cannot use REA. There is no tool in tools/ or agent/ that calls the Reverse engine, so reverse engineering is reachable only from the /reverse page and from Apex Code Full mode.",
+      "severity": "low",
+      "evidence": "grep for 'agent import reverse'/'agent.reverse' outside tests: only dashboard/reverse.py:15 and dashboard/code.py:24",
+      "fix_hint": "None needed unless the owner wants it. If so, add a read-only tool that wraps agent/reverse.py.",
+      "confirmed": true,
+      "how_confirmed": "Ran a grep across the repo for imports of agent.reverse."
+    },
+    {
+      "issue": "The stored 'handle' from open_binary is never used, which is dead code. It is harmless because each REA process holds exactly one Ghidra program.",
+      "severity": "low",
+      "evidence": "agent/reverse.py:192-199,221",
+      "fix_hint": "Remove it, or pass it as 'document' if REA ever needs one.",
+      "confirmed": true,
+      "how_confirmed": "Grepped for 'handle' in reverse.py and reverse.js: it is only set, never read except by a test."
+    },
+    {
+      "issue": "Each open starts `npx -y rea-agents@6.4.0 mcp`, which may try to reach the npm registry. On a slow or offline Lebanon connection the first open after a cache clear may stall or fail.",
+      "severity": "low",
+      "evidence": "agent/code_brain.py:361-363",
+      "fix_hint": "Install REA once locally (npm i -g rea-agents@6.4.0, or the integrations/rea copy) and launch it by path.",
+      "confirmed": false,
+      "how_confirmed": "Inferred from how npx behaves. Not tested offline here."
+    },
+    {
+      "issue": "One of the stated known facts is out of date: there is a Windows CI job for REA (.github/workflows/rea.yml, windows-latest). It only checks REA's own npm package (handshake, JS analysis, skill match), never Apex's Reverse page or the Apex Code REA wiring.",
+      "severity": "low",
+      "evidence": ".github/workflows/rea.yml:24-38",
+      "fix_hint": "Extend check.mjs to call the exact tools and arguments Apex's Reverse page uses.",
+      "confirmed": true,
+      "how_confirmed": "Read the workflow file. I did not check whether it currently passes on GitHub."
+    }
+  ],
+  "needs_from_owner": [
+    "Tell us whether .env on the laptop has DASHBOARD_TOKEN set. If it does, /reverse will answer 'Unauthorized' until the auth gap is fixed.",
+    "After the argument-name fix: open a small .exe you own (for example a copy in Downloads) on the Reverse page, check that the Functions and Strings tabs fill and that clicking a function shows decompiled code, and paste back any error text.",
+    "Run `node -v` and `npx rea-agents@6.4.0 providers --json` in PowerShell and confirm Ghidra and JDK 21 are listed, and that GHIDRA_INSTALL_DIR and JAVA_HOME are in .env.",
+    "If you use REA from Apex Code: tick 'REA reverse-engineering tools (Full mode)' on one project, run a Full-mode step, and confirm the feed shows an REA tool call.",
+    "Tell us whether you ran `npx rea-agents@6.4.0 setup --client codex --yes`. If so, REA is also live in Codex Safe-mode and review steps.",
+    "After closing Apex, check Task Manager for leftover java.exe/node.exe processes from Ghidra."
+  ],
+  "rating": {
+    "score": 3,
+    "why": "The safety gates and the Apex Code toggle are well built, but the Reverse page's core views send arguments the pinned REA rejects, it is locked out whenever a dashboard token is set, and its tests use a fake REA that hides both problems. None of it has run on the laptop."
+  }
+}
