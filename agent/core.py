@@ -1363,6 +1363,7 @@ TOOLS = [*offline_library.DEFINITIONS,
         "description": (
             "Schedule a recurring or one-off autonomous task. "
             "The agent will run the task prompt automatically at the given time. "
+            "Times are the PC's local time, the same clock as the current time you are told. "
             "Examples: daily briefing, reminders, periodic checks."
         ),
         "input_schema": {

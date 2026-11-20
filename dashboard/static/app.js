@@ -1565,7 +1565,7 @@ async function loadBriefing() {
     const b = await api('/api/briefing');
     document.getElementById('briefing-enabled').checked   = b.enabled === 'true' || b.enabled === true;
     document.getElementById('briefing-time').value        = b.time || '08:00';
-    document.getElementById('briefing-timezone').value    = b.timezone || 'America/New_York';
+    document.getElementById('briefing-timezone').value    = b.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     document.getElementById('briefing-location').value    = b.location || '';
     document.getElementById('briefing-topics').value      = b.news_topics || '';
 

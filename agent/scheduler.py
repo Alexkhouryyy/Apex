@@ -57,6 +57,16 @@ def init_db() -> None:
         """)
 
 
+def local_zone():
+    """The PC's own time zone (Asia/Beirut on the owner's laptop), which is what
+    Celine's clock and the owner mean by "at 8". UTC only if it can't be read."""
+    try:
+        from tzlocal import get_localzone
+        return get_localzone()
+    except Exception:
+        return "UTC"
+
+
 def init(agent_run_fn: Callable, speak_fn: Callable) -> None:
     """Wire up and start the scheduler. Call once at startup."""
     global _scheduler, _agent_run_fn, _speak_fn
@@ -66,7 +76,7 @@ def init(agent_run_fn: Callable, speak_fn: Callable) -> None:
     init_db()
 
     _scheduler = BackgroundScheduler(
-        timezone="UTC",
+        timezone=local_zone(),
         job_defaults={"coalesce": True, "misfire_grace_time": _MISFIRE_GRACE_SECONDS},
     )
     _scheduler.start()
@@ -84,7 +94,7 @@ def schedule(
 
     trigger_type: 'cron' | 'interval' | 'date'
     trigger_params examples:
-      cron:     {"hour": 8, "minute": 0}            — daily at 8am UTC
+      cron:     {"hour": 8, "minute": 0}            — daily at 8am the PC's local time
       cron:     {"day_of_week": "mon-fri", "hour": 9}
       interval: {"hours": 1}                         — every hour
       interval: {"minutes": 30}
@@ -181,7 +191,11 @@ def _fire_task(task_id: str, description: str) -> None:
 def _make_trigger(trigger_type: str, params: dict):
     try:
         if trigger_type == "cron":
-            return CronTrigger(**params, timezone="UTC")
+            # Local time unless the task names its own zone (the morning briefing
+            # does: passing it AND timezone="UTC" made every briefing fail).
+            params = dict(params)
+            zone = params.pop("timezone", None) or local_zone()
+            return CronTrigger(**params, timezone=zone)
         elif trigger_type == "interval":
             return IntervalTrigger(**params)
         elif trigger_type == "date":
