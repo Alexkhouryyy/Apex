@@ -37,32 +37,32 @@ PROBLEMS = [
          why='The size limit let new small packs push out the half-done 127 GB download, then said Done.'),
     dict(state='fixed', pr=89, area='apocalypse', title='New and updated books did not show up in search',
          why='NOMAD was never asked to rescan after a download.'),
-    dict(state='open', area='core', size='medium', title='Resident mode skips half of what Apex sets up at start',
+    dict(state='fixed', pr=90, area='core', title='Resident mode skips half of what Apex sets up at start',
          why='Your launcher runs resident mode, which never switches on sub-agents, never schedules the nightly '
              'reflection, weekly review or morning briefing, never runs the skill curator and never loads Python '
              'skills. One shared start-up fixes findings in five areas.'),
-    dict(state='open', area='voice', size='small', title='Long replies come out in the robot PC voice',
+    dict(state='fixed', pr=90, area='voice', title='Long replies come out in the robot PC voice',
          why='A Ctrl+Space reply is sent to Celine whole, with a 20-second limit, so anything over 3-4 sentences '
              'falls back to the Windows voice. Those turns also answer as Apex, not Celine.'),
     dict(state='open', area='core', size='medium', title='Risky actions are always refused, with no way to say yes',
          why='In resident mode nothing can ask you to confirm, so running Python, skills, image generation and '
              'similar are refused even when you asked for them.'),
-    dict(state='open', area='autonomy', size='small', title='Everything you copy is kept forever and sent to the model',
+    dict(state='fixed', pr=90, area='autonomy', title='Everything you copy is kept forever and sent to the model',
          why='Background awareness logs the first 200 characters of every clipboard copy, passwords and API keys '
              'included, with no time limit.'),
     dict(state='open', area='research', size='medium', title='With DeepSeek, Apex controls your screen blind',
          why='Every screenshot and image is dropped before it reaches DeepSeek, so desktop control, browser control '
              'and the webcam tool work without sight. The docs say DeepSeek supports images.'),
-    dict(state='open', area='core', size='small', title='DeepSeek network errors skip the fallback and can hang',
+    dict(state='fixed', pr=90, area='core', title='DeepSeek network errors skip the fallback and can hang',
          why='Only Claude errors are handled; a DeepSeek outage gives no friendly message and a turn can hang up to 10 minutes.'),
-    dict(state='open', area='core', size='small', title='The morning briefing crashes when it is scheduled',
+    dict(state='fixed', pr=90, area='core', title='The morning briefing crashes when it is scheduled',
          why='The time zone is passed twice, so the scheduler refuses the job. Schedules also run in UTC while '
              'Celine is told your local time.'),
     dict(state='open', area='memory', size='small', title="The Memory page's Save button always fails",
          why='The page encodes the request twice and the server rejects it. The page check hides it.'),
     dict(state='open', area='memory', size='small', title='Reflection can delete memories without asking',
          why='When it is 85% sure, it applies "forget" suggestions itself.'),
-    dict(state='open', area='autonomy', size='medium', title='Background awareness cannot see your active window on Windows',
+    dict(state='fixed', pr=90, area='autonomy', title='Background awareness cannot see your active window on Windows',
          why='The window watcher only knows a Linux tool, so most Guardian triggers never fire on your laptop.'),
     dict(state='open', area='voice', size='small', title='Hard to stop Celine mid-reply on Windows',
          why='The stop keys only work on Linux and the swipe-down gesture only changes the tray icon; talking over her is the only way.'),
