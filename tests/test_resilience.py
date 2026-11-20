@@ -199,3 +199,68 @@ class TestFallbackCreate:
         user_msg = next(m for m in captured["messages"] if m["role"] == "user")
         assert "hello" in user_msg["content"]
         assert "image" not in user_msg["content"].lower()
+
+
+# ---------------------------------------------------------------- DeepSeek and other OpenAI-style providers
+
+import openai
+
+
+def _openai_req():
+    return httpx.Request("POST", "https://api.deepseek.com/chat/completions")
+
+
+class TestOpenAIStyleProviders:
+    """DeepSeek, the owner's model, raises openai.* errors, which used to slip past
+    every handler: no friendly message, no fallback, a raw 'Connection error'."""
+
+    def test_categories(self):
+        r = _openai_req()
+        assert resilience.classify(openai.APIConnectionError(request=r)) == "network"
+        assert resilience.classify(openai.APITimeoutError(request=r)) == "network"
+        assert resilience.classify(openai.RateLimitError("x", response=httpx.Response(429, request=r), body=None)) == "rate_limit"
+        for code, category in ((402, "billing"), (503, "overloaded"), (500, "server_error"),
+                               (401, "auth"), (400, "client_error")):
+            error = openai.APIStatusError("x", response=httpx.Response(code, request=r), body=None)
+            assert resilience.classify(error) == category, code
+
+    def test_they_are_handled_like_claude_s(self):
+        assert issubclass(openai.APIConnectionError, resilience.PROVIDER_ERRORS)
+        assert "network" in resilience.friendly_message(openai.APIConnectionError(request=_openai_req())).lower() \
+            or "reach" in resilience.friendly_message(openai.APIConnectionError(request=_openai_req())).lower()
+
+    def test_a_bad_connection_cannot_hang_a_turn_for_ten_minutes(self):
+        from agent.provider import OpenAIAdapter
+        cloud = OpenAIAdapter("k", "https://api.deepseek.com")._oai
+        local = OpenAIAdapter("k", "http://127.0.0.1:11435/v1", strip_prefix="ollama/")._oai
+        assert cloud.timeout.connect == 10 and cloud.timeout.read == 90 and cloud.max_retries == 2
+        assert local.timeout.read == 600, "a laptop-CPU model is slow, not hung"
+
+
+def test_a_deepseek_outage_gets_the_fallback_and_a_friendly_message(monkeypatch, test_db):
+    import config
+    from agent import core, longterm, plugins, router
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(longterm, "load_memory_files", lambda: {})
+    monkeypatch.setattr(plugins, "slash", lambda text: None)
+    monkeypatch.setattr(core._budget, "check", lambda: None)
+    monkeypatch.setattr(router, "route_model", lambda *args: ("deepseek-flash", 0))
+    monkeypatch.setattr(core.computer, "screenshot", lambda: ("mock-screen", (32, 24)))
+    monkeypatch.setattr(core.telemetry, "bump_turn", lambda: None)
+    monkeypatch.setattr(core.telemetry, "log_turn", lambda *args: None)
+    agent = core.AgentCore()
+    monkeypatch.setattr(agent, "_effective_system_prompt", lambda persona=None: [])
+    monkeypatch.setattr(agent, "_all_tools", lambda: [])
+    monkeypatch.setattr(agent, "_try_subscription", lambda *args, **kwargs: None)
+    def outage(*args, **kwargs):
+        raise openai.APIConnectionError(request=_openai_req())
+    monkeypatch.setattr(core.telemetry, "create", outage)
+    tried = []
+    monkeypatch.setattr(resilience, "fallback_create", lambda *a, **k: tried.append(1) or "From the fallback.")
+    assert agent.run("hello") == "From the fallback."
+    assert tried == [1]
+    def no_fallback(*a, **k):
+        raise RuntimeError("OPENROUTER_API_KEY not configured.")
+    monkeypatch.setattr(resilience, "fallback_create", no_fallback)
+    assert agent.run("hello again") == resilience.friendly_message(openai.APIConnectionError(request=_openai_req()))

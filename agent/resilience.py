@@ -14,6 +14,15 @@ what the SDK does not:
 import anthropic
 import config
 
+try:                                      # DeepSeek, OpenAI, Gemini, OpenRouter and Ollama
+    import openai                         # all speak OpenAI's API and raise its errors
+except Exception:                         # pragma: no cover - openai is in requirements.txt
+    openai = None
+
+# Every error type a model call can end in after its retries. core.run caught
+# only Anthropic's, so a DeepSeek outage had no friendly message and no fallback.
+PROVIDER_ERRORS = (anthropic.APIError,) + ((openai.APIError,) if openai is not None else ())
+
 
 def _billing_failure(exc: anthropic.APIStatusError) -> bool:
     """Recognize payment errors, including Anthropic's legacy credit 400."""
@@ -39,6 +48,8 @@ def _billing_failure(exc: anthropic.APIStatusError) -> bool:
 
 def classify(exc: Exception) -> str:
     """Map an exception to a short category string for logs and messaging."""
+    if openai is not None and isinstance(exc, openai.APIError):
+        return _classify_openai(exc)
     if isinstance(exc, anthropic.RateLimitError):
         return "rate_limit"
     if isinstance(exc, (anthropic.APITimeoutError, anthropic.APIConnectionError)):
@@ -57,6 +68,26 @@ def classify(exc: Exception) -> str:
     if isinstance(exc, anthropic.APIError):
         return "api_error"
     return "unexpected"
+
+
+def _classify_openai(exc) -> str:
+    """The same categories for OpenAI-compatible providers (DeepSeek and others)."""
+    if isinstance(exc, openai.RateLimitError):
+        return "rate_limit"
+    if isinstance(exc, (openai.APITimeoutError, openai.APIConnectionError)):
+        return "network"
+    if isinstance(exc, openai.APIStatusError):
+        status = getattr(exc, "status_code", 0) or 0
+        if status == 402:
+            return "billing"                    # DeepSeek: "Insufficient Balance"
+        if status in (503, 529):
+            return "overloaded"
+        if status >= 500:
+            return "server_error"
+        if status in (401, 403):
+            return "auth"
+        return "client_error"
+    return "api_error"
 
 
 def should_fallback(category: str) -> bool:

@@ -528,7 +528,15 @@ class OpenAIAdapter:
 
     def __init__(self, api_key: str, base_url: str | None = None, strip_prefix: str = ""):
         from openai import OpenAI
-        self._oai = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+        import httpx
+        # The SDK default is a 600-second read timeout: on a bad connection one
+        # turn could hang for many minutes holding the turn. Cloud providers get
+        # 10 s to connect and 90 s of silence; the local model (Ollama, often on
+        # a laptop CPU) keeps the long limit.
+        local = strip_prefix == "ollama/"
+        limits = dict(timeout=httpx.Timeout(600.0 if local else 90.0, connect=10.0), max_retries=2)
+        self._oai = (OpenAI(api_key=api_key, base_url=base_url, **limits) if base_url
+                     else OpenAI(api_key=api_key, **limits))
         self.messages = _Messages(self._oai, strip_prefix=strip_prefix)
 
 

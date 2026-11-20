@@ -4136,7 +4136,7 @@ class AgentCore:
                         this_text = " ".join(
                             getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text"
                         ).strip()
-                except anthropic.APIError as e:
+                except resilience.PROVIDER_ERRORS as e:
                     category = resilience.classify(e)
                     print(f"[Resilience] agent.core/main failed ({category}) after retries: {e}")
                     try:
