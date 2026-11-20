@@ -34,6 +34,7 @@ except Exception:
 
 
 _running = False      # an AwarenessMonitor is started in this process
+_WINDOWS = os.name == "nt"
 
 
 def running() -> bool:
@@ -70,6 +71,65 @@ class AwarenessLog:
             return items
 
 
+def active_window_title() -> str:
+    """The title of the window in front. On Windows through user32 (no extra
+    install); elsewhere through xdotool. '' when it can't be read. The watcher
+    used to call xdotool only, so on the owner's laptop it never saw a window."""
+    if _WINDOWS:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return ""
+        size = user32.GetWindowTextLengthW(hwnd)
+        buffer = ctypes.create_unicode_buffer(size + 1)
+        user32.GetWindowTextW(hwnd, buffer, size + 1)
+        return buffer.value.strip()
+    wid = subprocess.run(["xdotool", "getactivewindow"], capture_output=True, text=True, timeout=2).stdout.strip()
+    if not wid:
+        return ""
+    return subprocess.run(["xdotool", "getwindowname", wid], capture_output=True, text=True, timeout=2).stdout.strip()
+
+
+PASSWORD_MANAGERS = ("1password", "bitwarden", "keepass", "lastpass", "dashlane", "keeper", "password manager",
+                     "credential manager", "roboform", "nordpass", "proton pass")
+
+
+def looks_private(text: str, window_title: str = "") -> bool:
+    """A copy that must never be stored or shown to the model: a key or token
+    Guardian already recognises, anything copied from a password manager, or a
+    lone password-like string (one word, 8-64 characters, letters with digits
+    or symbols)."""
+    from agent.guardian import SENSITIVE_CLIPBOARD
+    stripped = text.strip()
+    if SENSITIVE_CLIPBOARD.search(stripped):
+        return True
+    if any(name in window_title.lower() for name in PASSWORD_MANAGERS):
+        return True
+    if 8 <= len(stripped) <= 64 and not any(c.isspace() for c in stripped) and "://" not in stripped:
+        has_letter = any(c.isalpha() for c in stripped)
+        has_digit = any(c.isdigit() for c in stripped)
+        has_symbol = any(not c.isalnum() for c in stripped)
+        mixed_case = any(c.islower() for c in stripped) and any(c.isupper() for c in stripped)
+        if has_letter and has_digit and (has_symbol or mixed_case):
+            return True
+    return False
+
+
+def scrub_stored_copies() -> int:
+    """Blank out private-looking clipboard copies already in the log, from before
+    copies were checked. Returns how many."""
+    from agent import longterm, perception
+    perception.prune()
+    with longterm._conn() as c:
+        rows = c.execute("SELECT id, content FROM perception_log WHERE source = 'clipboard'").fetchall()
+        private = [row[0] for row in rows
+                   if looks_private(str(row[1]).removeprefix("Copied: ").removesuffix("..."))]
+        c.executemany("UPDATE perception_log SET content = 'Copied: [something private, not kept]' WHERE id = ?",
+                      [(i,) for i in private])
+    return len(private)
+
+
 class ActiveWindowWatcher(threading.Thread):
     def __init__(self, log: AwarenessLog, interval: float = 2.0):
         super().__init__(daemon=True, name="WindowWatcher")
@@ -83,16 +143,7 @@ class ActiveWindowWatcher(threading.Thread):
     def run(self):
         while not self._stop_event.wait(timeout=self.interval):
             try:
-                wid = subprocess.run(
-                    ["xdotool", "getactivewindow"],
-                    capture_output=True, text=True, timeout=2,
-                ).stdout.strip()
-                if not wid:
-                    continue
-                title = subprocess.run(
-                    ["xdotool", "getwindowname", wid],
-                    capture_output=True, text=True, timeout=2,
-                ).stdout.strip()
+                title = active_window_title()
                 if title and title != self._last_title:
                     self.log.add("window", f"Switched to: {title}")
                     self._last_title = title
@@ -101,9 +152,10 @@ class ActiveWindowWatcher(threading.Thread):
 
 
 class ClipboardWatcher(threading.Thread):
-    def __init__(self, log: AwarenessLog, interval: float = 1.5):
+    def __init__(self, log: AwarenessLog, interval: float = 1.5, window_title: Callable[[], str] = lambda: ""):
         super().__init__(daemon=True, name="ClipboardWatcher")
         self.log = log
+        self.window_title = window_title
         self.interval = interval
         self._stop_event = threading.Event()
         self._last: str = ""
@@ -118,6 +170,10 @@ class ClipboardWatcher(threading.Thread):
                 current = pyperclip.paste()
                 if current and current != self._last and len(current) < 4000:
                     self._last = current
+                    if looks_private(current, self.window_title()):
+                        # Passwords and keys were stored forever and sent to the model.
+                        self.log.add("clipboard", "Copied: [something private, not kept]")
+                        continue
                     snippet = current[:200] + ("..." if len(current) > 200 else "")
                     self.log.add("clipboard", f"Copied: {snippet}")
             except Exception:
@@ -270,7 +326,7 @@ class AwarenessMonitor:
 
         # Watchers
         self.window = ActiveWindowWatcher(self.log)
-        self.clipboard = ClipboardWatcher(self.log)
+        self.clipboard = ClipboardWatcher(self.log, window_title=lambda: self.window._last_title)
         self.files = FileWatcher(self.log, watch_paths or [])
 
         # IoT watcher — only starts if env flag is set and entities are configured
@@ -291,6 +347,10 @@ class AwarenessMonitor:
         global _running
         if getattr(self, '_started', False):
             return                    # already running: a second start must not tear the first down
+        try:
+            scrub_stored_copies()
+        except Exception as exc:
+            print(f"[Awareness] Could not clean old clipboard entries: {exc}")
         try:
             self._start_watchers()
         except BaseException:

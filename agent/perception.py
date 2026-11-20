@@ -65,8 +65,22 @@ def init_db() -> None:
             pass  # FTS5 unavailable — query() falls back to LIKE
 
 
+RETENTION_DAYS = 30          # what Apex observed is forgotten after this long
+_last_prune = 0.0
+
+
+def prune(days: float = RETENTION_DAYS) -> int:
+    """Delete observed events older than `days`. Returns how many went."""
+    cutoff = time.time() - days * 86400
+    with longterm._conn() as c:
+        return c.execute("DELETE FROM perception_log WHERE ts < ?", (cutoff,)).rowcount
+
+
 def log_event(source: str, content: str, ts: Optional[float] = None) -> None:
-    """Persist one observed event. Safe to call from any watcher thread."""
+    """Persist one observed event. Safe to call from any watcher thread.
+    At most once an hour, events older than RETENTION_DAYS are forgotten: the
+    log used to keep every window title and clipboard copy forever."""
+    global _last_prune
     t = ts or time.time()
     try:
         with longterm._conn() as c:
@@ -74,6 +88,9 @@ def log_event(source: str, content: str, ts: Optional[float] = None) -> None:
                 "INSERT INTO perception_log (ts, source, content) VALUES (?, ?, ?)",
                 (t, source, content),
             )
+        if time.time() - _last_prune > 3600:
+            _last_prune = time.time()
+            prune()
     except Exception as e:
         print(f"[Perception] log_event failed: {e}")
 
