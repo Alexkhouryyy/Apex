@@ -82,9 +82,46 @@ def test_long_replies_are_split_so_celine_can_read_them(quiet_tts, monkeypatch):
     monkeypatch.setattr(tts, '_synthesize', lambda text: seen.append(text) or b'wav')
     text = ('This sentence is about forty characters. ' * 250).strip()      # ~10,000 characters
     tts.speak(text)
-    assert len(seen) == 3 and all(len(piece) <= tts.MAX_CHUNK for piece in seen)
+    assert len(seen) == len(quiet_tts) > 3 and all(len(piece) <= tts.SPEAK_CHUNK for piece in seen)
     assert ' '.join(seen) == text and all(p.endswith('.') for p in seen)
-    assert [kind for kind, _ in quiet_tts] == ['celine'] * 3
+    assert all(kind == 'celine' for kind, _ in quiet_tts)
+
+
+def test_a_long_reply_stays_in_celine_s_voice_and_she_prepares_ahead(quiet_tts, monkeypatch):
+    """Resident mode sent a whole reply at once; past ~3-4 sentences the 20 s
+    budget ran out and the rest came out in the PC voice."""
+    import time as _time
+    made, plays = [], []
+    def synthesize(text):
+        made.append((text[:11], _time.monotonic()))
+        if len(text) > tts.SPEAK_CHUNK:
+            raise TimeoutError('no audio after 20 s')       # what a whole long reply did
+        return text.encode()
+    def play(audio):
+        began = _time.monotonic()
+        _time.sleep(0.05)                                   # a piece takes a while to say
+        plays.append((audio.decode()[:11], began, _time.monotonic()))
+    monkeypatch.setattr(tts, '_synthesize', synthesize)
+    monkeypatch.setattr(tts, '_play', play)
+    text = ' '.join(f'Sentence {i:02d} has some words in it so it runs long enough.' for i in range(20))
+    tts.speak(text)
+    assert [p[0] for p in plays] == [m[0] for m in made] and len(plays) > 3, 'every piece is played, in order'
+    for (_, made_at), (_, _, previous_ended) in zip(made[1:], plays):
+        assert made_at < previous_ended, 'each later piece is made before the one before has finished playing'
+    assert not [k for k, _ in quiet_tts if k == 'system'], 'no sentence falls back to the PC voice'
+
+
+def test_stopping_mid_reply_drops_the_piece_made_ahead(quiet_tts, monkeypatch):
+    stop = {'now': False}
+    played = []
+    monkeypatch.setattr(tts.interrupt_mod, 'is_interrupted', lambda: stop['now'])
+    monkeypatch.setattr(tts, '_synthesize', lambda text: text.encode())
+    def play(audio):
+        played.append(audio)
+        stop['now'] = True                                  # the owner talks over her during the first piece
+    monkeypatch.setattr(tts, '_play', play)
+    tts.speak(' '.join(f'Sentence number {i} goes on for a while to fill a piece.' for i in range(20)))
+    assert len(played) == 1
 
 
 def test_a_busy_celine_is_waited_for_briefly_then_the_pc_voice_speaks(monkeypatch):
