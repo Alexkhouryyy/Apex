@@ -50,6 +50,9 @@ PROBLEMS = [
     dict(state='open', area='autonomy', size='small', title='Everything you copy is kept forever and sent to the model',
          why='Background awareness logs the first 200 characters of every clipboard copy, passwords and API keys '
              'included, with no time limit.'),
+    dict(state='open', area='research', size='medium', title='With DeepSeek, Apex controls your screen blind',
+         why='Every screenshot and image is dropped before it reaches DeepSeek, so desktop control, browser control '
+             'and the webcam tool work without sight. The docs say DeepSeek supports images.'),
     dict(state='open', area='core', size='small', title='DeepSeek network errors skip the fallback and can hang',
          why='Only Claude errors are handled; a DeepSeek outage gives no friendly message and a turn can hang up to 10 minutes.'),
     dict(state='open', area='core', size='small', title='The morning briefing crashes when it is scheduled',
