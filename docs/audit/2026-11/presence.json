@@ -1,0 +1,294 @@
+{
+ "subsystem": "Avatars, hand tracking, gestures, hologram and presence",
+ "summary": "Apex can show itself as an orb, a 3D armoured character (Mk I or your own apex.glb), a photoreal MuseTalk video face on your GPU, or a paid Simli live face, picked in the Companion's settings; all of it is built and checked with fakes and headless-browser page checks, but none of the photoreal paths has ever run on your laptop. Hand tracking (MediaPipe on the webcam) with swipe gestures, the glass board, pinch calibration, gesture recording and the hologram motor study is OFF by default (HANDTRACK_ENABLED=false); the code comments show it was tried on a real hand in September and worked poorly (hand seen in ~22% of frames, most gestures misfired), so only two swipes are left on. In your real resident launcher the 'swipe down = stop talking' gesture does not actually stop Celine's voice, and with deepseek-flash the webcam tool sends the model only the picture's size, not the picture.",
+ "features": [
+  {
+   "name": "Presence look switch (Orb / Character / Video / Live face)",
+   "what": "A drop-down in the Companion settings chooses how Apex appears; the choice is remembered per device in the browser.",
+   "how_to_use": "Open /companion (or the desktop Companion window, which loads /companion?desktop=1, or /drive in the car) -> settings -> 'Apex appears as'.",
+   "status": "working",
+   "evidence": "dashboard/static/companion.html:50 (select#presence-look), dashboard/static/companion.js:405-491 (applyLook, localStorage 'apex.presence.look'), dashboard/companion.py:22-26 (/companion and /drive routes), app/companion_desktop.py:438 (desktop window loads /companion?desktop=1); page checks scripts/check_avatar_ui.cjs, check_video_avatar_ui.cjs, check_live_avatar_ui.cjs.",
+   "setup_needed": "None for Orb. Default is Orb."
+  },
+  {
+   "name": "3D character 'Apex Mk I' (built-in armoured suit)",
+   "what": "A full-body three.js character built in code (about 70 parts) that breathes, leans in when listening, puts a hand to its face when thinking, and moves its vocal grille with the real voice level.",
+   "how_to_use": "Companion settings -> Apex appears as: Character. Head and shoulders in normal view, full body in voice mode and on /drive#orb.",
+   "status": "built_untested_on_pc",
+   "evidence": "dashboard/static/avatar.js (imports three from vendored /static/vendor/three via importmap in companion.html:10, so it works offline), avatar-suit.js, avatar-pose.js; companion.js:476-488 falls back to the orb when WebGL is missing. No Python tests; covered only by page checks scripts/check_avatar_pose.cjs, check_avatar_browser.cjs, check_avatar_ui.cjs.",
+   "setup_needed": "Nothing to install. Needs WebGL in the browser / WebView2. Not confirmed on the laptop's GPU or inside the desktop Companion window."
+  },
+  {
+   "name": "Your own 3D model (apex.glb)",
+   "what": "Drop a rigged humanoid .glb in the avatars folder and the Character look uses it instead of the Mk I suit, driving bones by Mixamo/VRoid/Blender names and a mouth shape key if present.",
+   "how_to_use": "Save the file as dashboard/static/avatars/apex.glb, reload the Companion, choose Character.",
+   "status": "off_by_default",
+   "evidence": "dashboard/static/companion.js:405-406 (CUSTOM_MODEL '/static/avatars/apex.glb'), :478 findCustomModel; dashboard/static/avatar-model.js (GLTFLoader); dashboard/static/avatars/README.md; docs/AVATAR.md:60-90. Checked only by scripts/check_avatar_pose.cjs bone-name checks.",
+   "setup_needed": "Get or make a rigged .glb (Mixamo, AI generator, artist) and copy it into the folder."
+  },
+  {
+   "name": "Photoreal video face (MuseTalk lip-sync on your RTX 4070)",
+   "what": "A real video loop of a character whose mouth is redrawn by MuseTalk for each spoken sentence, rendered locally; Apex proxies it so phone/car can use it, and falls back to plain audio if a clip fails.",
+   "how_to_use": "Run Setup-Apex-Video-Avatar.cmd once (~10 GB), put an idle video at %USERPROFILE%\\apex-video-avatar\\apex-idle.mp4, start Start-Apex-Video-Avatar.cmd next to Apex, then Companion -> Apex appears as: Video (photoreal).",
+   "status": "built_untested_on_pc",
+   "evidence": "scripts/avatar_server.py (loopback server: /health, /idle, /lipsync), scripts/setup_video_avatar.py, Setup-Apex-Video-Avatar.cmd, Start-Apex-Video-Avatar.cmd; Apex proxy routes dashboard/companion.py:739-797 (/api/avatar/status, /api/avatar/idle, /api/avatar/lipsync); config.py:695 AVATAR_URL; dashboard/static/video-avatar.js; tests/test_video_avatar.py (9 tests, MuseTalk faked/'still' engine); page checks check_video_avatar_*.cjs. docs/VIDEO_AVATAR.md itself says GPU speed 'hasn't been measured on your laptop yet'.",
+   "setup_needed": "~10 GB download over a slow line, a separate Python env, a 5-10 s idle video of an original character, and a second launcher. Not started by Start-Apex-Platform.cmd / Start-Apex-All.cmd."
+  },
+  {
+   "name": "Live photoreal face (Simli, cloud, paid)",
+   "what": "Streams Apex's own voice to Simli's servers and plays back a live talking face; the API key stays on the PC and the page only gets a short session token.",
+   "how_to_use": "Put SIMLI_API_KEY and SIMLI_FACE_ID into .env with scripts/set_env_key.py, restart, Companion -> Apex appears as: Live face (Simli).",
+   "status": "off_by_default",
+   "evidence": "dashboard/companion.py:804-833 (/api/avatar/live/session, key never sent to the browser, session length/idle capped), config.py:700-705, dashboard/static/live-avatar.js, vendored client dashboard/static/vendor/simli/simli.bundle.js; tests/test_live_avatar.py (6 test functions, Simli faked).",
+   "setup_needed": "Simli account, per-minute payment, a face ID, and a steady internet connection (WebRTC) - a poor fit for slow Lebanese internet and power cuts. Never tried for real."
+  },
+  {
+   "name": "Hand tracking (MediaPipe on the webcam, in Python)",
+   "what": "A background thread reads the webcam, finds up to two hands, smooths them and works out pinch / fist / open palm; it runs without any browser tab and also hands its frames to the camera tool so the two do not fight over the webcam.",
+   "how_to_use": "Set HANDTRACK_ENABLED=true in .env and restart. Starts automatically in both main.py and resident mode (with or without the awareness monitor).",
+   "status": "off_by_default",
+   "evidence": "config.py:528 HANDTRACK_ENABLED default False; agent/awareness.py:284-288 and :311-317; standalone start main.py:466-500 and app/resident.py:446-483 via agent/handtrack.py:1354 start_standalone; model downloaded once from Google (handtrack.py:107, ~7.5 MB, retries handled at handtrack.py:991-1035). tests/test_handtrack.py (72 tests, fake camera/landmarks), tests/test_startup_resilience.py:165-179. config.py:604-617 records a real run where the hand was detected in only 46 of 205 frames.",
+   "setup_needed": "HANDTRACK_ENABLED=true, mediapipe installed (requirements.txt:70), one-time model download, and a single OpenCV package (handtrack.py:134 opencv_conflict check)."
+  },
+  {
+   "name": "Gestures that control Apex (swipe down = stop, swipe up = summon on the board)",
+   "what": "Recognised hand movements are mapped to actions only through an allow-list; by default only swipe_down:stop and swipe_up:board:summon are on. Wave-to-wake and pinch-hold-to-listen exist but were switched off because they misfired on a real hand.",
+   "how_to_use": "With hand tracking on: swipe your hand down in front of the camera to stop a reply; swipe up to summon Apex on /board (needs BOARD_ENABLED). Change the mapping with HANDTRACK_GESTURE_ACTIONS in .env.",
+   "status": "partial",
+   "evidence": "agent/gestures.py (GestureRecognizer), config.py:587-596 default 'swipe_down:stop,swipe_up:board:summon'; dispatch agent/handtrack.py:1260-1293; main.py handler main.py:93-142 really interrupts speech (voice.interrupt.trigger); resident handler app/resident.py:452-468 only flips the tray state for 'stop'. tests/test_main_gestures.py (9), tests/test_gesture_misfires.py (21); no test of the resident handler.",
+   "setup_needed": "HANDTRACK_ENABLED=true; BOARD_ENABLED=true for swipe up. In resident mode (your launcher) swipe-down does not cut the voice (see gaps)."
+  },
+  {
+   "name": "Release the camera for calls",
+   "what": "Ask Apex to give the webcam back (e.g. before Zoom/Teams); hand tracking pauses and resumes by itself after 5 minutes.",
+   "how_to_use": "Say or type something like 'I'm joining a call, release the camera' - the model calls the release_camera tool.",
+   "status": "off_by_default",
+   "evidence": "agent/core.py:549-560 tool definition, :2499-2508 handler calling HandTracker.release_for (agent/handtrack.py:820); config.py:580 HANDTRACK_RELEASE_SECONDS=300; tests in tests/test_handtrack.py.",
+   "setup_needed": "Only meaningful when hand tracking is on."
+  },
+  {
+   "name": "Webcam look (camera_capture tool)",
+   "what": "Apex grabs one webcam frame (from the hand tracker if it holds the camera) and passes it to the model so it can answer 'how do I look' or 'is anyone in the room'.",
+   "how_to_use": "Set CAMERA_ENABLED=true, then ask Apex a question about what the camera sees.",
+   "status": "partial",
+   "evidence": "tools/camera.py:46-90, config.py:363 CAMERA_ENABLED default False, agent/core.py:538-547 and :2491-2497; image block built at agent/core.py:3437-3451. For OpenAI-compatible providers (deepseek) agent/provider.py:266-276 keeps only the text of a tool result, so the picture is dropped. tests/test_camera.py (7).",
+   "setup_needed": "CAMERA_ENABLED=true and a vision-capable model. With deepseek-flash the model receives only 'Camera frame: WxH'."
+  },
+  {
+   "name": "Pinch calibration to your own hand",
+   "what": "The board prompts you through three poses (open, relaxed, pinch), computes your personal pinch thresholds, applies them at once and saves them to .env.",
+   "how_to_use": "Open /board with hand tracking on and press the calibrate control (POST /api/board/calibrate). Also scripts/calibrate_pinch.py from the command line.",
+   "status": "off_by_default",
+   "evidence": "agent/pinch_calibration.py:60-87 (compute/apply via scripts/set_env_key.set_key), route dashboard/companion.py:329-346, status streamed on /ws/board dashboard/server.py:2558; tests/test_pinch_calibration.py (12), tests/test_calibrate_pinch.py (29), tests/test_pinch_hysteresis.py (44).",
+   "setup_needed": "HANDTRACK_ENABLED=true (route returns a clear 400 otherwise) and BOARD_ENABLED=true to see the board."
+  },
+  {
+   "name": "Gesture recorder and replay",
+   "what": "Records only hand joint positions (no picture) while you perform each gesture on cue, then replays a recording through the real tracker, board and recogniser to see what would fire with the current thresholds.",
+   "how_to_use": "Board record control (POST /api/board/record) writes recordings/gestures-*.json.gz; then run: python -m tools.replay_gestures recordings\\<file>.json.gz",
+   "status": "off_by_default",
+   "evidence": "agent/gesture_recorder.py:54 OUT_DIR, :134 gzip UTF-8 write; route dashboard/companion.py:349-366; tools/replay_gestures.py; tests/test_gesture_recorder.py (11). No recordings exist in the repo (recordings/ absent), so the threshold tuning it was built for has not been fed real data here.",
+   "setup_needed": "HANDTRACK_ENABLED=true."
+  },
+  {
+   "name": "Hologram motor study (/study) with hand control",
+   "what": "A 3D assembly viewer in a 'hologram' style (glowing edges, bloom, drawn hand skeleton, soft sounds) where you can grab parts, pull a model apart with two hands, and spin it with momentum; it borrows the Python tracker's hands and an optional camera mirror.",
+   "how_to_use": "Open /study, press 'Enable hands' (and optionally 'Camera mirror'); '◈ Futuristic / ◇ Normal' toggles the look.",
+   "status": "built_untested_on_pc",
+   "evidence": "dashboard/static/study.html header buttons, study.js:6-11 imports study-hands.js / study-holo.js / study-gestures.js; dashboard/study.py:12-31 (/api/study/camera reuses the tracker, /api/study/session/{sid}/hands), agent/study_input.py (lease shared with the board), handtrack.py:924-931 study_sample. tests/test_study_input.py (7), tests/test_study_pointing.py (3); page checks scripts/check_study_holo.mjs, check_study_gestures.mjs. docs/STUDY_HAND_INTERACTION.md:55-57 says real camera accuracy 'still require[s] a physical test'.",
+   "setup_needed": "Viewer works with a mouse; hand control needs HANDTRACK_ENABLED=true."
+  },
+  {
+   "name": "Perception log (what Apex noticed, searchable)",
+   "what": "A small database of awareness events (window changes, gestures, clipboard...) that the dashboard and Apex can search by text or time.",
+   "how_to_use": "Automatic when awareness or hand tracking runs; query at /api/perception?q=...",
+   "status": "working",
+   "evidence": "agent/perception.py:14-148, written from agent/awareness.py:54-56, route dashboard/server.py:1469-1473; tests/test_perception.py (8), test_resident.py:337-369.",
+   "setup_needed": "None."
+  },
+  {
+   "name": "Hands-free speech model (Silero in the browser)",
+   "what": "Optional voice-activity model in the Companion page that tells speech from noise and ends your turn after 0.7 s instead of 1.2 s.",
+   "how_to_use": "Run Setup-Apex-Speech-Model.cmd once, reload the Companion; settings 'Hands-free detects' should say 'Speech (model)'.",
+   "status": "off_by_default",
+   "evidence": "dashboard/static/speech-model.js, handsfree.js, loaded at companion.html:8-9; route dashboard/companion.py:710 (/api/companion/speech-model); tests/test_speech_model.py (8); scripts/check_handsfree_ui.cjs, check_speech_detector_ui.cjs.",
+   "setup_needed": "One-time ~14 MB download via Setup-Apex-Speech-Model.cmd."
+  },
+  {
+   "name": "Omnipresence: phone app (PWA), QR pairing, tunnels, Web Push, browser extension",
+   "what": "Reach the same Apex from phone and other devices: install the dashboard as an app, pair with a QR code, expose it through Cloudflare Tunnel or Tailscale, get push notifications, and use the Chrome side-panel extension.",
+   "how_to_use": "Dashboard pairing QR (/api/pair/qr), Telemetry -> Notifications -> Enable notifications, python scripts/gen_vapid_keys.py >> .env, load apex-extension/ unpacked in Chrome.",
+   "status": "off_by_default",
+   "evidence": "dashboard/server.py:1084-1113 (/api/push/*), :1153 /api/pair/info, :1497 /api/pair/qr; dashboard/static/manifest.webmanifest, sw.js; index.html:487-488 push buttons; config.py:381-384 VAPID keys; scripts/gen_vapid_keys.py; apex-extension/. Tests: tests/test_notify.py, tests/test_control.py. Tunnels are external tools, not Apex code.",
+   "setup_needed": "DASHBOARD_TOKEN set, VAPID keys generated, a tunnel installed and running for outside access."
+  }
+ ],
+ "files_covered": [
+  "agent/handtrack.py",
+  "agent/gestures.py",
+  "agent/pinch_calibration.py",
+  "agent/gesture_recorder.py",
+  "agent/perception.py",
+  "agent/awareness.py",
+  "agent/study_input.py",
+  "agent/core.py",
+  "agent/provider.py",
+  "tools/camera.py",
+  "tools/replay_gestures.py",
+  "main.py",
+  "app/resident.py",
+  "app/companion_desktop.py",
+  "config.py",
+  ".env.example",
+  "env_file.py",
+  "requirements.txt",
+  "dashboard/companion.py",
+  "dashboard/server.py",
+  "dashboard/study.py",
+  "dashboard/static/companion.html",
+  "dashboard/static/companion.js",
+  "dashboard/static/study.html",
+  "dashboard/static/study.js",
+  "dashboard/static/avatar.js",
+  "dashboard/static/avatar-model.js",
+  "dashboard/static/avatar-suit.js",
+  "dashboard/static/avatar-pose.js",
+  "dashboard/static/avatar3d.js",
+  "dashboard/static/app.js",
+  "dashboard/static/live-avatar.js",
+  "dashboard/static/video-avatar.js",
+  "dashboard/static/speech-model.js",
+  "dashboard/static/avatars/README.md",
+  "scripts/avatar_server.py",
+  "scripts/gen_vapid_keys.py",
+  "Start-Apex-Video-Avatar.cmd",
+  "docs/AVATAR.md",
+  "docs/LIVE_AVATAR.md",
+  "docs/VIDEO_AVATAR.md",
+  "docs/PHASE2_HOLOGRAM.md",
+  "docs/OMNIPRESENCE.md",
+  "docs/HANDS_FREE_COMPANION.md",
+  "docs/STUDY_HAND_INTERACTION.md",
+  "tests/test_apps.py",
+  "tests/test_main_gestures.py",
+  "tests/test_video_avatar.py",
+  "tests/test_live_avatar.py",
+  "tests/test_startup_resilience.py"
+ ],
+ "tests": {
+  "files": [
+   "tests/test_handtrack.py",
+   "tests/test_gesture_misfires.py",
+   "tests/test_main_gestures.py",
+   "tests/test_pinch_calibration.py",
+   "tests/test_pinch_hysteresis.py",
+   "tests/test_pinch_intent.py",
+   "tests/test_calibrate_pinch.py",
+   "tests/test_gesture_recorder.py",
+   "tests/test_perception.py",
+   "tests/test_camera.py",
+   "tests/test_video_avatar.py",
+   "tests/test_live_avatar.py",
+   "tests/test_speech_model.py",
+   "tests/test_study_input.py",
+   "tests/test_study_pointing.py",
+   "tests/test_board_readout.py",
+   "tests/test_startup_resilience.py"
+  ],
+  "approx_test_count": 265
+ },
+ "gaps": [
+  {
+   "issue": "In resident mode (your real launcher) the default 'swipe down = stop' gesture does not stop Celine talking. The resident handler only changes the tray state to idle; it never calls voice.interrupt.trigger() or cancels the reply the way main.py does. Only if the board is enabled does the board's own voice panel get a 'hush'.",
+   "severity": "medium",
+   "evidence": "app/resident.py:463-465 (stop -> state.set(IDLE) only); ResidentState.set at app/resident.py:105-115 just notifies listeners, the only listener is the tray (app/resident.py:539-542); compare main.py:126-142 (interrupt.trigger + active.stop); handtrack.py:1278-1279 _board_voice is a no-op unless BOARD_ENABLED.",
+   "fix_hint": "Make the resident 'stop' branch call the same stop path as main.py (voice.interrupt.trigger() plus cancelling the queued reply), and add a test that the resident handler interrupts speech.",
+   "confirmed": true,
+   "how_confirmed": "Read app/resident.py:446-483 and ResidentState.set/listeners (only _state_to_tray registered); grep found no interrupt/stop_speaking call in app/resident.py; grep of tests/test_resident.py found no stop-gesture test."
+  },
+  {
+   "issue": "With deepseek-flash (an OpenAI-compatible provider) the webcam tool is blind: the image block in the tool result is dropped and the model receives only 'Camera frame: 640x480', so it may invent an answer about what it 'sees'.",
+   "severity": "medium",
+   "evidence": "agent/provider.py:266-276 (tool_result list -> only text parts kept); agent/core.py:3437-3451 builds the image inside the tool_result.",
+   "fix_hint": "For providers that cannot take images in tool messages, send the frame as a following user message with an image_url part (and only for vision-capable models), or have camera_capture return an honest 'this model cannot see images' message.",
+   "confirmed": true,
+   "how_confirmed": "Ran a python snippet: core._make_tool_result_content('camera_capture','t1', <fake frame>) then provider._translate_messages -> [{'role':'tool','content':'Camera frame: 640x480'}]; provider_for('deepseek-flash') == 'deepseek'. Grepped core/provider for any vision fallback and found none."
+  },
+  {
+   "issue": ".env.example still sets HANDTRACK_MIN_CONFIDENCE=0.7 with the old reasoning, while config.py moved the default back to 0.5 because 0.7 made the tracker see a real hand only ~22% of the time. Any .env copied from the example silently keeps the bad value.",
+   "severity": "medium",
+   "evidence": ".env.example:267-270 vs config.py:604-618.",
+   "fix_hint": "Change .env.example to 0.5 (or leave it commented out) with the measured reasoning, and ask the owner to check his own .env.",
+   "confirmed": true,
+   "how_confirmed": "Read both lines; the config comment cites the 46-of-205-frames calibration run that the example's comment contradicts."
+  },
+  {
+   "issue": "None of the photoreal paths (MuseTalk video face, Simli live face) or the 3D character has run on the laptop; tests fake MuseTalk and Simli, and the character is only checked in a headless browser. MuseTalk speed on the RTX 4070 is explicitly unmeasured.",
+   "severity": "medium",
+   "evidence": "docs/VIDEO_AVATAR.md (\"This hasn't been measured on your laptop yet\"); tests/test_video_avatar.py and tests/test_live_avatar.py use fakes; scripts/check_avatar_*.cjs are page checks.",
+   "fix_hint": "Try Character in the desktop Companion first (no setup), then the video avatar with --engine still before the full MuseTalk install.",
+   "confirmed": true,
+   "how_confirmed": "Read the doc line and the test fixtures; ran tests/test_live_avatar.py (passes with faked Simli)."
+  },
+  {
+   "issue": "Hand tracking has a documented poor real-world record: detection in ~22% of frames at the old threshold and wave/pinch-hold disabled because they misfired. No gesture recordings exist in the repo to show the current thresholds now work on the owner's hand.",
+   "severity": "medium",
+   "evidence": "config.py:589-594 (\"On a real hand the rest misfired\"), config.py:604-612; recordings/ directory absent (agent/gesture_recorder.py:54).",
+   "fix_hint": "Record a session with the board's record control and replay it with tools.replay_gestures before turning more gestures on.",
+   "confirmed": true,
+   "how_confirmed": "Read config comments; ls recordings returned nothing."
+  },
+  {
+   "issue": "swipe_up:board:summon is on by default but BOARD_ENABLED is off by default, so with hand tracking on and the board off, swipe up is recognised and silently does nothing (not even a log line saying why).",
+   "severity": "low",
+   "evidence": "config.py:595 default actions, config.py:635 BOARD_ENABLED False, agent/handtrack.py:1220-1222 returns early without logging.",
+   "fix_hint": "Log 'ignored (board is off)' or drop board:summon from the default when BOARD_ENABLED is false.",
+   "confirmed": true,
+   "how_confirmed": "Read _board_gesture: first line returns when BOARD_ENABLED is false."
+  },
+  {
+   "issue": "Dead code: dashboard/static/avatar3d.js (Ready Player Me head loaded from a CDN) is loaded by no page, and app.js still holds an unused 2D avatar face (_startApexAvatar) whose canvas no longer exists.",
+   "severity": "low",
+   "evidence": "dashboard/static/avatar3d.js:1-20; tests/test_apps.py:292 asserts it is not in index.html; dashboard/static/app.js:3331 and :3408 (_startApexAvatar defined, never called).",
+   "fix_hint": "Delete avatar3d.js and the _startApexAvatar block.",
+   "confirmed": true,
+   "how_confirmed": "grep for avatar3d and _startApexAvatar/apex-avatar across dashboard/static found only the definitions and a comment in cst3d.js."
+  },
+  {
+   "issue": "Stale comment in the gesture dispatcher says on_gesture 'is only ever set by app/resident.py'; main.py sets it too.",
+   "severity": "low",
+   "evidence": "agent/handtrack.py:1283-1286 vs main.py:476-480.",
+   "fix_hint": "Update the comment.",
+   "confirmed": true,
+   "how_confirmed": "Read both places."
+  },
+  {
+   "issue": "The camera is opened with OpenCV's default backend on Windows (no CAP_DSHOW/CAP_MSMF choice); some laptop webcams open slowly or fail under the default backend. Untested on the laptop because there is no Windows CI.",
+   "severity": "low",
+   "evidence": "agent/handtrack.py:997 cv2.VideoCapture(self.device_index); tools/camera.py:66.",
+   "fix_hint": "Allow a HANDTRACK_CAMERA_BACKEND setting and report which backend opened.",
+   "confirmed": false,
+   "how_confirmed": "Read the call; cannot reproduce Windows behaviour here."
+  },
+  {
+   "issue": "The live Simli face needs a steady connection and costs money per minute; with slow internet and power cuts it is the least suitable option, and the docs present it as 'the top tier'.",
+   "severity": "low",
+   "evidence": "docs/LIVE_AVATAR.md:1-25, dashboard/companion.py:804-833.",
+   "fix_hint": "Recommend Character (offline, free) as the default suggestion for this owner.",
+   "confirmed": true,
+   "how_confirmed": "Read doc and route (calls api.simli.ai, WebRTC ICE)."
+  }
+ ],
+ "needs_from_owner": [
+  "Open the desktop Companion, choose 'Apex appears as: Character' and say whether the suit appears and moves its grille when Celine talks (WebGL in WebView2 on your GPU).",
+  "Check your own .env for HANDTRACK_MIN_CONFIDENCE and HANDTRACK_GESTURE_ACTIONS; if it says 0.7 or an old gesture list, it overrides the newer defaults.",
+  "If you want hands: set HANDTRACK_ENABLED=true (and BOARD_ENABLED=true for the board), restart Start-Apex-Platform.cmd, watch the console for '[HandTrack] Camera open' and the delegate line, then run pinch calibration on /board.",
+  "Record one gesture session from the board and send the recordings\\gestures-*.json.gz file so the thresholds can be tuned on real data.",
+  "Decide whether you want the photoreal video face at all: it is a ~10 GB download plus a separate launcher (Start-Apex-Video-Avatar.cmd) that the Platform launcher does not start.",
+  "Tell us whether the webcam question ('how do I look') matters to you: on deepseek-flash it cannot see the picture."
+ ],
+ "rating": {
+  "score": 5,
+  "why": "Lots of careful, well-tested code, but almost everything is off by default or never run on the laptop, hand tracking has a weak real-world record, and two defaults (resident stop gesture, webcam on deepseek) do not do what they claim."
+ }
+}

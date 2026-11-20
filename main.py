@@ -277,102 +277,28 @@ def main():
     from agent import scheduler as sched
     sched.init(agent_run_fn=agent.run, speak_fn=speak)
 
-    # Wire orchestrator with a fresh-agent factory (no shared memory)
-    from agent import orchestrator
-    def _sub_factory():
-        from agent.core import AgentCore
-        return AgentCore()
-    orchestrator.set_agent_factory(_sub_factory)
-
     # Load self-mod overlay (system prompt addition + dynamic tools)
     from agent import self_mod
     n_dyn = self_mod.load_dynamic_handlers()
     if n_dyn:
         print(f"[SelfMod] Loaded {n_dyn} user-defined tools.")
 
-    # Load skills registry
-    from agent import skills as skills_mod
-    # Procedural (markdown) skills that ship with Apex — self-install on first boot.
-    from agent import skill_md as _skill_md_mod
-    _n_bundled = _skill_md_mod.install_bundled()
-    if _n_bundled:
-        print(f"[Skills] Installed {_n_bundled} bundled procedural skill(s).")
+    # Sub-agents, skills, vault, Constellation, the weekly review, nightly
+    # reflection and morning briefing, and the skill curator: the same steps
+    # resident mode runs (agent/startup.py), so the two cannot drift apart.
+    from agent import startup as _startup
+    _startup.run_common(agent, print)
 
-    n_skills = skills_mod.load_all()
-    if n_skills:
-        print(f"[Skills] Loaded {n_skills} skill(s).")
-
-    # Obsidian vault — create structure + migrate memory files on first run
-    from agent import vault as _vault_mod
-    print(f"[Vault] {_vault_mod.init_vault()}")
-
-    # The Constellation — 12 persistent domain-expert planets + their vault journals
-    from agent import constellation as _constellation_mod
-    print(f"[Constellation] {_constellation_mod.init()}")
-
-    # Knowledge base — optionally trigger background indexing.
-    # Its tables come from schema.init_all() above, like everything else.
-    from agent import knowledge
-
-    # Goals — auto-schedule the weekly self-eval (once per fresh DB)
-    from agent import goals
-
+    # Knowledge base, goals and feedback register their tools on import; their
+    # tables come from schema.init_all() above, like everything else.
+    from agent import knowledge  # noqa: F401
+    from agent import goals  # noqa: F401
     from agent import feedback  # noqa: F401  (turn_feedback, for 👍/👎 capture)
-    weekly_eval_exists = any(
-        "Weekly self-evaluation" in t.get("description", "") for t in sched.list_tasks()
-    )
-    if not weekly_eval_exists:
-        sched.schedule(
-            description=(
-                "Weekly self-evaluation. Call evaluate_recent_work(days=7) and speak the result. "
-                "Then suggest one concrete focus for the coming week."
-            ),
-            trigger_type="cron",
-            trigger_params={"day_of_week": "mon", "hour": 8, "minute": 0},
-        )
-
-    # Nightly reflection — once per fresh DB
     from agent import reflection
-    nightly_refl_exists = any(
-        "Nightly reflection" in t.get("description", "") for t in sched.list_tasks()
-    )
-    if not nightly_refl_exists:
-        sched.schedule(
-            description=(
-                "Nightly reflection. Call reflect_now(hours=24). Then call list_reflections(status='pending') "
-                "and briefly mention how many insights are awaiting review on the dashboard."
-            ),
-            trigger_type="cron",
-            trigger_params={"hour": 3, "minute": 0},
-        )
-
-    # Morning briefing — daily spoken digest (weather, news, follow-ups)
-    from agent import briefing as _briefing
-    _briefing_result = _briefing.install_briefing_task()
-    if "scheduled" in _briefing_result:
-        print(f"[Briefing] {_briefing_result}")
 
     # Wire every messaging channel's inbound dispatch to this agent.
     from tools.channels import wire_channels
     wire_channels(agent)
-
-    # Skill Curator — background maintenance thread
-    if getattr(config, "CURATOR_ENABLED", True):
-        _last_activity_ref = {"ts": time.time()}
-        def _curator_tick():
-            import time as _t
-            while True:
-                _t.sleep(3600)
-                try:
-                    from agent import curator as _cur
-                    if _cur.should_run(last_active_ts=_last_activity_ref["ts"]):
-                        print("[Curator] Running scheduled curation...")
-                        report = _cur.run(dry_run=False, client=agent.anthropic)
-                        lines = report.splitlines()
-                        print(f"[Curator] Done. {len(lines)} report lines.")
-                except Exception as e:
-                    print(f"[Curator] Error: {e}")
-        threading.Thread(target=_curator_tick, daemon=True, name="SkillCurator").start()
 
     # Telegram long-polling — pulls messages when there's no public webhook URL.
     if config.TELEGRAM_POLLING:
@@ -412,10 +338,7 @@ def main():
             # Hook awareness events into the WebSocket broadcaster
             from agent import awareness as _aw_mod
             _aw_mod.attach_live_feed(monitor, dash)
-            if hasattr(monitor, "guardian") and monitor.guardian is not None:
-                dash.set_guardian(monitor.guardian)
-            if getattr(monitor, "timecapsule", None) is not None:
-                dash.set_timecapsule(monitor.timecapsule)
+            _startup.attach_monitor_panels(dash, monitor)
             port = getattr(config, "DASHBOARD_PORT", 7860)
             _dash_t = dash.start_in_background(port=port)
             # Print where it actually bound. Printing config's host was wrong

@@ -17,7 +17,7 @@ _BRIEFING_MARKER = "[BRIEFING]"
 _DEFAULTS: dict[str, str] = {
     "enabled":     "false",
     "time":        "08:00",
-    "timezone":    "America/New_York",
+    "timezone":    "",          # empty: the PC's own zone (scheduler.local_zone)
     "location":    "",
     "news_topics": "",
 }
@@ -40,6 +40,9 @@ def get_config() -> dict:
     cfg = dict(_DEFAULTS)
     for k, v in rows:
         cfg[k] = v
+    if not cfg.get("timezone"):
+        from agent import scheduler
+        cfg["timezone"] = str(scheduler.local_zone())
     return cfg
 
 
@@ -104,16 +107,15 @@ def install_briefing_task() -> str:
     from agent import scheduler
 
     cfg = get_config()
-    if cfg.get("enabled", "false").lower() not in {"1", "true", "yes"}:
-        return "Morning briefing disabled."
-
-    # Cancel any existing briefing task
+    # Cancel any existing briefing task first, so turning it off really stops it.
     for task in scheduler.list_tasks():
         if task.get("description", "").startswith(_BRIEFING_MARKER):
             scheduler.cancel(task["id"])
+    if cfg.get("enabled", "false").lower() not in {"1", "true", "yes"}:
+        return "Morning briefing disabled."
 
     time_str = cfg.get("time", "08:00")
-    tz       = cfg.get("timezone", "America/New_York")
+    tz       = cfg.get("timezone") or str(scheduler.local_zone())
     try:
         hour, minute = (int(x) for x in time_str.split(":"))
     except ValueError:

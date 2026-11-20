@@ -1,0 +1,306 @@
+{
+  "subsystem": "Research and computer-use tools (cited research, deep research, web, browser, desktop control, OCR vision, shell, sandbox, Python REPL, files, image generation)",
+  "summary": "The quick cited research (the Research page and the 'research' tool) is the most solid part: it has a page, a route, a save button and about 100 tests. Deep research works only as a chat tool: there is no page to see past runs, reports or where a claim came from, and the system prompt tells the model to avoid it. Desktop control, the browser, OCR clicking and the shell are all coded and unit-tested with fakes, but none has run on the Windows laptop, and with the deepseek-flash model Apex cannot see the screenshots it takes, so screen-driven computer use is effectively blind. The shell tool also loses all output (and reports failure for a command that actually ran) whenever a command prints non-UTF-8 bytes, which is the same kind of encoding fault that stopped the last launch.",
+  "features": [
+    {
+      "name": "Research page (cited answers)",
+      "what": "Ask a question, Apex searches the web, reads 3/6/10 pages and writes an answer where every [n] points to a page it actually fetched. Follow-up questions in the same thread work.",
+      "how_to_use": "Dashboard sidebar 'Research' tab: type a question, pick depth (quick/standard/deep), press Research. Or just ask Apex in chat or by voice; the model calls the 'research' tool.",
+      "status": "working",
+      "evidence": "Nav button dashboard/static/index.html:78, page index.html:787-804; JS runResearch dashboard/static/app.js:3827-3860; route POST /api/research dashboard/server.py:1752-1792 -> agent/answers.answer; agent tool 'research' agent/core.py:1080-1100 and dispatch agent/core.py:2907-2912; tests/test_answers.py (98 tests). Search uses ddgs when the model is not Anthropic (tools/research.py:41-58).",
+      "setup_needed": "Internet. With deepseek-flash, web search goes straight to DuckDuckGo (ddgs, in requirements.txt:47). Slow internet makes it slow (15 s per page timeout, tools/research.py:110)."
+    },
+    {
+      "name": "Save research to Documents",
+      "what": "Saves the whole research thread, with citations, as a document.",
+      "how_to_use": "Research page: 'Save to Documents' button after an answer.",
+      "status": "working",
+      "evidence": "app.js:3862-3874 -> POST /api/research/save dashboard/server.py:1795-1815 (documents.create); covered in tests/test_answers.py.",
+      "setup_needed": ""
+    },
+    {
+      "name": "Deep research (multi-round report from hundreds of sources)",
+      "what": "Breaks a question into sub-questions, runs many searches, reads every page, keeps only findings whose quote really appears in the page, closes gaps over several rounds, and writes a sectioned report with citations. Everything is stored in the database (research_runs/research_sources/research_notes tables).",
+      "how_to_use": "Only by asking Apex in chat/voice for 'deep research' or 'a research report'; the model calls the deep_research tool. There is no page, button, hotkey or CLI for it.",
+      "status": "partial",
+      "evidence": "agent/deepresearch.py run() 549-603, tables 85-140; tool schema agent/core.py:1103-1122; dispatch core.py:2914-2925; tests/test_deepresearch.py (19 tests, passed here). list_runs/get_run/provenance (deepresearch.py:629-662) have no route or caller in dashboard/, app/ or main.py (grep). System prompt core.py:57-58 calls it a 'Raw uncited source dump (use research instead)', contradicting its own tool description.",
+      "setup_needed": "Internet and model credit. Default depth is 'deep' (~1000 sources) and runs inside the chat turn for minutes; on a slow Lebanese connection expect much longer."
+    },
+    {
+      "name": "Web search and read a page (web_search, web_browse)",
+      "what": "Plain search results and plain page text for the model.",
+      "how_to_use": "Automatic: Apex uses them when you ask about current things.",
+      "status": "working",
+      "evidence": "tools/research.py:33-139; dispatch agent/core.py:2900-2905; exercised through tests/test_answers.py and tests/test_deepresearch.py (fakes).",
+      "setup_needed": "Internet."
+    },
+    {
+      "name": "Real browser automation (browser_goto/click/fill/press/get_text/screenshot/evaluate/url/close)",
+      "what": "Apex opens its own Chromium window and can log in, fill forms and click buttons on websites.",
+      "how_to_use": "Ask Apex to do something on a website ('log in to X and ...'). A separate Chromium window opens on the laptop.",
+      "status": "built_untested_on_pc",
+      "evidence": "tools/browser.py:1-159 (Playwright, one persistent page); tool schemas agent/core.py:1287-1360; dispatch core.py:3027-3045. No test file imports tools.browser (only tests/test_subagent_scope.py mentions tool names).",
+      "setup_needed": "'python -m playwright install chromium' (done by Apex.ps1:52 first-time setup, not by Start-Apex-Platform.cmd). Logins are not kept between Apex restarts (fresh context each launch, browser.py:48-55)."
+    },
+    {
+      "name": "Desktop control (screenshot, click, type_text, hotkey, scroll, drag, move_mouse)",
+      "what": "Apex takes a screenshot of the laptop screen and moves the mouse/keyboard for you. The Companion bubble is hidden during its own screenshot.",
+      "how_to_use": "Ask Apex to do something on your PC ('open Notepad and type ...'). No hotkey; it is a model tool.",
+      "status": "partial",
+      "evidence": "tools/computer.py:27-189 (PyAutoGUI on Windows), screenshot hides companion surfaces computer.py:61-66; dispatch agent/core.py:2486-2489, 2883-2898; tests/test_computer.py (22 tests incl. 8 for Windows Unicode typing, fakes only). With deepseek-flash the screenshot image is dropped before reaching the model (agent/provider.py:265-275), so the model clicks without seeing.",
+      "setup_needed": "PyAutoGUI + mss (requirements.txt:43-44). An Anthropic or other vision-capable brain for the screenshot to be useful."
+    },
+    {
+      "name": "Windows Unicode typing",
+      "what": "Types any text including Arabic and accents through Windows SendInput without touching the clipboard.",
+      "how_to_use": "Automatic when Apex uses type_text on Windows.",
+      "status": "built_untested_on_pc",
+      "evidence": "tools/windows_input.py:41-67; called from tools/computer.py:113-115; 8 ABI/fake tests in tests/test_computer.py.",
+      "setup_needed": ""
+    },
+    {
+      "name": "OCR click helpers (find_on_screen, click_on, annotate_screenshot, click_mark)",
+      "what": "Reads the text on screen with Tesseract so Apex can click a button by its label ('click Submit') instead of guessing pixels.",
+      "how_to_use": "Automatic model tools when you ask Apex to click something.",
+      "status": "off_by_default",
+      "evidence": "tools/vision.py:19-204; dispatch agent/core.py:3129-3145; tests/test_vision.py (8 tests, fakes; OCR missing is reported not raised).",
+      "setup_needed": "Install the Tesseract OCR program for Windows (pip only installs the pytesseract wrapper, requirements.txt:21). Without it every call says 'OCR not available'."
+    },
+    {
+      "name": "Describe my screen (describe_screen)",
+      "what": "Takes a screenshot and has the background model describe it (general / coding / one-line context).",
+      "how_to_use": "Ask Apex 'what's on my screen?' / 'look at my code'.",
+      "status": "built_untested_on_pc",
+      "evidence": "tools/screen_vision.py:66-93; dispatch agent/core.py:3393-3395; call site 'tools.screen_vision/describe' is re-routed to BACKGROUND_MODEL by agent/telemetry.py:190,196-209, so with deepseek-flash it sends the image to DeepSeek. Only exposure is tested (tests/test_vision.py:90).",
+      "setup_needed": "A background model that accepts images. Whether deepseek-flash does is unverified here."
+    },
+    {
+      "name": "Shell commands (bash tool)",
+      "what": "Apex runs shell commands on the laptop with your permissions (risky ones go through the safety check).",
+      "how_to_use": "Automatic model tool ('install X', 'find my file').",
+      "status": "partial",
+      "evidence": "tools/bash.py:10-13 -> tools/sandbox.py LocalBackend 78-89 (subprocess shell=True, text=True, no encoding/errors). On Windows this is cmd.exe, not bash, while the prompt advertises grep/find (agent/core.py:52). Non-UTF-8 output loses everything (confirmed). tests/test_sandbox.py (12).",
+      "setup_needed": ""
+    },
+    {
+      "name": "Docker sandbox for commands",
+      "what": "Runs bash and Python in a throw-away, no-network, memory-capped container. Anything Apex starts on its own (cortex, forged skills) must run here or it is held for your approval.",
+      "how_to_use": "Set EXECUTION_BACKEND=docker (and optionally SANDBOX_REQUIRE=true) in .env; Docker Desktop must be running.",
+      "status": "off_by_default",
+      "evidence": "config.py:155-163 (default local); tools/sandbox.py:109-264 (DockerBackend, autonomous_backend raises SandboxUnavailable); tests/test_sandbox.py (12, argv/fallback logic only).",
+      "setup_needed": "Docker Desktop running (it was not running on the last laptop run, so all self-started code is being staged, not run)."
+    },
+    {
+      "name": "Persistent Python (python_exec / python_reset)",
+      "what": "A Jupyter kernel that keeps variables between calls; plots come back as images.",
+      "how_to_use": "Automatic model tool for data analysis.",
+      "status": "built_untested_on_pc",
+      "evidence": "tools/repl.py:20-179 (refuses unless EXECUTION_BACKEND=local and SANDBOX_REQUIRE=false); dispatch agent/core.py:3105-3112; tests/test_repl_policy.py (policy only, 10 cases). Plot images are dropped for deepseek-flash (agent/provider.py:265-275).",
+      "setup_needed": "jupyter_client + ipykernel (requirements.txt:12-13)."
+    },
+    {
+      "name": "File tools (read_file, write_file, append_file, list_dir, find_files)",
+      "what": "Reads and writes any file the user account can reach; reads PDFs/spreadsheets as text.",
+      "how_to_use": "Automatic model tools.",
+      "status": "working",
+      "evidence": "tools/files.py:6-67 (UTF-8 explicit); dispatch agent/core.py:2930-2946; tests/test_doc_convert.py uses files.read.",
+      "setup_needed": ""
+    },
+    {
+      "name": "Image generation (generate_image)",
+      "what": "Makes pictures from a description, through your signed-in ChatGPT plan via Codex, or Replicate if a token is set. Saves files to ~/.voice_agent_images.",
+      "how_to_use": "Ask Apex 'make me an image of ...'. Every request shows you the full prompt for approval (safety rule).",
+      "status": "off_by_default",
+      "evidence": "tools/image_gen.py:36-141; dispatch agent/core.py:3271-3278; tests in tests/test_code_catalog.py:57, tests/test_code_studio.py:310-326, tests/test_companion.py:458.",
+      "setup_needed": "Run Setup-Apex-Work-Plans.cmd (Codex signed in to ChatGPT), or put REPLICATE_API_TOKEN in .env."
+    },
+    {
+      "name": "Owner memory/learning research API (/api/research/memory, /learning, /context)",
+      "what": "Despite the name, this is owner-only inspection of scoped memory and learning versions, not web research. The Scoped memory UI uses it.",
+      "how_to_use": "Dashboard scoped memory panel (dashboard/static/scoped-memory.js).",
+      "status": "working",
+      "evidence": "dashboard/research.py:11-73 mounted at dashboard/server.py:152-153; dashboard/static/scoped-memory.js:8,21; tests/test_research_api.py (2), tests/test_research_memory.py (7), tests/test_research_learning.py (9).",
+      "setup_needed": ""
+    },
+    {
+      "name": "Offline research evaluators (research_metrics, research_experiments)",
+      "what": "Developer scoring scripts for labelled experiment data. Not something the owner uses day to day; they never change Apex behaviour.",
+      "how_to_use": "Command line: python scripts/research_readout.py ... / python scripts/research_experiment.py ...",
+      "status": "working",
+      "evidence": "agent/research_metrics.py:1-96, agent/research_experiments.py:1-31; scripts/research_readout.py, scripts/research_experiment.py; tests/test_research_metrics.py (4), tests/test_research_experiments.py (2).",
+      "setup_needed": "Labelled JSON evidence files."
+    }
+  ],
+  "files_covered": [
+    "agent/deepresearch.py",
+    "agent/research_experiments.py",
+    "agent/research_metrics.py",
+    "tools/research.py",
+    "tools/browser.py",
+    "tools/computer.py",
+    "tools/windows_input.py",
+    "tools/bash.py",
+    "tools/sandbox.py",
+    "tools/files.py",
+    "tools/repl.py",
+    "tools/image_gen.py",
+    "tools/vision.py",
+    "tools/screen_vision.py",
+    "dashboard/research.py",
+    "dashboard/server.py",
+    "dashboard/static/app.js",
+    "dashboard/static/index.html",
+    "agent/core.py",
+    "agent/provider.py",
+    "agent/telemetry.py",
+    "agent/safety.py",
+    "app/resident.py",
+    "config.py",
+    "requirements.txt",
+    "Apex.ps1",
+    "docs/DEEPSEEK.md",
+    "docs/CAPABILITY_MATRIX.md",
+    "scripts/research_experiment.py",
+    "scripts/research_readout.py"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_answers.py",
+      "tests/test_deepresearch.py",
+      "tests/test_computer.py",
+      "tests/test_sandbox.py",
+      "tests/test_vision.py",
+      "tests/test_repl_policy.py",
+      "tests/test_research_api.py",
+      "tests/test_research_metrics.py",
+      "tests/test_research_experiments.py",
+      "tests/test_research_memory.py",
+      "tests/test_research_learning.py",
+      "tests/test_companion.py",
+      "tests/test_code_catalog.py",
+      "tests/test_code_studio.py",
+      "tests/test_doc_convert.py"
+    ],
+    "approx_test_count": 180
+  },
+  "gaps": [
+    {
+      "issue": "With deepseek-flash (the owner's model) every picture returned by a tool is thrown away before it reaches the model: screenshot, browser_screenshot, annotate_screenshot, camera_capture and python_exec plots. The model only gets the text 'Screen size: WxH', so desktop and browser control by screenshot is blind. docs/DEEPSEEK.md:4 and :30 claim the DeepSeek adapter supports images and vision.",
+      "severity": "high",
+      "evidence": "agent/provider.py:265-275 (tool_result content list reduced to its text parts); agent/core.py:3438-3455 (screenshots are sent as images inside tool_result); docs/DEEPSEEK.md:4,30",
+      "fix_hint": "In provider._translate_messages, move tool_result image blocks into a following user message (image_url parts) when the model accepts images; otherwise hide the screenshot tools for text-only models and point the model at describe_screen/find_on_screen.",
+      "confirmed": true,
+      "how_confirmed": "Ran provider._translate_messages on a tool_result holding an image plus 'Screen size: 1920x1080'. The output was [{'role':'tool','content':'Screen size: 1920x1080'}], with no image. Checked that get_client routes deepseek to OpenAIAdapter (provider.py:575-578) and that core.py has no other path that lifts images out (grep __screenshot__)."
+    },
+    {
+      "issue": "The shell tool loses all output when a command prints bytes that are not valid UTF-8, and it reports exit code -1 / failure even though the command ran. On Windows, cmd.exe prints in the OEM code page (accented or Arabic file names), so this is likely there. Without PYTHONUTF8 it is the same \"'charmap' codec can't decode byte 0x9d\" fault seen at the last launch. The model may then re-run a command that already did its job.",
+      "severity": "medium",
+      "evidence": "tools/sandbox.py:81-89 and 156-168 (subprocess.run text=True with no encoding/errors; the UnicodeDecodeError is caught as a generic error)",
+      "fix_hint": "Pass encoding='utf-8', errors='replace' (or decode bytes with the console code page on Windows) in LocalBackend and DockerBackend, and keep the real return code.",
+      "confirmed": true,
+      "how_confirmed": "Ran PYTHONUTF8=1 python3 -c LocalBackend().run_shell(\"printf 'ok \\235 end'\"). It returned stdout '', returncode -1, stderr \"'utf-8' codec can't decode byte 0x9d\"."
+    },
+    {
+      "issue": "The 'bash' tool is cmd.exe on the Windows laptop, but the system prompt advertises bash with grep/find. The model will write Unix commands that fail on Windows.",
+      "severity": "medium",
+      "evidence": "tools/sandbox.py:81-83 (shell=True, which uses COMSPEC = cmd.exe on Windows); agent/core.py:52 (prompt: 'grep, find, pip install, git')",
+      "fix_hint": "Tell the model the OS and shell in the tool description or live status block, or run commands through PowerShell on Windows.",
+      "confirmed": true,
+      "how_confirmed": "Read the lines. shell=True on Windows runs %COMSPEC% (Python documentation). grep in agent/core.py found no Windows or PowerShell hint for bash."
+    },
+    {
+      "issue": "annotate_screenshot is broken in two ways. (1) Without Tesseract (it is not installed by pip, so likely missing on the laptop) it returns an empty picture, and core still sends an image block with empty data, which Anthropic models will probably reject. (2) The numbered list of marks (_marks_summary) is never given to the model by any provider; only the picture and the screen size are, so on deepseek click_mark has nothing to work with.",
+      "severity": "medium",
+      "evidence": "tools/vision.py:142-143 and 185-195; agent/core.py:3440-3455",
+      "fix_hint": "Return a plain text error when OCR is missing. In _make_tool_result_content, add the marks summary as a text block next to the image.",
+      "confirmed": true,
+      "how_confirmed": "Ran annotate_for_agent() with _check_ocr forced False, then passed the result through core._make_tool_result_content. The output had an image block with data '' plus only the 'Screen size: 1920x1080' text, and the marks summary was gone. That the API rejects an empty image is inference: no live API call was made."
+    },
+    {
+      "issue": "The OCR click tools and describe_screen capture the screen without hiding the desktop Companion bubble. The bubble is on by default and follows the cursor. Only computer.screenshot hides it. click_on('Submit') can therefore match a word inside Celine's own bubble and click it, and describe_screen will describe the bubble.",
+      "severity": "medium",
+      "evidence": "tools/vision.py:32-38 and tools/screen_vision.py:41-62 (no capture_surfaces); compare tools/computer.py:63-66 (wrapped in desktop_companion.capture_surfaces())",
+      "fix_hint": "Wrap vision._grab_screen_pil and screen_vision.take_screenshot in desktop_companion.capture_surfaces().",
+      "confirmed": true,
+      "how_confirmed": "Read the three capture functions side by side. Only computer.screenshot uses capture_surfaces, and grep finds capture_surfaces in no other tools/ file. Not run on Windows."
+    },
+    {
+      "issue": "Deep research has no page. Past runs, saved reports and 'which source backs this claim' (list_runs/get_run/provenance) are stored but cannot be reached from the dashboard, a route or a command. The report only exists in the chat turn that produced it.",
+      "severity": "medium",
+      "evidence": "agent/deepresearch.py:629-662; grep for list_runs/deepresearch in dashboard/, app/ and main.py finds no caller (dashboard/team.py:10 list_runs is a different function)",
+      "fix_hint": "Add GET /api/deepresearch/runs, /runs/{id} and /runs/{id}/provenance, plus a 'Deep' mode or history list on the Research page.",
+      "confirmed": true,
+      "how_confirmed": "Ran grep -rn 'list_runs|deepresearch|.provenance(' over dashboard/, app/ and main.py. The only hit is the unrelated dashboard/team.py list_runs."
+    },
+    {
+      "issue": "The system prompt describes deep_research as a 'Raw uncited source dump (use research instead)', the opposite of its real tool description. The model is steered away from the deep research engine.",
+      "severity": "low",
+      "evidence": "agent/core.py:57-58 vs agent/core.py:1103-1113",
+      "fix_hint": "Update the prompt line to match the tool (a slow, costly cited report).",
+      "confirmed": true,
+      "how_confirmed": "Read both passages."
+    },
+    {
+      "issue": "tools/research.deep_research (the old 4-source dump) is dead code. Nothing calls it, because the tool now goes to agent/deepresearch.",
+      "severity": "low",
+      "evidence": "tools/research.py:142-158; agent/core.py:2914-2915",
+      "fix_hint": "Delete it.",
+      "confirmed": true,
+      "how_confirmed": "grep for 'research.deep_research' and '.deep_research(' across *.py found no caller."
+    },
+    {
+      "issue": "deep_research defaults to depth 'deep' (~1000 sources) and runs inside the chat or voice turn with no tool timeout, so a voice request can block Apex for many minutes on a slow connection. The '$7' in the tool description is an Anthropic-price figure, not a DeepSeek one.",
+      "severity": "low",
+      "evidence": "agent/deepresearch.py:63; agent/core.py:1108-1121, 2914-2925",
+      "fix_hint": "Default to 'standard' for voice, run it as a background job that reports when done, and compute the price text from estimate().",
+      "confirmed": true,
+      "how_confirmed": "Read the lines. grep for TOOL_TIMEOUT/future.result(timeout in agent/core.py found nothing."
+    },
+    {
+      "issue": "Browser automation has no tests at all. The Chromium engine is installed only by Apex.ps1 first-time setup, not by the Start-Apex-Platform.cmd path the owner uses. Logins are lost at every restart because each launch starts a fresh, non-persistent context.",
+      "severity": "low",
+      "evidence": "tools/browser.py:42-55; Apex.ps1:52; no test imports tools.browser",
+      "fix_hint": "Add fake-Playwright tests, check for Chromium at startup, and consider launch_persistent_context.",
+      "confirmed": true,
+      "how_confirmed": "grep in tests/ for tools.browser or 'from tools import browser' found nothing. grep for 'playwright install' found only setup.sh and Apex.ps1."
+    },
+    {
+      "issue": "docs/CAPABILITY_MATRIX.md lists Deep research and Sandbox as TESTED with nothing left to do, yet neither has run on the laptop. The sandbox needs Docker Desktop, which was not running.",
+      "severity": "low",
+      "evidence": "docs/CAPABILITY_MATRIX.md:107-108",
+      "fix_hint": "Change 'Left to do' to: run one quick deep research on the PC; start Docker Desktop and set EXECUTION_BACKEND=docker.",
+      "confirmed": true,
+      "how_confirmed": "Read the rows and compared them with config.py:155 (EXECUTION_BACKEND default local)."
+    },
+    {
+      "issue": "Screenshots go to the model at full resolution with no scaling. On a high-resolution laptop, Anthropic downsizes large images, so pixel coordinates the model reads off the image may not match real screen pixels.",
+      "severity": "low",
+      "evidence": "tools/computer.py:58-72",
+      "fix_hint": "Downscale to a known size and scale click coordinates back.",
+      "confirmed": false,
+      "how_confirmed": "Read the code only. It depends on the laptop's resolution and on how the API resizes images, which was not tested."
+    },
+    {
+      "issue": "dashboard/research.py is named 'research' but holds memory-governance and learning endpoints, so it is easy to confuse with the web research feature.",
+      "severity": "low",
+      "evidence": "dashboard/research.py:1-73",
+      "fix_hint": "Rename it to dashboard/memory_governance_api.py (the routes can stay).",
+      "confirmed": true,
+      "how_confirmed": "Read the file."
+    }
+  ],
+  "needs_from_owner": [
+    "On the laptop, ask Apex 'take a screenshot and tell me what you see' with deepseek-flash. Expect it to admit it cannot see; this confirms the high gap.",
+    "Ask Apex 'what's on my screen?' (describe_screen). This tells us whether deepseek-flash accepts images at all.",
+    "In chat, ask Apex to run 'dir' in a folder that has accented or Arabic file names, and send back what the bash tool returns.",
+    "Install Tesseract OCR for Windows if you want click-by-label (find_on_screen/click_on). Check with: tesseract --version",
+    "Check that Chromium for Playwright is installed: .venv\\Scripts\\python.exe -m playwright install chromium (only needed for browser automation).",
+    "Start Docker Desktop if you want Apex's self-started code (cortex, forged skills) to actually run. Without it, that code is held for your approval.",
+    "Try one 'quick' deep research in chat (e.g. 'do quick deep research on solar batteries in Lebanon') and time it on your connection.",
+    "To use image generation, run Setup-Apex-Work-Plans.cmd (Codex signed in to ChatGPT) or add REPLICATE_API_TOKEN to .env."
+  ],
+  "rating": {
+    "score": 5,
+    "why": "The Research page is solid and well tested, but deep research has no page, and on deepseek-flash all screenshot-based computer use is blind. The shell, browser and OCR tools have never run on the Windows laptop."
+  }
+}

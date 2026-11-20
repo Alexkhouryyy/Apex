@@ -116,6 +116,8 @@ CELINE_COOLDOWN = 30.0      # after a failure, speak with the PC voice for this 
 SYNTH_BUDGET = 20.0         # seconds one sentence may take to synthesize before the PC voice takes over
 BUSY_RETRY_SECONDS = 4.0    # Celine busy with another reply: wait this long for her before falling back
 MAX_CHUNK = 4000            # voice/voicebox.synthesize accepts at most this many characters
+SPEAK_CHUNK = 240           # Celine makes a reply this much at a time: each piece finishes well
+                            # inside SYNTH_BUDGET, and she starts talking sooner
 
 
 class PlaybackFailed(RuntimeError):
@@ -302,52 +304,75 @@ def _speak_voicebox_or_fallback(text):
     short cool-down so later sentences don't each wait for the same failure, and
     a sentence is never said twice: once Celine's audio has started playing, a
     playback error is logged, not repeated in the PC voice."""
+    from concurrent.futures import ThreadPoolExecutor
+    # A whole reply sent at once ran past SYNTH_BUDGET after 3-4 sentences, and the
+    # rest came out in the PC voice. Now she makes it a few sentences at a time, and
+    # makes the next piece while the current one plays (one request at a time, so
+    # her server is never asked twice at once).
+    pieces = _chunks(text, SPEAK_CHUNK)
+    ahead = ThreadPoolExecutor(max_workers=1, thread_name_prefix='CelineAhead')
+    prepared = None
+    try:
+        for index, piece in enumerate(pieces):
+            following = pieces[index + 1] if index + 1 < len(pieces) else None
+            keep_going, prepared = _speak_piece(piece, prepared, following, ahead)
+            if not keep_going:
+                return
+    finally:
+        ahead.shutdown(wait=False, cancel_futures=True)
+
+
+def _speak_piece(piece, prepared, following, ahead):
+    """Say one piece, in Celine's voice when she answers. `prepared` is her audio
+    for it if it was made ahead; while it plays, `following` is started on `ahead`.
+    Returns (keep going, the future for `following` or None)."""
     import time
     global _fallback_noted, _celine_down_until, _celine_busy_until
-    for piece in _chunks(text):
+    if interrupt_mod.is_interrupted():
+        return False, None
+    if _audio_missing:
+        # No audio library: Celine's audio could never be played. Don't make her
+        # synthesize it; the PC voice speaks, and the log says why once.
+        if not _fallback_noted:
+            print(f"[TTS] This PC cannot play Celine's audio ({_audio_missing[:120]}); "
+                  "using its own voice until Apex restarts.")
+            _fallback_noted = True
+        _speak_system(piece)
+        return True, None
+    if time.monotonic() < _celine_down_until:
+        _speak_system(piece)
+        return True, None
+    try:
+        audio = prepared.result() if prepared is not None else _synthesize(piece)
+    except CelineBusy:
+        # Up, but making another reply: this sentence in the PC voice, no
+        # cool-down and no outage notice, so the next one asks her again
+        # (without the busy wait for a few seconds).
+        _celine_busy_until = time.monotonic() + BUSY_COOLDOWN
+        if not interrupt_mod.is_interrupted():
+            _speak_system(piece)
+        return True, None
+    except Exception as exc:
         if interrupt_mod.is_interrupted():
-            return
-        if _audio_missing:
-            # No audio library: Celine's audio could never be played. Don't make her
-            # synthesize it; the PC voice speaks, and the log says why once.
-            if not _fallback_noted:
-                print(f"[TTS] This PC cannot play Celine's audio ({_audio_missing[:120]}); "
-                      "using its own voice until Apex restarts.")
-                _fallback_noted = True
-            _speak_system(piece)
-            continue
-        if time.monotonic() < _celine_down_until:
-            _speak_system(piece)
-            continue
-        try:
-            audio = _synthesize(piece)
-        except CelineBusy:
-            # Up, but making another reply: this sentence in the PC voice, no
-            # cool-down and no outage notice, so the next one asks her again
-            # (without the busy wait for a few seconds).
-            _celine_busy_until = time.monotonic() + BUSY_COOLDOWN
-            if not interrupt_mod.is_interrupted():
-                _speak_system(piece)
-            continue
-        except Exception as exc:
-            if interrupt_mod.is_interrupted():
-                return
+            return False, None
+        _celine_down_until = time.monotonic() + CELINE_COOLDOWN
+        _note_outage(exc)
+        _speak_system(piece)
+        return True, None
+    if interrupt_mod.is_interrupted():
+        return False, None
+    upcoming = ahead.submit(_synthesize, following) if following else None
+    try:
+        _play(audio)
+    except PlaybackFailed as exc:
+        if exc.started:
+            print(f"[TTS] Celine's audio stopped part-way ({exc}); not repeating the sentence.")
+        else:
+            # Nothing was heard (audio device or library missing): same as an outage.
             _celine_down_until = time.monotonic() + CELINE_COOLDOWN
             _note_outage(exc)
             _speak_system(piece)
-            continue
-        if interrupt_mod.is_interrupted():
-            return
-        try:
-            _play(audio)
-        except PlaybackFailed as exc:
-            if exc.started:
-                print(f"[TTS] Celine's audio stopped part-way ({exc}); not repeating the sentence.")
-            else:
-                # Nothing was heard (audio device or library missing): same as an outage.
-                _celine_down_until = time.monotonic() + CELINE_COOLDOWN
-                _note_outage(exc)
-                _speak_system(piece)
-            continue
-        _celine_down_until = 0.0
-        _fallback_noted = False
+        return True, upcoming
+    _celine_down_until = 0.0
+    _fallback_noted = False
+    return True, upcoming

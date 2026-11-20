@@ -206,20 +206,19 @@ def run_resident(model_override: Optional[str] = None) -> None:
 
     # Self-mod tools
     self_mod.load_dynamic_handlers()
-    # Procedural (markdown) skills that ship with Apex — self-install on first boot.
-    try:
-        from agent import skill_md as _skill_md_mod
-        _n_bundled = _skill_md_mod.install_bundled()
-        if _n_bundled:
-            logging.info(f"Installed {_n_bundled} bundled procedural skill(s).")
-    except Exception as e:
-        logging.warning(f"Bundled skill install skipped: {e}")
 
     # Scheduler — pass a thin speak that goes through the state machine
     state = ResidentState()
     from agent import desktop_companion
     desktop_companion.bind_resident(state)
     sched.init(agent_run_fn=agent.run, speak_fn=lambda t: _speak_with_state(state, t))
+
+    # Sub-agents, skills, vault, Constellation, the weekly review, nightly
+    # reflection and morning briefing, and the skill curator: the same steps
+    # main.py runs (agent/startup.py). Resident mode used to skip most of them.
+    from agent import startup as _startup
+    _startup.run_common(agent, logging.info)
+    from agent import knowledge, goals, feedback  # noqa: F401  (they register their tools on import)
 
     # Autonomous cortex — BUG FIX: resident mode previously built no AwarenessMonitor,
     # so the cortex/world-model/Guardian/Time-Capsule never ticked in the always-on
@@ -282,6 +281,7 @@ def run_resident(model_override: Optional[str] = None) -> None:
             if awareness_monitor is not None:
                 from agent import awareness as _aw_mod
                 _aw_mod.attach_live_feed(awareness_monitor, dash)
+                _startup.attach_monitor_panels(dash, awareness_monitor)   # Guardian and Time Capsule panels
             _dash_t = dash.start_in_background(port=getattr(config, "DASHBOARD_PORT", 7860))
             # Where it actually bound, not where we asked — see server.start_in_background.
             _dashboard_url = getattr(_dash_t, "dashboard_url", _dashboard_url)

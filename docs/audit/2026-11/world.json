@@ -1,0 +1,270 @@
+{
+  "subsystem": "World View (Earth globe, live layers, full God's Eye View engine, Ask Celine on the map)",
+  "summary": "World View has two globes. Clicking Earth (or 'World View' in the Command header) opens /world, which is now only a shell that starts the full God's Eye View engine (a Node.js app pinned in integrations/gods-eye-view); it shows nothing until you have run Setup-Apex-World.cmd with Node 24.14+ or 26 installed, and it has never been tried on the laptop. The older 'basic globe' at /world/basic is the well-tested part: place search, satellite/street maps, and three live layers (earthquakes, regional aircraft, space stations) plus an Ask Celine box that goes through normal Apex chat. Its 3D globe library (Cesium) is fetched from a CDN, so neither globe works offline. The Ask Celine panel inside the full engine has a confirmed bug: its first step calls a map action ('get_scene_context') that the engine does not have, so every question should fail before reaching the model.",
+  "features": [
+    {
+      "name": "Earth portal on Command (entry point)",
+      "what": "Clicking the Earth globe on the Command page, the 'Earth · World View' label, or the 'World View' link in the header opens World View in a full-screen dialog. Dragging the globe rotates it instead of opening it.",
+      "how_to_use": "Command page (/) -> click Earth or the 'World View' header link. Escape or '<- Command' closes it. Home, Setup and Apps pages also link to /world.",
+      "status": "working",
+      "evidence": "dashboard/static/index.html:33 loads world-launch.js; index.html:161 and :199 have the links; dashboard/static/world-launch.js:37-77 builds the dialog with an iframe to /world; scripts/check_world_entry_ui.cjs and scripts/check_world_view_ui.cjs:131 check the iframe src. /world is in the no-auth shell list at dashboard/server.py:277.",
+      "setup_needed": "None for the portal itself, but what opens inside it is the full engine (see next feature), which needs setup."
+    },
+    {
+      "name": "Full World View engine (God's Eye View) at /world",
+      "what": "A pinned copy of the open-source God's Eye View app (26 layers, including satellites, flights, military flights, vessels, traffic, cameras, weather, fires, cables and launches, plus HUD/sensor styles, drawing and routes). Apex starts it on demand as a hidden Node process on a random local port and passes requests through an authenticated gateway.",
+      "how_to_use": "Click Earth on Command, or open http://127.0.0.1:7860/world. It shows 'Opening the complete world engine...' and then loads the engine in a frame. If it fails, the page offers links to /world/basic and /setup.",
+      "status": "built_untested_on_pc",
+      "evidence": "dashboard/world.py:37-39 (/world serves world-engine.html; confirmed with TestClient: GET /world returns the engine shell, not the basic globe); dashboard/static/world-engine-shell.js:11-23 (session, then iframe to /world/engine/); dashboard/world_engine.py:85-127 (EngineRuntime.start: needs 'node' on PATH and node_modules/vite, 45 s health deadline, max 3 starts in 120 s); dashboard/world_engine.py:179-231 (gateway); dashboard/server.py:255-261 (auth for /world/engine/); integrations/gods-eye-view/apex-server.mjs:38 (rebuilds the whole production bundle before serving if dist/ is missing or the fingerprint changed). Tests: tests/test_world_engine.py (14 tests, all with the Node process faked; no test starts the real engine). Here: node_modules is absent and this machine has Node 22, which the engine refuses, so the real engine was never run in this environment.",
+      "setup_needed": "Install Node.js 24.14+ (24.x) or 26.x, then run Setup-Apex-World.cmd once (it verifies 1551 pinned files, runs npm ci and a production build). Needs internet for npm and for most map layers. Rerun after any update that changes integrations/gods-eye-view."
+    },
+    {
+      "name": "Ask Celine inside the full engine",
+      "what": "A toolbar button 'Ask Celine' in the full engine opens a panel where you type (or speak) a question; Apex's model is given the engine's 30 map actions (fly to, show layer, track entity, annotate, next ISS pass...) and the page runs them, with optional spoken replies through local Celine.",
+      "how_to_use": "In /world, click 'Ask Celine' at the top, type a question and Send; tick 'Speak replies' for voice; 'Microphone' uses the browser's speech recognition.",
+      "status": "broken",
+      "evidence": "integrations/gods-eye-view/apex-bridge.js:62 calls runner('get_scene_context', ...) before contacting Apex; the engine's action runner (integrations/gods-eye-view/src/voice/gevActions.js:346-1163) only handles named actions and ends with throw new Error('Unknown GEV tool: ' + name); 'get_scene_context' appears nowhere in the engine source or in APEX_ACTIONS.json (30 actions, closest is get_current_view_state). The throw is caught at apex-bridge.js:81 and printed, so the model is never asked. Server side (dashboard/world_assistant.py:50-135) is tested in tests/test_world_engine.py:120-174 with the browser faked; apex-bridge.js itself has no test.",
+      "setup_needed": "Engine setup as above, plus an API key for the active model (DeepSeek for deepseek-flash). Needs a code fix first."
+    },
+    {
+      "name": "Basic globe at /world/basic",
+      "what": "The original Apex globe: drag/zoom/tilt the Earth, switch between satellite imagery, street map or bare globe, click to mark a point, quick buttons for Byblos, Beirut and Rome. It remembers the camera and map in the browser.",
+      "how_to_use": "Open http://127.0.0.1:7860/world/basic, or click 'Open the basic globe and existing saved projects' on the World View loading screen.",
+      "status": "working",
+      "evidence": "dashboard/world_engine.py:159-161 (/world/basic route); dashboard/static/world.html; dashboard/static/world-view.js:47-76 (loads Cesium 1.124 from cdn.jsdelivr.net, line 6, with a 20 s timeout); dashboard/static/world/imagery.js:7-10 (OpenStreetMap and Esri tiles). Page checks: scripts/check_world_view_ui.cjs. The real-browser check scripts/check_world_view_browser.cjs:83 is stale (see gaps).",
+      "setup_needed": "Internet: the Cesium library and map tiles come from the web. Does not work offline."
+    },
+    {
+      "name": "Place search",
+      "what": "Type a city, landmark or 'lat, lng' and fly there. Names are looked up on Photon (OpenStreetMap); coordinates are handled in the browser. Results are cached 10 minutes and searches are limited to one per second.",
+      "how_to_use": "/world/basic -> 'Go to a place' box -> Go.",
+      "status": "working",
+      "evidence": "dashboard/world.py:69-104 (/api/world/search); dashboard/static/world-view.js:239-280; tests/test_world_view.py (5 tests: auth, validation, filtering, cache, provider failure).",
+      "setup_needed": "Internet (photon.komoot.io). Signed in with the dashboard token in this browser."
+    },
+    {
+      "name": "Earthquakes layer (USGS)",
+      "what": "Shows M2.5+ earthquakes from the past day as markers sized by magnitude, with magnitude, depth, times, review status and a USGS link. Refreshes each minute while visible and marks old data as stale.",
+      "how_to_use": "/world/basic -> Live layers -> tick 'Earthquakes · M2.5+ · past day'. Or type 'show earthquakes' in Ask Celine.",
+      "status": "working",
+      "evidence": "dashboard/world_layers.py:85-106 (/api/world/layers/earthquakes, 60 s server cache, 2 MiB cap); dashboard/static/world-earthquakes.js:116; tests/test_world_layers.py (8 tests); scripts/check_world_earthquakes_ui.cjs.",
+      "setup_needed": "Internet (earthquake.usgs.gov)."
+    },
+    {
+      "name": "Regional aircraft layer (ADSB.lol)",
+      "what": "Shows aircraft reported within 250 nautical miles of the place you picked (default Byblos), with callsign, registration, type, altitude, speed and track. Refreshes every 30 seconds; older positions are dimmed.",
+      "how_to_use": "/world/basic -> Live layers -> tick 'Aircraft · regional', pick a place, then 'Load this area'. Or say/type 'show flights'.",
+      "status": "working",
+      "evidence": "dashboard/world_flights.py:88-135 (/api/world/layers/flights, 30 s region cache, 16 regions, 429 back-off); dashboard/static/world-flights.js:117; tests/test_world_flights.py (9 tests); scripts/check_world_flights_ui.cjs.",
+      "setup_needed": "Internet (api.adsb.lol). Coverage over Lebanon depends on volunteer receivers."
+    },
+    {
+      "name": "Space stations layer (CelesTrak + SGP4)",
+      "what": "Downloads orbit data for the space-station group (ISS and others) at most every 2 hours, saves it next to Apex's database, and calculates positions in the browser every second, with the predicted next orbit for a selected station.",
+      "how_to_use": "/world/basic -> Live layers -> tick 'Satellites · space stations'. 'Retry source' only works after the 2-hour cooldown.",
+      "status": "working",
+      "evidence": "dashboard/world_satellites.py:108-153 (/api/world/layers/satellites and /satellites/retry; cache file from longterm.DB_PATH, line 22-25); dashboard/static/world-satellites.js:13 loads the local satellite-6.0.2.min.js; tests/test_world_satellites.py (6 tests); scripts/check_world_satellites_ui.cjs.",
+      "setup_needed": "Internet (celestrak.org) for the first download; positions then calculate locally from the saved file."
+    },
+    {
+      "name": "Ask Celine on the basic globe",
+      "what": "A box where you ask about what is on the map. Simple commands ('show flights', 'hide satellites', 'show earthquakes', 'reset globe') run directly; other questions go to the normal Apex chat with a server-checked summary of your enabled layers and selected item. Answers can be spoken by local Celine.",
+      "how_to_use": "/world/basic -> right panel -> 'Ask Celine' -> type and 'Ask Apex'; 'Microphone' uses browser speech recognition; tick 'Speak using local Celine'.",
+      "status": "working",
+      "evidence": "dashboard/static/world/live.js:114-130 (commands and /api/chat); dashboard/server.py:1565-1568 (adds scene_context); dashboard/world_live.py:127-156; tests/test_world_live.py (6 tests incl. test_chat_gets_server_selection_never_client_metadata); scripts/check_world_live_ui.cjs.",
+      "setup_needed": "A working model key. Speech output needs the Celine/Voicebox server running; the mic needs a browser with speech recognition (Chrome/Edge, which sends audio to the vendor)."
+    },
+    {
+      "name": "World projects on the basic globe (notes, routes, terrain, 3D buildings)",
+      "what": "Save notes at a selected point, draw routes, undo, export/import the project as a JSON file; turn on terrain, and OSM 3D buildings if you paste a Cesium ion token (not saved).",
+      "how_to_use": "/world/basic -> right panel -> 'World project' and 'Terrain & buildings'.",
+      "status": "partial",
+      "evidence": "dashboard/static/world.html:63-71; handlers in dashboard/static/world/live.js (world-add-note, world-route, world-project-export/import/undo, world-terrain, world-buildings). Only page checks (scripts/check_world_live_ui.cjs); no Python tests; 3D buildings need a Cesium ion account. Notes are not migrated into the full engine (docs/FULL_WORLD_VIEW.md:37).",
+      "setup_needed": "Internet; a Cesium ion token for buildings."
+    },
+    {
+      "name": "World View setup on /setup (provider keys, engine status, update check)",
+      "what": "The Setup page shows whether the engine is installed/running, lets the owner save map-provider keys into the engine's own store, shows model/voice/apps readiness, and has a 'Check God's Eye update' button that only compares the pinned revision with GitHub (never installs).",
+      "how_to_use": "Open /setup (from Home, the World View toolbar, or the engine's error screen).",
+      "status": "built_untested_on_pc",
+      "evidence": "dashboard/world_setup.py:23-103 (/setup, /api/setup/access, /api/setup/status, /api/setup/world-update, owner-only via dashboard/apps.py:14-17); dashboard/static/setup.js:32,39 (keys saved through /world/engine/api/setup/keys, which needs the engine running); tests/test_world_setup.py (8 tests); scripts/check_setup_ui.cjs.",
+      "setup_needed": "Engine installed for the provider-keys part; owner dashboard token."
+    },
+    {
+      "name": "Background world model (agent context)",
+      "what": "Not the map: every 5 minutes Apex summarises goals and recent awareness events into a 'world state' that is added to Celine's prompt; readable at /api/world-state.",
+      "how_to_use": "Automatic when awareness is on (default on); GET /api/world-state to read it.",
+      "status": "working",
+      "evidence": "agent/world_model.py; agent/awareness.py:341-372 and :579 (client wired); app/resident.py:224-232 builds the same monitor in resident mode; config.py:108 AWARENESS_ENABLED default True; dashboard/server.py:1459; tests/test_world_state_fresh.py (3 tests). Only skimmed for this audit.",
+      "setup_needed": "None beyond a model key."
+    }
+  ],
+  "files_covered": [
+    "dashboard/world.py",
+    "dashboard/world_engine.py",
+    "dashboard/world_setup.py",
+    "dashboard/world_assistant.py",
+    "dashboard/world_layers.py",
+    "dashboard/world_flights.py",
+    "dashboard/world_satellites.py",
+    "dashboard/world_live.py",
+    "dashboard/server.py",
+    "dashboard/apps.py",
+    "dashboard/static/world.html",
+    "dashboard/static/world-view.js",
+    "dashboard/static/world-engine.html",
+    "dashboard/static/world-engine-shell.js",
+    "dashboard/static/world-launch.js",
+    "dashboard/static/world-satellites.js",
+    "dashboard/static/world/live.js",
+    "dashboard/static/world/imagery.js",
+    "dashboard/static/index.html",
+    "dashboard/static/setup.js",
+    "integrations/gods-eye-view/apex-server.mjs",
+    "integrations/gods-eye-view/apex-build.mjs",
+    "integrations/gods-eye-view/apex-bridge.js",
+    "integrations/gods-eye-view/apex.config.mjs",
+    "integrations/gods-eye-view/APEX_UPSTREAM.json",
+    "integrations/gods-eye-view/APEX_ACTIONS.json",
+    "integrations/gods-eye-view/package.json",
+    "integrations/gods-eye-view/src/app/tools.js",
+    "integrations/gods-eye-view/src/voice/gevActions.js",
+    "integrations/gods-eye-view/src/voice/gevRealtime.js",
+    "integrations/gods-eye-view/src/voice/commands.js",
+    "integrations/gods-eye-view/src/voice/sessionCommands.js",
+    "integrations/gods-eye-view/src/voice/session.js",
+    "integrations/gods-eye-view/src/voice/realtimeController.js",
+    "scripts/setup_world_engine.py",
+    "scripts/check_world_view_browser.cjs",
+    "Setup-Apex-World.cmd",
+    "config.py",
+    "main.py",
+    "app/resident.py",
+    "agent/world_model.py",
+    "agent/awareness.py",
+    "agent/provider.py",
+    "docs/WORLD_VIEW.md",
+    "docs/FULL_WORLD_VIEW.md",
+    "docs/USE_ALL_OF_APEX.md",
+    "tests/test_world_engine.py",
+    "tests/test_world_satellites.py",
+    "tests/test_world_windows_launcher.py"
+  ],
+  "tests": {
+    "files": [
+      "tests/test_world_engine.py",
+      "tests/test_world_flights.py",
+      "tests/test_world_layers.py",
+      "tests/test_world_live.py",
+      "tests/test_world_satellites.py",
+      "tests/test_world_setup.py",
+      "tests/test_world_view.py",
+      "tests/test_world_windows_launcher.py",
+      "tests/test_world_state_fresh.py",
+      "tests/test_provider_budget.py",
+      "scripts/check_world_entry_ui.cjs",
+      "scripts/check_world_view_ui.cjs",
+      "scripts/check_world_view_browser.cjs",
+      "scripts/check_world_earthquakes_ui.cjs",
+      "scripts/check_world_flights_ui.cjs",
+      "scripts/check_world_satellites_ui.cjs",
+      "scripts/check_world_live_ui.cjs",
+      "scripts/check_setup_ui.cjs"
+    ],
+    "approx_test_count": 89
+  },
+  "gaps": [
+    {
+      "issue": "Ask Celine in the full World View cannot work: apex-bridge.js first calls runner('get_scene_context'), an action the engine does not have, so the runner throws 'Unknown GEV tool: get_scene_context' and the question never reaches the model.",
+      "severity": "high",
+      "evidence": "integrations/gods-eye-view/apex-bridge.js:62; integrations/gods-eye-view/src/voice/gevActions.js:1163 (final throw); APEX_ACTIONS.json has 30 actions and none is get_scene_context",
+      "fix_hint": "Use runner('get_current_view_state', {}) (an existing action) for the context, or build the context in the bridge from window.__godsEyeView; add a browser or jsdom test that runs apex-bridge.js against the real runner. Also drop get_scene_context from the SYSTEM prompt in dashboard/world_assistant.py:18.",
+      "confirmed": true,
+      "how_confirmed": "Grepped the whole engine (src, json, mjs) for 'get_scene_context': it appears only in apex-bridge.js (and in the Python SYSTEM prompt). Read runGevAction (gevActions.js:346-1163): every branch is name === '<action>' and it ends with throw. Followed window.__godsEyeView.voiceCommands (src/app/tools.js:178) -> sessionCommands.js:42 (controller or session) -> realtimeController.js:76 (this.runner = the raw runner). No wrapper adds the action. No test runs apex-bridge.js."
+    },
+    {
+      "issue": "Clicking Earth now always opens the full engine, which needs Node 24.14+/26 and Setup-Apex-World.cmd. Without it the owner gets an error screen, not a globe. The tested basic globe is only reachable through a small link on that screen or by typing /world/basic.",
+      "severity": "medium",
+      "evidence": "dashboard/world.py:37-39; dashboard/world_engine.py:91-93; dashboard/static/world-engine.html:5",
+      "fix_hint": "Have /world check runtime.status()['installed'] (and that node is on PATH) and fall back to /world/basic automatically, with a banner explaining how to set up the full engine.",
+      "confirmed": true,
+      "how_confirmed": "Ran TestClient: GET /world returns the engine shell (contains world-engine-shell, not world-reset); GET /world/basic returns the basic globe. Read EngineRuntime.start: it raises 'World engine dependencies are missing. Run Setup-Apex-World.cmd.' when node or node_modules/vite is missing; the shell shows that as an error."
+    },
+    {
+      "issue": "The engine may rebuild its whole production bundle when it starts, but Apex allows only 45 seconds for start-up before killing it. A rebuild happens whenever apex-bridge.js or apex.config.mjs changed after setup (for example after a git update), or when GOOGLE_MAPS_API_KEY / CESIUM_ION_TOKEN in Apex's .env differ from what setup saw. On a slow laptop a Cesium build can exceed 45 s. If it does, the build is killed, the next open starts it again, and after 3 tries in 2 minutes World View refuses to start.",
+      "severity": "medium",
+      "evidence": "integrations/gods-eye-view/apex-server.mjs:14-17,38 (fingerprint, rebuild before preview); dashboard/world_engine.py:95-98,115-127 (3 starts per 120 s, 45 s deadline, then stop()); config.py:6 loads Apex .env into os.environ, which the engine inherits (world_engine.py:102)",
+      "fix_hint": "Rebuild in Setup-Apex-World.cmd and the update flow, not at start-up; or have apex-server answer /apex-health with a 'building' state and let Python wait longer while building.",
+      "confirmed": true,
+      "how_confirmed": "Read both files. The rebuild is awaited before preview() starts, so /apex-health cannot answer during the build, and the Python loop stops the process after 45 s. Not confirmed: how long the build actually takes on the laptop (node_modules are not installed here)."
+    },
+    {
+      "issue": "Neither globe works offline or on a poor connection. The basic globe loads Cesium (several MB) from cdn.jsdelivr.net with a 20-second total timeout, and map tiles come from OSM/Esri. Nothing uses the offline PMTiles world map on D:.",
+      "severity": "medium",
+      "evidence": "dashboard/static/world-view.js:6 (BASE = jsdelivr), :57 (20000 ms timeout), :62 (error message); dashboard/static/world/imagery.js:7-10; grep for 'pmtiles|offline' in dashboard/world*.py and static world files returned nothing",
+      "fix_hint": "Serve Cesium from the engine's node_modules/cesium build (or vendor it under dashboard/static) and add an offline imagery option that points at the Apocalypse PMTiles map.",
+      "confirmed": true,
+      "how_confirmed": "Read world-view.js loadEngine(): the timer starts before the download and fail() rejects with 'Check your internet connection'. Grepped the World View files for pmtiles/offline: no matches."
+    },
+    {
+      "issue": "The only real-browser check of the basic globe opens /world and waits for #world-reset, but /world now serves the engine shell. The check would time out, so the basic globe's real Cesium rendering has no working browser check.",
+      "severity": "medium",
+      "evidence": "scripts/check_world_view_browser.cjs:83-84; dashboard/world.py:37-39",
+      "fix_hint": "Point the check at /world/basic and add a separate engine smoke check once Node 24 is available in CI.",
+      "confirmed": true,
+      "how_confirmed": "Read the script (it boots the real dashboard.server app) and confirmed with TestClient that GET /world has no 'world-reset' element. Did not run the script (it needs Playwright, Chromium and internet)."
+    },
+    {
+      "issue": "Docs overclaim the basic globe. docs/WORLD_VIEW.md says there is a Follow button, a searchable entity list and typed commands 'follow selected' / 'stop following', and that 'the standalone page is /world'. None of the follow features exist in the code, and /world is now the full engine.",
+      "severity": "low",
+      "evidence": "docs/WORLD_VIEW.md:5-12; dashboard/static/world/live.js:115-121 (only show/hide and reset globe); grep -i follow over the World View static files finds only a CSS note",
+      "fix_hint": "Rewrite the top of WORLD_VIEW.md to describe what /world/basic actually does, and remove the follow commands or build them.",
+      "confirmed": true,
+      "how_confirmed": "Grepped dashboard/static/world*.js, world/*.js and world.html for 'follow' (case-insensitive). The only hit is world.html:54 'size follows magnitude'."
+    },
+    {
+      "issue": "No automated test covers scripts/setup_world_engine.py, apex-server.mjs, apex-build.mjs or apex-bridge.js. Every engine test fakes the Node process, so the real start-up, gateway proxying to Vite preview and the Ask Celine bridge have never run under test. The engine pins Node 24.14+/26, but this environment has Node 22.",
+      "severity": "medium",
+      "evidence": "tests/test_world_engine.py:112-118 (start failure faked); grep for setup_world_engine/apex-server/apex-bridge in tests/ found no engine test; node --version here = v22.23.4",
+      "fix_hint": "Add a test that runs setup_world_engine.verify_source() (it passes: 1551 files) and a Node-gated smoke test that starts apex-server.mjs and requests /apex-health.",
+      "confirmed": true,
+      "how_confirmed": "Ran python3 scripts/setup_world_engine.py --verify-only (passed: 'Verified 1551 original God's Eye View files'). Grepped tests/ for the engine scripts and found nothing beyond faked runtime tests. Ran the 8 world test files: 85 passed in 6.9 s."
+    },
+    {
+      "issue": "After any failed CelesTrak download (for example during a power or internet cut), the space-station layer stays paused for 2 hours, and 'Retry source' does nothing until then because the cooldown is saved before the request.",
+      "severity": "low",
+      "evidence": "dashboard/world_satellites.py:112-118 (retry clears paused but next_attempt is still 2 h ahead), :137",
+      "fix_hint": "Use a shorter cooldown (for example 5-10 minutes) after a network error, keeping 2 h after success.",
+      "confirmed": true,
+      "how_confirmed": "Read _load(): with retry=True it sets paused=False and then returns early when now < next_attempt. The UI text says 'Retry source after its cooldown', so this is by design, and tests/test_world_satellites.py covers it."
+    },
+    {
+      "issue": "World Ask Celine holds one global lock for the whole model call (up to 90 s), so a second World View window or a slow model blocks every other world question.",
+      "severity": "low",
+      "evidence": "dashboard/world_assistant.py:74,115",
+      "fix_hint": "Release the lock around the model call and only hold it for the turn bookkeeping.",
+      "confirmed": true,
+      "how_confirmed": "Read the code: asyncio.wait_for(asyncio.to_thread(_complete...), 90) runs inside 'async with _lock'."
+    },
+    {
+      "issue": "If the engine process dies and is restarted, the previous log file handle is not closed before start() opens a new one (a small handle leak on Windows).",
+      "severity": "low",
+      "evidence": "dashboard/world_engine.py:88-93,110",
+      "fix_hint": "Close self.log in start() when the previous process has exited.",
+      "confirmed": false,
+      "how_confirmed": "Read the lines only; the impact is minor and was not reproduced."
+    }
+  ],
+  "needs_from_owner": [
+    "Check whether Node.js is installed and which version: run 'node --version' in PowerShell. World View needs 24.14+ (24.x) or 26.x.",
+    "Run Setup-Apex-World.cmd once (it needs internet for npm), then click Earth on Command and report whether the full World View opens or shows an error. If it errors, send .mcp-runtime\\world-engine.log.",
+    "Time how long the first open takes after Setup and after the next Apex update (the 45-second start-up limit).",
+    "Open http://127.0.0.1:7860/world/basic and confirm the globe loads on the Lebanese connection, then try Earthquakes, Aircraft (Byblos) and Space stations.",
+    "In the basic globe's Ask Celine, ask 'what earthquakes are on?' with Earthquakes on, to confirm the deepseek-flash model answers with the layer context.",
+    "Do not rely on the full engine's 'Ask Celine' button until it is fixed. It is expected to show 'Unknown GEV tool: get_scene_context'."
+  ],
+  "rating": {
+    "score": 5,
+    "why": "The basic globe and its three live layers are solid and well tested, but the main Earth button now opens a heavy Node engine that has never run on the laptop, its Ask Celine is broken, and nothing works offline."
+  }
+}

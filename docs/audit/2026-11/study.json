@@ -1,0 +1,311 @@
+{
+ "subsystem": "Study, board, assembly, 3D build, Blender, design workbench, named workspaces",
+ "summary": "This is Apex's 'make and explore 3D things' area: the /study page (take apart a DC motor, heart, car engine, jet engine or a real CAD motor, or your own imported GLB), the /board glass board (notes, links, pictures and 3D models), voice-built 3D objects made from simple parts, a measured-millimetre design panel with 3D-print checks and 3MF/STL export, and named board workspaces. With the mouse and voice almost all of it is wired, tested and worked when I ran it here (routes answer, models load, builds and exports write real files). Everything that needs hands (webcam + MediaPipe) is off by default and has never been checked on the laptop. Blender creation needs Blender installed plus a hand-installed add-on that has no automated tests at all.",
+ "features": [
+  {
+   "name": "Study page: explore 3D assemblies",
+   "what": "A 3D viewer at /study with a library of 5 built-in subjects (DC motor drawn by the page, heart, car engine, jet engine, and an OpenMotor CAD model with 135 parts). You can take it apart (explode slider), put it back together, isolate, hide, cut it open (section), run its motion, search parts, read sources/limitations, and undo/redo.",
+   "how_to_use": "Open http://127.0.0.1:7860/study (or the 'Study' button on /board). Pick a subject from the dropdown. Mouse drag to orbit, click a part to select it. Ctrl+Z / Ctrl+Shift+Z undo/redo.",
+   "status": "working",
+   "evidence": "Routes dashboard/study.py:74-104 (/study, /api/study/models, /api/study/model/{id}, /asset) and 168-199 (sessions); included at dashboard/server.py:138-143; /study is an auth-exempt shell at server.py:277. Models data/assemblies/*.json + dashboard/static/models/*.glb.gz (all 4 geometry files present). Page dashboard/static/study.js:240-300. Tests: tests/test_assembly_study.py, test_study_library.py, test_study_motion.py. I ran a TestClient smoke: /api/study/models returned all 5, every /asset returned 200 gzip (1-6 MB), session + explode returned 200.",
+   "setup_needed": "None. three.js is vendored locally (dashboard/static/vendor/three), so it works offline."
+  },
+  {
+   "name": "Study by voice (assembly_study tool)",
+   "what": "Ask Celine to open a study ('show me how a jet engine works') or to explode/assemble/select parts in the open one. The tool list of subjects refreshes itself when you import a model.",
+   "how_to_use": "Voice or the Companion: 'open the heart study', 'take it apart'. It only pops up on screen if a /board tab is open and visible; otherwise the reply contains a /study?session=... link you must open yourself.",
+   "status": "working",
+   "evidence": "Tool defined agent/core.py:646, dispatched core.py:2567-2580; description built from the library core.py:464-487; allowed in the Companion agent/companion.py:19. The page opens only via the board's study_open event: dashboard/static/board.html:871. Tests: tests/test_assembly_study.py, tests/test_study_pointing.py.",
+   "setup_needed": "Keep /board open in a visible browser tab if you want voice to open the study for you."
+  },
+  {
+   "name": "Import your own 3D model into the study",
+   "what": "Upload a .glb/.gltf (up to 150 MB) on the study page. It is split into components, added to the library under your folder, and can be removed. 'Draft notes' asks the AI to write a short explanation for each part (labelled AI-drafted).",
+   "how_to_use": "On /study use the Import control (study-import.js); pick the file, name, category, source and license. On an imported model use 'Draft notes with AI' or 'Remove'.",
+   "status": "working",
+   "evidence": "Route dashboard/study.py:105-160; agent/study_import.py (MAX_BYTES 150 MB at line 27, files in ~/.apex/study or APEX_STUDY_DIR, line 50-51; UTF-8 writes lines 287, 347). Page dashboard/static/study-import.js. Tests: tests/test_study_import.py (12 tests), scripts/check_study_import*.{mjs,cjs}.",
+   "setup_needed": "Draft notes needs a working chat model (it uses BACKGROUND_MODEL, which falls back to AGENT_MODEL, config.py:26). Import and remove need nothing."
+  },
+  {
+   "name": "Saved study projects (notebook)",
+   "what": "Save a study with your notes for each part, the camera angle and the exploded/hidden view, then reopen it later. It warns if the model changed since you saved.",
+   "how_to_use": "On /study open Projects, write notes, Save. Reopen from Projects, or from a linked board workspace (/study?project=...).",
+   "status": "working",
+   "evidence": "agent/study_projects.py (save/recent/open_project, SQLite in the main memory DB); routes dashboard/study.py:47-71; page dashboard/static/study-projects.js. Tests: tests/test_study_projects.py (8), plus test_board_workspaces.py.",
+   "setup_needed": "None."
+  },
+  {
+   "name": "Study with your hands (webcam)",
+   "what": "Move, turn and push parts in depth, orbit and zoom the study with pinch gestures seen by the laptop webcam; two-hand stretch to explode; a hologram look (glowing hand and edges, soft sounds); an optional camera mirror preview. Only one study window owns the hands at a time; it pauses board hand actions and does not turn them back on.",
+   "how_to_use": "On /study press 'Hands on' (needs Apex's hand tracker running). Hover with an open hand ~250 ms, pinch, move, release. Camera mirror button shows the tracker's picture.",
+   "status": "off_by_default",
+   "evidence": "agent/study_input.py:19-46 (2 s lease, claims hands and pauses board at line 37-38); route dashboard/study.py:12-31; tracker blocks other gestures while study owns hands agent/handtrack.py:1240-1242. JS: study-hands.js, study-gestures.js, study-comfort.js, study-holo.js, study-mirror.js. Tests: tests/test_study_input.py (7), test_study_pointing.py, scripts/check_study_gestures*.{mjs,cjs}, check_study_hands.cjs (synthetic frames only). docs/ASSEMBLY_STUDY.md:68-69 and docs/STUDY_HAND_INTERACTION.md:60 say real-camera acceptance is still pending.",
+   "setup_needed": "HANDTRACK_ENABLED=true in .env (default false, config.py:528), mediapipe + opencv installed (requirements.txt:22,70), a webcam. Never tried on the laptop."
+  },
+  {
+   "name": "The glass board (/board) with mouse and keyboard",
+   "what": "A board of cards: text notes, web reference links, pictures and 3D models you can drag, resize, turn, select, edit and undo/redo. It keeps everything in the database so it comes back after a restart. Focus mode, optional camera background, object list.",
+   "how_to_use": "Open http://127.0.0.1:7860/board. Drag with the mouse; keyboard nudges; Focus (F), Hand setup (H). Voice: 'put my notes on the board', 'clear the board'.",
+   "status": "working",
+   "evidence": "Page route dashboard/server.py:2447-2453, live data over /ws/board server.py:2495-2581 (token checked at 2504-2516); board API in dashboard/companion.py:219-400; model agent/board.py (Board class 305+, get_board 1531-1542 loads the last active workspace). Tests: tests/test_board.py (88), test_board_jarvis.py (50), test_board_selection.py, test_board_readout.py, test_board_tap.py, test_daily_workspace.py; page checks scripts/check_board_*.cjs.",
+   "setup_needed": "None for mouse/voice use."
+  },
+  {
+   "name": "Board hand control (pinch, drag, two-hand scale/turn, throw, swipes)",
+   "what": "Grab cards and models with a pinch, two hands to resize and rotate, flick to throw away (with undo), swipes to step selection. Tracking runs in Python so it keeps working when the tab is in the background.",
+   "how_to_use": "Turn on the flags, restart Apex, open /board, calibrate the pinch when asked, then press 'Hands on' (hands are paused after every restart).",
+   "status": "off_by_default",
+   "evidence": "BOARD_ENABLED default False config.py:635, BOARD_THROW_ENABLED False config.py:642, HANDTRACK_ENABLED False config.py:528. Hands are forced off when a workspace loads: agent/board_workspaces.py:52. Tracker started in both main.py:468-500 and app/resident.py:447-482; board gesture guards live in the tracker (agent/handtrack.py:1221-1258), so both modes behave the same. Tests: test_board.py, test_pinch_*.py, test_gesture_misfires.py, test_handtrack.py (all with fake cursors).",
+   "setup_needed": "BOARD_ENABLED=true and HANDTRACK_ENABLED=true in .env, webcam, mediapipe; optionally BOARD_THROW_ENABLED=true. Run the pinch calibration. Never tried on the laptop."
+  },
+  {
+   "name": "Show your own pictures and 3D files on the board (props)",
+   "what": "Drop .glb/.gltf/.png/.jpg/.webp files into your props folder and ask Celine to put them on the board. Paths are jailed to that folder.",
+   "how_to_use": "Copy files into C:\\Users\\alexk\\.apex\\props, then say 'what props do I have' / 'show the drone model on the board'.",
+   "status": "working",
+   "evidence": "agent/props.py:47-55 (root ~/.apex/props), resolve() 57+; route /board/prop/{rel} dashboard/server.py:2456-2468 (NOT auth-exempt); tools board_props/board_present/board_model core.py:2519-2565. Tests: tests/test_props.py (25). Smoke: a built model was served from /board/prop/created/... with 200.",
+   "setup_needed": "Put files in ~/.apex/props."
+  },
+  {
+   "name": "Build 3D objects by voice from parts (board_build)",
+   "what": "'Build me a rocket' - the model describes it as simple parts (box, sphere, cylinder, cone, torus, gear, tube, wedge) in centimetres; Apex writes a real .glb with no Blender and puts it on the board. Saying it again with the same name makes a new version and keeps the old one.",
+   "how_to_use": "Voice or Companion: 'build me a gearbox with two shafts and a 24-tooth gear'. 'Show the parts of the rocket' lists the recipe.",
+   "status": "working",
+   "evidence": "agent/build3d.py (validate 107, to_glb 383, build 442-474, numpy only); tool core.py:663 and 2582-2626; allowed in Companion agent/companion.py:19. Tests: tests/test_build3d.py (17), test_build_create.py (12); scripts/check_build3d_glb.mjs. Smoke: build3d.build() wrote created/smoke-rocket/v1.glb (2 parts, 20x80x20 cm) and it was served.",
+   "setup_needed": "None. Quality depends on how well the chat model (deepseek-flash) writes part recipes."
+  },
+  {
+   "name": "Edit a build part by part (voice) and parts mode (hands)",
+   "what": "'Make the shaft red', 'move this up 5 cm', 'remove the fins', 'add a knob' - each change saves a new version so undo works. Parts mode lets you pinch a single part to move/resize it.",
+   "how_to_use": "Voice: 'make the drive gear brass'. 'This' means the part you clicked or pinch-tapped in the last 8 seconds. Parts mode: 'take it apart' (board_parts), or the /api/board/parts button on /board.",
+   "status": "working",
+   "evidence": "agent/build_edit.py (resolve 34, apply 81); tool dispatch core.py:2628-2663; parts mode core.py:2665-2690 and route dashboard/companion.py:312; picking agent/board_parts.py. Tests: tests/test_build_create.py, tests/test_board_parts.py (19). Hand-dragging parts needs BOARD_ENABLED + HANDTRACK_ENABLED (see board hand control).",
+   "setup_needed": "None for voice edits and mouse clicks; hand dragging needs the board hand flags."
+  },
+  {
+   "name": "Send a build to the study (board_study)",
+   "what": "'Study it' copies the current build into the study library under 'Built by you' with its part names and opens it, so you can take your own creation apart and keep notes. It is a copy: later board edits don't update it.",
+   "how_to_use": "Voice with the build selected or named: 'study the gearbox'.",
+   "status": "working",
+   "evidence": "core.py:428-456 (_study_build imports the GLB via study_import and emits study_open); core.py:2647-2649. Tests: tests/test_build_create.py.",
+   "setup_needed": "A visible /board tab for it to open automatically (same as assembly_study)."
+  },
+  {
+   "name": "Version history, restore, undo/redo for created objects",
+   "what": "Every build, recolor or export is a numbered version; earlier ones are kept. Celine can list what exists, bring back an older version, and undo/redo board changes.",
+   "how_to_use": "Voice: 'what have I made', 'bring back version 2 of the rocket', 'undo', 'redo'.",
+   "status": "working",
+   "evidence": "agent/assets.py (create 89, add_version 114, listing 181, find_by_title 198); tools board_history/board_restore/board_undo/board_redo core.py:2773-2845. Tests: tests/test_assets.py (14), test_board.py.",
+   "setup_needed": "None."
+  },
+  {
+   "name": "Blender creation (board_create, board_recolor)",
+   "what": "'Create a red cube 50 mm wide' - Apex asks a running Blender to make one exact-size primitive (cube, sphere, cylinder, cone, plane, torus), colour it, export a GLB and put it on the board. Recolor makes a new version.",
+   "how_to_use": "Install blender/apex_blender_addon.py in Blender (Preferences > Add-ons > Install), open the N-panel > Apex tab > Start Server, set BLENDER_ENABLED=true, then say 'create a 40 mm blue sphere'.",
+   "status": "off_by_default",
+   "evidence": "BLENDER_ENABLED default False config.py:663; client agent/blender_bridge.py:200-304 (refuses when off at 250-253); add-on blender/apex_blender_addon.py (fixed command set ping/create_primitive/set_color/export_glb at 194-199, exports only to ~/.apex/blender_exports); tool core.py:2692-2771; capability probe agent/capabilities.py:160-163. Tests: tests/test_blender_bridge.py (26), test_board_create.py (5) - all with a fake socket; nothing tests the add-on itself.",
+   "setup_needed": "Install Blender 3.6+ on the laptop, install and start the add-on every Blender session, BLENDER_ENABLED=true. Never tried on the laptop."
+  },
+  {
+   "name": "Measured design workbench with print checks and 3MF/STL export",
+   "what": "A Design panel on /board: make an object with exact millimetre sizes (a primitive or a round enclosure with base, wall and lid), edit each component's size/position/rotation with numbers, save versions, run 3D-printer checks (build plate, wall thickness, overhangs) and download a 3MF or STL only if the checks pass.",
+   "how_to_use": "Open /board?design=1 or choose Design on /board. Measured build > name + mm sizes > Save new version > Run print checks / Check & export file. Downloads appear under Manufacturing exports.",
+   "status": "working",
+   "evidence": "Routes dashboard/design.py:17-48 (owner only: master token or no token set, line 12-14 and companion.py:93-94); agent/design_workbench.py:59-184; UI dashboard/static/board-design.js loaded by board.html:253,958; downloads dashboard/companion.py:385-400. Printer defaults config.py:679-692 (0.4 mm nozzle, 256 mm cube). Tests: tests/test_design_workbench.py (17 passed when run alone), scripts/check_design_workbench_ui.cjs, check_design_workbench_browser.cjs. Smoke: POST /api/board/design create returned 200 and wrote created/smoke-box/v1.glb.",
+   "setup_needed": "Set FORGE_* in .env if your printer is not a 256 mm FFF with a 0.4 mm nozzle."
+  },
+  {
+   "name": "Reference picture for a design question",
+   "what": "In the Design panel attach a photo or the current webcam frame and stage it for your next question to Celine.",
+   "how_to_use": "Design panel > Visual reference > upload or take camera frame > Use in my next question > ask Celine.",
+   "status": "built_untested_on_pc",
+   "evidence": "docs/DESIGN_WORKBENCH.md:40-52; board-design.js (photo callback); checked only by the UI harness scripts/check_design_workbench_ui.cjs. Whether the answer actually 'sees' the picture depends on the chat model accepting images.",
+   "setup_needed": "A chat model that accepts images (not confirmed for deepseek-flash). Camera frame needs the hand tracker running."
+  },
+  {
+   "name": "Named workspaces",
+   "what": "Several separate boards ('Spaces'), each with its own notes, links, models and layout. Create empty or copy the current one, switch between them; the last one used comes back after a restart. Up to 50.",
+   "how_to_use": "On /board click the workspace name ('Spaces' button) > Your workspaces > create or switch.",
+   "status": "working",
+   "evidence": "agent/board_workspaces.py (tables 17-38, load_initial 55-62, create 81, switch 110); routes dashboard/workspaces.py:35-58; board.html:222,572. Tests: tests/test_board_workspaces.py (8), test_daily_workspace.py (8), test_continuity.py, test_offline_sessions.py. Smoke: GET /api/board/workspaces returned the default 'My workspace'.",
+   "setup_needed": "None. No rename/delete of workspaces yet (docs/NAMED_WORKSPACES.md:52-53)."
+  },
+  {
+   "name": "Link saved studies to a workspace",
+   "what": "Attach saved study projects to a named board so you can reopen them from that board's workspace menu.",
+   "how_to_use": "On /study Projects dialog link a project to a board; on /board open the workspace menu and pick the linked study.",
+   "status": "working",
+   "evidence": "agent/board_workspaces.py:132-174; routes dashboard/workspaces.py:10-32; board.html:587-594. Tests: tests/test_board_workspaces.py, test_study_library.py.",
+   "setup_needed": "None."
+  }
+ ],
+ "files_covered": [
+  "agent/study_import.py",
+  "agent/study_input.py",
+  "agent/study_projects.py",
+  "agent/board.py",
+  "agent/board_parts.py",
+  "agent/board_workspaces.py",
+  "agent/assembly.py",
+  "agent/build3d.py",
+  "agent/build_edit.py",
+  "agent/blender_bridge.py",
+  "agent/design_workbench.py",
+  "agent/props.py",
+  "agent/assets.py",
+  "agent/core.py",
+  "agent/companion.py",
+  "agent/handtrack.py",
+  "agent/capabilities.py",
+  "agent/provider.py",
+  "agent/longterm.py",
+  "dashboard/study.py",
+  "dashboard/design.py",
+  "dashboard/workspaces.py",
+  "dashboard/server.py",
+  "dashboard/companion.py",
+  "dashboard/static/study.html",
+  "dashboard/static/study.js",
+  "dashboard/static/study-import.js",
+  "dashboard/static/study-projects.js",
+  "dashboard/static/study-hands.js",
+  "dashboard/static/study-holo.js",
+  "dashboard/static/study-mirror.js",
+  "dashboard/static/study-gestures.js",
+  "dashboard/static/study-comfort.js",
+  "dashboard/static/study-diagnostics.js",
+  "dashboard/static/study-motion.js",
+  "dashboard/static/board.html",
+  "dashboard/static/board-design.js",
+  "dashboard/static/board-selection.js",
+  "dashboard/static/companion.js",
+  "blender/apex_blender_addon.py",
+  "config.py",
+  "main.py",
+  "app/resident.py",
+  "data/assemblies/",
+  "requirements.txt",
+  ".github/workflows/tests.yml",
+  "docs/ASSEMBLY_STUDY.md",
+  "docs/STUDY_HAND_INTERACTION.md",
+  "docs/STUDY_LIBRARY.md",
+  "docs/BOARD_MOVES.md",
+  "docs/CREATE.md",
+  "docs/DAILY_WORKSPACE_PLAN.md",
+  "docs/DESIGN_WORKBENCH.md",
+  "docs/NAMED_WORKSPACES.md"
+ ],
+ "tests": {
+  "files": [
+   "tests/test_study_import.py",
+   "tests/test_study_input.py",
+   "tests/test_study_pointing.py",
+   "tests/test_study_projects.py",
+   "tests/test_study_library.py",
+   "tests/test_study_motion.py",
+   "tests/test_assembly_study.py",
+   "tests/test_board.py",
+   "tests/test_board_parts.py",
+   "tests/test_board_workspaces.py",
+   "tests/test_board_create.py",
+   "tests/test_board_jarvis.py",
+   "tests/test_board_readout.py",
+   "tests/test_board_selection.py",
+   "tests/test_board_tap.py",
+   "tests/test_build3d.py",
+   "tests/test_build_create.py",
+   "tests/test_blender_bridge.py",
+   "tests/test_design_workbench.py",
+   "tests/test_props.py",
+   "tests/test_assets.py",
+   "tests/test_daily_workspace.py"
+  ],
+  "approx_test_count": 469
+ },
+ "gaps": [
+  {
+   "issue": "Voice-opened studies only appear if a /board tab is open and visible. In resident mode with the desktop Companion (his normal setup) 'open the heart study' or 'study it' creates a session and replies with a relative /study?session=... link; nothing opens by itself.",
+   "severity": "medium",
+   "evidence": "agent/core.py:2567-2577 and 452-455 (only emit 'study_open' to the board); dashboard/static/board.html:871 (the only listener, and only when !document.hidden); no 'study' handling in app/*.py.",
+   "fix_hint": "Have the desktop Companion (or the dashboard /ws/live broadcast) open /study?session=... when a study_open event arrives and no board tab is visible, or return an absolute URL.",
+   "confirmed": true,
+   "how_confirmed": "Read the tool dispatch and the board listener; grepped dashboard/static and app/ for other 'study_open' or '/study' handlers and found none outside board.html."
+  },
+  {
+   "issue": "The Blender add-on itself has no automated test of any kind, and it has never been run against a real Blender. All Blender tests use a fake socket on Apex's side, so things like bpy operators running from a timer, Blender 4.x add-on install, or glTF export options are unproven.",
+   "severity": "medium",
+   "evidence": "blender/apex_blender_addon.py:88-199 (bpy.ops calls from the timer queue); grep for 'apex_blender_addon' or 'blender/' in tests/ returns nothing; tests/test_blender_bridge.py tests the client only.",
+   "fix_hint": "Run the add-on once in Blender on the laptop (or headless 'blender -b --python' in a CI job) and add a smoke script that does ping/create/export.",
+   "confirmed": true,
+   "how_confirmed": "grep -rln 'apex_blender_addon|blender/' tests returned no files; read the add-on handlers."
+  },
+  {
+   "issue": "Running only this subsystem's test files together gives 3 failures (HTTP 429) that disappear when each file runs alone: the dashboard's shared login-failure throttle (10 bad tokens per 60 s per IP) leaks between tests. The full suite passes by order luck.",
+   "severity": "low",
+   "evidence": "dashboard/server.py:221-224 (module-level AuthThrottle), 289; failing tests tests/test_design_workbench.py::test_owner_origin_and_expected_revision_are_enforced_by_http and tests/test_board_parts.py::TestRoutesAndTool::test_parts_route / test_viewport_route.",
+   "fix_hint": "Reset server._throttle in a tests/conftest.py autouse fixture.",
+   "confirmed": true,
+   "how_confirmed": "Ran 22 subsystem test files together: 3 failed with 'assert 429 == 200'; ran tests/test_design_workbench.py alone (17 passed) and tests/test_board_parts.py alone (20 passed)."
+  },
+  {
+   "issue": "board_recolor only works on objects made with board_create in the same run of Apex; after any restart Celine says the object 'wasn't created with board_create in this session'.",
+   "severity": "low",
+   "evidence": "agent/core.py:156-162 (_BLENDER_OBJECTS is an in-memory dict) and 2741-2746.",
+   "fix_hint": "Store the Blender object name in the asset manifest (agent/assets.py) and look it up there.",
+   "confirmed": true,
+   "how_confirmed": "Read the dict definition and the recolor branch; nothing persists it."
+  },
+  {
+   "issue": "Board hands are always switched off when Apex starts (and when switching workspace), and a study window that took the hands never gives them back. With hands enabled he must press 'Hands on' on /board every time.",
+   "severity": "low",
+   "evidence": "agent/board_workspaces.py:52 (b.hands_enabled = False on every load); agent/study_input.py:37-38; documented in docs/NAMED_WORKSPACES.md:11-12 and docs/ASSEMBLY_STUDY.md:154-156.",
+   "fix_hint": "Intentional safety choice; consider a visible reminder on /board or remembering the last choice.",
+   "confirmed": true,
+   "how_confirmed": "Read the lines and the matching doc paragraphs."
+  },
+  {
+   "issue": "docs/DESIGN_WORKBENCH.md says 'The normal CI IDE jobs run this check on Windows and Linux'. A workflow with windows-latest exists, but the owner's known fact is that there is no Windows CI actually running, so this verification claim is not something he can rely on.",
+   "severity": "low",
+   "evidence": "docs/DESIGN_WORKBENCH.md:79; .github/workflows/tests.yml:15-19,51-55.",
+   "fix_hint": "Reword the doc to 'defined in CI' or confirm the workflow actually runs.",
+   "confirmed": true,
+   "how_confirmed": "Read the doc line and the workflow file; could not see any CI run history from here."
+  },
+  {
+   "issue": "Study, project and workspace routes only check the browser origin, not 'owner'. Any device token (e.g. a phone) can switch the shared active board, import or delete imported study models. Only the Design routes are owner-only.",
+   "severity": "low",
+   "evidence": "dashboard/study.py:127-137 (DELETE model), dashboard/workspaces.py:43-58 (switch/create) use _check_origin only; dashboard/design.py:12-14 uses owner().",
+   "fix_hint": "Add the same owner() check to delete/switch if device tokens are given to other people.",
+   "confirmed": true,
+   "how_confirmed": "Read the three route modules side by side."
+  },
+  {
+   "issue": "Stale docstring: board.init_db says it is called from main.py's boot sequence, but neither main.py nor app/resident.py calls it; the table is created lazily on first get_board(). Harmless today.",
+   "severity": "low",
+   "evidence": "agent/board.py:240-246; agent/board_workspaces.py:17-19.",
+   "fix_hint": "Fix the docstring.",
+   "confirmed": true,
+   "how_confirmed": "grep 'init_db' in main.py and app/resident.py returned nothing."
+  },
+  {
+   "issue": "The design panel's reference picture may do nothing useful with deepseek-flash if that model does not accept images.",
+   "severity": "low",
+   "evidence": "docs/DESIGN_WORKBENCH.md:40-52.",
+   "fix_hint": "Check what the companion does with screen_image when the model has no vision, and tell the user.",
+   "confirmed": false,
+   "how_confirmed": "Not confirmed: did not trace the image path through the provider for deepseek."
+  }
+ ],
+ "needs_from_owner": [
+  "After updating, open http://127.0.0.1:7860/study and /board on the laptop once (with Start-Apex-Platform.cmd) and check the heart / car engine load and explode, so we know the charmap fix did not leave the study or board broken.",
+  "Say 'build me a rocket' with the desktop Companion while /board is open, then 'make the nose red', then 'study it', and report whether it shows up.",
+  "Try the Design panel (/board?design=1): make a 40x20x30 mm box, run print checks, export 3MF and open it in your slicer.",
+  "Decide whether you want hand control: if yes set HANDTRACK_ENABLED=true and BOARD_ENABLED=true in .env, restart, run the pinch calibration on /board and press 'Hands on' (it is off after every restart).",
+  "If you want Blender: install Blender, install blender/apex_blender_addon.py, press Start Server in the Apex tab, set BLENDER_ENABLED=true and try 'create a 50 millimetre red cube'.",
+  "Tell us whether deepseek-flash answers questions about a staged reference picture."
+ ],
+ "rating": {
+  "score": 7,
+  "why": "Mouse/voice study, board, builds, design export and workspaces are wired, well tested (~470 tests) and ran here; but all hand features and Blender are off by default and never tried on the laptop, and voice-opened studies need a visible /board tab."
+ }
+}
